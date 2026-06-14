@@ -1,0 +1,65 @@
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# Build Outputs
+dist/
+build/
+out/
+.next/
+.nuxt/
+
+# NestJS / TypeScript
+*.js.map
+*.d.ts
+tsconfig.tsbuildinfo
+
+# React Native / Expo
+.expo/
+.expo-shared/
+*.orig.*
+web-build/
+android/
+ios/
+
+# React / Vite (web) 
+*.local
+
+# Docker
+*.dockerignore
+
+# Logs
+logs/
+*.log
+
+# Testing
+coverage/
+.nyc_output/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Prisma / DB
+*.sqlite
+*.sqlite3
+
+# Monitoring / Grafana
+grafana/data/
+prometheus/data/
+
