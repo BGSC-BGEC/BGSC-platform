@@ -1367,53 +1367,53 @@ Execute these in sequence. Each step produces a testable, deployable artifact.
 
 ### Step 1: Project Scaffold & Config (Day 1)
 
-- [ ] Initialize NestJS app at `backend/apps/auth-service/` using `@nestjs/cli`
-- [ ] Install all dependencies listed in Section 2
-- [ ] Create `auth.config.ts` with typed env validation using `@nestjs/config` and `Joi`
-- [ ] Configure TypeORM connection to PostgreSQL
-- [ ] Configure `ioredis` connection to Redis
-- [ ] Apply `helmet`, CORS, `ValidationPipe`, and `cookieParser` in `main.ts` (Section 18)
-- [ ] Write the Docker Compose service entry for the auth service
+- [x] Initialize NestJS app at `backend/apps/auth-service/` using `@nestjs/cli`
+- [x] Install all dependencies listed in Section 2
+- [x] Create `auth.config.ts` with typed env validation using `@nestjs/config` and `Joi`
+- [x] Configure TypeORM connection to PostgreSQL
+- [x] Configure `ioredis` connection to Redis
+- [x] Apply `helmet`, CORS, `ValidationPipe`, and `cookieParser` in `main.ts` (Section 18)
+- [x] Write the Docker Compose service entry for the auth service
 
 ### Step 2: Database Schema & Entities (Day 1-2)
 
-- [ ] Create TypeORM migration for the `users` table (Section 4)
-- [ ] Create TypeORM migration for the `login_audit_log` table
-- [ ] Create `UserCredential` entity mapping to the `users` table
-- [ ] Create `LoginAuditLog` entity
-- [ ] Run migration, verify tables exist
+- [x] Create TypeORM migration for the `users` table (Section 4)
+- [x] Create TypeORM migration for the `login_audit_log` table
+- [x] Create `UserCredential` entity mapping to the `users` table
+- [x] Create `LoginAuditLog` entity
+- [x] Run migration, verify tables exist
 
 ### Step 3: Password Service (Day 2)
 
-- [ ] Implement `hashPassword()` and `verifyPassword()` using bcrypt with cost factor 12
-- [ ] Implement `generateResetToken()` returning `{ raw, hash }`
-- [ ] Write unit tests: hash round-trip, timing consistency, weak password rejection
+- [x] Implement `hashPassword()` and `verifyPassword()` using bcrypt with cost factor 12
+- [x] Implement `generateResetToken()` returning `{ raw, hash }`
+- [x] Write unit tests: hash round-trip, timing consistency, weak password rejection
 
 ### Step 4: Token Service (Day 2-3)
 
-- [ ] Implement `signAccessToken(user): string` — signs a JWT with the payload from Section 8
-- [ ] Implement `verifyAccessToken(token): JwtPayload` — verifies signature + expiry
-- [ ] Implement `generateRefreshToken(userId): { raw, hash, familyId }` — creates `userId.familyId.random`
-- [ ] Implement `hashToken(raw): string` — SHA-256
-- [ ] Write unit tests: signing, verification, expiry, different secrets for access/refresh
+- [x] Implement `signAccessToken(user): string` — signs a JWT with the payload from Section 8
+- [x] Implement `verifyAccessToken(token): JwtPayload` — verifies signature + expiry
+- [x] Implement `generateRefreshToken(userId): { raw, hash, familyId }` — creates `userId.familyId.random`
+- [x] Implement `hashToken(raw): string` — SHA-256
+- [x] Write unit tests: signing, verification, expiry, different secrets for access/refresh
 
 ### Step 5: Session Service (Day 3)
 
-- [ ] Implement `createSession(userId, tokenHash, familyId, ip, userAgent, keepMeLoggedIn)`
+- [x] Implement `createSession(userId, tokenHash, familyId, ip, userAgent, keepMeLoggedIn)`
   - Stores hash in `auth:session:{userId}:{familyId}`
   - Adds familyId to `auth:session_index:{userId}`
   - Enforces max 5 sessions (evicts oldest)
-- [ ] Implement `validateAndRotateSession(userId, familyId, oldTokenHash, newTokenHash, ip, userAgent)`
+- [x] Implement `validateAndRotateSession(userId, familyId, oldTokenHash, newTokenHash, ip, userAgent)`
   - Breach detection logic from Section 9
-- [ ] Implement `revokeSession(userId, familyId)`
-- [ ] Implement `revokeAllSessions(userId)`
-- [ ] Implement `listSessions(userId)`
-- [ ] Write unit tests with mocked Redis
+- [x] Implement `revokeSession(userId, familyId)`
+- [x] Implement `revokeAllSessions(userId)`
+- [x] Implement `listSessions(userId)`
+- [x] Write unit tests with mocked Redis
 
 ### Step 6: Registration Endpoint (Day 3-4)
 
-- [ ] Create `RegisterDto` with all validations (Section 14.1)
-- [ ] Implement `AuthService.register()`:
+- [x] Create `RegisterDto` with all validations (Section 14.1)
+- [x] Implement `AuthService.register()`:
   1. Check username uniqueness (case-insensitive)
   2. Check email uniqueness (case-insensitive, normalized)
   3. Hash password
@@ -1422,29 +1422,29 @@ Execute these in sequence. Each step produces a testable, deployable artifact.
   6. Set refresh token cookie
   7. Emit `UserRegistered` event
   8. Return access token + user info
-- [ ] Create `auth.controller.ts` with `POST /auth/register`
-- [ ] Add rate limit decorator: 3/hour/IP
-- [ ] Write integration test
+- [x] Create `auth.controller.ts` with `POST /auth/register`
+- [x] Add rate limit decorator: 3/hour/IP
+- [x] Write integration test
 
 ### Step 7: Login Endpoint (Day 4)
 
-- [ ] Create `LoginDto`
-- [ ] Implement `LocalStrategy` (Passport) — looks up user by username OR email, verifies password
-- [ ] Implement `AuthService.login()`:
+- [x] Create `LoginDto`
+- [x] Implement `LocalStrategy` (Passport) — looks up user by username OR email, verifies password
+- [x] Implement `AuthService.login()`:
   1. Verify credentials via LocalStrategy
   2. Check `user.status === 'active'`
   3. Log attempt in `login_audit_log`
   4. If `totp_enabled` → return `{ requiresTOTP: true, tempToken }`
   5. Else → create session, set cookie, return access token
   6. Emit `UserLoggedIn`
-- [ ] Write integration tests: valid login, wrong password, disabled account, TOTP required
+- [x] Write integration tests: valid login, wrong password, disabled account, TOTP required
 
 ### Step 8: Refresh & Logout Endpoints (Day 4-5)
 
-- [ ] Implement `POST /auth/refresh` — reads cookie, calls session service rotation
-- [ ] Implement `POST /auth/logout` — revokes current session, clears cookie, blacklists access token JTI
-- [ ] Implement `POST /auth/logout-all` — revokes all sessions
-- [ ] Write integration tests including breach detection scenario
+- [x] Implement `POST /auth/refresh` — reads cookie, calls session service rotation
+- [x] Implement `POST /auth/logout` — revokes current session, clears cookie, blacklists access token JTI
+- [x] Implement `POST /auth/logout-all` — revokes all sessions
+- [x] Write integration tests including breach detection scenario
 
 ### Step 9: Password Reset Flow (Day 5)
 

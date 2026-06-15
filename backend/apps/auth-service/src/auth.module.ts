@@ -31,11 +31,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         type: 'postgres',
-        host: configService.get<string>('auth.db.host'),
-        port: configService.get<number>('auth.db.port'),
-        username: configService.get<string>('auth.db.user'),
-        password: configService.get<string>('auth.db.password'),
-        database: configService.get<string>('auth.db.name'),
+        url: configService.get<string>('auth.db.url'),
         entities: [UserCredential, LoginAuditLog],
         synchronize: configService.get<string>('auth.env') !== 'production',
       }),
@@ -56,14 +52,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       provide: 'REDIS_CLIENT',
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => {
-        const host = configService.get<string>('auth.redis.host')!;
-        const port = configService.get<number>('auth.redis.port')!;
-        const password = configService.get<string>('auth.redis.password');
-        return new Redis({
-          host,
-          port,
-          password: password || undefined,
-        });
+        const url = configService.get<string>('auth.redis.url')!;
+        return new Redis(url);
       },
     },
   ],
