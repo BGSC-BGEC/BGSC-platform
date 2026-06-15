@@ -23,7 +23,7 @@ export class TokenService {
 
     return this.jwtService.sign(payload, {
       secret: this.configService.get<string>('auth.jwt.accessSecret'),
-      expiresIn: this.configService.get<string>('auth.jwt.accessExpiry') || '15m',
+      expiresIn: (this.configService.get<string>('auth.jwt.accessExpiry') || '15m') as any,
       issuer: this.configService.get<string>('auth.jwt.issuer') || 'bgsc-auth-service',
     });
   }
