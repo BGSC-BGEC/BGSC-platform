@@ -19,6 +19,8 @@ import { EmailService } from './services/email.service';
 
 import { LocalStrategy } from './strategies/local.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { GoogleStrategy } from './strategies/google.strategy';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
 
 @Module({
   imports: [
@@ -50,6 +52,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     EmailService,
     LocalStrategy,
     JwtStrategy,
+    GoogleStrategy,
+    GoogleAuthGuard,
     {
       provide: 'REDIS_CLIENT',
       inject: [ConfigService],

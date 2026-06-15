@@ -13,6 +13,7 @@ import { UserRole, UserStatus } from '../src/constants/roles.constant';
 import { InvalidCredentialsException } from '../src/exceptions/invalid-credentials.exception';
 import { AccountDisabledException } from '../src/exceptions/account-disabled.exception';
 import { TokenReuseDetectedException } from '../src/exceptions/token-reuse-detected.exception';
+import { EmailAlreadyLinkedException } from '../src/exceptions/email-already-linked.exception';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -291,7 +292,7 @@ describe('AuthService', () => {
         id: 'u-1',
         email: 'user@example.com',
         status: UserStatus.ACTIVE,
-      };
+      } as UserCredential;
       userRepository.findOne.mockResolvedValue(user);
 
       const result = await service.forgotPassword({ email: ' USER@EXAMPLE.COM ' });
@@ -311,7 +312,7 @@ describe('AuthService', () => {
         id: 'u-1',
         email: 'user@example.com',
         status: UserStatus.ACTIVE,
-      };
+      } as UserCredential;
       userRepository.findOne.mockResolvedValue(user);
       emailService.sendPasswordResetEmail.mockRejectedValue(new Error('smtp unavailable'));
 
@@ -329,7 +330,7 @@ describe('AuthService', () => {
         status: UserStatus.ACTIVE,
         passwordResetTokenHash: 'reset-hash',
         passwordResetExpires: new Date(Date.now() + 60_000),
-      };
+      } as UserCredential;
       redis.hgetall.mockResolvedValue({ userId: 'u-1' });
       userRepository.findOne.mockResolvedValue(user);
 
@@ -350,7 +351,7 @@ describe('AuthService', () => {
         status: UserStatus.ACTIVE,
         passwordResetTokenHash: 'reset-hash',
         passwordResetExpires: new Date(Date.now() - 60_000),
-      };
+      } as UserCredential;
       redis.hgetall.mockResolvedValue({ userId: 'u-1' });
       userRepository.findOne.mockResolvedValue(user);
 
@@ -359,6 +360,126 @@ describe('AuthService', () => {
       ).rejects.toThrow(BadRequestException);
 
       expect(sessionService.revokeAllSessions).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findOrCreateGoogleUser', () => {
+    it('should return existing user when googleId already linked', async () => {
+      const existing = {
+        id: 'u-1',
+        username: 'linkeduser',
+        email: 'linked@example.com',
+        googleId: 'gid-123',
+        status: UserStatus.ACTIVE,
+      };
+      userRepository.findOne.mockResolvedValueOnce(existing);
+
+      const result = await service.findOrCreateGoogleUser({
+        googleId: 'gid-123',
+        email: 'linked@example.com',
+        emailVerified: true,
+      });
+
+      expect(result.isNewUser).toBe(false);
+      expect(result.user).toBe(existing);
+      expect(userRepository.save).not.toHaveBeenCalled();
+      expect(eventBusService.emit).not.toHaveBeenCalled();
+    });
+
+    it('should auto-register a new user when googleId is not linked and email is free', async () => {
+      userRepository.findOne
+        .mockResolvedValueOnce(null) // by googleId
+        .mockResolvedValueOnce(null); // by email
+
+      userRepository.save.mockImplementation(async (u: any) => ({ id: 'new-uuid', ...u }));
+
+      const result = await service.findOrCreateGoogleUser({
+        googleId: 'gid-new',
+        email: 'newuser@example.com',
+        emailVerified: true,
+      });
+
+      expect(result.isNewUser).toBe(true);
+      expect(result.user.id).toBe('new-uuid');
+      expect(result.user.googleId).toBe('gid-new');
+      expect(result.user.passwordHash).toBeNull();
+      expect(result.user.email).toBe('newuser@example.com');
+      expect(eventBusService.emit).toHaveBeenCalledWith(
+        'UserRegistered',
+        expect.objectContaining({ method: 'google', email: 'newuser@example.com' }),
+      );
+    });
+
+    it('should throw EmailAlreadyLinkedException when email exists without googleId', async () => {
+      userRepository.findOne
+        .mockResolvedValueOnce(null) // by googleId
+        .mockResolvedValueOnce({ id: 'u-existing', email: 'taken@example.com', googleId: null }); // by email
+
+      await expect(
+        service.findOrCreateGoogleUser({
+          googleId: 'gid-attacker',
+          email: 'taken@example.com',
+          emailVerified: true,
+        }),
+      ).rejects.toThrow(EmailAlreadyLinkedException);
+
+      expect(userRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('should throw ConflictException when Google returns no email', async () => {
+      userRepository.findOne.mockResolvedValueOnce(null);
+
+      await expect(
+        service.findOrCreateGoogleUser({
+          googleId: 'gid-noemail',
+          emailVerified: false,
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('loginWithGoogle', () => {
+    it('should issue tokens, create session, log audit, and emit UserLoggedIn', async () => {
+      const user = new UserCredential();
+      user.id = 'u-1';
+      user.username = 'googler';
+      user.status = UserStatus.ACTIVE;
+
+      const result = await service.loginWithGoogle(user, true, '127.0.0.1', 'google-ua');
+
+      expect(result.accessToken).toBe('access_jwt_token');
+      expect(result.refreshToken).toBe('mock-uuid.family-uuid.random-hex');
+      expect(result.isNewUser).toBe(true);
+      expect(sessionService.createSession).toHaveBeenCalledWith(
+        'u-1',
+        'sha256-hash',
+        'family-uuid',
+        '127.0.0.1',
+        'google-ua',
+        true,
+      );
+      expect(auditLogRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ method: 'google', success: true }),
+      );
+      expect(eventBusService.emit).toHaveBeenCalledWith(
+        'UserLoggedIn',
+        expect.objectContaining({ method: 'google', userId: 'u-1', isNewDevice: true }),
+      );
+    });
+
+    it('should reject login for disabled accounts and log failure', async () => {
+      const user = new UserCredential();
+      user.id = 'u-1';
+      user.status = UserStatus.DISABLED;
+
+      await expect(
+        service.loginWithGoogle(user, false, '127.0.0.1', 'ua'),
+      ).rejects.toThrow(AccountDisabledException);
+
+      expect(auditLogRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ method: 'google', success: false, failureReason: 'account_disabled' }),
+      );
+      expect(sessionService.createSession).not.toHaveBeenCalled();
     });
   });
 

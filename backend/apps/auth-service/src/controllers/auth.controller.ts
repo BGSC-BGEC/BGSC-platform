@@ -1,6 +1,8 @@
-import { Controller, Post, Body, Req, Res, UseGuards, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Post, Body, Req, Res, UseGuards, HttpStatus, HttpCode, Get } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { AuthService } from '../services/auth.service';
+import type { GoogleProfilePayload } from '../services/auth.service';
 import { RegisterDto } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
 import { ForgotPasswordDto } from '../dto/forgot-password.dto';
@@ -8,6 +10,7 @@ import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
 import { LocalAuthGuard } from '../guards/local-auth.guard';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
+import { GoogleAuthGuard } from '../guards/google-auth.guard';
 import { CurrentUser } from '../decorators/current-user.decorator';
 import { Public } from '../decorators/public.decorator';
 import { RateLimit } from '../decorators/rate-limit.decorator';
@@ -18,7 +21,52 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 @Controller('auth')
 @UseGuards(RateLimitGuard)
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  @Public()
+  @Get('google')
+  @UseGuards(GoogleAuthGuard)
+  @ApiOperation({ summary: 'Redirect to Google OAuth2 consent screen' })
+  @ApiResponse({ status: 302, description: 'Redirected to Google OAuth2 consent screen' })
+  async googleAuth() {
+    return;
+  }
+
+  @Public()
+  @Get('google/callback')
+  @UseGuards(GoogleAuthGuard)
+  @ApiOperation({ summary: 'Handle Google OAuth2 callback' })
+  @ApiResponse({ status: 302, description: 'Redirected to frontend with access token in fragment' })
+  @ApiResponse({ status: 401, description: 'Invalid or expired state' })
+  @ApiResponse({ status: 409, description: 'Email already linked to a non-Google account' })
+  async googleAuthCallback(
+    @CurrentUser() googleProfile: GoogleProfilePayload,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '';
+    const ip = Array.isArray(rawIp) ? rawIp[0] : (rawIp.split(',')[0].trim() || '127.0.0.1');
+    const userAgent = req.headers['user-agent'] || 'unknown';
+
+    const { user, isNewUser } = await this.authService.findOrCreateGoogleUser(googleProfile);
+    const tokens = await this.authService.loginWithGoogle(user, isNewUser, ip, userAgent);
+
+    this.setCookie(res, tokens.refreshToken, true);
+
+    const frontendUrl = this.configService.get<string>('auth.oauth.frontendCallbackUrl')
+      || this.configService.get<string>('auth.cors.origins.0')
+      || 'https://bgsc-platform.in';
+
+    const params = new URLSearchParams({
+      access_token: tokens.accessToken,
+      is_new_user: String(tokens.isNewUser),
+    });
+
+    return res.redirect(302, `${frontendUrl}/auth/callback#${params.toString()}`);
+  }
 
   @Public()
   @Post('register')

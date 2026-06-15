@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, Logger, Una
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import Redis from 'ioredis';
+import { randomBytes } from 'crypto';
 import { UserCredential } from '../entities/user-credential.entity';
 import { LoginAuditLog } from '../entities/login-audit-log.entity';
 import { PasswordService } from './password.service';
@@ -16,6 +17,16 @@ import { ChangePasswordDto } from '../dto/change-password.dto';
 import { UserRole, UserStatus } from '../constants/roles.constant';
 import { InvalidCredentialsException } from '../exceptions/invalid-credentials.exception';
 import { AccountDisabledException } from '../exceptions/account-disabled.exception';
+import { EmailAlreadyLinkedException } from '../exceptions/email-already-linked.exception';
+
+export interface GoogleProfilePayload {
+  googleId: string;
+  email?: string;
+  emailVerified: boolean;
+  firstName?: string;
+  lastName?: string;
+  picture?: string;
+}
 
 @Injectable()
 export class AuthService {
@@ -176,6 +187,109 @@ export class AuthService {
       refreshToken,
       isNewUser: false,
     };
+  }
+
+  async findOrCreateGoogleUser(profile: GoogleProfilePayload): Promise<{ user: UserCredential; isNewUser: boolean }> {
+    const existingByGoogleId = await this.userRepository.findOne({
+      where: { googleId: profile.googleId },
+    });
+
+    if (existingByGoogleId) {
+      return { user: existingByGoogleId, isNewUser: false };
+    }
+
+    const normalizedEmail = profile.email?.toLowerCase().trim();
+    if (normalizedEmail) {
+      const existingByEmail = await this.userRepository.findOne({
+        where: { email: normalizedEmail },
+      });
+
+      if (existingByEmail) {
+        throw new EmailAlreadyLinkedException();
+      }
+    }
+
+    if (!normalizedEmail) {
+      throw new ConflictException('Google account must provide a verified email to register');
+    }
+
+    const generatedUsername = await this.generateUniqueUsername(normalizedEmail);
+
+    const created = this.userRepository.create({
+      username: generatedUsername,
+      email: normalizedEmail,
+      passwordHash: null,
+      googleId: profile.googleId,
+      role: UserRole.USER,
+      status: UserStatus.ACTIVE,
+    });
+    const user = await this.userRepository.save(created);
+
+    this.eventBusService.emit('UserRegistered', {
+      userId: user.id,
+      email: user.email,
+      username: user.username,
+      method: 'google',
+      timestamp: new Date().toISOString(),
+    });
+
+    return { user, isNewUser: true };
+  }
+
+  async loginWithGoogle(
+    user: UserCredential,
+    isNewUser: boolean,
+    ip: string,
+    userAgent: string,
+  ): Promise<{ accessToken: string; refreshToken: string; isNewUser: boolean }> {
+    if (user.status !== UserStatus.ACTIVE) {
+      const reason = user.status === UserStatus.DISABLED ? 'account_disabled' : 'account_pending_deletion';
+      await this.logLoginAttempt(user.id, ip, userAgent, 'google', false, reason);
+
+      const message = user.status === UserStatus.DISABLED
+        ? 'Account is disabled. Contact support.'
+        : 'Account is scheduled for deletion. Log in to cancel.';
+      throw new AccountDisabledException(message);
+    }
+
+    const { raw: refreshToken, hash: tokenHash, familyId } = this.tokenService.generateRefreshToken(user.id);
+    await this.sessionService.createSession(user.id, tokenHash, familyId, ip, userAgent, true);
+
+    const accessToken = this.tokenService.signAccessToken(user);
+
+    await this.logLoginAttempt(user.id, ip, userAgent, 'google', true);
+
+    this.eventBusService.emit('UserLoggedIn', {
+      userId: user.id,
+      device: userAgent,
+      ip,
+      method: 'google',
+      isNewDevice: true,
+      timestamp: new Date().toISOString(),
+    });
+
+    return {
+      accessToken,
+      refreshToken,
+      isNewUser,
+    };
+  }
+
+  private async generateUniqueUsername(email: string): Promise<string> {
+    const basePrefix = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '').toLowerCase() || 'user';
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const candidate = attempt === 0
+        ? basePrefix.slice(0, 46)
+        : `${basePrefix.slice(0, 42)}.${randomBytes(2).toString('hex')}`;
+
+      const collision = await this.userRepository.findOne({ where: { username: candidate } });
+      if (!collision) {
+        return candidate;
+      }
+    }
+
+    return `${basePrefix.slice(0, 40)}.${randomBytes(4).toString('hex')}`;
   }
 
   async refreshTokens(

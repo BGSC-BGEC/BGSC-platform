@@ -1456,15 +1456,15 @@ Execute these in sequence. Each step produces a testable, deployable artifact.
 
 ### Step 10: Google OAuth2 (Day 5-6)
 
-- [ ] Implement `GoogleStrategy` with state parameter CSRF protection
-- [ ] Implement `GET /auth/google` redirect
-- [ ] Implement `GET /auth/google/callback`:
+- [x] Implement `GoogleStrategy` with state parameter CSRF protection
+- [x] Implement `GET /auth/google` redirect
+- [x] Implement `GET /auth/google/callback`:
   - Validate state parameter against Redis
   - Exchange code for profile
   - Find or create user
   - Handle email collision (existing user with same email but no google_id)
   - Create session, redirect with fragment token
-- [ ] Write integration tests with mocked Google responses
+- [x] Write integration tests with mocked Google responses
 
 ### Step 11: TOTP 2FA (Day 6-7)
 

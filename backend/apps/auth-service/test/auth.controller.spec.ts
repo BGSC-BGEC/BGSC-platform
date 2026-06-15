@@ -1,14 +1,18 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpStatus } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuthController } from '../src/controllers/auth.controller';
 import { AuthService } from '../src/services/auth.service';
 import { RateLimitGuard } from '../src/guards/rate-limit.guard';
 import { LocalAuthGuard } from '../src/guards/local-auth.guard';
 import { JwtAuthGuard } from '../src/guards/jwt-auth.guard';
+import { GoogleAuthGuard } from '../src/guards/google-auth.guard';
+import { EmailAlreadyLinkedException } from '../src/exceptions/email-already-linked.exception';
 
 describe('AuthController', () => {
   let controller: AuthController;
   let authService: any;
+  let configService: any;
 
   const mockResponse = () => {
     const res: any = {};
@@ -16,6 +20,7 @@ describe('AuthController', () => {
     res.json = jest.fn().mockReturnValue(res);
     res.cookie = jest.fn().mockReturnValue(res);
     res.clearCookie = jest.fn().mockReturnValue(res);
+    res.redirect = jest.fn().mockReturnValue(res);
     return res;
   };
 
@@ -29,11 +34,18 @@ describe('AuthController', () => {
       forgotPassword: jest.fn(),
       resetPassword: jest.fn(),
       changePassword: jest.fn(),
+      findOrCreateGoogleUser: jest.fn(),
+      loginWithGoogle: jest.fn(),
+    };
+
+    configService = {
+      get: jest.fn().mockReturnValue('https://app.bgsc-platform.in'),
     };
 
     const mockRateLimitGuard = { canActivate: () => true };
     const mockLocalAuthGuard = { canActivate: () => true };
     const mockJwtAuthGuard = { canActivate: () => true };
+    const mockGoogleAuthGuard = { canActivate: () => true };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [AuthController],
@@ -41,6 +53,10 @@ describe('AuthController', () => {
         {
           provide: AuthService,
           useValue: authService,
+        },
+        {
+          provide: ConfigService,
+          useValue: configService,
         },
       ],
     })
@@ -50,6 +66,8 @@ describe('AuthController', () => {
       .useValue(mockLocalAuthGuard)
       .overrideGuard(JwtAuthGuard)
       .useValue(mockJwtAuthGuard)
+      .overrideGuard(GoogleAuthGuard)
+      .useValue(mockGoogleAuthGuard)
       .compile();
 
     controller = module.get<AuthController>(AuthController);
@@ -57,6 +75,81 @@ describe('AuthController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  describe('googleAuth', () => {
+    it('should be defined for the OAuth redirect entrypoint', async () => {
+      await expect(controller.googleAuth()).resolves.toBeUndefined();
+    });
+  });
+
+  describe('googleAuthCallback', () => {
+    const profile = {
+      googleId: 'gid-1',
+      email: 'user@example.com',
+      emailVerified: true,
+      firstName: 'User',
+      lastName: 'Test',
+      picture: 'https://example.com/pic.png',
+    };
+
+    it('should set refresh cookie, issue tokens, and redirect with access_token in fragment', async () => {
+      const user = { id: 'u-1', username: 'googler', email: 'user@example.com', role: 'user' };
+      authService.findOrCreateGoogleUser.mockResolvedValue({ user, isNewUser: true });
+      authService.loginWithGoogle.mockResolvedValue({
+        accessToken: 'access-token-xyz',
+        refreshToken: 'u-1.fam-1.random',
+        isNewUser: true,
+      });
+
+      const req: any = { headers: { 'user-agent': 'browser' }, socket: {} };
+      const res = mockResponse();
+
+      await controller.googleAuthCallback(profile, req, res);
+
+      expect(authService.findOrCreateGoogleUser).toHaveBeenCalledWith(profile);
+      expect(authService.loginWithGoogle).toHaveBeenCalledWith(user, true, '127.0.0.1', 'browser');
+      expect(res.cookie).toHaveBeenCalledWith(
+        'bgsc_refresh_token',
+        'u-1.fam-1.random',
+        expect.objectContaining({ httpOnly: true, sameSite: 'strict' }),
+      );
+      expect(res.redirect).toHaveBeenCalledTimes(1);
+      const [status, url] = res.redirect.mock.calls[0];
+      expect(status).toBe(302);
+      expect(url).toContain('https://app.bgsc-platform.in/auth/callback#');
+      expect(url).toContain('access_token=access-token-xyz');
+      expect(url).toContain('is_new_user=true');
+    });
+
+    it('should pass isNewUser=false on second OAuth login with same googleId', async () => {
+      const user = { id: 'u-1', username: 'googler', email: 'user@example.com' };
+      authService.findOrCreateGoogleUser.mockResolvedValue({ user, isNewUser: false });
+      authService.loginWithGoogle.mockResolvedValue({
+        accessToken: 'at',
+        refreshToken: 'rt',
+        isNewUser: false,
+      });
+
+      const req: any = { headers: {}, socket: {} };
+      const res = mockResponse();
+
+      await controller.googleAuthCallback(profile, req, res);
+
+      const [, url] = res.redirect.mock.calls[0];
+      expect(url).toContain('is_new_user=false');
+    });
+
+    it('should propagate EmailAlreadyLinkedException for collision', async () => {
+      authService.findOrCreateGoogleUser.mockRejectedValue(new EmailAlreadyLinkedException());
+
+      const req: any = { headers: {}, socket: {} };
+      const res = mockResponse();
+
+      await expect(controller.googleAuthCallback(profile, req, res)).rejects.toThrow(EmailAlreadyLinkedException);
+      expect(res.cookie).not.toHaveBeenCalled();
+      expect(res.redirect).not.toHaveBeenCalled();
+    });
   });
 
   describe('register', () => {

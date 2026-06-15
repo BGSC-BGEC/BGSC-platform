@@ -14,6 +14,7 @@ export const authConfigValidationSchema = Joi.object({
   GOOGLE_CLIENT_ID: Joi.string().required(),
   GOOGLE_CLIENT_SECRET: Joi.string().required(),
   GOOGLE_CALLBACK_URL: Joi.string().uri().required(),
+  OAUTH_FRONTEND_CALLBACK_URL: Joi.string().uri().optional(),
   AUTH_TOTP_ENCRYPTION_KEY: Joi.string().length(64).hex().required(),
   AUTH_TOTP_ISSUER: Joi.string().default('BGSC Platform'),
   SMTP_HOST: Joi.string().required(),
@@ -45,6 +46,9 @@ export const authConfig = registerAs('auth', () => ({
     clientId: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     callbackUrl: process.env.GOOGLE_CALLBACK_URL,
+  },
+  oauth: {
+    frontendCallbackUrl: process.env.OAUTH_FRONTEND_CALLBACK_URL,
   },
   totp: {
     encryptionKey: process.env.AUTH_TOTP_ENCRYPTION_KEY,
