@@ -1,10 +1,10 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
-import { CreateUserDto } from './dto/create-user.dto';
-import { User } from './user.entity';
-import { UserRole } from './user-role.enum';
-import { UserStatus } from './user-status.enum';
-import { UsersService } from './users.service';
+import { CreateUserDto } from '../src/users/dto/create-user.dto';
+import { User } from '../src/users/entities/user.entity';
+import { UserRole } from '../src/users/enums/user-role.enum';
+import { UserStatus } from '../src/users/enums/user-status.enum';
+import { UsersService } from '../src/users/users.service';
 
 type UsersRepositoryMock = Pick<
   jest.Mocked<Repository<User>>,

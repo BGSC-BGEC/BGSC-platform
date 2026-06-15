@@ -25,3 +25,16 @@ services:
       DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
       REDIS_URL: redis://redis:6379
       JWT_SECRET: dev_secret_change_in_prod
+
+  user-service:
+    build:
+      context: ./backend
+      dockerfile: apps/user-service/Dockerfile
+    ports:
+      - '3001:3001'
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
+      JWT_SECRET: dev_secret_change_in_prod
+      PORT: 3001

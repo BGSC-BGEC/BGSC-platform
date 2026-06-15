@@ -1,8 +1,8 @@
 import { ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ExecutionContext } from '@nestjs/common';
-import { UserRole } from '../users/user-role.enum';
-import { RolesGuard } from './roles.guard';
+import { UserRole } from '../src/users/enums/user-role.enum';
+import { RolesGuard } from '../src/rbac/roles.guard';
 
 describe('RolesGuard', () => {
   let reflector: jest.Mocked<Pick<Reflector, 'getAllAndOverride'>>;

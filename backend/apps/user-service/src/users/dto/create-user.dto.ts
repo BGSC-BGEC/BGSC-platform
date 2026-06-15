@@ -11,8 +11,8 @@ import {
   Min,
   MinLength,
 } from 'class-validator';
-import { UserRole } from '../user-role.enum';
-import { UserStatus } from '../user-status.enum';
+import { UserRole } from '../enums/user-role.enum';
+import { UserStatus } from '../enums/user-status.enum';
 
 export class CreateUserDto {
   @IsString()

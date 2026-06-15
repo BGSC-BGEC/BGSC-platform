@@ -9,9 +9,9 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
-import { User } from './user.entity';
-import { UserRole } from './user-role.enum';
-import { UserStatus } from './user-status.enum';
+import { User } from './entities/user.entity';
+import { UserRole } from './enums/user-role.enum';
+import { UserStatus } from './enums/user-status.enum';
 
 @Injectable()
 export class UsersService {
