@@ -1,17 +1,22 @@
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json nest-cli.json tsconfig*.json ./
+RUN npm ci
+
+COPY src ./src
+
+RUN npm run build
+
+RUN npm prune --omit=dev
+
 FROM node:20-alpine
 
 WORKDIR /app
 
-COPY package*.json ./
-
-RUN npm ci
-
-COPY . .
-
-# Build the app
-RUN npm run build
-
-RUN npm prune --omit=dev
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 

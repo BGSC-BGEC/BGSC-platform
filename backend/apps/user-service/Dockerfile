@@ -18,6 +18,6 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 
-EXPOSE 3001
+EXPOSE 3002
 
 CMD ["node", "dist/apps/user-service/main"]

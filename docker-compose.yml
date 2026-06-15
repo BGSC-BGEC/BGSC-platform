@@ -1,40 +1,81 @@
 version: '3.8'
+
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16-alpine
+    container_name: bgsc-postgres
+    ports:
+      - '5432:5432'
     environment:
       POSTGRES_USER: bgsc
       POSTGRES_PASSWORD: bgsc_pass
       POSTGRES_DB: bgsc_dev
-    ports:
-      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bgsc -d bgsc_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bgsc-network
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
+    container_name: bgsc-redis
     ports:
       - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bgsc-network
 
   backend:
     build: ./backend
+    container_name: bgsc-backend
     ports:
       - '3000:3000'
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
+      PORT: 3000
+      NODE_ENV: development
       DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
       REDIS_URL: redis://redis:6379
       JWT_SECRET: dev_secret_change_in_prod
+    networks:
+      - bgsc-network
 
   user-service:
     build:
       context: ./backend
       dockerfile: apps/user-service/Dockerfile
+    container_name: bgsc-user-service
     ports:
-      - '3001:3001'
+      - '3002:3002'
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
+      PORT: 3002
+      NODE_ENV: development
       DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
       JWT_SECRET: dev_secret_change_in_prod
-      PORT: 3001
+    networks:
+      - bgsc-network
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  bgsc-network:
+    driver: bridge
