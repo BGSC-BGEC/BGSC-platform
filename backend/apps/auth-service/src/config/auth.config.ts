@@ -8,7 +8,9 @@ export const authConfigValidationSchema = Joi.object({
   REDIS_URL: Joi.string().uri().required(),
   JWT_ACCESS_SECRET: Joi.string().required(),
   JWT_ACCESS_EXPIRY: Joi.string().default('15m'),
-  JWT_REFRESH_SECRET: Joi.string().required(),
+  JWT_REFRESH_SECRET: Joi.string().required().not(Joi.ref('JWT_ACCESS_SECRET')).messages({
+    'any.invalid': 'JWT_REFRESH_SECRET must be different from JWT_ACCESS_SECRET',
+  }),
   JWT_REFRESH_EXPIRY: Joi.string().default('7d'),
   JWT_ISSUER: Joi.string().default('bgsc-auth-service'),
   GOOGLE_CLIENT_ID: Joi.string().required(),

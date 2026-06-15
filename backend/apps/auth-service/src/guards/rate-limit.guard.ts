@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import Redis from 'ioredis';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { RATE_LIMIT_KEY, RateLimitConfig } from '../decorators/rate-limit.decorator';
 import { RateLimitExceededException } from '../exceptions/rate-limit-exceeded.exception';
 
@@ -20,8 +20,10 @@ export class RateLimitGuard implements CanActivate {
       return true; // No rate limit configured
     }
 
-    const request = context.switchToHttp().getRequest();
-    const key = this.buildKey(config.keyPrefix, request);
+    const http = context.switchToHttp();
+    const request = http.getRequest();
+    const response = http.getResponse();
+    const key = this.buildKey(config.keyPrefix, request, config);
     const now = Date.now();
     const windowStart = now - config.windowMs;
 
@@ -51,15 +53,46 @@ export class RateLimitGuard implements CanActivate {
         retryAfterSeconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
       }
 
+      response.setHeader('Retry-After', retryAfterSeconds.toString());
+      response.setHeader('X-RateLimit-Remaining', '0');
       throw new RateLimitExceededException(retryAfterSeconds);
     }
 
+    response.setHeader('X-RateLimit-Remaining', Math.max(0, config.max - count).toString());
     return true;
   }
 
-  private buildKey(prefix: string, request: any): string {
-    const ip = request.headers['x-forwarded-for'] || request.socket.remoteAddress || request.ip;
-    const identifier = request.user?.sub || ip;
+  private buildKey(prefix: string, request: any, config: RateLimitConfig): string {
+    let identifier: string | undefined;
+
+    if (config.keyBy === 'email') {
+      const email = String(request.body?.email || '').trim().toLowerCase();
+      if (email) identifier = createHash('sha256').update(email).digest('hex');
+    } else if (config.keyBy === 'refreshToken') {
+      const rawToken = request.cookies?.bgsc_refresh_token;
+      if (typeof rawToken === 'string') {
+        const parts = rawToken.split('.');
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const randomHexRegex = /^[0-9a-f]{64}$/i;
+        if (
+          parts.length === 3 &&
+          uuidRegex.test(parts[0]) &&
+          uuidRegex.test(parts[1]) &&
+          randomHexRegex.test(parts[2])
+        ) {
+          identifier = parts[0];
+        }
+      }
+    }
+
+    if (!identifier) {
+      const forwarded = request.headers['x-forwarded-for'];
+      const rawIp = Array.isArray(forwarded)
+        ? forwarded[0]
+        : String(forwarded || request.socket?.remoteAddress || request.ip || 'unknown');
+      identifier = request.user?.sub || rawIp.split(',')[0].trim();
+    }
+
     return `auth:rate:${prefix}:${identifier}`;
   }
 }

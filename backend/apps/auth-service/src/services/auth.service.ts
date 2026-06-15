@@ -18,6 +18,7 @@ import { UserRole, UserStatus } from '../constants/roles.constant';
 import { InvalidCredentialsException } from '../exceptions/invalid-credentials.exception';
 import { AccountDisabledException } from '../exceptions/account-disabled.exception';
 import { EmailAlreadyLinkedException } from '../exceptions/email-already-linked.exception';
+import { TokenReuseDetectedException } from '../exceptions/token-reuse-detected.exception';
 
 export interface GoogleProfilePayload {
   googleId: string;
@@ -123,14 +124,9 @@ export class AuthService {
       throw new InvalidCredentialsException();
     }
 
-    if (user.status !== UserStatus.ACTIVE) {
-      const reason = user.status === UserStatus.DISABLED ? 'account_disabled' : 'account_pending_deletion';
-      await this.logLoginAttempt(user.id, ip, userAgent, 'local', false, reason);
-      
-      const message = user.status === UserStatus.DISABLED
-        ? 'Account is disabled. Contact support.'
-        : 'Account is scheduled for deletion. Log in to cancel.';
-      throw new AccountDisabledException(message);
+    if (user.status === UserStatus.DISABLED) {
+      await this.logLoginAttempt(user.id, ip, userAgent, 'local', false, 'account_disabled');
+      throw new AccountDisabledException('Account is disabled. Contact support.');
     }
 
     if (!user.passwordHash) {
@@ -242,14 +238,9 @@ export class AuthService {
     ip: string,
     userAgent: string,
   ): Promise<{ accessToken: string; refreshToken: string; isNewUser: boolean }> {
-    if (user.status !== UserStatus.ACTIVE) {
-      const reason = user.status === UserStatus.DISABLED ? 'account_disabled' : 'account_pending_deletion';
-      await this.logLoginAttempt(user.id, ip, userAgent, 'google', false, reason);
-
-      const message = user.status === UserStatus.DISABLED
-        ? 'Account is disabled. Contact support.'
-        : 'Account is scheduled for deletion. Log in to cancel.';
-      throw new AccountDisabledException(message);
+    if (user.status === UserStatus.DISABLED) {
+      await this.logLoginAttempt(user.id, ip, userAgent, 'google', false, 'account_disabled');
+      throw new AccountDisabledException('Account is disabled. Contact support.');
     }
 
     const { raw: refreshToken, hash: tokenHash, familyId } = this.tokenService.generateRefreshToken(user.id);
@@ -298,7 +289,16 @@ export class AuthService {
     userAgent: string,
   ): Promise<{ accessToken: string; refreshToken: string; keepMeLoggedIn: boolean }> {
     const parts = rawToken.split('.');
-    if (parts.length !== 3) {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const randomHexRegex = /^[0-9a-f]{64}$/i;
+
+    if (
+      parts.length !== 3 ||
+      !uuidRegex.test(parts[0]) ||
+      !uuidRegex.test(parts[1]) ||
+      !randomHexRegex.test(parts[2])
+    ) {
+      await this.logLoginAttempt(undefined, ip, userAgent, 'refresh', false, 'malformed_token');
       throw new InvalidCredentialsException();
     }
 
@@ -311,6 +311,7 @@ export class AuthService {
 
     if (!user || user.status !== UserStatus.ACTIVE) {
       await this.sessionService.revokeSession(userId, familyId);
+      await this.logLoginAttempt(user?.id, ip, userAgent, 'refresh', false, user ? 'account_inactive' : 'invalid_token');
       throw new InvalidCredentialsException();
     }
 
@@ -327,6 +328,8 @@ export class AuthService {
       );
 
       const accessToken = this.tokenService.signAccessToken(user);
+      await this.logLoginAttempt(user.id, ip, userAgent, 'refresh', true);
+
 
       return {
         accessToken,
@@ -334,7 +337,15 @@ export class AuthService {
         keepMeLoggedIn,
       };
     } catch (err) {
-      if (err instanceof UnauthorizedException && err.message.includes('Session invalidated for security')) {
+      await this.logLoginAttempt(
+        user.id,
+        ip,
+        userAgent,
+        'refresh',
+        false,
+        err instanceof TokenReuseDetectedException ? 'token_reuse' : 'invalid_token',
+      );
+      if (err instanceof TokenReuseDetectedException) {
         // Log token reuse / breach
         this.eventBusService.emit('UserSessionBreach', {
           userId,

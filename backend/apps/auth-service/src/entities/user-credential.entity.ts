@@ -38,6 +38,9 @@ export class UserCredential {
   @Column({ name: 'totp_enabled', default: false })
   totpEnabled!: boolean;
 
+  @Column({ name: 'totp_backup_codes_hash', type: 'simple-array', nullable: true })
+  totpBackupCodesHash?: string[] | null;
+
   @Column({ name: 'password_reset_token_hash', type: 'varchar', nullable: true, length: 255 })
   passwordResetTokenHash?: string | null;
 

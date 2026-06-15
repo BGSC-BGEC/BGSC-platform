@@ -36,7 +36,10 @@ import {
   Injectable,
   UnauthorizedException,
   ValidationPipe,
+  HttpStatus,
 } from '@nestjs/common';
+import { generateSync } from 'otplib';
+import { UserStatus } from './../src/constants/roles.constant';
 import { Test, TestingModule } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import Redis from 'ioredis';
@@ -47,6 +50,7 @@ import cookieParser = require('cookie-parser');
 import { AuthModule } from './../src/auth.module';
 import { EmailService } from './../src/services/email.service';
 import { TokenService } from './../src/services/token.service';
+import { AccountService } from './../src/services/account.service';
 import { GoogleAuthGuard } from './../src/guards/google-auth.guard';
 import { UserRole } from './../src/constants/roles.constant';
 import { UserCredential } from './../src/entities/user-credential.entity';
@@ -516,6 +520,374 @@ describe('AuthService integration (steps 1-10)', () => {
     }
   });
 
+  describe('Additional flows (steps 11-16)', () => {
+    it('supports TOTP setup, verification, authenticate, and disable', async () => {
+      const email = testEmail('totp');
+      const registerRes = await registerUser('E2ETotpUser', email, 'Password1!');
+      const accessToken = registerRes.body.accessToken;
+
+      // 1. Setup TOTP
+      const setupRes = await post('/auth/totp/setup')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(201);
+      expect(setupRes.body.qrCodeUrl).toEqual(expect.any(String));
+      const secret = setupRes.body.secret;
+      expect(secret).toEqual(expect.any(String));
+      expect(setupRes.body.backupCodes).toHaveLength(10);
+      const backupCodes = setupRes.body.backupCodes;
+
+      // 2. Verify with invalid code
+      await post('/auth/totp/verify-setup')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ token: '000000' })
+        .expect(401);
+
+      // 3. Verify with valid code
+      const validCode = generateSync({ secret });
+      const verifyRes = await post('/auth/totp/verify-setup')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ token: validCode })
+        .expect(200);
+      expect(verifyRes.body.enabled).toBe(true);
+
+      // 4. Login -> expect requiresTOTP
+      const loginRes = await post('/auth/login')
+        .send({ usernameOrEmail: email, password: 'Password1!' })
+        .expect(200);
+      expect(loginRes.body.requiresTOTP).toBe(true);
+      const tempToken = loginRes.body.tempToken;
+      expect(tempToken).toBeDefined();
+
+      // 5. Authenticate with invalid code
+      await post('/auth/totp/authenticate')
+        .send({ tempToken, token: '000000' })
+        .expect(401);
+
+      // 6. Authenticate with valid code
+      const validCode2 = generateSync({ secret });
+      const authRes = await post('/auth/totp/authenticate')
+        .send({ tempToken, token: validCode2 })
+        .expect(200);
+      expect(authRes.body.accessToken).toEqual(expect.any(String));
+      const refreshCookie = getRefreshCookie(authRes);
+      expect(refreshCookie).toContain('bgsc_refresh_token=');
+
+      // 7. Authenticate with backup code
+      const loginRes2 = await post('/auth/login')
+        .send({ usernameOrEmail: email, password: 'Password1!' })
+        .expect(200);
+      const tempToken2 = loginRes2.body.tempToken;
+      
+      const backupAuthRes = await post('/auth/totp/authenticate')
+        .send({ tempToken: tempToken2, token: backupCodes[0] })
+        .expect(200);
+      expect(backupAuthRes.body.accessToken).toEqual(expect.any(String));
+
+      // Check backup code consumption
+      const userInDb = await dataSource.query('SELECT totp_backup_codes_hash FROM users WHERE email = $1', [email]);
+      expect(userInDb[0].totp_backup_codes_hash.split(',')).toHaveLength(9);
+
+      // 8. Disable TOTP
+      const activeAccessToken = backupAuthRes.body.accessToken;
+      const disableCode = generateSync({ secret });
+      await post('/auth/totp/disable')
+        .set('Authorization', `Bearer ${activeAccessToken}`)
+        .send({ token: disableCode })
+        .expect(200);
+
+      // Check login works directly now
+      const loginRes3 = await post('/auth/login')
+        .send({ usernameOrEmail: email, password: 'Password1!' })
+        .expect(200);
+      expect(loginRes3.body.accessToken).toEqual(expect.any(String));
+    }, 60_000);
+
+    it('supports session listing and revocation', async () => {
+      const email = testEmail('sessions');
+      const registerRes = await registerUser('E2ESessionsUser', email, 'Password1!');
+      const accessToken = registerRes.body.accessToken;
+      const refreshCookie = getRefreshCookie(registerRes);
+
+      // List sessions
+      const listRes1 = await request(server)
+        .get('/auth/sessions')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Cookie', refreshCookie)
+        .expect(200);
+      expect(listRes1.body).toHaveLength(1);
+      expect(listRes1.body[0].isCurrent).toBe(true);
+
+      // Mock login on a different device (using different User-Agent)
+      const loginRes = await request(server)
+        .post('/auth/login')
+        .set('User-Agent', 'mock-other-device')
+        .send({ usernameOrEmail: email, password: 'Password1!', keepMeLoggedIn: true })
+        .expect(200);
+      const otherAccessToken = loginRes.body.accessToken;
+      const otherRefreshCookie = getRefreshCookie(loginRes);
+
+      // List sessions again
+      const listRes2 = await request(server)
+        .get('/auth/sessions')
+        .set('Authorization', `Bearer ${otherAccessToken}`)
+        .set('Cookie', otherRefreshCookie)
+        .expect(200);
+      expect(listRes2.body).toHaveLength(2);
+
+      const otherSession = listRes2.body.find((s: any) => !s.isCurrent);
+      expect(otherSession).toBeDefined();
+
+      // Revoke the first session
+      await request(server)
+        .delete(`/auth/sessions/${otherSession.familyId}`)
+        .set('Authorization', `Bearer ${otherAccessToken}`)
+        .set('Cookie', otherRefreshCookie)
+        .expect(200);
+
+      // Try to refresh with the revoked session
+      await request(server)
+        .post('/auth/refresh')
+        .set('Cookie', refreshCookie)
+        .expect(401);
+    }, 60_000);
+
+    it('supports account lifecycle and RBAC policies', async () => {
+      const emailA = testEmail('user-a');
+      const emailB = testEmail('user-b');
+
+      const registerResA = await registerUser('E2EUserA', emailA, 'Password1!');
+      const tokenA = registerResA.body.accessToken;
+      const userIdA = registerResA.body.user.id;
+
+      const registerResB = await registerUser('E2EUserB', emailB, 'Password1!');
+      const userIdB = registerResB.body.user.id;
+
+      // Assign coordinator role to B
+      await dataSource.query("UPDATE users SET role = 'coordinator' WHERE email = $1", [emailB]);
+
+      // B is coordinator, so B can fetch its role. Let's sign a fresh token for B so that the role claims are updated in the JWT.
+      const freshLoginB = await post('/auth/login')
+        .send({ usernameOrEmail: emailB, password: 'Password1!' })
+        .expect(200);
+      const tokenBCoordinator = freshLoginB.body.accessToken;
+
+      // Non-admin trying to enable throws 403 (implicit check because A is not enabled, but let's check enable directly)
+      await post(`/account/${userIdA}/enable`)
+        .set('Authorization', `Bearer ${tokenA}`)
+        .expect(403);
+
+      // User A self-disables account
+      await post('/account/disable')
+        .set('Authorization', `Bearer ${tokenA}`)
+        .send({})
+        .expect(200);
+
+      // Try to login as User A -> expect 403 Forbidden
+      await post('/auth/login')
+        .send({ usernameOrEmail: emailA, password: 'Password1!' })
+        .expect(403);
+
+      // Coordinator (User B) enables User A
+      await post(`/account/${userIdA}/enable`)
+        .set('Authorization', `Bearer ${tokenBCoordinator}`)
+        .expect(200);
+
+      // Login as A succeeds again
+      const loginResA = await post('/auth/login')
+        .send({ usernameOrEmail: emailA, password: 'Password1!' })
+        .expect(200);
+      const activeTokenA = loginResA.body.accessToken;
+
+      // Coordinator B disables User A
+      await post('/account/disable')
+        .set('Authorization', `Bearer ${tokenBCoordinator}`)
+        .send({ userId: userIdA })
+        .expect(200);
+
+      // Login as A fails again
+      await post('/auth/login')
+        .send({ usernameOrEmail: emailA, password: 'Password1!' })
+        .expect(403);
+
+      // Enable A again so we can delete it
+      await post(`/account/${userIdA}/enable`)
+        .set('Authorization', `Bearer ${tokenBCoordinator}`)
+        .expect(200);
+
+      // Login A
+      const freshLoginA = await post('/auth/login')
+        .send({ usernameOrEmail: emailA, password: 'Password1!' })
+        .expect(200);
+      const loginTokenA = freshLoginA.body.accessToken;
+
+      // User A schedules deletion
+      await post('/account/delete')
+        .set('Authorization', `Bearer ${loginTokenA}`)
+        .expect(200);
+
+      const dbUserA = await dataSource.query('SELECT status, deletion_scheduled FROM users WHERE id = $1', [userIdA]);
+      expect(dbUserA[0].status).toBe(UserStatus.PENDING_DELETION);
+      expect(dbUserA[0].deletion_scheduled).toBeInstanceOf(Date);
+
+      // Login pending deletion user -> expect 403 with message and accessToken
+      const cancelLoginRes = await post('/auth/login')
+        .send({ usernameOrEmail: emailA, password: 'Password1!' })
+        .expect(403);
+      expect(cancelLoginRes.body.message).toContain('Account is scheduled for deletion');
+      const tempCancelToken = cancelLoginRes.body.accessToken;
+      expect(tempCancelToken).toBeDefined();
+
+      // Cancel deletion using the returned token
+      await post('/account/cancel-deletion')
+        .set('Authorization', `Bearer ${tempCancelToken}`)
+        .expect(200);
+
+      const dbUserAAfter = await dataSource.query('SELECT status, deletion_scheduled FROM users WHERE id = $1', [userIdA]);
+      expect(dbUserAAfter[0].status).toBe(UserStatus.ACTIVE);
+      expect(dbUserAAfter[0].deletion_scheduled).toBeNull();
+    }, 60_000);
+
+    it('returns 429 Too Many Requests when rate limits are exceeded', async () => {
+      const email = testEmail('ratelimit');
+      await registerUser('E2ERateLimitUser', email, 'Password1!');
+
+      const limitIp = '10.99.99.99';
+
+      // Send 5 failed logins (allowed limit is 5 per 15 minutes)
+      for (let i = 0; i < 5; i++) {
+        await request(server)
+          .post('/auth/login')
+          .set('x-forwarded-for', limitIp)
+          .set('user-agent', TEST_USER_AGENT)
+          .send({ usernameOrEmail: email, password: 'WrongPassword!' })
+          .expect(401);
+      }
+
+      // 6th failed login should get 429
+      const limitRes = await request(server)
+        .post('/auth/login')
+        .set('x-forwarded-for', limitIp)
+        .set('user-agent', TEST_USER_AGENT)
+        .send({ usernameOrEmail: email, password: 'WrongPassword!' })
+        .expect(429);
+      expect(limitRes.headers['retry-after']).toBeDefined();
+
+      // Clean up rate limit in redis for subsequent runs
+      const keys = await redis.keys('auth:rate:*');
+      if (keys.length > 0) {
+        await redis.del(...keys);
+      }
+    }, 60_000);
+
+    it('verifies the full step-16 lifecycle and scheduled job cleanup', async () => {
+      const email = testEmail('full-lifecycle');
+      
+      // 1. Register
+      const regRes = await registerUser('E2ELifecycleUser', email, 'Password1!');
+      const userId = regRes.body.user.id;
+      let accessToken = regRes.body.accessToken;
+      let refreshCookie = getRefreshCookie(regRes);
+
+      // 2. Refresh
+      const refRes = await post('/auth/refresh')
+        .set('Cookie', refreshCookie)
+        .expect(200);
+      accessToken = refRes.body.accessToken;
+      refreshCookie = getRefreshCookie(refRes);
+
+      // Verify refresh audit log in DB
+      const audits = await dataSource.query(
+        'SELECT * FROM login_audit_log WHERE user_id = $1 AND method = $2',
+        [userId, 'refresh'],
+      );
+      expect(audits.length).toBeGreaterThanOrEqual(1);
+      expect(audits[0].success).toBe(true);
+      expect(audits[0].ip_address).toBeDefined();
+      expect(audits[0].user_agent).toBe(TEST_USER_AGENT);
+
+      // 3. Change password
+      await post('/auth/change-password')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Cookie', refreshCookie)
+        .send({ currentPassword: 'Password1!', newPassword: 'NewPassword1!' })
+        .expect(200);
+
+      // 4. Logout
+      await post('/auth/logout')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Cookie', refreshCookie)
+        .expect(200);
+
+      // 5. Login with new password
+      const logRes = await post('/auth/login')
+        .send({ usernameOrEmail: email, password: 'NewPassword1!' })
+        .expect(200);
+      accessToken = logRes.body.accessToken;
+
+      // 6. Enable TOTP
+      const setupRes = await post('/auth/totp/setup')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(201);
+      const secret = setupRes.body.secret;
+      const setupCode = generateSync({ secret });
+      await post('/auth/totp/verify-setup')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ token: setupCode })
+        .expect(200);
+
+      // 7. Login with TOTP
+      const totpLogRes = await post('/auth/login')
+        .send({ usernameOrEmail: email, password: 'NewPassword1!' })
+        .expect(200);
+      const tempToken = totpLogRes.body.tempToken;
+      const authCode = generateSync({ secret });
+      const totpAuthRes = await post('/auth/totp/authenticate')
+        .send({ tempToken, token: authCode })
+        .expect(200);
+      accessToken = totpAuthRes.body.accessToken;
+
+      // 8. Disable TOTP
+      const disableCode = generateSync({ secret });
+      await post('/auth/totp/disable')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ token: disableCode })
+        .expect(200);
+
+      // 9. Forgot password and reset
+      await post('/auth/forgot-password')
+        .send({ email })
+        .expect(200);
+      const resetToken = resetTokensByEmail.get(email);
+      expect(resetToken).toBeDefined();
+      await post('/auth/reset-password')
+        .send({ token: resetToken!, newPassword: 'ResetPassword1!' })
+        .expect(200);
+
+      // 10. Login after reset
+      const resetLoginRes = await post('/auth/login')
+        .send({ usernameOrEmail: email, password: 'ResetPassword1!' })
+        .expect(200);
+      accessToken = resetLoginRes.body.accessToken;
+
+      // 11. Delete account (sets pending_deletion)
+      await post('/account/delete')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .expect(200);
+
+      // 12. Simulate 31 days elapsed
+      await dataSource.query("UPDATE users SET deletion_scheduled = NOW() - INTERVAL '31 days' WHERE id = $1", [userId]);
+
+      // 13. Run deletion job manually using AccountService
+      const AccountServiceModule = app.get(AccountService);
+      const purgedCount = await AccountServiceModule.purgeScheduledDeletions(new Date());
+      expect(purgedCount).toBe(1);
+
+      // 14. Verify user is completely removed from DB
+      const userCheck = await dataSource.query('SELECT * FROM users WHERE id = $1', [userId]);
+      expect(userCheck).toHaveLength(0);
+    }, 90_000);
+  });
+
   function post(path: string) {
     return request(server)
       .post(path)
@@ -590,6 +962,11 @@ describe('AuthService integration (steps 1-10)', () => {
     const stateKeys = await redis.keys('auth:oauth:google:state:*');
     if (stateKeys.length > 0) {
       await redis.del(...stateKeys);
+    }
+
+    const rateKeys = await redis.keys('auth:rate:*');
+    if (rateKeys.length > 0) {
+      await redis.del(...rateKeys);
     }
   }
 });

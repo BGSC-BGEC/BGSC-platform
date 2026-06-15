@@ -1468,75 +1468,75 @@ Execute these in sequence. Each step produces a testable, deployable artifact.
 
 ### Step 11: TOTP 2FA (Day 6-7)
 
-- [ ] Implement `TotpService`:
+- [x] Implement `TotpService`:
   - `generateSecret()` using `otplib`
   - `encryptSecret()` / `decryptSecret()` using AES-256-GCM
   - `generateQRCode()` using `qrcode` library
   - `verifyCode(secret, code)` with 1-step window tolerance
   - `generateBackupCodes()` — 10 codes, bcrypt-hashed
-- [ ] Implement endpoints: `/totp/setup`, `/totp/verify-setup`, `/totp/authenticate`, `/totp/disable`
-- [ ] Write unit and integration tests
+- [x] Implement endpoints: `/totp/setup`, `/totp/verify-setup`, `/totp/authenticate`, `/totp/disable`
+- [x] Write unit and integration tests
 
 ### Step 12: Session Management Endpoints (Day 7)
 
-- [ ] Implement `GET /auth/sessions` — list all devices
-- [ ] Implement `DELETE /auth/sessions/:familyId` — revoke specific session
-- [ ] Write integration tests
+- [x] Implement `GET /auth/sessions` — list all devices
+- [x] Implement `DELETE /auth/sessions/:familyId` — revoke specific session
+- [x] Write integration tests
 
 ### Step 13: Account Lifecycle (Day 7-8)
 
-- [ ] Implement `POST /account/disable` (self and admin paths)
-- [ ] Implement `POST /account/:userId/enable` (admin only)
-- [ ] Implement `POST /account/delete` (sets 30-day grace period)
-- [ ] Implement `POST /account/cancel-deletion`
-- [ ] Implement `POST /account/export` (emits event for async processing)
-- [ ] Write scheduled job stub for deletion cron
-- [ ] Write integration tests
+- [x] Implement `POST /account/disable` (self and admin paths)
+- [x] Implement `POST /account/:userId/enable` (admin only)
+- [x] Implement `POST /account/delete` (sets 30-day grace period)
+- [x] Implement `POST /account/cancel-deletion`
+- [x] Implement `POST /account/export` (emits event for async processing)
+- [x] Write scheduled job stub for deletion cron
+- [x] Write integration tests
 
 ### Step 14: Rate Limiting Guard (Day 8)
 
-- [ ] Implement `RateLimitGuard` (Section 12)
-- [ ] Create `@RateLimit()` decorator
-- [ ] Apply to all auth endpoints with correct limits
-- [ ] Write integration tests: verify 429 is returned after threshold
+- [x] Implement `RateLimitGuard` (Section 12)
+- [x] Create `@RateLimit()` decorator
+- [x] Apply to all auth endpoints with correct limits
+- [x] Write integration tests: verify 429 is returned after threshold
 
 ### Step 15: Login Audit Logging (Day 8)
 
-- [ ] Ensure every login attempt (success + failure) writes to `login_audit_log`
-- [ ] Include: IP, User-Agent, method (local/google/refresh), success boolean, failure reason
-- [ ] Write test verifying audit rows are created
+- [x] Ensure every login attempt (success + failure) writes to `login_audit_log`
+- [x] Include: IP, User-Agent, method (local/google/refresh), success boolean, failure reason
+- [x] Write test verifying audit rows are created
 
 ### Step 16: End-to-End Integration Test Suite (Day 9)
 
-- [ ] Write the full lifecycle E2E test:
+- [x] Write the full lifecycle E2E test:
   `Register → Login → Refresh → Change Password → Logout → Login with new password → Enable TOTP → Login with TOTP → Disable TOTP → Forgot Password → Reset → Login → Delete Account`
-- [ ] Write breach detection E2E test
-- [ ] Write rate limit E2E test
-- [ ] Verify all tests pass in CI
+- [x] Write breach detection E2E test
+- [x] Write rate limit E2E test
+- [x] Verify all tests pass in CI
 
 ### Step 17: Swagger Documentation (Day 9)
 
-- [ ] Add `@nestjs/swagger` decorators to all controllers and DTOs
-- [ ] Configure Swagger UI at `/auth/docs`
-- [ ] Verify all endpoints are documented with request/response schemas
+- [x] Add `@nestjs/swagger` decorators to all controllers and DTOs
+- [x] Configure Swagger UI at `/auth/docs`
+- [x] Verify all endpoints are documented with request/response schemas
 
 ### Step 18: Security Audit Checklist (Day 10)
 
 Before marking the auth service as complete, verify:
 
-- [ ] No secrets in code (scan with `trufflehog` or `gitleaks`)
-- [ ] `JWT_ACCESS_SECRET` ≠ `JWT_REFRESH_SECRET`
-- [ ] Refresh token stored as SHA-256 hash in Redis, never raw
-- [ ] Password reset token stored as SHA-256 hash, never raw
-- [ ] TOTP secret encrypted with AES-256-GCM, not stored in plaintext
-- [ ] All auth error messages are generic (no enumeration leaks)
-- [ ] Rate limiting active on all public endpoints
-- [ ] CORS restricted to known origins
-- [ ] Cookies set with `HttpOnly`, `Secure`, `SameSite=Strict`
-- [ ] `ValidationPipe` has `whitelist: true` and `forbidNonWhitelisted: true`
-- [ ] No raw SQL queries (TypeORM parameterized queries only)
-- [ ] Test coverage > 80%
-- [ ] Swagger docs complete
+- [x] No secrets in code (scan with `trufflehog` or `gitleaks`)
+- [x] `JWT_ACCESS_SECRET` ≠ `JWT_REFRESH_SECRET`
+- [x] Refresh token stored as SHA-256 hash in Redis, never raw
+- [x] Password reset token stored as SHA-256 hash, never raw
+- [x] TOTP secret encrypted with AES-256-GCM, not stored in plaintext
+- [x] All auth error messages are generic (no enumeration leaks)
+- [x] Rate limiting active on all public endpoints
+- [x] CORS restricted to known origins
+- [x] Cookies set with `HttpOnly`, `Secure`, `SameSite=Strict`
+- [x] `ValidationPipe` has `whitelist: true` and `forbidNonWhitelisted: true`
+- [x] No raw SQL queries (TypeORM parameterized queries only)
+- [x] Test coverage > 80%
+- [x] Swagger docs complete
 
 ---
 

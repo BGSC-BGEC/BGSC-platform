@@ -15,6 +15,8 @@ import { CurrentUser } from '../decorators/current-user.decorator';
 import { Public } from '../decorators/public.decorator';
 import { RateLimit } from '../decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../guards/rate-limit.guard';
+import { UserStatus } from '../constants/roles.constant';
+import { AuthResponseDto, RefreshResponseDto, SuccessMessageDto, LoginPendingDeletionResponseDto } from '../dto/responses.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 
 @ApiTags('Authentication')
@@ -28,6 +30,7 @@ export class AuthController {
 
   @Public()
   @Get('google')
+  @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Redirect to Google OAuth2 consent screen' })
   @ApiResponse({ status: 302, description: 'Redirected to Google OAuth2 consent screen' })
@@ -37,6 +40,7 @@ export class AuthController {
 
   @Public()
   @Get('google/callback')
+  @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Handle Google OAuth2 callback' })
   @ApiResponse({ status: 302, description: 'Redirected to frontend with access token in fragment' })
@@ -64,6 +68,9 @@ export class AuthController {
       access_token: tokens.accessToken,
       is_new_user: String(tokens.isNewUser),
     });
+    if (user.status === UserStatus.PENDING_DELETION) {
+      params.append('is_pending_deletion', 'true');
+    }
 
     return res.redirect(302, `${frontendUrl}/auth/callback#${params.toString()}`);
   }
@@ -72,7 +79,7 @@ export class AuthController {
   @Post('register')
   @RateLimit({ windowMs: 60 * 60 * 1000, max: 3, keyPrefix: 'register' }) // 3 per hour
   @ApiOperation({ summary: 'Register a new user' })
-  @ApiResponse({ status: 201, description: 'User registered successfully' })
+  @ApiResponse({ status: 201, description: 'User registered successfully', type: AuthResponseDto })
   @ApiResponse({ status: 400, description: 'Validation failed' })
   @ApiResponse({ status: 409, description: 'Username or email already exists' })
   async register(
@@ -100,7 +107,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @RateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'login' }) // 5 per 15 mins
   @ApiOperation({ summary: 'Log in with credentials' })
-  @ApiResponse({ status: 200, description: 'Login successful' })
+  @ApiResponse({ status: 200, description: 'Login successful', type: AuthResponseDto })
+  @ApiResponse({ status: 403, description: 'Account scheduled for deletion', type: LoginPendingDeletionResponseDto })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   async login(
     @CurrentUser() user: any,
@@ -123,6 +131,15 @@ export class AuthController {
 
     this.setCookie(res, result.refreshToken!, !!dto.keepMeLoggedIn);
 
+    if (user.status === UserStatus.PENDING_DELETION) {
+      res.status(HttpStatus.FORBIDDEN);
+      return {
+        statusCode: HttpStatus.FORBIDDEN,
+        message: 'Account is scheduled for deletion. Log in to cancel.',
+        accessToken: result.accessToken,
+      };
+    }
+
     return {
       user: result.user,
       accessToken: result.accessToken,
@@ -133,9 +150,9 @@ export class AuthController {
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  @RateLimit({ windowMs: 60 * 1000, max: 30, keyPrefix: 'refresh' }) // 30 per min
+  @RateLimit({ windowMs: 60 * 1000, max: 30, keyPrefix: 'refresh', keyBy: 'refreshToken' }) // 30 per min
   @ApiOperation({ summary: 'Refresh access token' })
-  @ApiResponse({ status: 200, description: 'Token refreshed successfully' })
+  @ApiResponse({ status: 200, description: 'Token refreshed successfully', type: RefreshResponseDto })
   @ApiResponse({ status: 401, description: 'Invalid refresh token' })
   async refresh(
     @Req() req: Request,
@@ -175,6 +192,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
+  @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @ApiOperation({ summary: 'Log out current session' })
   async logout(
     @CurrentUser() user: any,
@@ -184,7 +202,14 @@ export class AuthController {
     const refreshToken = req.cookies['bgsc_refresh_token'];
     if (refreshToken) {
       const parts = refreshToken.split('.');
-      if (parts.length === 3) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const randomHexRegex = /^[0-9a-f]{64}$/i;
+      if (
+        parts.length === 3 &&
+        uuidRegex.test(parts[0]) &&
+        uuidRegex.test(parts[1]) &&
+        randomHexRegex.test(parts[2])
+      ) {
         const [userId, familyId] = parts;
         if (userId === user.sub) {
           await this.authService.logout(user.sub, familyId, user.jti, user.exp);
@@ -206,6 +231,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
+  @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @ApiOperation({ summary: 'Log out all sessions across all devices' })
   async logoutAll(
     @CurrentUser() user: any,
@@ -226,9 +252,9 @@ export class AuthController {
   @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  @RateLimit({ windowMs: 60 * 60 * 1000, max: 3, keyPrefix: 'password_reset' })
+  @RateLimit({ windowMs: 60 * 60 * 1000, max: 3, keyPrefix: 'password_reset', keyBy: 'email' })
   @ApiOperation({ summary: 'Request a password reset link' })
-  @ApiResponse({ status: 200, description: 'Password reset request accepted' })
+  @ApiResponse({ status: 200, description: 'Password reset request accepted', type: SuccessMessageDto })
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto);
   }
@@ -236,8 +262,9 @@ export class AuthController {
   @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
+  @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @ApiOperation({ summary: 'Reset password with emailed token' })
-  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  @ApiResponse({ status: 200, description: 'Password reset successfully', type: SuccessMessageDto })
   @ApiResponse({ status: 400, description: 'Invalid or expired reset token' })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
@@ -247,8 +274,9 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
+  @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @ApiOperation({ summary: 'Change password for current user' })
-  @ApiResponse({ status: 200, description: 'Password changed successfully' })
+  @ApiResponse({ status: 200, description: 'Password changed successfully', type: SuccessMessageDto })
   async changePassword(
     @CurrentUser() user: any,
     @Body() dto: ChangePasswordDto,
@@ -257,6 +285,8 @@ export class AuthController {
     const currentFamilyId = this.getFamilyIdFromRefreshCookie(req, user.sub);
     return this.authService.changePassword(user.sub, dto, currentFamilyId);
   }
+
+
 
   private setCookie(res: Response, token: string, keepMeLoggedIn: boolean) {
     res.cookie('bgsc_refresh_token', token, {
@@ -275,7 +305,15 @@ export class AuthController {
     }
 
     const parts = refreshToken.split('.');
-    if (parts.length !== 3 || parts[0] !== userId) {
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const randomHexRegex = /^[0-9a-f]{64}$/i;
+    if (
+      parts.length !== 3 ||
+      !uuidRegex.test(parts[0]) ||
+      !uuidRegex.test(parts[1]) ||
+      !randomHexRegex.test(parts[2]) ||
+      parts[0] !== userId
+    ) {
       return undefined;
     }
 

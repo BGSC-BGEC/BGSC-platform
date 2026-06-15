@@ -267,11 +267,14 @@ describe('AuthController', () => {
     it('should pass current session familyId to changePassword when cookie matches user', async () => {
       authService.changePassword.mockResolvedValue({ message: 'Password changed successfully.' });
 
-      const req: any = { cookies: { bgsc_refresh_token: 'u-1.fam-1.random' } };
+      const userId = '11111111-2222-3333-4444-555555555555';
+      const familyId = '66666666-7777-8888-9999-000000000000';
+      const randomHex = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+      const req: any = { cookies: { bgsc_refresh_token: `${userId}.${familyId}.${randomHex}` } };
       const dto = { currentPassword: 'OldPassword1!', newPassword: 'NewPassword1!' };
-      const result = await controller.changePassword({ sub: 'u-1' }, dto, req);
+      const result = await controller.changePassword({ sub: userId }, dto, req);
 
-      expect(authService.changePassword).toHaveBeenCalledWith('u-1', dto, 'fam-1');
+      expect(authService.changePassword).toHaveBeenCalledWith(userId, dto, familyId);
       expect(result.message).toBe('Password changed successfully.');
     });
   });

@@ -47,9 +47,9 @@ describe('AuthService', () => {
 
     tokenService = {
       generateRefreshToken: jest.fn().mockReturnValue({
-        raw: 'mock-uuid.family-uuid.random-hex',
+        raw: '11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333',
         hash: 'sha256-hash',
-        familyId: 'family-uuid',
+        familyId: '22222222-2222-4222-8222-222222222222',
       }),
       signAccessToken: jest.fn().mockReturnValue('access_jwt_token'),
       signTempToken: jest.fn().mockReturnValue('temp_jwt_token'),
@@ -143,7 +143,7 @@ describe('AuthService', () => {
       expect(result).toBeDefined();
       expect(result.user.username).toBe('newuser');
       expect(result.accessToken).toBe('access_jwt_token');
-      expect(result.refreshToken).toBe('mock-uuid.family-uuid.random-hex');
+      expect(result.refreshToken).toBe('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333');
       expect(eventBusService.emit).toHaveBeenCalledWith('UserRegistered', expect.any(Object));
     });
 
@@ -245,31 +245,31 @@ describe('AuthService', () => {
       const result = await service.login(mockUser, '127.0.0.1', 'ua');
       expect(result.requiresTOTP).toBe(false);
       expect(result.accessToken).toBe('access_jwt_token');
-      expect(result.refreshToken).toBe('mock-uuid.family-uuid.random-hex');
+      expect(result.refreshToken).toBe('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333');
       expect(eventBusService.emit).toHaveBeenCalledWith('UserLoggedIn', expect.any(Object));
     });
   });
 
   describe('refreshTokens', () => {
     it('should successfully rotate tokens', async () => {
-      const mockUser = { id: 'u-1', status: UserStatus.ACTIVE };
+      const mockUser = { id: '11111111-1111-4111-8111-111111111111', status: UserStatus.ACTIVE };
       userRepository.findOne.mockResolvedValue(mockUser);
       sessionService.validateAndRotateSession.mockResolvedValue(true);
 
-      const result = await service.refreshTokens('u-1.fam-1.random', '127.0.0.1', 'ua');
+      const result = await service.refreshTokens('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333', '127.0.0.1', 'ua');
       expect(result.accessToken).toBe('access_jwt_token');
-      expect(result.refreshToken).toBe('mock-uuid.family-uuid.random-hex');
+      expect(result.refreshToken).toBe('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333');
     });
 
     it('should log a breach when token reuse is detected', async () => {
-      const mockUser = { id: 'u-1', status: UserStatus.ACTIVE };
+      const mockUser = { id: '11111111-1111-4111-8111-111111111111', status: UserStatus.ACTIVE };
       userRepository.findOne.mockResolvedValue(mockUser);
       
       const staleException = new TokenReuseDetectedException();
       sessionService.validateAndRotateSession.mockRejectedValue(staleException);
 
       await expect(
-        service.refreshTokens('u-1.fam-1.random', '127.0.0.1', 'ua'),
+        service.refreshTokens('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333', '127.0.0.1', 'ua'),
       ).rejects.toThrow(TokenReuseDetectedException);
 
       expect(eventBusService.emit).toHaveBeenCalledWith('UserSessionBreach', expect.any(Object));
@@ -448,12 +448,12 @@ describe('AuthService', () => {
       const result = await service.loginWithGoogle(user, true, '127.0.0.1', 'google-ua');
 
       expect(result.accessToken).toBe('access_jwt_token');
-      expect(result.refreshToken).toBe('mock-uuid.family-uuid.random-hex');
+      expect(result.refreshToken).toBe('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333');
       expect(result.isNewUser).toBe(true);
       expect(sessionService.createSession).toHaveBeenCalledWith(
         'u-1',
         'sha256-hash',
-        'family-uuid',
+        '22222222-2222-4222-8222-222222222222',
         '127.0.0.1',
         'google-ua',
         true,

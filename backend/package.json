@@ -99,6 +99,9 @@
     "testEnvironment": "node",
     "roots": [
       "<rootDir>/apps/"
+    ],
+    "transformIgnorePatterns": [
+      "/node_modules/(?!otplib|@otplib|@scure|@noble)"
     ]
   }
 }
