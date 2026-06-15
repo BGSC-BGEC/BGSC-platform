@@ -15,4 +15,4 @@ RUN npm prune --omit=dev
 
 EXPOSE 3000
 
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/apps/auth-service/main.js"]
