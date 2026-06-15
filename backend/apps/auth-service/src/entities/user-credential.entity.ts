@@ -12,8 +12,8 @@ export class UserCredential {
   @Column({ unique: true, length: 255 })
   email!: string;
 
-  @Column({ name: 'password_hash', nullable: true, length: 255 })
-  passwordHash?: string;
+  @Column({ name: 'password_hash', type: 'varchar', nullable: true, length: 255 })
+  passwordHash?: string | null;
 
   @Column({
     type: 'enum',
@@ -29,29 +29,29 @@ export class UserCredential {
   })
   status!: UserStatus;
 
-  @Column({ name: 'google_id', unique: true, nullable: true, length: 255 })
-  googleId?: string;
+  @Column({ name: 'google_id', type: 'varchar', unique: true, nullable: true, length: 255 })
+  googleId?: string | null;
 
-  @Column({ name: 'totp_secret_enc', nullable: true, length: 512 })
-  totpSecretEnc?: string;
+  @Column({ name: 'totp_secret_enc', type: 'varchar', nullable: true, length: 512 })
+  totpSecretEnc?: string | null;
 
   @Column({ name: 'totp_enabled', default: false })
   totpEnabled!: boolean;
 
-  @Column({ name: 'password_reset_token_hash', nullable: true, length: 255 })
-  passwordResetTokenHash?: string;
+  @Column({ name: 'password_reset_token_hash', type: 'varchar', nullable: true, length: 255 })
+  passwordResetTokenHash?: string | null;
 
   @Column({ name: 'password_reset_expires', nullable: true, type: 'timestamptz' })
-  passwordResetExpires?: Date;
+  passwordResetExpires?: Date | null;
 
   @Column({ name: 'disabled_at', nullable: true, type: 'timestamptz' })
-  disabledAt?: Date;
+  disabledAt?: Date | null;
 
   @Column({ name: 'disabled_by', nullable: true, type: 'uuid' })
-  disabledBy?: string;
+  disabledBy?: string | null;
 
   @Column({ name: 'deletion_scheduled', nullable: true, type: 'timestamptz' })
-  deletionScheduled?: Date;
+  deletionScheduled?: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

@@ -3,6 +3,9 @@ import type { Request, Response } from 'express';
 import { AuthService } from '../services/auth.service';
 import { RegisterDto } from '../dto/register.dto';
 import { LoginDto } from '../dto/login.dto';
+import { ForgotPasswordDto } from '../dto/forgot-password.dto';
+import { ResetPasswordDto } from '../dto/reset-password.dto';
+import { ChangePasswordDto } from '../dto/change-password.dto';
 import { LocalAuthGuard } from '../guards/local-auth.guard';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { CurrentUser } from '../decorators/current-user.decorator';
@@ -172,6 +175,41 @@ export class AuthController {
     return { message: 'Logged out of all devices successfully' };
   }
 
+  @Public()
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @RateLimit({ windowMs: 60 * 60 * 1000, max: 3, keyPrefix: 'password_reset' })
+  @ApiOperation({ summary: 'Request a password reset link' })
+  @ApiResponse({ status: 200, description: 'Password reset request accepted' })
+  async forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Public()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password with emailed token' })
+  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid or expired reset token' })
+  async resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Change password for current user' })
+  @ApiResponse({ status: 200, description: 'Password changed successfully' })
+  async changePassword(
+    @CurrentUser() user: any,
+    @Body() dto: ChangePasswordDto,
+    @Req() req: Request,
+  ) {
+    const currentFamilyId = this.getFamilyIdFromRefreshCookie(req, user.sub);
+    return this.authService.changePassword(user.sub, dto, currentFamilyId);
+  }
+
   private setCookie(res: Response, token: string, keepMeLoggedIn: boolean) {
     res.cookie('bgsc_refresh_token', token, {
       httpOnly: true,
@@ -180,5 +218,19 @@ export class AuthController {
       path: '/auth',
       maxAge: keepMeLoggedIn ? 7 * 24 * 60 * 60 * 1000 : undefined,
     });
+  }
+
+  private getFamilyIdFromRefreshCookie(req: Request, userId: string): string | undefined {
+    const refreshToken = req.cookies?.['bgsc_refresh_token'];
+    if (!refreshToken) {
+      return undefined;
+    }
+
+    const parts = refreshToken.split('.');
+    if (parts.length !== 3 || parts[0] !== userId) {
+      return undefined;
+    }
+
+    return parts[1];
   }
 }

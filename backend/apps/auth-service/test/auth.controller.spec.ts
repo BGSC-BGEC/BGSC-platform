@@ -26,6 +26,9 @@ describe('AuthController', () => {
       refreshTokens: jest.fn(),
       logout: jest.fn(),
       logoutAll: jest.fn(),
+      forgotPassword: jest.fn(),
+      resetPassword: jest.fn(),
+      changePassword: jest.fn(),
     };
 
     const mockRateLimitGuard = { canActivate: () => true };
@@ -143,6 +146,40 @@ describe('AuthController', () => {
       expect(result.requiresTOTP).toBe(true);
       expect(result.tempToken).toBe('temp-token');
       expect(res.cookie).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('password flows', () => {
+    it('should call forgotPassword and return generic response', async () => {
+      authService.forgotPassword.mockResolvedValue({
+        message: 'If an account with that email exists, a reset link has been sent.',
+      });
+
+      const result = await controller.forgotPassword({ email: 'user@example.com' });
+
+      expect(authService.forgotPassword).toHaveBeenCalledWith({ email: 'user@example.com' });
+      expect(result.message).toContain('If an account with that email exists');
+    });
+
+    it('should call resetPassword with token and new password', async () => {
+      authService.resetPassword.mockResolvedValue({ message: 'Password has been reset successfully.' });
+
+      const dto = { token: 'a'.repeat(64), newPassword: 'NewPassword1!' };
+      const result = await controller.resetPassword(dto);
+
+      expect(authService.resetPassword).toHaveBeenCalledWith(dto);
+      expect(result.message).toBe('Password has been reset successfully.');
+    });
+
+    it('should pass current session familyId to changePassword when cookie matches user', async () => {
+      authService.changePassword.mockResolvedValue({ message: 'Password changed successfully.' });
+
+      const req: any = { cookies: { bgsc_refresh_token: 'u-1.fam-1.random' } };
+      const dto = { currentPassword: 'OldPassword1!', newPassword: 'NewPassword1!' };
+      const result = await controller.changePassword({ sub: 'u-1' }, dto, req);
+
+      expect(authService.changePassword).toHaveBeenCalledWith('u-1', dto, 'fam-1');
+      expect(result.message).toBe('Password changed successfully.');
     });
   });
 });

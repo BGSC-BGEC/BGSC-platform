@@ -55,5 +55,11 @@ describe('PasswordService', () => {
       expect(result.raw.length).toBe(64); // 32 bytes hex
       expect(result.hash.length).toBe(64); // SHA-256 hash length is 64 hex characters
     });
+
+    it('should hash reset tokens deterministically', () => {
+      const token = 'a'.repeat(64);
+      expect(service.hashResetToken(token)).toBe(service.hashResetToken(token));
+      expect(service.hashResetToken(token)).not.toBe(token);
+    });
   });
 });

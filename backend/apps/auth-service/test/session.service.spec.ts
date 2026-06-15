@@ -161,4 +161,18 @@ describe('SessionService', () => {
       expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session_index:user-123');
     });
   });
+
+  describe('revokeAllSessionsExcept', () => {
+    it('should delete every session except the current familyId', async () => {
+      mockRedis.smembers.mockResolvedValue(['f1', 'current', 'f2']);
+
+      await service.revokeAllSessionsExcept('user-123', 'current');
+
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session:user-123:f1');
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session:user-123:f2');
+      expect(mockRedis.pipeline().del).not.toHaveBeenCalledWith('auth:session:user-123:current');
+      expect(mockRedis.pipeline().srem).toHaveBeenCalledWith('auth:session_index:user-123', 'f1');
+      expect(mockRedis.pipeline().srem).toHaveBeenCalledWith('auth:session_index:user-123', 'f2');
+    });
+  });
 });

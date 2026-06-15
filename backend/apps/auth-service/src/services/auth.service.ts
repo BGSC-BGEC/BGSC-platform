@@ -1,19 +1,26 @@
-import { Injectable, ConflictException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import Redis from 'ioredis';
 import { UserCredential } from '../entities/user-credential.entity';
 import { LoginAuditLog } from '../entities/login-audit-log.entity';
 import { PasswordService } from './password.service';
 import { TokenService } from './token.service';
 import { SessionService } from './session.service';
 import { EventBusService } from './event-bus.service';
+import { EmailService } from './email.service';
 import { RegisterDto } from '../dto/register.dto';
+import { ForgotPasswordDto } from '../dto/forgot-password.dto';
+import { ResetPasswordDto } from '../dto/reset-password.dto';
+import { ChangePasswordDto } from '../dto/change-password.dto';
 import { UserRole, UserStatus } from '../constants/roles.constant';
 import { InvalidCredentialsException } from '../exceptions/invalid-credentials.exception';
 import { AccountDisabledException } from '../exceptions/account-disabled.exception';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(UserCredential)
     private readonly userRepository: Repository<UserCredential>,
@@ -23,6 +30,8 @@ export class AuthService {
     private readonly tokenService: TokenService,
     private readonly sessionService: SessionService,
     private readonly eventBusService: EventBusService,
+    private readonly emailService: EmailService,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
   async register(
@@ -242,6 +251,131 @@ export class AuthService {
       reason: 'User requested logout from all devices',
       timestamp: new Date().toISOString(),
     });
+  }
+
+  async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
+    const normalizedEmail = dto.email.toLowerCase().trim();
+    const response = { message: 'If an account with that email exists, a reset link has been sent.' };
+
+    const user = await this.userRepository.findOne({ where: { email: normalizedEmail } });
+    if (!user || user.status !== UserStatus.ACTIVE) {
+      return response;
+    }
+
+    try {
+      const { raw, hash } = this.passwordService.generateResetToken();
+      const expires = new Date(Date.now() + 60 * 60 * 1000);
+
+      user.passwordResetTokenHash = hash;
+      user.passwordResetExpires = expires;
+      await this.userRepository.save(user);
+
+      const key = this.getPasswordResetKey(hash);
+      await this.redis.hset(key, {
+        userId: user.id,
+        createdAt: Date.now().toString(),
+      });
+      await this.redis.expire(key, 60 * 60);
+
+      await this.emailService.sendPasswordResetEmail(user.email, raw);
+    } catch (error) {
+      this.logger.error(`Password reset request failed for user ${user.id}`, error instanceof Error ? error.stack : undefined);
+    }
+
+    return response;
+  }
+
+  async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
+    const tokenHash = this.passwordService.hashResetToken(dto.token);
+    const user = await this.findUserForPasswordReset(tokenHash);
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    user.passwordHash = await this.passwordService.hashPassword(dto.newPassword);
+    user.passwordResetTokenHash = null;
+    user.passwordResetExpires = null;
+    await this.userRepository.save(user);
+
+    await this.redis.del(this.getPasswordResetKey(tokenHash));
+    await this.sessionService.revokeAllSessions(user.id);
+
+    this.eventBusService.emit('UserPasswordChanged', {
+      userId: user.id,
+      timestamp: new Date().toISOString(),
+    });
+
+    return { message: 'Password has been reset successfully.' };
+  }
+
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+    currentFamilyId?: string,
+  ): Promise<{ message: string }> {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user || user.status !== UserStatus.ACTIVE) {
+      throw new InvalidCredentialsException();
+    }
+
+    if (user.passwordHash) {
+      if (!dto.currentPassword) {
+        throw new BadRequestException('Current password is required');
+      }
+      if (dto.currentPassword === dto.newPassword) {
+        throw new BadRequestException('New password must be different from current password');
+      }
+
+      const currentPasswordValid = await this.passwordService.verifyPassword(dto.currentPassword, user.passwordHash);
+      if (!currentPasswordValid) {
+        throw new InvalidCredentialsException();
+      }
+    }
+
+    user.passwordHash = await this.passwordService.hashPassword(dto.newPassword);
+    user.passwordResetTokenHash = null;
+    user.passwordResetExpires = null;
+    await this.userRepository.save(user);
+
+    await this.sessionService.revokeAllSessionsExcept(user.id, currentFamilyId);
+
+    this.eventBusService.emit('UserPasswordChanged', {
+      userId: user.id,
+      timestamp: new Date().toISOString(),
+    });
+
+    return { message: 'Password changed successfully.' };
+  }
+
+  private async findUserForPasswordReset(tokenHash: string): Promise<UserCredential | null> {
+    const key = this.getPasswordResetKey(tokenHash);
+    const reset = await this.redis.hgetall(key);
+    let user: UserCredential | null = null;
+
+    if (reset?.userId) {
+      user = await this.userRepository.findOne({ where: { id: reset.userId } });
+    } else {
+      user = await this.userRepository.findOne({ where: { passwordResetTokenHash: tokenHash } });
+    }
+
+    if (!user || user.status !== UserStatus.ACTIVE) {
+      return null;
+    }
+
+    if (user.passwordResetTokenHash !== tokenHash || !user.passwordResetExpires) {
+      return null;
+    }
+
+    if (user.passwordResetExpires.getTime() <= Date.now()) {
+      return null;
+    }
+
+    return user;
+  }
+
+  private getPasswordResetKey(tokenHash: string): string {
+    return `auth:password_reset:${tokenHash}`;
   }
 
   private async logLoginAttempt(

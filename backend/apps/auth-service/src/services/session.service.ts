@@ -119,6 +119,25 @@ export class SessionService {
     await pipeline.exec();
   }
 
+  async revokeAllSessionsExcept(userId: string, currentFamilyId?: string): Promise<void> {
+    if (!currentFamilyId) {
+      await this.revokeAllSessions(userId);
+      return;
+    }
+
+    const indexKey = this.getIndexKey(userId);
+    const familyIds = await this.redis.smembers(indexKey);
+
+    const pipeline = this.redis.pipeline();
+    for (const familyId of familyIds) {
+      if (familyId !== currentFamilyId) {
+        pipeline.del(this.getSessionKey(userId, familyId));
+        pipeline.srem(indexKey, familyId);
+      }
+    }
+    await pipeline.exec();
+  }
+
   async listSessions(userId: string, currentFamilyId?: string): Promise<any[]> {
     const indexKey = this.getIndexKey(userId);
     const familyIds = await this.redis.smembers(indexKey);

@@ -1448,11 +1448,11 @@ Execute these in sequence. Each step produces a testable, deployable artifact.
 
 ### Step 9: Password Reset Flow (Day 5)
 
-- [ ] Implement `POST /auth/forgot-password` — always returns 200
-- [ ] Implement email sending via nodemailer (or queue via event bus for notification service)
-- [ ] Implement `POST /auth/reset-password` — validates token, updates hash, revokes all sessions
-- [ ] Implement `POST /auth/change-password` — handles both password-having and OAuth-only users
-- [ ] Write integration tests
+- [x] Implement `POST /auth/forgot-password` — always returns 200
+- [x] Implement email sending via nodemailer (or queue via event bus for notification service)
+- [x] Implement `POST /auth/reset-password` — validates token, updates hash, revokes all sessions
+- [x] Implement `POST /auth/change-password` — handles both password-having and OAuth-only users
+- [x] Write integration tests
 
 ### Step 10: Google OAuth2 (Day 5-6)
 

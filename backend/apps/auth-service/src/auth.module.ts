@@ -15,6 +15,7 @@ import { PasswordService } from './services/password.service';
 import { TokenService } from './services/token.service';
 import { SessionService } from './services/session.service';
 import { EventBusService } from './services/event-bus.service';
+import { EmailService } from './services/email.service';
 
 import { LocalStrategy } from './strategies/local.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -46,6 +47,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     TokenService,
     SessionService,
     EventBusService,
+    EmailService,
     LocalStrategy,
     JwtStrategy,
     {

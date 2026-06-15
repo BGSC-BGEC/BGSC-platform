@@ -21,7 +21,11 @@ export class PasswordService {
 
   generateResetToken(): { raw: string; hash: string } {
     const raw = randomBytes(32).toString('hex');
-    const hash = createHash('sha256').update(raw).digest('hex');
+    const hash = this.hashResetToken(raw);
     return { raw, hash };
+  }
+
+  hashResetToken(raw: string): string {
+    return createHash('sha256').update(raw).digest('hex');
   }
 }

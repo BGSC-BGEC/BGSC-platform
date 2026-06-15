@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { AuthService } from '../src/services/auth.service';
 import { UserCredential } from '../src/entities/user-credential.entity';
 import { LoginAuditLog } from '../src/entities/login-audit-log.entity';
@@ -8,6 +8,7 @@ import { PasswordService } from '../src/services/password.service';
 import { TokenService } from '../src/services/token.service';
 import { SessionService } from '../src/services/session.service';
 import { EventBusService } from '../src/services/event-bus.service';
+import { EmailService } from '../src/services/email.service';
 import { UserRole, UserStatus } from '../src/constants/roles.constant';
 import { InvalidCredentialsException } from '../src/exceptions/invalid-credentials.exception';
 import { AccountDisabledException } from '../src/exceptions/account-disabled.exception';
@@ -21,6 +22,8 @@ describe('AuthService', () => {
   let tokenService: any;
   let sessionService: any;
   let eventBusService: any;
+  let emailService: any;
+  let redis: any;
 
   beforeEach(async () => {
     userRepository = {
@@ -37,6 +40,8 @@ describe('AuthService', () => {
     passwordService = {
       hashPassword: jest.fn().mockResolvedValue('hashed_pass'),
       verifyPassword: jest.fn(),
+      generateResetToken: jest.fn().mockReturnValue({ raw: 'a'.repeat(64), hash: 'reset-hash' }),
+      hashResetToken: jest.fn().mockReturnValue('reset-hash'),
     };
 
     tokenService = {
@@ -55,11 +60,23 @@ describe('AuthService', () => {
       validateAndRotateSession: jest.fn().mockResolvedValue(true),
       revokeSession: jest.fn().mockResolvedValue(undefined),
       revokeAllSessions: jest.fn().mockResolvedValue(undefined),
+      revokeAllSessionsExcept: jest.fn().mockResolvedValue(undefined),
       blacklistJti: jest.fn().mockResolvedValue(undefined),
     };
 
     eventBusService = {
       emit: jest.fn(),
+    };
+
+    emailService = {
+      sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
+    };
+
+    redis = {
+      hset: jest.fn().mockResolvedValue(1),
+      expire: jest.fn().mockResolvedValue(1),
+      hgetall: jest.fn().mockResolvedValue({}),
+      del: jest.fn().mockResolvedValue(1),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -88,6 +105,14 @@ describe('AuthService', () => {
         {
           provide: EventBusService,
           useValue: eventBusService,
+        },
+        {
+          provide: EmailService,
+          useValue: emailService,
+        },
+        {
+          provide: 'REDIS_CLIENT',
+          useValue: redis,
         },
       ],
     }).compile();
@@ -247,6 +272,144 @@ describe('AuthService', () => {
       ).rejects.toThrow(TokenReuseDetectedException);
 
       expect(eventBusService.emit).toHaveBeenCalledWith('UserSessionBreach', expect.any(Object));
+    });
+  });
+
+  describe('forgotPassword', () => {
+    it('should always return generic response and not send email when user is missing', async () => {
+      userRepository.findOne.mockResolvedValue(null);
+
+      const result = await service.forgotPassword({ email: 'missing@example.com' });
+
+      expect(result.message).toContain('If an account with that email exists');
+      expect(emailService.sendPasswordResetEmail).not.toHaveBeenCalled();
+      expect(redis.hset).not.toHaveBeenCalled();
+    });
+
+    it('should store reset hash in Redis and DB then send reset email for active user', async () => {
+      const user = {
+        id: 'u-1',
+        email: 'user@example.com',
+        status: UserStatus.ACTIVE,
+      };
+      userRepository.findOne.mockResolvedValue(user);
+
+      const result = await service.forgotPassword({ email: ' USER@EXAMPLE.COM ' });
+
+      expect(result.message).toContain('If an account with that email exists');
+      expect(user.passwordResetTokenHash).toBe('reset-hash');
+      expect(user.passwordResetExpires).toBeInstanceOf(Date);
+      expect(userRepository.save).toHaveBeenCalledWith(user);
+      expect(redis.hset).toHaveBeenCalledWith('auth:password_reset:reset-hash', expect.objectContaining({ userId: 'u-1' }));
+      expect(redis.expire).toHaveBeenCalledWith('auth:password_reset:reset-hash', 60 * 60);
+      expect(emailService.sendPasswordResetEmail).toHaveBeenCalledWith('user@example.com', 'a'.repeat(64));
+    });
+
+    it('should still return generic response if reset email sending fails', async () => {
+      const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const user = {
+        id: 'u-1',
+        email: 'user@example.com',
+        status: UserStatus.ACTIVE,
+      };
+      userRepository.findOne.mockResolvedValue(user);
+      emailService.sendPasswordResetEmail.mockRejectedValue(new Error('smtp unavailable'));
+
+      const result = await service.forgotPassword({ email: 'user@example.com' });
+
+      expect(result.message).toContain('If an account with that email exists');
+      loggerSpy.mockRestore();
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('should reset password, clear token, revoke sessions, and emit event', async () => {
+      const user = {
+        id: 'u-1',
+        status: UserStatus.ACTIVE,
+        passwordResetTokenHash: 'reset-hash',
+        passwordResetExpires: new Date(Date.now() + 60_000),
+      };
+      redis.hgetall.mockResolvedValue({ userId: 'u-1' });
+      userRepository.findOne.mockResolvedValue(user);
+
+      const result = await service.resetPassword({ token: 'a'.repeat(64), newPassword: 'NewPassword1!' });
+
+      expect(result.message).toBe('Password has been reset successfully.');
+      expect(user.passwordHash).toBe('hashed_pass');
+      expect(user.passwordResetTokenHash).toBeNull();
+      expect(user.passwordResetExpires).toBeNull();
+      expect(redis.del).toHaveBeenCalledWith('auth:password_reset:reset-hash');
+      expect(sessionService.revokeAllSessions).toHaveBeenCalledWith('u-1');
+      expect(eventBusService.emit).toHaveBeenCalledWith('UserPasswordChanged', expect.objectContaining({ userId: 'u-1' }));
+    });
+
+    it('should reject expired or invalid reset token', async () => {
+      const user = {
+        id: 'u-1',
+        status: UserStatus.ACTIVE,
+        passwordResetTokenHash: 'reset-hash',
+        passwordResetExpires: new Date(Date.now() - 60_000),
+      };
+      redis.hgetall.mockResolvedValue({ userId: 'u-1' });
+      userRepository.findOne.mockResolvedValue(user);
+
+      await expect(
+        service.resetPassword({ token: 'a'.repeat(64), newPassword: 'NewPassword1!' }),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(sessionService.revokeAllSessions).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('changePassword', () => {
+    it('should require current password when the user has a password', async () => {
+      userRepository.findOne.mockResolvedValue({
+        id: 'u-1',
+        status: UserStatus.ACTIVE,
+        passwordHash: 'old_hash',
+      });
+
+      await expect(
+        service.changePassword('u-1', { newPassword: 'NewPassword1!' }, 'fam-1'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should change password and revoke other sessions for password users', async () => {
+      const user = {
+        id: 'u-1',
+        status: UserStatus.ACTIVE,
+        passwordHash: 'old_hash',
+      };
+      userRepository.findOne.mockResolvedValue(user);
+      passwordService.verifyPassword.mockResolvedValue(true);
+
+      const result = await service.changePassword(
+        'u-1',
+        { currentPassword: 'OldPassword1!', newPassword: 'NewPassword1!' },
+        'fam-1',
+      );
+
+      expect(result.message).toBe('Password changed successfully.');
+      expect(passwordService.verifyPassword).toHaveBeenCalledWith('OldPassword1!', 'old_hash');
+      expect(user.passwordHash).toBe('hashed_pass');
+      expect(sessionService.revokeAllSessionsExcept).toHaveBeenCalledWith('u-1', 'fam-1');
+      expect(eventBusService.emit).toHaveBeenCalledWith('UserPasswordChanged', expect.objectContaining({ userId: 'u-1' }));
+    });
+
+    it('should set password for OAuth-only users without current password', async () => {
+      const user = {
+        id: 'u-1',
+        status: UserStatus.ACTIVE,
+        passwordHash: null,
+      };
+      userRepository.findOne.mockResolvedValue(user);
+
+      await service.changePassword('u-1', { newPassword: 'NewPassword1!' }, 'fam-1');
+
+      expect(passwordService.verifyPassword).not.toHaveBeenCalled();
+      expect(user.passwordHash).toBe('hashed_pass');
+      expect(sessionService.revokeAllSessionsExcept).toHaveBeenCalledWith('u-1', 'fam-1');
     });
   });
 });
