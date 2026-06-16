@@ -2,7 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
-import cookieParser = require('cookie-parser');
+import cookieParser from 'cookie-parser';
 import { AuthModule } from './auth.module';
 import { ConfigService } from '@nestjs/config';
 
@@ -14,27 +14,32 @@ async function bootstrap() {
   const env = configService.get<string>('auth.env') || 'development';
   const port = configService.get<number>('auth.port') || 3001;
 
-  app.use(helmet({
-    contentSecurityPolicy: env === 'production' ? {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "https:"],
-        connectSrc: ["'self'"],
-        fontSrc: ["'self'"],
-        objectSrc: ["'none'"],
-        frameSrc: ["'none'"],
-        upgradeInsecureRequests: [],
-      },
-    } : false,
-    crossOriginEmbedderPolicy: env === 'production',
-    crossOriginOpenerPolicy: true,
-    crossOriginResourcePolicy: { policy: 'same-site' },
-    hsts: { maxAge: 63072000, includeSubDomains: true, preload: true },
-    noSniff: true,
-    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-  }));
+  app.use(
+    helmet({
+      contentSecurityPolicy:
+        env === 'production'
+          ? {
+              directives: {
+                defaultSrc: ["'self'"],
+                scriptSrc: ["'self'"],
+                styleSrc: ["'self'", "'unsafe-inline'"],
+                imgSrc: ["'self'", 'data:', 'https:'],
+                connectSrc: ["'self'"],
+                fontSrc: ["'self'"],
+                objectSrc: ["'none'"],
+                frameSrc: ["'none'"],
+                upgradeInsecureRequests: [],
+              },
+            }
+          : false,
+      crossOriginEmbedderPolicy: env === 'production',
+      crossOriginOpenerPolicy: true,
+      crossOriginResourcePolicy: { policy: 'same-site' },
+      hsts: { maxAge: 63072000, includeSubDomains: true, preload: true },
+      noSniff: true,
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    }),
+  );
 
   app.enableCors({
     origin: corsOrigins,
@@ -44,12 +49,14 @@ async function bootstrap() {
     exposedHeaders: ['X-RateLimit-Remaining', 'Retry-After'],
   });
 
-  app.useGlobalPipes(new ValidationPipe({
-    whitelist: true,
-    forbidNonWhitelisted: true,
-    transform: true,
-    transformOptions: { enableImplicitConversion: false },
-  }));
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: { enableImplicitConversion: false },
+    }),
+  );
 
   app.use(cookieParser());
 
@@ -64,4 +71,4 @@ async function bootstrap() {
 
   await app.listen(port);
 }
-bootstrap();
+void bootstrap();

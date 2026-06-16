@@ -3,14 +3,20 @@ import * as Joi from 'joi';
 
 export const authConfigValidationSchema = Joi.object({
   PORT: Joi.number().default(3001),
-  NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
+  NODE_ENV: Joi.string()
+    .valid('development', 'production', 'test')
+    .default('development'),
   DATABASE_URL: Joi.string().uri().required(),
   REDIS_URL: Joi.string().uri().required(),
   JWT_ACCESS_SECRET: Joi.string().required(),
   JWT_ACCESS_EXPIRY: Joi.string().default('15m'),
-  JWT_REFRESH_SECRET: Joi.string().required().not(Joi.ref('JWT_ACCESS_SECRET')).messages({
-    'any.invalid': 'JWT_REFRESH_SECRET must be different from JWT_ACCESS_SECRET',
-  }),
+  JWT_REFRESH_SECRET: Joi.string()
+    .required()
+    .not(Joi.ref('JWT_ACCESS_SECRET'))
+    .messages({
+      'any.invalid':
+        'JWT_REFRESH_SECRET must be different from JWT_ACCESS_SECRET',
+    }),
   JWT_REFRESH_EXPIRY: Joi.string().default('7d'),
   JWT_ISSUER: Joi.string().default('bgsc-auth-service'),
   GOOGLE_CLIENT_ID: Joi.string().required(),
@@ -64,7 +70,9 @@ export const authConfig = registerAs('auth', () => ({
     from: process.env.SMTP_FROM,
   },
   cors: {
-    origins: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : [],
+    origins: process.env.CORS_ORIGINS
+      ? process.env.CORS_ORIGINS.split(',')
+      : [],
   },
   bcrypt: {
     saltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS || '12', 10),

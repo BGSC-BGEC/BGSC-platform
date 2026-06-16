@@ -15,12 +15,15 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: configService.get<string>('auth.jwt.accessSecret')!,
-      issuer: configService.get<string>('auth.jwt.issuer') || 'bgsc-auth-service',
+      issuer:
+        configService.get<string>('auth.jwt.issuer') || 'bgsc-auth-service',
     });
   }
 
   async validate(payload: JwtPayload) {
-    const isBlacklisted = await this.sessionService.isJtiBlacklisted(payload.jti);
+    const isBlacklisted = await this.sessionService.isJtiBlacklisted(
+      payload.jti,
+    );
     if (isBlacklisted) {
       throw new UnauthorizedException('Token has been revoked');
     }

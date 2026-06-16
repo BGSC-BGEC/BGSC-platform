@@ -1,9 +1,19 @@
-import { CanActivate, ExecutionContext, Inject, Injectable } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Inject,
+  Injectable,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import type { Request, Response } from 'express';
 import Redis from 'ioredis';
 import { createHash, randomBytes } from 'crypto';
-import { RATE_LIMIT_KEY, RateLimitConfig } from '../decorators/rate-limit.decorator';
+import {
+  RATE_LIMIT_KEY,
+  RateLimitConfig,
+} from '../decorators/rate-limit.decorator';
 import { RateLimitExceededException } from '../exceptions/rate-limit-exceeded.exception';
+import type { JwtPayload } from '../interfaces/jwt-payload.interface';
 
 @Injectable()
 export class RateLimitGuard implements CanActivate {
@@ -21,17 +31,17 @@ export class RateLimitGuard implements CanActivate {
     }
 
     const http = context.switchToHttp();
-    const request = http.getRequest();
-    const response = http.getResponse();
+    const request = http.getRequest<Request & { user?: JwtPayload }>();
+    const response = http.getResponse<Response>();
     const key = this.buildKey(config.keyPrefix, request, config);
     const now = Date.now();
     const windowStart = now - config.windowMs;
 
     const member = `${now}:${randomBytes(4).toString('hex')}`;
     const pipeline = this.redis.pipeline();
-    pipeline.zremrangebyscore(key, 0, windowStart);  // Prune old attempts
-    pipeline.zadd(key, now, member);                 // Add current attempt
-    pipeline.zcard(key);                             // Count active attempts
+    pipeline.zremrangebyscore(key, 0, windowStart); // Prune old attempts
+    pipeline.zadd(key, now, member); // Add current attempt
+    pipeline.zcard(key); // Count active attempts
     pipeline.expire(key, Math.ceil(config.windowMs / 1000)); // Update TTL
 
     const results = await pipeline.exec();
@@ -58,21 +68,33 @@ export class RateLimitGuard implements CanActivate {
       throw new RateLimitExceededException(retryAfterSeconds);
     }
 
-    response.setHeader('X-RateLimit-Remaining', Math.max(0, config.max - count).toString());
+    response.setHeader(
+      'X-RateLimit-Remaining',
+      Math.max(0, config.max - count).toString(),
+    );
     return true;
   }
 
-  private buildKey(prefix: string, request: any, config: RateLimitConfig): string {
+  private buildKey(
+    prefix: string,
+    request: Request & { user?: JwtPayload },
+    config: RateLimitConfig,
+  ): string {
     let identifier: string | undefined;
 
     if (config.keyBy === 'email') {
-      const email = String(request.body?.email || '').trim().toLowerCase();
+      const body = request.body as Record<string, unknown> | undefined;
+      const emailValue = body?.email;
+      const email =
+        typeof emailValue === 'string' ? emailValue.trim().toLowerCase() : '';
       if (email) identifier = createHash('sha256').update(email).digest('hex');
     } else if (config.keyBy === 'refreshToken') {
-      const rawToken = request.cookies?.bgsc_refresh_token;
+      const rawToken = (request.cookies as Record<string, string>)
+        ?.bgsc_refresh_token;
       if (typeof rawToken === 'string') {
         const parts = rawToken.split('.');
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const uuidRegex =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         const randomHexRegex = /^[0-9a-f]{64}$/i;
         if (
           parts.length === 3 &&
@@ -89,7 +111,12 @@ export class RateLimitGuard implements CanActivate {
       const forwarded = request.headers['x-forwarded-for'];
       const rawIp = Array.isArray(forwarded)
         ? forwarded[0]
-        : String(forwarded || request.socket?.remoteAddress || request.ip || 'unknown');
+        : String(
+            forwarded ||
+              request.socket?.remoteAddress ||
+              request.ip ||
+              'unknown',
+          );
       identifier = request.user?.sub || rawIp.split(',')[0].trim();
     }
 

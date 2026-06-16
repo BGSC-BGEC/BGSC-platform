@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { AccountService } from './account.service';
 
 @Injectable()
@@ -21,7 +26,10 @@ export class AccountDeletionJob implements OnModuleInit, OnModuleDestroy {
     try {
       return await this.accountService.purgeScheduledDeletions(now);
     } catch (error) {
-      this.logger.error('Scheduled account deletion cleanup failed', error instanceof Error ? error.stack : undefined);
+      this.logger.error(
+        'Scheduled account deletion cleanup failed',
+        error instanceof Error ? error.stack : undefined,
+      );
       return 0;
     }
   }

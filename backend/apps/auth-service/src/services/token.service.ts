@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes, createHash, randomUUID } from 'crypto';
+import type { SignOptions } from 'jsonwebtoken';
 import { JwtPayload } from '../interfaces/jwt-payload.interface';
 import { UserCredential } from '../entities/user-credential.entity';
 
@@ -23,15 +24,20 @@ export class TokenService {
 
     return this.jwtService.sign(payload, {
       secret: this.configService.get<string>('auth.jwt.accessSecret'),
-      expiresIn: (this.configService.get<string>('auth.jwt.accessExpiry') || '15m') as any,
-      issuer: this.configService.get<string>('auth.jwt.issuer') || 'bgsc-auth-service',
+      expiresIn: (this.configService.get<string>('auth.jwt.accessExpiry') ||
+        '15m') as SignOptions['expiresIn'],
+      issuer:
+        this.configService.get<string>('auth.jwt.issuer') ||
+        'bgsc-auth-service',
     });
   }
 
   verifyAccessToken(token: string): JwtPayload {
     return this.jwtService.verify<JwtPayload>(token, {
       secret: this.configService.get<string>('auth.jwt.accessSecret'),
-      issuer: this.configService.get<string>('auth.jwt.issuer') || 'bgsc-auth-service',
+      issuer:
+        this.configService.get<string>('auth.jwt.issuer') ||
+        'bgsc-auth-service',
     });
   }
 
@@ -41,16 +47,23 @@ export class TokenService {
       {
         secret: this.configService.get<string>('auth.jwt.accessSecret'),
         expiresIn: '5m',
-        issuer: this.configService.get<string>('auth.jwt.issuer') || 'bgsc-auth-service',
+        issuer:
+          this.configService.get<string>('auth.jwt.issuer') ||
+          'bgsc-auth-service',
       },
     );
   }
 
   verifyTempToken(token: string, expectedPurpose: string): string {
-    const payload = this.jwtService.verify(token, {
-      secret: this.configService.get<string>('auth.jwt.accessSecret'),
-      issuer: this.configService.get<string>('auth.jwt.issuer') || 'bgsc-auth-service',
-    });
+    const payload = this.jwtService.verify<{ sub: string; purpose: string }>(
+      token,
+      {
+        secret: this.configService.get<string>('auth.jwt.accessSecret'),
+        issuer:
+          this.configService.get<string>('auth.jwt.issuer') ||
+          'bgsc-auth-service',
+      },
+    );
 
     if (payload.purpose !== expectedPurpose) {
       throw new Error('Invalid token purpose');
@@ -59,7 +72,10 @@ export class TokenService {
     return payload.sub;
   }
 
-  generateRefreshToken(userId: string, familyId?: string): { raw: string; hash: string; familyId: string } {
+  generateRefreshToken(
+    userId: string,
+    familyId?: string,
+  ): { raw: string; hash: string; familyId: string } {
     const fid = familyId || randomUUID();
     const random = randomBytes(32).toString('hex');
     const raw = `${userId}.${fid}.${random}`;

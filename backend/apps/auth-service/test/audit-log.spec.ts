@@ -14,35 +14,96 @@ import { TotpService } from '../src/services/totp.service';
 import { UserRole, UserStatus } from '../src/constants/roles.constant';
 import { InvalidCredentialsException } from '../src/exceptions/invalid-credentials.exception';
 
+interface MockUserRepo2 {
+  findOne: jest.Mock;
+  create: jest.Mock;
+  save: jest.Mock;
+}
+interface MockAuditRepo2 {
+  create: jest.Mock;
+  save: jest.Mock;
+}
+interface MockPasswordSvc {
+  hashPassword: jest.Mock;
+  verifyPassword: jest.Mock;
+  generateResetToken: jest.Mock;
+  hashResetToken: jest.Mock;
+}
+interface MockTokenSvc {
+  generateRefreshToken: jest.Mock;
+  signAccessToken: jest.Mock;
+  signTempToken: jest.Mock;
+  hashToken: jest.Mock;
+  verifyTempToken: jest.Mock;
+}
+interface MockSessionSvc {
+  createSession: jest.Mock;
+  validateAndRotateSession: jest.Mock;
+  revokeSession: jest.Mock;
+  revokeAllSessions: jest.Mock;
+  revokeAllSessionsExcept: jest.Mock;
+  blacklistJti: jest.Mock;
+}
+interface MockEventBusSvc {
+  emit: jest.Mock;
+}
+interface MockEmailSvc {
+  sendPasswordResetEmail: jest.Mock;
+}
+interface MockTotpSvc {
+  decryptSecret: jest.Mock;
+  verifyCode: jest.Mock;
+  generateSecret: jest.Mock;
+  generateQRCode: jest.Mock;
+  encryptSecret: jest.Mock;
+  generateBackupCodes: jest.Mock;
+}
+interface MockRedisSvc {
+  hset: jest.Mock;
+  expire: jest.Mock;
+  hgetall: jest.Mock;
+  del: jest.Mock;
+}
+
 describe('Login Audit Logging', () => {
   let authService: AuthService;
   let totpController: TotpController;
-  let userRepository: any;
-  let auditLogRepository: any;
-  let passwordService: any;
-  let tokenService: any;
-  let sessionService: any;
-  let eventBusService: any;
-  let emailService: any;
-  let totpService: any;
-  let redis: any;
+  let userRepository: MockUserRepo2;
+  let auditLogRepository: MockAuditRepo2;
+  let passwordService: MockPasswordSvc;
+  let tokenService: MockTokenSvc;
+  let sessionService: MockSessionSvc;
+  let eventBusService: MockEventBusSvc;
+  let emailService: MockEmailSvc;
+  let totpService: MockTotpSvc;
+  let redis: MockRedisSvc;
 
   beforeEach(async () => {
     userRepository = {
       findOne: jest.fn(),
-      create: jest.fn().mockImplementation((dto) => dto),
-      save: jest.fn().mockImplementation((entity) => Promise.resolve({ id: 'mock-uuid', ...entity })),
+      create: jest.fn().mockImplementation((dto: unknown) => dto),
+      save: jest
+        .fn()
+        .mockImplementation((entity: unknown) =>
+          Promise.resolve({ id: 'mock-uuid', ...(entity as object) }),
+        ),
     };
 
     auditLogRepository = {
-      create: jest.fn().mockImplementation((dto) => dto),
-      save: jest.fn().mockImplementation((log) => Promise.resolve({ id: 'log-uuid', ...log })),
+      create: jest.fn().mockImplementation((dto: unknown) => dto),
+      save: jest
+        .fn()
+        .mockImplementation((log: unknown) =>
+          Promise.resolve({ id: 'log-uuid', ...(log as object) }),
+        ),
     };
 
     passwordService = {
       hashPassword: jest.fn().mockResolvedValue('hashed_pass'),
       verifyPassword: jest.fn(),
-      generateResetToken: jest.fn().mockReturnValue({ raw: 'a'.repeat(64), hash: 'reset-hash' }),
+      generateResetToken: jest
+        .fn()
+        .mockReturnValue({ raw: 'a'.repeat(64), hash: 'reset-hash' }),
       hashResetToken: jest.fn().mockReturnValue('reset-hash'),
     };
 
@@ -153,7 +214,12 @@ describe('Login Audit Logging', () => {
       userRepository.findOne.mockResolvedValue(mockUser);
       passwordService.verifyPassword.mockResolvedValue(true);
 
-      await authService.validateAndLogUser('testuser', 'correct-pass', '192.168.1.1', 'Mozilla/5.0');
+      await authService.validateAndLogUser(
+        'testuser',
+        'correct-pass',
+        '192.168.1.1',
+        'Mozilla/5.0',
+      );
 
       expect(auditLogRepository.create).toHaveBeenCalledWith({
         userId: 'u-1',
@@ -180,7 +246,12 @@ describe('Login Audit Logging', () => {
       passwordService.verifyPassword.mockResolvedValue(false);
 
       await expect(
-        authService.validateAndLogUser('testuser', 'wrong-pass', '10.0.0.1', 'curl/7.68'),
+        authService.validateAndLogUser(
+          'testuser',
+          'wrong-pass',
+          '10.0.0.1',
+          'curl/7.68',
+        ),
       ).rejects.toThrow(InvalidCredentialsException);
 
       expect(auditLogRepository.create).toHaveBeenCalledWith({
@@ -192,7 +263,10 @@ describe('Login Audit Logging', () => {
         failureReason: 'invalid_credentials',
       });
       expect(auditLogRepository.save).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, failureReason: 'invalid_credentials' }),
+        expect.objectContaining({
+          success: false,
+          failureReason: 'invalid_credentials',
+        }),
       );
     });
 
@@ -234,7 +308,8 @@ describe('Login Audit Logging', () => {
     it('should log success=true with method="refresh" on successful token refresh', async () => {
       const userId = '11111111-2222-3333-4444-555555555555';
       const familyId = '66666666-7777-8888-9999-000000000000';
-      const randomHex = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+      const randomHex =
+        'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
       const rawToken = `${userId}.${familyId}.${randomHex}`;
 
       const mockUser = {
@@ -281,7 +356,7 @@ describe('Login Audit Logging', () => {
   describe('TotpController audit logging', () => {
     const mockReq = {
       headers: { 'user-agent': 'TestBrowser/1.0' },
-    } as any;
+    } as unknown as import('express').Request;
 
     it('should log success=true with method="totp" on valid TOTP code', async () => {
       const mockUser = {
@@ -345,7 +420,11 @@ describe('Login Audit Logging', () => {
         failureReason: 'invalid_code',
       });
       expect(auditLogRepository.save).toHaveBeenCalledWith(
-        expect.objectContaining({ method: 'totp', success: false, failureReason: 'invalid_code' }),
+        expect.objectContaining({
+          method: 'totp',
+          success: false,
+          failureReason: 'invalid_code',
+        }),
       );
     });
 
@@ -372,7 +451,11 @@ describe('Login Audit Logging', () => {
       ).rejects.toThrow(UnauthorizedException);
 
       expect(auditLogRepository.save).toHaveBeenCalledWith(
-        expect.objectContaining({ method: 'backup_code', success: false, failureReason: 'invalid_code' }),
+        expect.objectContaining({
+          method: 'backup_code',
+          success: false,
+          failureReason: 'invalid_code',
+        }),
       );
     });
 
@@ -391,7 +474,7 @@ describe('Login Audit Logging', () => {
 
       const customReq = {
         headers: { 'user-agent': 'Custom-Agent/2.0' },
-      } as any;
+      } as unknown as import('express').Request;
 
       await totpController.authenticate(
         { tempToken: 'valid-temp', token: '654321', keepMeLoggedIn: true },

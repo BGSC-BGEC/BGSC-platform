@@ -50,7 +50,7 @@ describe('TotpService', () => {
     const originalSecret = service.generateSecret();
     const encrypted = service.encryptSecret(originalSecret);
     const decrypted = service.decryptSecret(encrypted);
-    
+
     expect(decrypted).toBe(originalSecret);
   });
 

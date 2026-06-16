@@ -8,7 +8,8 @@ export class PasswordService {
   private readonly saltRounds: number;
 
   constructor(private readonly configService: ConfigService) {
-    this.saltRounds = this.configService.get<number>('auth.bcrypt.saltRounds') || 12;
+    this.saltRounds =
+      this.configService.get<number>('auth.bcrypt.saltRounds') || 12;
   }
 
   async hashPassword(plain: string): Promise<string> {

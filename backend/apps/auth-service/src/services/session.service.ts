@@ -1,14 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
 import Redis from 'ioredis';
-import { Session } from '../interfaces/session.interface';
 import { InvalidCredentialsException } from '../exceptions/invalid-credentials.exception';
 import { TokenReuseDetectedException } from '../exceptions/token-reuse-detected.exception';
 
+export interface SessionEntry {
+  familyId: string;
+  deviceIp: string;
+  deviceUserAgent: string;
+  createdAt: Date;
+  lastUsedAt: Date;
+  isCurrent: boolean;
+}
+
 @Injectable()
 export class SessionService {
-  constructor(
-    @Inject('REDIS_CLIENT') private readonly redis: Redis,
-  ) {}
+  constructor(@Inject('REDIS_CLIENT') private readonly redis: Redis) {}
 
   private getSessionKey(userId: string, familyId: string): string {
     return `auth:session:${userId}:${familyId}`;
@@ -89,7 +95,7 @@ export class SessionService {
       lastUsedAt: now,
     });
     pipeline.expire(sessionKey, ttl);
-    
+
     const indexKey = this.getIndexKey(userId);
     pipeline.expire(indexKey, ttl);
     await pipeline.exec();
@@ -119,7 +125,10 @@ export class SessionService {
     await pipeline.exec();
   }
 
-  async revokeAllSessionsExcept(userId: string, currentFamilyId?: string): Promise<void> {
+  async revokeAllSessionsExcept(
+    userId: string,
+    currentFamilyId?: string,
+  ): Promise<void> {
     if (!currentFamilyId) {
       await this.revokeAllSessions(userId);
       return;
@@ -138,14 +147,19 @@ export class SessionService {
     await pipeline.exec();
   }
 
-  async listSessions(userId: string, currentFamilyId?: string): Promise<any[]> {
+  async listSessions(
+    userId: string,
+    currentFamilyId?: string,
+  ): Promise<SessionEntry[]> {
     const indexKey = this.getIndexKey(userId);
     const familyIds = await this.redis.smembers(indexKey);
-    
-    const sessions: any[] = [];
+
+    const sessions: SessionEntry[] = [];
     for (const familyId of familyIds) {
-      const session = await this.redis.hgetall(this.getSessionKey(userId, familyId));
-      if (session && session.tokenHash) {
+      const session = await this.redis.hgetall(
+        this.getSessionKey(userId, familyId),
+      );
+      if (session?.tokenHash) {
         sessions.push({
           familyId,
           deviceIp: session.deviceIp,
@@ -156,12 +170,19 @@ export class SessionService {
         });
       }
     }
-    
-    return sessions.sort((a, b) => b.lastUsedAt.getTime() - a.lastUsedAt.getTime());
+
+    return sessions.sort(
+      (a, b) => b.lastUsedAt.getTime() - a.lastUsedAt.getTime(),
+    );
   }
 
   async blacklistJti(jti: string, ttlSeconds: number): Promise<void> {
-    await this.redis.set(`auth:blacklist:${jti}`, '1', 'EX', Math.max(1, ttlSeconds));
+    await this.redis.set(
+      `auth:blacklist:${jti}`,
+      '1',
+      'EX',
+      Math.max(1, ttlSeconds),
+    );
   }
 
   async isJtiBlacklisted(jti: string): Promise<boolean> {
@@ -169,11 +190,17 @@ export class SessionService {
     return !!result;
   }
 
-  private async evictOldestSession(userId: string, familyIds: string[]): Promise<void> {
+  private async evictOldestSession(
+    userId: string,
+    familyIds: string[],
+  ): Promise<void> {
     const sessionsMeta: { familyId: string; lastUsedAt: number }[] = [];
 
     for (const familyId of familyIds) {
-      const lastUsed = await this.redis.hget(this.getSessionKey(userId, familyId), 'lastUsedAt');
+      const lastUsed = await this.redis.hget(
+        this.getSessionKey(userId, familyId),
+        'lastUsedAt',
+      );
       if (lastUsed) {
         sessionsMeta.push({ familyId, lastUsedAt: parseInt(lastUsed, 10) });
       } else {

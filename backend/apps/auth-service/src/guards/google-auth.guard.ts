@@ -1,4 +1,9 @@
-import { ExecutionContext, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ExecutionContext,
+  Inject,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { randomBytes } from 'crypto';
 import type { Request } from 'express';

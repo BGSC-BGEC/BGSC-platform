@@ -54,6 +54,25 @@ services:
     networks:
       - bgsc-network
 
+  user-service:
+    build:
+      context: ./backend
+      dockerfile: apps/user-service/Dockerfile
+    container_name: bgsc-user-service
+    ports:
+      - '3002:3002'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3002
+      NODE_ENV: development
+      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
+      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      JWT_ISSUER: bgsc-auth-service
+    networks:
+      - bgsc-network
+
   auth-service:
     build:
       context: ./backend

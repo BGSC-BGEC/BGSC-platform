@@ -2,7 +2,10 @@ import { IsString, IsNotEmpty, IsOptional, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class LoginDto {
-  @ApiProperty({ description: 'Username or email address', example: 'john_doe' })
+  @ApiProperty({
+    description: 'Username or email address',
+    example: 'john_doe',
+  })
   @IsString()
   @IsNotEmpty()
   usernameOrEmail!: string;
@@ -12,7 +15,10 @@ export class LoginDto {
   @IsNotEmpty()
   password!: string;
 
-  @ApiPropertyOptional({ description: 'Keep session alive for 7 days', example: true })
+  @ApiPropertyOptional({
+    description: 'Keep session alive for 7 days',
+    example: true,
+  })
   @IsOptional()
   @IsBoolean()
   keepMeLoggedIn?: boolean;
