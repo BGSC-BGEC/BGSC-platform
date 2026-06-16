@@ -19,18 +19,10 @@ export class User {
   @Column({ length: 320, unique: true })
   email!: string;
 
-  @Column({
-    name: 'password_hash',
-    type: 'text',
-    nullable: true,
-    select: false,
-  })
-  passwordHash?: string | null;
-
   @Column({ type: 'varchar', length: 30, nullable: true })
   contact?: string | null;
 
-  @Column({ type: 'enum', enum: UserRole, default: UserRole.USER })
+  @Column({ type: 'varchar', length: 50, default: UserRole.USER })
   role!: UserRole;
 
   @Column({ name: 'avatar_url', type: 'text', nullable: true })
@@ -51,7 +43,7 @@ export class User {
   @Column({ name: 'points_balance', type: 'integer', default: 0 })
   pointsBalance!: number;
 
-  @Column({ type: 'enum', enum: UserStatus, default: UserStatus.ACTIVE })
+  @Column({ type: 'varchar', length: 50, default: UserStatus.ACTIVE })
   status!: UserStatus;
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })

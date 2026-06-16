@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ExecutionContext } from '@nestjs/common';
 import { UserRole } from '../src/users/enums/user-role.enum';
@@ -13,49 +13,38 @@ describe('RolesGuard', () => {
     };
   });
 
-  it('allows routes with no required roles', () => {
+  it('allows routes with no required roles regardless of auth state', () => {
     reflector.getAllAndOverride.mockReturnValue(undefined);
-    const request = { headers: {} };
     const guard = new RolesGuard(reflector as unknown as Reflector);
 
-    expect(guard.canActivate(makeContext(request))).toBe(true);
-    expect(request).toMatchObject({ user: { role: UserRole.GUEST } });
+    expect(guard.canActivate(makeContext({ user: undefined }))).toBe(true);
+    expect(guard.canActivate(makeContext({ user: { id: 'u1', role: UserRole.USER } }))).toBe(true);
   });
 
-  it('allows a matching role and attaches the current user', () => {
+  it('allows a user whose role matches the required roles', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.COORDINATOR]);
-    const request = {
-      headers: {
-        'x-user-id': 'user-id',
-        'x-user-role': UserRole.COORDINATOR,
-      },
-    };
+    const request = { user: { id: 'user-id', role: UserRole.COORDINATOR } };
     const guard = new RolesGuard(reflector as unknown as Reflector);
 
     expect(guard.canActivate(makeContext(request))).toBe(true);
-    expect(request).toMatchObject({
-      user: { id: 'user-id', role: UserRole.COORDINATOR },
-    });
   });
 
-  it('rejects users without the required role', () => {
+  it('throws ForbiddenException when user role is insufficient', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.FOUNDER]);
     const guard = new RolesGuard(reflector as unknown as Reflector);
 
     expect(() =>
-      guard.canActivate(
-        makeContext({ headers: { 'x-user-role': UserRole.COORDINATOR } }),
-      ),
+      guard.canActivate(makeContext({ user: { id: 'u1', role: UserRole.COORDINATOR } })),
     ).toThrow(ForbiddenException);
   });
 
-  it('rejects invalid role headers', () => {
+  it('throws UnauthorizedException when no authenticated user is present', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.USER]);
     const guard = new RolesGuard(reflector as unknown as Reflector);
 
     expect(() =>
-      guard.canActivate(makeContext({ headers: { 'x-user-role': 'admin' } })),
-    ).toThrow(ForbiddenException);
+      guard.canActivate(makeContext({ user: undefined })),
+    ).toThrow(UnauthorizedException);
   });
 });
 

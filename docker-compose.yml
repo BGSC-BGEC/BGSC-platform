@@ -68,7 +68,8 @@ services:
       PORT: 3002
       NODE_ENV: development
       DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
-      JWT_SECRET: dev_secret_change_in_prod
+      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      JWT_ISSUER: bgsc-auth-service
     networks:
       - bgsc-network
 

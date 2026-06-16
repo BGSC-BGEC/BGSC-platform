@@ -206,8 +206,9 @@ Each client (mobile & web) follows the same MVVM pattern:
 
 | Status | Task | Sub‑tasks | Est. | Notes | Done By |
 |--------|------|-----------|------|-------|---------|
-| [ ]    | Auth Service (NestJS) | – JWT issuance (access/refresh) <br> – Google OAuth2 flow <br> – `/register`, `/login`, `/refresh`, `/logout` | 3 | Use `@nestjs/jwt` and `@nestjs/passport`. Store refresh tokens in Redis. | — |
-| [x]    | User Service | – CRUD for users (PostgreSQL) <br> – RBAC middleware (roles: guest, user, member, core, coordinator, founder) | 2 | Create `users` table with `role` enum. | Dhruvin(Partial) |
+| [x]    | Auth Service (NestJS) | – JWT issuance (access/refresh) <br> – Google OAuth2 flow <br> – `/register`, `/login`, `/refresh`, `/logout` | 3 | Use `@nestjs/jwt` and `@nestjs/passport`. Store refresh tokens in Redis. | Dhruvin,Kashyap |
+| [x]    | User Service | – CRUD for users (PostgreSQL) <br> – RBAC middleware (roles: guest, user, member, core, coordinator, founder) | 2 | Create `users` table with `role` enum. Integration between auth and user in the next task | Dhruvin |
+| [x]    | Integrate auth and user service | Integrate the two services to make sure they go hand in hand and no issues come up | 3 | integrate | Dhruvin |
 | [ ]    | API Gateway (Kong / Express Gateway) | – Route requests to services <br> – JWT verification <br> – Rate limiting (5 auth attempts/15min, 100 req/min for general) | 2 | Start with Express Gateway for simplicity; later replace with Kong. | — |
 | [ ]    | Event Bus (MVP: in‑memory) | – Simple `EventEmitter` based bus <br> – Define domain events (`UserRegistered`, `EventCreated`) | 1 | We will replace with Kafka in Phase 2. For MVP, this is enough. | — |
 

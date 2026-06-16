@@ -9,24 +9,16 @@ export class UserCredential {
   @Column({ unique: true, length: 50 })
   username!: string;
 
-  @Column({ unique: true, length: 255 })
+  @Column({ unique: true, length: 320 })
   email!: string;
 
-  @Column({ name: 'password_hash', type: 'varchar', nullable: true, length: 255 })
+  @Column({ name: 'password_hash', type: 'text', nullable: true })
   passwordHash?: string | null;
 
-  @Column({
-    type: 'enum',
-    enum: UserRole,
-    default: UserRole.USER,
-  })
+  @Column({ type: 'varchar', length: 50, default: UserRole.USER })
   role!: UserRole;
 
-  @Column({
-    type: 'enum',
-    enum: UserStatus,
-    default: UserStatus.ACTIVE,
-  })
+  @Column({ type: 'varchar', length: 50, default: UserStatus.ACTIVE })
   status!: UserStatus;
 
   @Column({ name: 'google_id', type: 'varchar', unique: true, nullable: true, length: 255 })

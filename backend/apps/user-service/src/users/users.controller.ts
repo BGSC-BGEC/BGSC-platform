@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUserId } from '../rbac/current-user-id.decorator';
 import { Roles } from '../rbac/roles.decorator';
 import { RolesGuard } from '../rbac/roles.guard';
@@ -22,7 +23,7 @@ import { UserStatus } from './enums/user-status.enum';
 import { UsersService } from './users.service';
 
 @Controller('users')
-@UseGuards(RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 

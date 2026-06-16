@@ -46,7 +46,7 @@ import { AddTotpAndAccountLifecycleAndAuditLog1718520000000 } from './migrations
         type: 'postgres',
         url: configService.get<string>('auth.db.url'),
         entities: [UserCredential, LoginAuditLog],
-        synchronize: configService.get<string>('auth.env') !== 'production',
+        synchronize: false,
         migrations: [AddTotpAndAccountLifecycleAndAuditLog1718520000000],
         migrationsRun: true,
       }),
