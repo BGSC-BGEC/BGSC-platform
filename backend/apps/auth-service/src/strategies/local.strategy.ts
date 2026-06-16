@@ -14,11 +14,26 @@ export class LocalStrategy extends PassportStrategy(Strategy, 'local') {
     });
   }
 
-  async validate(req: Request, usernameOrEmail: string, password: string): Promise<any> {
-    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '';
-    const ip = Array.isArray(rawIp) ? rawIp[0] : (rawIp.split(',')[0].trim() || '127.0.0.1');
+  async validate(
+    req: Request,
+    usernameOrEmail: string,
+    password: string,
+  ): Promise<any> {
+    const rawIp =
+      req.headers['x-forwarded-for'] ||
+      req.socket.remoteAddress ||
+      req.ip ||
+      '';
+    const ip = Array.isArray(rawIp)
+      ? rawIp[0]
+      : rawIp.split(',')[0].trim() || '127.0.0.1';
     const userAgent = req.headers['user-agent'] || 'unknown';
 
-    return this.authService.validateAndLogUser(usernameOrEmail, password, ip, userAgent);
+    return this.authService.validateAndLogUser(
+      usernameOrEmail,
+      password,
+      ip,
+      userAgent,
+    );
   }
 }

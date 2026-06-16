@@ -1,4 +1,15 @@
-import { Controller, Post, Body, Req, Res, UseGuards, HttpStatus, HttpCode, Get } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  Req,
+  Res,
+  UseGuards,
+  HttpStatus,
+  HttpCode,
+  Get,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { AuthService } from '../services/auth.service';
@@ -16,8 +27,20 @@ import { Public } from '../decorators/public.decorator';
 import { RateLimit } from '../decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../guards/rate-limit.guard';
 import { UserStatus } from '../constants/roles.constant';
-import { AuthResponseDto, RefreshResponseDto, SuccessMessageDto, LoginPendingDeletionResponseDto } from '../dto/responses.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  AuthResponseDto,
+  RefreshResponseDto,
+  SuccessMessageDto,
+  LoginPendingDeletionResponseDto,
+} from '../dto/responses.dto';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import type { JwtPayload } from '../interfaces/jwt-payload.interface';
+import type { UserCredential } from '../entities/user-credential.entity';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -33,8 +56,11 @@ export class AuthController {
   @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Redirect to Google OAuth2 consent screen' })
-  @ApiResponse({ status: 302, description: 'Redirected to Google OAuth2 consent screen' })
-  async googleAuth() {
+  @ApiResponse({
+    status: 302,
+    description: 'Redirected to Google OAuth2 consent screen',
+  })
+  googleAuth() {
     return;
   }
 
@@ -43,26 +69,45 @@ export class AuthController {
   @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @UseGuards(GoogleAuthGuard)
   @ApiOperation({ summary: 'Handle Google OAuth2 callback' })
-  @ApiResponse({ status: 302, description: 'Redirected to frontend with access token in fragment' })
+  @ApiResponse({
+    status: 302,
+    description: 'Redirected to frontend with access token in fragment',
+  })
   @ApiResponse({ status: 401, description: 'Invalid or expired state' })
-  @ApiResponse({ status: 409, description: 'Email already linked to a non-Google account' })
+  @ApiResponse({
+    status: 409,
+    description: 'Email already linked to a non-Google account',
+  })
   async googleAuthCallback(
     @CurrentUser() googleProfile: GoogleProfilePayload,
     @Req() req: Request,
     @Res() res: Response,
   ) {
-    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '';
-    const ip = Array.isArray(rawIp) ? rawIp[0] : (rawIp.split(',')[0].trim() || '127.0.0.1');
+    const rawIp =
+      req.headers['x-forwarded-for'] ||
+      req.socket.remoteAddress ||
+      req.ip ||
+      '';
+    const ip = Array.isArray(rawIp)
+      ? rawIp[0]
+      : rawIp.split(',')[0].trim() || '127.0.0.1';
     const userAgent = req.headers['user-agent'] || 'unknown';
 
-    const { user, isNewUser } = await this.authService.findOrCreateGoogleUser(googleProfile);
-    const tokens = await this.authService.loginWithGoogle(user, isNewUser, ip, userAgent);
+    const { user, isNewUser } =
+      await this.authService.findOrCreateGoogleUser(googleProfile);
+    const tokens = await this.authService.loginWithGoogle(
+      user,
+      isNewUser,
+      ip,
+      userAgent,
+    );
 
     this.setCookie(res, tokens.refreshToken, true);
 
-    const frontendUrl = this.configService.get<string>('auth.oauth.frontendCallbackUrl')
-      || this.configService.get<string>('auth.cors.origins.0')
-      || 'https://bgsc-platform.in';
+    const frontendUrl =
+      this.configService.get<string>('auth.oauth.frontendCallbackUrl') ||
+      this.configService.get<string>('auth.cors.origins.0') ||
+      'https://bgsc-platform.in';
 
     const params = new URLSearchParams({
       access_token: tokens.accessToken,
@@ -72,14 +117,21 @@ export class AuthController {
       params.append('is_pending_deletion', 'true');
     }
 
-    return res.redirect(302, `${frontendUrl}/auth/callback#${params.toString()}`);
+    return res.redirect(
+      302,
+      `${frontendUrl}/auth/callback#${params.toString()}`,
+    );
   }
 
   @Public()
   @Post('register')
   @RateLimit({ windowMs: 60 * 60 * 1000, max: 3, keyPrefix: 'register' }) // 3 per hour
   @ApiOperation({ summary: 'Register a new user' })
-  @ApiResponse({ status: 201, description: 'User registered successfully', type: AuthResponseDto })
+  @ApiResponse({
+    status: 201,
+    description: 'User registered successfully',
+    type: AuthResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'Validation failed' })
   @ApiResponse({ status: 409, description: 'Username or email already exists' })
   async register(
@@ -87,8 +139,14 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '';
-    const ip = Array.isArray(rawIp) ? rawIp[0] : (rawIp.split(',')[0].trim() || '127.0.0.1');
+    const rawIp =
+      req.headers['x-forwarded-for'] ||
+      req.socket.remoteAddress ||
+      req.ip ||
+      '';
+    const ip = Array.isArray(rawIp)
+      ? rawIp[0]
+      : rawIp.split(',')[0].trim() || '127.0.0.1';
     const userAgent = req.headers['user-agent'] || 'unknown';
 
     const result = await this.authService.register(dto, ip, userAgent);
@@ -107,20 +165,39 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @RateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'login' }) // 5 per 15 mins
   @ApiOperation({ summary: 'Log in with credentials' })
-  @ApiResponse({ status: 200, description: 'Login successful', type: AuthResponseDto })
-  @ApiResponse({ status: 403, description: 'Account scheduled for deletion', type: LoginPendingDeletionResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Login successful',
+    type: AuthResponseDto,
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Account scheduled for deletion',
+    type: LoginPendingDeletionResponseDto,
+  })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   async login(
-    @CurrentUser() user: any,
+    @CurrentUser() user: UserCredential,
     @Body() dto: LoginDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '';
-    const ip = Array.isArray(rawIp) ? rawIp[0] : (rawIp.split(',')[0].trim() || '127.0.0.1');
+    const rawIp =
+      req.headers['x-forwarded-for'] ||
+      req.socket.remoteAddress ||
+      req.ip ||
+      '';
+    const ip = Array.isArray(rawIp)
+      ? rawIp[0]
+      : rawIp.split(',')[0].trim() || '127.0.0.1';
     const userAgent = req.headers['user-agent'] || 'unknown';
 
-    const result = await this.authService.login(user, ip, userAgent, dto.keepMeLoggedIn);
+    const result = await this.authService.login(
+      user,
+      ip,
+      userAgent,
+      dto.keepMeLoggedIn,
+    );
 
     if (result.requiresTOTP) {
       return {
@@ -129,7 +206,7 @@ export class AuthController {
       };
     }
 
-    this.setCookie(res, result.refreshToken!, !!dto.keepMeLoggedIn);
+    this.setCookie(res, result.refreshToken, !!dto.keepMeLoggedIn);
 
     if (user.status === UserStatus.PENDING_DELETION) {
       res.status(HttpStatus.FORBIDDEN);
@@ -150,15 +227,26 @@ export class AuthController {
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  @RateLimit({ windowMs: 60 * 1000, max: 30, keyPrefix: 'refresh', keyBy: 'refreshToken' }) // 30 per min
+  @RateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    keyPrefix: 'refresh',
+    keyBy: 'refreshToken',
+  }) // 30 per min
   @ApiOperation({ summary: 'Refresh access token' })
-  @ApiResponse({ status: 200, description: 'Token refreshed successfully', type: RefreshResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Token refreshed successfully',
+    type: RefreshResponseDto,
+  })
   @ApiResponse({ status: 401, description: 'Invalid refresh token' })
   async refresh(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const refreshToken = req.cookies['bgsc_refresh_token'];
+    const refreshToken = (req.cookies as Record<string, string>)[
+      'bgsc_refresh_token'
+    ];
     if (!refreshToken) {
       res.clearCookie('bgsc_refresh_token', {
         httpOnly: true,
@@ -166,15 +254,27 @@ export class AuthController {
         sameSite: 'strict',
         path: '/auth',
       });
-      return res.status(HttpStatus.UNAUTHORIZED).json({ message: 'Missing refresh token' });
+      return res
+        .status(HttpStatus.UNAUTHORIZED)
+        .json({ message: 'Missing refresh token' });
     }
 
-    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || req.ip || '';
-    const ip = Array.isArray(rawIp) ? rawIp[0] : (rawIp.split(',')[0].trim() || '127.0.0.1');
+    const rawIp =
+      req.headers['x-forwarded-for'] ||
+      req.socket.remoteAddress ||
+      req.ip ||
+      '';
+    const ip = Array.isArray(rawIp)
+      ? rawIp[0]
+      : rawIp.split(',')[0].trim() || '127.0.0.1';
     const userAgent = req.headers['user-agent'] || 'unknown';
 
     try {
-      const result = await this.authService.refreshTokens(refreshToken, ip, userAgent);
+      const result = await this.authService.refreshTokens(
+        refreshToken,
+        ip,
+        userAgent,
+      );
       this.setCookie(res, result.refreshToken, result.keepMeLoggedIn);
       return { accessToken: result.accessToken };
     } catch (error) {
@@ -195,14 +295,17 @@ export class AuthController {
   @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @ApiOperation({ summary: 'Log out current session' })
   async logout(
-    @CurrentUser() user: any,
+    @CurrentUser() user: JwtPayload,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const refreshToken = req.cookies['bgsc_refresh_token'];
+    const refreshToken = (req.cookies as Record<string, string>)[
+      'bgsc_refresh_token'
+    ];
     if (refreshToken) {
       const parts = refreshToken.split('.');
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const randomHexRegex = /^[0-9a-f]{64}$/i;
       if (
         parts.length === 3 &&
@@ -212,7 +315,12 @@ export class AuthController {
       ) {
         const [userId, familyId] = parts;
         if (userId === user.sub) {
-          await this.authService.logout(user.sub, familyId, user.jti, user.exp);
+          await this.authService.logout(
+            user.sub,
+            familyId,
+            user.jti,
+            this.getRequiredExpiry(user),
+          );
         }
       }
     }
@@ -234,10 +342,14 @@ export class AuthController {
   @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @ApiOperation({ summary: 'Log out all sessions across all devices' })
   async logoutAll(
-    @CurrentUser() user: any,
+    @CurrentUser() user: JwtPayload,
     @Res({ passthrough: true }) res: Response,
   ) {
-    await this.authService.logoutAll(user.sub, user.jti, user.exp);
+    await this.authService.logoutAll(
+      user.sub,
+      user.jti,
+      this.getRequiredExpiry(user),
+    );
 
     res.clearCookie('bgsc_refresh_token', {
       httpOnly: true,
@@ -252,9 +364,18 @@ export class AuthController {
   @Public()
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  @RateLimit({ windowMs: 60 * 60 * 1000, max: 3, keyPrefix: 'password_reset', keyBy: 'email' })
+  @RateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 3,
+    keyPrefix: 'password_reset',
+    keyBy: 'email',
+  })
   @ApiOperation({ summary: 'Request a password reset link' })
-  @ApiResponse({ status: 200, description: 'Password reset request accepted', type: SuccessMessageDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset request accepted',
+    type: SuccessMessageDto,
+  })
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto);
   }
@@ -264,7 +385,11 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @ApiOperation({ summary: 'Reset password with emailed token' })
-  @ApiResponse({ status: 200, description: 'Password reset successfully', type: SuccessMessageDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset successfully',
+    type: SuccessMessageDto,
+  })
   @ApiResponse({ status: 400, description: 'Invalid or expired reset token' })
   async resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
@@ -276,17 +401,19 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @ApiOperation({ summary: 'Change password for current user' })
-  @ApiResponse({ status: 200, description: 'Password changed successfully', type: SuccessMessageDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Password changed successfully',
+    type: SuccessMessageDto,
+  })
   async changePassword(
-    @CurrentUser() user: any,
+    @CurrentUser() user: JwtPayload,
     @Body() dto: ChangePasswordDto,
     @Req() req: Request,
   ) {
     const currentFamilyId = this.getFamilyIdFromRefreshCookie(req, user.sub);
     return this.authService.changePassword(user.sub, dto, currentFamilyId);
   }
-
-
 
   private setCookie(res: Response, token: string, keepMeLoggedIn: boolean) {
     res.cookie('bgsc_refresh_token', token, {
@@ -298,14 +425,28 @@ export class AuthController {
     });
   }
 
-  private getFamilyIdFromRefreshCookie(req: Request, userId: string): string | undefined {
-    const refreshToken = req.cookies?.['bgsc_refresh_token'];
+  private getRequiredExpiry(user: JwtPayload): number {
+    if (!user.exp) {
+      throw new UnauthorizedException('Invalid access token');
+    }
+
+    return user.exp;
+  }
+
+  private getFamilyIdFromRefreshCookie(
+    req: Request,
+    userId: string,
+  ): string | undefined {
+    const refreshToken = (req.cookies as Record<string, string>)?.[
+      'bgsc_refresh_token'
+    ];
     if (!refreshToken) {
       return undefined;
     }
 
     const parts = refreshToken.split('.');
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const randomHexRegex = /^[0-9a-f]{64}$/i;
     if (
       parts.length !== 3 ||

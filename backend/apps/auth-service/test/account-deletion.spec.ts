@@ -7,12 +7,23 @@ import { UserStatus } from '../src/constants/roles.constant';
 import { SessionService } from '../src/services/session.service';
 import { EventBusService } from '../src/services/event-bus.service';
 
+interface MockUserRepository {
+  find: jest.Mock;
+  delete: jest.Mock;
+}
+interface MockSessionService {
+  revokeAllSessions: jest.Mock;
+}
+interface MockEventBusService {
+  emit: jest.Mock;
+}
+
 describe('Account Deletion Job and Service Purge', () => {
   let deletionJob: AccountDeletionJob;
   let accountService: AccountService;
-  let userRepository: any;
-  let sessionService: any;
-  let eventBusService: any;
+  let userRepository: MockUserRepository;
+  let sessionService: MockSessionService;
+  let eventBusService: MockEventBusService;
 
   beforeEach(async () => {
     userRepository = {
@@ -58,7 +69,9 @@ describe('Account Deletion Job and Service Purge', () => {
 
   describe('AccountDeletionJob', () => {
     it('should invoke accountService.purgeScheduledDeletions and return the count', async () => {
-      const purgeSpy = jest.spyOn(accountService, 'purgeScheduledDeletions').mockResolvedValue(5);
+      const purgeSpy = jest
+        .spyOn(accountService, 'purgeScheduledDeletions')
+        .mockResolvedValue(5);
       const now = new Date();
       const count = await deletionJob.run(now);
 
@@ -67,7 +80,9 @@ describe('Account Deletion Job and Service Purge', () => {
     });
 
     it('should catch errors in run() and return 0', async () => {
-      jest.spyOn(accountService, 'purgeScheduledDeletions').mockRejectedValue(new Error('DB connection lost'));
+      jest
+        .spyOn(accountService, 'purgeScheduledDeletions')
+        .mockRejectedValue(new Error('DB connection lost'));
       const count = await deletionJob.run();
 
       expect(count).toBe(0);
@@ -89,8 +104,16 @@ describe('Account Deletion Job and Service Purge', () => {
     it('should fetch pending deletion users scheduled before or equal to now, delete them, revoke sessions, and emit events', async () => {
       const now = new Date();
       const mockUsers = [
-        { id: 'user-id-1', status: UserStatus.PENDING_DELETION, deletionScheduled: now },
-        { id: 'user-id-2', status: UserStatus.PENDING_DELETION, deletionScheduled: new Date(now.getTime() - 1000) },
+        {
+          id: 'user-id-1',
+          status: UserStatus.PENDING_DELETION,
+          deletionScheduled: now,
+        },
+        {
+          id: 'user-id-2',
+          status: UserStatus.PENDING_DELETION,
+          deletionScheduled: new Date(now.getTime() - 1000),
+        },
       ];
 
       userRepository.find.mockResolvedValue(mockUsers);
@@ -105,8 +128,12 @@ describe('Account Deletion Job and Service Purge', () => {
           deletionScheduled: expect.any(Object),
         },
       });
-      expect(sessionService.revokeAllSessions).toHaveBeenCalledWith('user-id-1');
-      expect(sessionService.revokeAllSessions).toHaveBeenCalledWith('user-id-2');
+      expect(sessionService.revokeAllSessions).toHaveBeenCalledWith(
+        'user-id-1',
+      );
+      expect(sessionService.revokeAllSessions).toHaveBeenCalledWith(
+        'user-id-2',
+      );
       expect(userRepository.delete).toHaveBeenCalledWith('user-id-1');
       expect(userRepository.delete).toHaveBeenCalledWith('user-id-2');
       expect(eventBusService.emit).toHaveBeenCalledWith('UserDeleted', {

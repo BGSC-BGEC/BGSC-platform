@@ -7,7 +7,6 @@ import { UserCredential } from '../src/entities/user-credential.entity';
 
 describe('TokenService', () => {
   let service: TokenService;
-  let jwtService: JwtService;
 
   const mockConfigService = {
     get: jest.fn().mockImplementation((key: string) => {
@@ -37,7 +36,6 @@ describe('TokenService', () => {
     }).compile();
 
     service = module.get<TokenService>(TokenService);
-    jwtService = module.get<JwtService>(JwtService);
   });
 
   it('should be defined', () => {

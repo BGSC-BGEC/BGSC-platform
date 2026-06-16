@@ -1,5 +1,22 @@
-import { Controller, Post, Body, UseGuards, Req, Res, HttpCode, HttpStatus, UnauthorizedException, Ip, BadRequestException } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  Req,
+  Res,
+  HttpCode,
+  HttpStatus,
+  UnauthorizedException,
+  Ip,
+  BadRequestException,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
@@ -13,10 +30,20 @@ import { RateLimitGuard } from '../guards/rate-limit.guard';
 import { RateLimit } from '../decorators/rate-limit.decorator';
 import { UserCredential } from '../entities/user-credential.entity';
 import { UserStatus } from '../constants/roles.constant';
+import type { JwtPayload } from '../interfaces/jwt-payload.interface';
 import { LoginAuditLog } from '../entities/login-audit-log.entity';
-import { VerifyTotpSetupDto, AuthenticateTotpDto, DisableTotpDto } from '../dto/totp.dto';
+import {
+  VerifyTotpSetupDto,
+  AuthenticateTotpDto,
+  DisableTotpDto,
+} from '../dto/totp.dto';
 import type { Request, Response } from 'express';
-import { TotpSetupResponseDto, TotpVerifySetupResponseDto, AuthResponseDto, SuccessMessageDto } from '../dto/responses.dto';
+import {
+  TotpSetupResponseDto,
+  TotpVerifySetupResponseDto,
+  AuthResponseDto,
+  SuccessMessageDto,
+} from '../dto/responses.dto';
 
 @ApiTags('TOTP 2FA')
 @Controller('auth/totp')
@@ -37,11 +64,17 @@ export class TotpController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
-  @ApiOperation({ summary: 'Initialize TOTP setup — returns secret and QR code' })
-  @ApiResponse({ status: 201, description: 'TOTP setup initialized', type: TotpSetupResponseDto })
+  @ApiOperation({
+    summary: 'Initialize TOTP setup — returns secret and QR code',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'TOTP setup initialized',
+    type: TotpSetupResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'TOTP already enabled' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async setupTotp(@Req() req: any) {
+  async setupTotp(@Req() req: Request & { user: JwtPayload }) {
     const userId = req.user.sub;
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
@@ -54,8 +87,9 @@ export class TotpController {
 
     const secret = this.totpService.generateSecret();
     const qrCodeUrl = await this.totpService.generateQRCode(user.email, secret);
-    const { plainTextCodes, hashedCodes } = await this.totpService.generateBackupCodes();
-    
+    const { plainTextCodes, hashedCodes } =
+      await this.totpService.generateBackupCodes();
+
     user.totpSecretEnc = this.totpService.encryptSecret(secret);
     user.totpBackupCodesHash = hashedCodes;
     await this.userRepository.save(user);
@@ -72,11 +106,21 @@ export class TotpController {
   @ApiBearerAuth()
   @HttpCode(HttpStatus.OK)
   @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
-  @ApiOperation({ summary: 'Verify TOTP setup with a code — enables 2FA and returns backup codes' })
-  @ApiResponse({ status: 200, description: 'TOTP enabled, backup codes returned', type: TotpVerifySetupResponseDto })
+  @ApiOperation({
+    summary:
+      'Verify TOTP setup with a code — enables 2FA and returns backup codes',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'TOTP enabled, backup codes returned',
+    type: TotpVerifySetupResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'TOTP setup not initialized' })
   @ApiResponse({ status: 401, description: 'Invalid TOTP code' })
-  async verifySetup(@Req() req: any, @Body() body: VerifyTotpSetupDto) {
+  async verifySetup(
+    @Req() req: Request & { user: JwtPayload },
+    @Body() body: VerifyTotpSetupDto,
+  ) {
     const userId = req.user.sub;
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user || !user.totpSecretEnc) {
@@ -93,7 +137,10 @@ export class TotpController {
     user.totpEnabled = true;
     await this.userRepository.save(user);
 
-    this.eventBusService.emit('UserTOTPEnabled', { userId: user.id, timestamp: new Date().toISOString() });
+    this.eventBusService.emit('UserTOTPEnabled', {
+      userId: user.id,
+      timestamp: new Date().toISOString(),
+    });
 
     return {
       enabled: true,
@@ -103,8 +150,14 @@ export class TotpController {
   @Post('authenticate')
   @HttpCode(HttpStatus.OK)
   @RateLimit({ windowMs: 15 * 60 * 1000, max: 5, keyPrefix: 'totp' })
-  @ApiOperation({ summary: 'Authenticate with TOTP code or backup code after login' })
-  @ApiResponse({ status: 200, description: 'Authentication successful', type: AuthResponseDto })
+  @ApiOperation({
+    summary: 'Authenticate with TOTP code or backup code after login',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Authentication successful',
+    type: AuthResponseDto,
+  })
   @ApiResponse({ status: 401, description: 'Invalid code or expired token' })
   async authenticate(
     @Body() body: AuthenticateTotpDto,
@@ -116,8 +169,11 @@ export class TotpController {
 
     let userId: string;
     try {
-      userId = this.tokenService.verifyTempToken(body.tempToken, 'totp_verification');
-    } catch (err) {
+      userId = this.tokenService.verifyTempToken(
+        body.tempToken,
+        'totp_verification',
+      );
+    } catch {
       throw new UnauthorizedException('Invalid or expired temporary token');
     }
 
@@ -127,7 +183,10 @@ export class TotpController {
     }
 
     const secret = this.totpService.decryptSecret(user.totpSecretEnc);
-    const isValidTotp = body.token.length === 6 ? await this.totpService.verifyCode(secret, body.token) : false;
+    const isValidTotp =
+      body.token.length === 6
+        ? await this.totpService.verifyCode(secret, body.token)
+        : false;
 
     let isValidBackup = false;
     let matchedBackupIndex = -1;
@@ -135,7 +194,10 @@ export class TotpController {
     if (!isValidTotp && user.totpBackupCodesHash && body.token.length === 8) {
       // Check backup codes
       for (let i = 0; i < user.totpBackupCodesHash.length; i++) {
-        const isMatch = await bcrypt.compare(body.token, user.totpBackupCodesHash[i]);
+        const isMatch = await bcrypt.compare(
+          body.token,
+          user.totpBackupCodesHash[i],
+        );
         if (isMatch) {
           isValidBackup = true;
           matchedBackupIndex = i;
@@ -146,7 +208,14 @@ export class TotpController {
 
     if (!isValidTotp && !isValidBackup) {
       const method = body.token.length === 8 ? 'backup_code' : 'totp';
-      await this.logLoginAttempt(user.id, ip, userAgent as string, method, false, 'invalid_code');
+      await this.logLoginAttempt(
+        user.id,
+        ip,
+        userAgent,
+        method,
+        false,
+        'invalid_code',
+      );
       throw new UnauthorizedException('Invalid authentication code');
     }
 
@@ -158,10 +227,21 @@ export class TotpController {
 
     const method = isValidBackup ? 'backup_code' : 'totp';
 
-    await this.logLoginAttempt(user.id, ip, userAgent as string, method, true);
+    await this.logLoginAttempt(user.id, ip, userAgent, method, true);
 
-    const { raw: refreshToken, hash: tokenHash, familyId } = this.tokenService.generateRefreshToken(user.id);
-    await this.sessionService.createSession(user.id, tokenHash, familyId, ip, userAgent as string, !!body.keepMeLoggedIn);
+    const {
+      raw: refreshToken,
+      hash: tokenHash,
+      familyId,
+    } = this.tokenService.generateRefreshToken(user.id);
+    await this.sessionService.createSession(
+      user.id,
+      tokenHash,
+      familyId,
+      ip,
+      userAgent,
+      !!body.keepMeLoggedIn,
+    );
 
     const accessToken = this.tokenService.signAccessToken(user);
     if (res) this.setRefreshCookie(res, refreshToken, !!body.keepMeLoggedIn);
@@ -202,10 +282,17 @@ export class TotpController {
   @HttpCode(HttpStatus.OK)
   @RateLimit({ windowMs: 60 * 1000, max: 60, keyPrefix: 'general' })
   @ApiOperation({ summary: 'Disable TOTP 2FA (requires valid TOTP code)' })
-  @ApiResponse({ status: 200, description: 'TOTP disabled successfully', type: SuccessMessageDto })
+  @ApiResponse({
+    status: 200,
+    description: 'TOTP disabled successfully',
+    type: SuccessMessageDto,
+  })
   @ApiResponse({ status: 400, description: 'TOTP is not enabled' })
   @ApiResponse({ status: 401, description: 'Invalid TOTP code' })
-  async disableTotp(@Req() req: any, @Body() body: DisableTotpDto) {
+  async disableTotp(
+    @Req() req: Request & { user: JwtPayload },
+    @Body() body: DisableTotpDto,
+  ) {
     const userId = req.user.sub;
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user || !user.totpEnabled || !user.totpSecretEnc) {
@@ -225,7 +312,10 @@ export class TotpController {
 
     await this.userRepository.save(user);
 
-    this.eventBusService.emit('UserTOTPDisabled', { userId: user.id, timestamp: new Date().toISOString() });
+    this.eventBusService.emit('UserTOTPDisabled', {
+      userId: user.id,
+      timestamp: new Date().toISOString(),
+    });
 
     return {
       message: 'TOTP disabled successfully',
@@ -251,7 +341,11 @@ export class TotpController {
     await this.auditLogRepository.save(log);
   }
 
-  private setRefreshCookie(res: Response, token: string, keepMeLoggedIn: boolean): void {
+  private setRefreshCookie(
+    res: Response,
+    token: string,
+    keepMeLoggedIn: boolean,
+  ): void {
     res.cookie('bgsc_refresh_token', token, {
       httpOnly: true,
       secure: true,

@@ -3,20 +3,38 @@ import { SessionService } from '../src/services/session.service';
 import { InvalidCredentialsException } from '../src/exceptions/invalid-credentials.exception';
 import { TokenReuseDetectedException } from '../src/exceptions/token-reuse-detected.exception';
 
+interface MockPipeline {
+  hset: jest.Mock;
+  expire: jest.Mock;
+  sadd: jest.Mock;
+  del: jest.Mock;
+  srem: jest.Mock;
+  exec: jest.Mock;
+}
+interface MockRedis {
+  pipeline: jest.MockedFunction<() => MockPipeline>;
+  smembers: jest.Mock;
+  hgetall: jest.Mock;
+  hget: jest.Mock;
+  srem: jest.Mock;
+  del: jest.Mock;
+}
+
 describe('SessionService', () => {
   let service: SessionService;
-  let mockRedis: any;
+  let mockRedis: MockRedis;
 
   beforeEach(async () => {
+    const mockPipeline: MockPipeline = {
+      hset: jest.fn().mockReturnThis(),
+      expire: jest.fn().mockReturnThis(),
+      sadd: jest.fn().mockReturnThis(),
+      del: jest.fn().mockReturnThis(),
+      srem: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue([]),
+    };
     mockRedis = {
-      pipeline: jest.fn().mockReturnValue({
-        hset: jest.fn().mockReturnThis(),
-        expire: jest.fn().mockReturnThis(),
-        sadd: jest.fn().mockReturnThis(),
-        del: jest.fn().mockReturnThis(),
-        srem: jest.fn().mockReturnThis(),
-        exec: jest.fn().mockResolvedValue([]),
-      }),
+      pipeline: jest.fn().mockReturnValue(mockPipeline),
       smembers: jest.fn().mockResolvedValue([]),
       hgetall: jest.fn().mockResolvedValue({}),
       hget: jest.fn().mockResolvedValue(null),
@@ -52,7 +70,9 @@ describe('SessionService', () => {
       await service.createSession(userId, tokenHash, familyId, ip, ua, true);
 
       expect(mockRedis.pipeline).toHaveBeenCalled();
-      expect(mockRedis.smembers).toHaveBeenCalledWith(`auth:session_index:${userId}`);
+      expect(mockRedis.smembers).toHaveBeenCalledWith(
+        `auth:session_index:${userId}`,
+      );
     });
 
     it('should evict the oldest session when concurrent session limit (5) is exceeded', async () => {
@@ -64,7 +84,12 @@ describe('SessionService', () => {
 
       // Mock 6 sessions inside the index
       mockRedis.smembers.mockResolvedValue([
-        'f1', 'f2', 'f3', 'f4', 'f5', 'family-new'
+        'f1',
+        'f2',
+        'f3',
+        'f4',
+        'f5',
+        'family-new',
       ]);
 
       // Mock lastUsedAt timestamps where f1 is the oldest
@@ -85,8 +110,13 @@ describe('SessionService', () => {
       // Verify that the oldest session (f1) was deleted/revoked
       expect(mockRedis.pipeline).toHaveBeenCalled();
       // Revoking oldest will delete f1 key and remove f1 from set index
-      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session:user-123:f1');
-      expect(mockRedis.pipeline().srem).toHaveBeenCalledWith('auth:session_index:user-123', 'f1');
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith(
+        'auth:session:user-123:f1',
+      );
+      expect(mockRedis.pipeline().srem).toHaveBeenCalledWith(
+        'auth:session_index:user-123',
+        'f1',
+      );
     });
   });
 
@@ -105,14 +135,19 @@ describe('SessionService', () => {
       });
 
       const keepMeLoggedIn = await service.validateAndRotateSession(
-        userId, familyId, oldTokenHash, newTokenHash, ip, ua
+        userId,
+        familyId,
+        oldTokenHash,
+        newTokenHash,
+        ip,
+        ua,
       );
 
       expect(keepMeLoggedIn).toBe(true);
       expect(mockRedis.pipeline).toHaveBeenCalled();
       expect(mockRedis.pipeline().hset).toHaveBeenCalledWith(
         'auth:session:user-123:family-xyz',
-        expect.objectContaining({ tokenHash: newTokenHash })
+        expect.objectContaining({ tokenHash: newTokenHash }),
       );
     });
 
@@ -120,7 +155,7 @@ describe('SessionService', () => {
       mockRedis.hgetall.mockResolvedValue({});
 
       await expect(
-        service.validateAndRotateSession('u', 'f', 'old', 'new', 'ip', 'ua')
+        service.validateAndRotateSession('u', 'f', 'old', 'new', 'ip', 'ua'),
       ).rejects.toThrow(InvalidCredentialsException);
     });
 
@@ -134,21 +169,39 @@ describe('SessionService', () => {
       mockRedis.smembers.mockResolvedValue(['f1', 'f2']);
 
       await expect(
-        service.validateAndRotateSession(userId, 'family-xyz', 'hash-replayed', 'hash-new', 'ip', 'ua')
+        service.validateAndRotateSession(
+          userId,
+          'family-xyz',
+          'hash-replayed',
+          'hash-new',
+          'ip',
+          'ua',
+        ),
       ).rejects.toThrow(TokenReuseDetectedException);
 
       // Verify all sessions were deleted
-      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session:user-123:f1');
-      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session:user-123:f2');
-      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session_index:user-123');
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith(
+        'auth:session:user-123:f1',
+      );
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith(
+        'auth:session:user-123:f2',
+      );
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith(
+        'auth:session_index:user-123',
+      );
     });
   });
 
   describe('revokeSession', () => {
     it('should delete session key and remove familyId from set', async () => {
       await service.revokeSession('user-123', 'family-xyz');
-      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session:user-123:family-xyz');
-      expect(mockRedis.pipeline().srem).toHaveBeenCalledWith('auth:session_index:user-123', 'family-xyz');
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith(
+        'auth:session:user-123:family-xyz',
+      );
+      expect(mockRedis.pipeline().srem).toHaveBeenCalledWith(
+        'auth:session_index:user-123',
+        'family-xyz',
+      );
     });
   });
 
@@ -156,9 +209,15 @@ describe('SessionService', () => {
     it('should delete all session keys for active familyIds and index key', async () => {
       mockRedis.smembers.mockResolvedValue(['f1', 'f2']);
       await service.revokeAllSessions('user-123');
-      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session:user-123:f1');
-      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session:user-123:f2');
-      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session_index:user-123');
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith(
+        'auth:session:user-123:f1',
+      );
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith(
+        'auth:session:user-123:f2',
+      );
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith(
+        'auth:session_index:user-123',
+      );
     });
   });
 
@@ -168,11 +227,23 @@ describe('SessionService', () => {
 
       await service.revokeAllSessionsExcept('user-123', 'current');
 
-      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session:user-123:f1');
-      expect(mockRedis.pipeline().del).toHaveBeenCalledWith('auth:session:user-123:f2');
-      expect(mockRedis.pipeline().del).not.toHaveBeenCalledWith('auth:session:user-123:current');
-      expect(mockRedis.pipeline().srem).toHaveBeenCalledWith('auth:session_index:user-123', 'f1');
-      expect(mockRedis.pipeline().srem).toHaveBeenCalledWith('auth:session_index:user-123', 'f2');
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith(
+        'auth:session:user-123:f1',
+      );
+      expect(mockRedis.pipeline().del).toHaveBeenCalledWith(
+        'auth:session:user-123:f2',
+      );
+      expect(mockRedis.pipeline().del).not.toHaveBeenCalledWith(
+        'auth:session:user-123:current',
+      );
+      expect(mockRedis.pipeline().srem).toHaveBeenCalledWith(
+        'auth:session_index:user-123',
+        'f1',
+      );
+      expect(mockRedis.pipeline().srem).toHaveBeenCalledWith(
+        'auth:session_index:user-123',
+        'f2',
+      );
     });
   });
 });

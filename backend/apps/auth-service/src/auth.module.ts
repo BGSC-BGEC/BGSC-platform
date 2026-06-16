@@ -54,7 +54,12 @@ import { AddTotpAndAccountLifecycleAndAuditLog1718520000000 } from './migrations
     TypeOrmModule.forFeature([UserCredential, LoginAuditLog]),
     JwtModule.register({}),
   ],
-  controllers: [AuthController, TotpController, AccountController, SessionController],
+  controllers: [
+    AuthController,
+    TotpController,
+    AccountController,
+    SessionController,
+  ],
   providers: [
     AuthService,
     PasswordService,

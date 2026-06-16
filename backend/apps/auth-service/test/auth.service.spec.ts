@@ -9,39 +9,91 @@ import { TokenService } from '../src/services/token.service';
 import { SessionService } from '../src/services/session.service';
 import { EventBusService } from '../src/services/event-bus.service';
 import { EmailService } from '../src/services/email.service';
-import { UserRole, UserStatus } from '../src/constants/roles.constant';
+import { UserStatus } from '../src/constants/roles.constant';
 import { InvalidCredentialsException } from '../src/exceptions/invalid-credentials.exception';
 import { AccountDisabledException } from '../src/exceptions/account-disabled.exception';
 import { TokenReuseDetectedException } from '../src/exceptions/token-reuse-detected.exception';
 import { EmailAlreadyLinkedException } from '../src/exceptions/email-already-linked.exception';
 
+interface MockUserRepo {
+  findOne: jest.Mock;
+  create: jest.Mock;
+  save: jest.Mock;
+}
+interface MockAuditRepo {
+  create: jest.Mock;
+  save: jest.Mock;
+}
+interface MockPasswordService {
+  hashPassword: jest.Mock;
+  verifyPassword: jest.Mock;
+  generateResetToken: jest.Mock;
+  hashResetToken: jest.Mock;
+}
+interface MockTokenService {
+  generateRefreshToken: jest.Mock;
+  signAccessToken: jest.Mock;
+  signTempToken: jest.Mock;
+  hashToken: jest.Mock;
+}
+interface MockSessionService {
+  createSession: jest.Mock;
+  validateAndRotateSession: jest.Mock;
+  revokeSession: jest.Mock;
+  revokeAllSessions: jest.Mock;
+  revokeAllSessionsExcept: jest.Mock;
+  blacklistJti: jest.Mock;
+}
+interface MockEventBus {
+  emit: jest.Mock;
+}
+interface MockEmailService {
+  sendPasswordResetEmail: jest.Mock;
+}
+interface MockRedis {
+  hset: jest.Mock;
+  expire: jest.Mock;
+  hgetall: jest.Mock;
+  del: jest.Mock;
+}
+
 describe('AuthService', () => {
   let service: AuthService;
-  let userRepository: any;
-  let auditLogRepository: any;
-  let passwordService: any;
-  let tokenService: any;
-  let sessionService: any;
-  let eventBusService: any;
-  let emailService: any;
-  let redis: any;
+  let userRepository: MockUserRepo;
+  let auditLogRepository: MockAuditRepo;
+  let passwordService: MockPasswordService;
+  let tokenService: MockTokenService;
+  let sessionService: MockSessionService;
+  let eventBusService: MockEventBus;
+  let emailService: MockEmailService;
+  let redis: MockRedis;
 
   beforeEach(async () => {
     userRepository = {
       findOne: jest.fn(),
-      create: jest.fn().mockImplementation((dto) => dto),
-      save: jest.fn().mockImplementation((user) => Promise.resolve({ id: 'mock-uuid', ...user })),
+      create: jest.fn().mockImplementation((dto: unknown) => dto),
+      save: jest
+        .fn()
+        .mockImplementation((user: unknown) =>
+          Promise.resolve({ id: 'mock-uuid', ...(user as object) }),
+        ),
     };
 
     auditLogRepository = {
-      create: jest.fn().mockImplementation((dto) => dto),
-      save: jest.fn().mockImplementation((log) => Promise.resolve({ id: 'log-uuid', ...log })),
+      create: jest.fn().mockImplementation((dto: unknown) => dto),
+      save: jest
+        .fn()
+        .mockImplementation((log: unknown) =>
+          Promise.resolve({ id: 'log-uuid', ...(log as object) }),
+        ),
     };
 
     passwordService = {
       hashPassword: jest.fn().mockResolvedValue('hashed_pass'),
       verifyPassword: jest.fn(),
-      generateResetToken: jest.fn().mockReturnValue({ raw: 'a'.repeat(64), hash: 'reset-hash' }),
+      generateResetToken: jest
+        .fn()
+        .mockReturnValue({ raw: 'a'.repeat(64), hash: 'reset-hash' }),
       hashResetToken: jest.fn().mockReturnValue('reset-hash'),
     };
 
@@ -143,8 +195,13 @@ describe('AuthService', () => {
       expect(result).toBeDefined();
       expect(result.user.username).toBe('newuser');
       expect(result.accessToken).toBe('access_jwt_token');
-      expect(result.refreshToken).toBe('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333');
-      expect(eventBusService.emit).toHaveBeenCalledWith('UserRegistered', expect.any(Object));
+      expect(result.refreshToken).toBe(
+        '11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333',
+      );
+      expect(eventBusService.emit).toHaveBeenCalledWith(
+        'UserRegistered',
+        expect.any(Object),
+      );
     });
 
     it('should throw ConflictException if username exists', async () => {
@@ -177,7 +234,12 @@ describe('AuthService', () => {
       userRepository.findOne.mockResolvedValue(mockUser);
       passwordService.verifyPassword.mockResolvedValue(true);
 
-      const user = await service.validateAndLogUser('testuser', 'pass', '127.0.0.1', 'ua');
+      const user = await service.validateAndLogUser(
+        'testuser',
+        'pass',
+        '127.0.0.1',
+        'ua',
+      );
       expect(user).toBeDefined();
       expect(user.id).toBe(mockUser.id);
       expect(auditLogRepository.save).toHaveBeenCalledWith(
@@ -201,7 +263,10 @@ describe('AuthService', () => {
       ).rejects.toThrow(InvalidCredentialsException);
 
       expect(auditLogRepository.save).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, failureReason: 'invalid_credentials' }),
+        expect.objectContaining({
+          success: false,
+          failureReason: 'invalid_credentials',
+        }),
       );
     });
 
@@ -220,7 +285,10 @@ describe('AuthService', () => {
       ).rejects.toThrow(AccountDisabledException);
 
       expect(auditLogRepository.save).toHaveBeenCalledWith(
-        expect.objectContaining({ success: false, failureReason: 'account_disabled' }),
+        expect.objectContaining({
+          success: false,
+          failureReason: 'account_disabled',
+        }),
       );
     });
   });
@@ -245,34 +313,58 @@ describe('AuthService', () => {
       const result = await service.login(mockUser, '127.0.0.1', 'ua');
       expect(result.requiresTOTP).toBe(false);
       expect(result.accessToken).toBe('access_jwt_token');
-      expect(result.refreshToken).toBe('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333');
-      expect(eventBusService.emit).toHaveBeenCalledWith('UserLoggedIn', expect.any(Object));
+      expect(result.refreshToken).toBe(
+        '11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333',
+      );
+      expect(eventBusService.emit).toHaveBeenCalledWith(
+        'UserLoggedIn',
+        expect.any(Object),
+      );
     });
   });
 
   describe('refreshTokens', () => {
     it('should successfully rotate tokens', async () => {
-      const mockUser = { id: '11111111-1111-4111-8111-111111111111', status: UserStatus.ACTIVE };
+      const mockUser = {
+        id: '11111111-1111-4111-8111-111111111111',
+        status: UserStatus.ACTIVE,
+      };
       userRepository.findOne.mockResolvedValue(mockUser);
       sessionService.validateAndRotateSession.mockResolvedValue(true);
 
-      const result = await service.refreshTokens('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333', '127.0.0.1', 'ua');
+      const result = await service.refreshTokens(
+        '11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333',
+        '127.0.0.1',
+        'ua',
+      );
       expect(result.accessToken).toBe('access_jwt_token');
-      expect(result.refreshToken).toBe('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333');
+      expect(result.refreshToken).toBe(
+        '11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333',
+      );
     });
 
     it('should log a breach when token reuse is detected', async () => {
-      const mockUser = { id: '11111111-1111-4111-8111-111111111111', status: UserStatus.ACTIVE };
+      const mockUser = {
+        id: '11111111-1111-4111-8111-111111111111',
+        status: UserStatus.ACTIVE,
+      };
       userRepository.findOne.mockResolvedValue(mockUser);
-      
+
       const staleException = new TokenReuseDetectedException();
       sessionService.validateAndRotateSession.mockRejectedValue(staleException);
 
       await expect(
-        service.refreshTokens('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333', '127.0.0.1', 'ua'),
+        service.refreshTokens(
+          '11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333',
+          '127.0.0.1',
+          'ua',
+        ),
       ).rejects.toThrow(TokenReuseDetectedException);
 
-      expect(eventBusService.emit).toHaveBeenCalledWith('UserSessionBreach', expect.any(Object));
+      expect(eventBusService.emit).toHaveBeenCalledWith(
+        'UserSessionBreach',
+        expect.any(Object),
+      );
     });
   });
 
@@ -280,7 +372,9 @@ describe('AuthService', () => {
     it('should always return generic response and not send email when user is missing', async () => {
       userRepository.findOne.mockResolvedValue(null);
 
-      const result = await service.forgotPassword({ email: 'missing@example.com' });
+      const result = await service.forgotPassword({
+        email: 'missing@example.com',
+      });
 
       expect(result.message).toContain('If an account with that email exists');
       expect(emailService.sendPasswordResetEmail).not.toHaveBeenCalled();
@@ -295,28 +389,45 @@ describe('AuthService', () => {
       } as UserCredential;
       userRepository.findOne.mockResolvedValue(user);
 
-      const result = await service.forgotPassword({ email: ' USER@EXAMPLE.COM ' });
+      const result = await service.forgotPassword({
+        email: ' USER@EXAMPLE.COM ',
+      });
 
       expect(result.message).toContain('If an account with that email exists');
       expect(user.passwordResetTokenHash).toBe('reset-hash');
       expect(user.passwordResetExpires).toBeInstanceOf(Date);
       expect(userRepository.save).toHaveBeenCalledWith(user);
-      expect(redis.hset).toHaveBeenCalledWith('auth:password_reset:reset-hash', expect.objectContaining({ userId: 'u-1' }));
-      expect(redis.expire).toHaveBeenCalledWith('auth:password_reset:reset-hash', 60 * 60);
-      expect(emailService.sendPasswordResetEmail).toHaveBeenCalledWith('user@example.com', 'a'.repeat(64));
+      expect(redis.hset).toHaveBeenCalledWith(
+        'auth:password_reset:reset-hash',
+        expect.objectContaining({ userId: 'u-1' }),
+      );
+      expect(redis.expire).toHaveBeenCalledWith(
+        'auth:password_reset:reset-hash',
+        60 * 60,
+      );
+      expect(emailService.sendPasswordResetEmail).toHaveBeenCalledWith(
+        'user@example.com',
+        'a'.repeat(64),
+      );
     });
 
     it('should still return generic response if reset email sending fails', async () => {
-      const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const loggerSpy = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
       const user = {
         id: 'u-1',
         email: 'user@example.com',
         status: UserStatus.ACTIVE,
       } as UserCredential;
       userRepository.findOne.mockResolvedValue(user);
-      emailService.sendPasswordResetEmail.mockRejectedValue(new Error('smtp unavailable'));
+      emailService.sendPasswordResetEmail.mockRejectedValue(
+        new Error('smtp unavailable'),
+      );
 
-      const result = await service.forgotPassword({ email: 'user@example.com' });
+      const result = await service.forgotPassword({
+        email: 'user@example.com',
+      });
 
       expect(result.message).toContain('If an account with that email exists');
       loggerSpy.mockRestore();
@@ -334,7 +445,10 @@ describe('AuthService', () => {
       redis.hgetall.mockResolvedValue({ userId: 'u-1' });
       userRepository.findOne.mockResolvedValue(user);
 
-      const result = await service.resetPassword({ token: 'a'.repeat(64), newPassword: 'NewPassword1!' });
+      const result = await service.resetPassword({
+        token: 'a'.repeat(64),
+        newPassword: 'NewPassword1!',
+      });
 
       expect(result.message).toBe('Password has been reset successfully.');
       expect(user.passwordHash).toBe('hashed_pass');
@@ -342,7 +456,10 @@ describe('AuthService', () => {
       expect(user.passwordResetExpires).toBeNull();
       expect(redis.del).toHaveBeenCalledWith('auth:password_reset:reset-hash');
       expect(sessionService.revokeAllSessions).toHaveBeenCalledWith('u-1');
-      expect(eventBusService.emit).toHaveBeenCalledWith('UserPasswordChanged', expect.objectContaining({ userId: 'u-1' }));
+      expect(eventBusService.emit).toHaveBeenCalledWith(
+        'UserPasswordChanged',
+        expect.objectContaining({ userId: 'u-1' }),
+      );
     });
 
     it('should reject expired or invalid reset token', async () => {
@@ -356,7 +473,10 @@ describe('AuthService', () => {
       userRepository.findOne.mockResolvedValue(user);
 
       await expect(
-        service.resetPassword({ token: 'a'.repeat(64), newPassword: 'NewPassword1!' }),
+        service.resetPassword({
+          token: 'a'.repeat(64),
+          newPassword: 'NewPassword1!',
+        }),
       ).rejects.toThrow(BadRequestException);
 
       expect(sessionService.revokeAllSessions).not.toHaveBeenCalled();
@@ -391,7 +511,9 @@ describe('AuthService', () => {
         .mockResolvedValueOnce(null) // by googleId
         .mockResolvedValueOnce(null); // by email
 
-      userRepository.save.mockImplementation(async (u: any) => ({ id: 'new-uuid', ...u }));
+      userRepository.save.mockImplementation((u: unknown) =>
+        Promise.resolve({ id: 'new-uuid', ...(u as object) }),
+      );
 
       const result = await service.findOrCreateGoogleUser({
         googleId: 'gid-new',
@@ -406,14 +528,21 @@ describe('AuthService', () => {
       expect(result.user.email).toBe('newuser@example.com');
       expect(eventBusService.emit).toHaveBeenCalledWith(
         'UserRegistered',
-        expect.objectContaining({ method: 'google', email: 'newuser@example.com' }),
+        expect.objectContaining({
+          method: 'google',
+          email: 'newuser@example.com',
+        }),
       );
     });
 
     it('should throw EmailAlreadyLinkedException when email exists without googleId', async () => {
       userRepository.findOne
         .mockResolvedValueOnce(null) // by googleId
-        .mockResolvedValueOnce({ id: 'u-existing', email: 'taken@example.com', googleId: null }); // by email
+        .mockResolvedValueOnce({
+          id: 'u-existing',
+          email: 'taken@example.com',
+          googleId: null,
+        }); // by email
 
       await expect(
         service.findOrCreateGoogleUser({
@@ -445,10 +574,17 @@ describe('AuthService', () => {
       user.username = 'googler';
       user.status = UserStatus.ACTIVE;
 
-      const result = await service.loginWithGoogle(user, true, '127.0.0.1', 'google-ua');
+      const result = await service.loginWithGoogle(
+        user,
+        true,
+        '127.0.0.1',
+        'google-ua',
+      );
 
       expect(result.accessToken).toBe('access_jwt_token');
-      expect(result.refreshToken).toBe('11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333');
+      expect(result.refreshToken).toBe(
+        '11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333',
+      );
       expect(result.isNewUser).toBe(true);
       expect(sessionService.createSession).toHaveBeenCalledWith(
         'u-1',
@@ -463,7 +599,11 @@ describe('AuthService', () => {
       );
       expect(eventBusService.emit).toHaveBeenCalledWith(
         'UserLoggedIn',
-        expect.objectContaining({ method: 'google', userId: 'u-1', isNewDevice: true }),
+        expect.objectContaining({
+          method: 'google',
+          userId: 'u-1',
+          isNewDevice: true,
+        }),
       );
     });
 
@@ -477,7 +617,11 @@ describe('AuthService', () => {
       ).rejects.toThrow(AccountDisabledException);
 
       expect(auditLogRepository.save).toHaveBeenCalledWith(
-        expect.objectContaining({ method: 'google', success: false, failureReason: 'account_disabled' }),
+        expect.objectContaining({
+          method: 'google',
+          success: false,
+          failureReason: 'account_disabled',
+        }),
       );
       expect(sessionService.createSession).not.toHaveBeenCalled();
     });
@@ -492,7 +636,11 @@ describe('AuthService', () => {
       });
 
       await expect(
-        service.changePassword('u-1', { newPassword: 'NewPassword1!' }, 'fam-1'),
+        service.changePassword(
+          'u-1',
+          { newPassword: 'NewPassword1!' },
+          'fam-1',
+        ),
       ).rejects.toThrow(BadRequestException);
     });
 
@@ -512,10 +660,19 @@ describe('AuthService', () => {
       );
 
       expect(result.message).toBe('Password changed successfully.');
-      expect(passwordService.verifyPassword).toHaveBeenCalledWith('OldPassword1!', 'old_hash');
+      expect(passwordService.verifyPassword).toHaveBeenCalledWith(
+        'OldPassword1!',
+        'old_hash',
+      );
       expect(user.passwordHash).toBe('hashed_pass');
-      expect(sessionService.revokeAllSessionsExcept).toHaveBeenCalledWith('u-1', 'fam-1');
-      expect(eventBusService.emit).toHaveBeenCalledWith('UserPasswordChanged', expect.objectContaining({ userId: 'u-1' }));
+      expect(sessionService.revokeAllSessionsExcept).toHaveBeenCalledWith(
+        'u-1',
+        'fam-1',
+      );
+      expect(eventBusService.emit).toHaveBeenCalledWith(
+        'UserPasswordChanged',
+        expect.objectContaining({ userId: 'u-1' }),
+      );
     });
 
     it('should set password for OAuth-only users without current password', async () => {
@@ -526,11 +683,18 @@ describe('AuthService', () => {
       };
       userRepository.findOne.mockResolvedValue(user);
 
-      await service.changePassword('u-1', { newPassword: 'NewPassword1!' }, 'fam-1');
+      await service.changePassword(
+        'u-1',
+        { newPassword: 'NewPassword1!' },
+        'fam-1',
+      );
 
       expect(passwordService.verifyPassword).not.toHaveBeenCalled();
       expect(user.passwordHash).toBe('hashed_pass');
-      expect(sessionService.revokeAllSessionsExcept).toHaveBeenCalledWith('u-1', 'fam-1');
+      expect(sessionService.revokeAllSessionsExcept).toHaveBeenCalledWith(
+        'u-1',
+        'fam-1',
+      );
     });
   });
 });

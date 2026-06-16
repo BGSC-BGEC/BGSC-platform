@@ -13,13 +13,18 @@ export class TotpService {
   constructor(private readonly configService: ConfigService) {
     const keyStr = this.configService.get<string>('auth.totp.encryptionKey');
     if (!keyStr) {
-      throw new InternalServerErrorException('TOTP encryption key is not configured');
+      throw new InternalServerErrorException(
+        'TOTP encryption key is not configured',
+      );
     }
     if (!/^[a-fA-F0-9]{64}$/.test(keyStr)) {
-      throw new InternalServerErrorException('TOTP encryption key must be 32 bytes encoded as hex');
+      throw new InternalServerErrorException(
+        'TOTP encryption key must be 32 bytes encoded as hex',
+      );
     }
     this.encryptionKey = Buffer.from(keyStr, 'hex');
-    this.issuer = this.configService.get<string>('auth.totp.issuer') || 'BGSC Platform';
+    this.issuer =
+      this.configService.get<string>('auth.totp.issuer') || 'BGSC Platform';
   }
 
   generateSecret(): string {
@@ -29,12 +34,12 @@ export class TotpService {
   encryptSecret(secret: string): string {
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv('aes-256-gcm', this.encryptionKey, iv);
-    
+
     let encrypted = cipher.update(secret, 'utf8', 'hex');
     encrypted += cipher.final('hex');
-    
+
     const authTag = cipher.getAuthTag().toString('hex');
-    
+
     return `${iv.toString('hex')}:${authTag}:${encrypted}`;
   }
 
@@ -43,19 +48,19 @@ export class TotpService {
     if (parts.length !== 3) {
       throw new InternalServerErrorException('Invalid encrypted secret format');
     }
-    
+
     const [ivHex, authTagHex, encrypted] = parts;
-    
+
     const decipher = crypto.createDecipheriv(
-      'aes-256-gcm', 
-      this.encryptionKey, 
-      Buffer.from(ivHex, 'hex')
+      'aes-256-gcm',
+      this.encryptionKey,
+      Buffer.from(ivHex, 'hex'),
     );
     decipher.setAuthTag(Buffer.from(authTagHex, 'hex'));
-    
+
     let decrypted = decipher.update(encrypted, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
-    
+
     return decrypted;
   }
 
@@ -77,10 +82,14 @@ export class TotpService {
     return result.valid;
   }
 
-  async generateBackupCodes(): Promise<{ plainTextCodes: string[]; hashedCodes: string[] }> {
+  async generateBackupCodes(): Promise<{
+    plainTextCodes: string[];
+    hashedCodes: string[];
+  }> {
     const plainTextCodes: string[] = [];
     const hashedCodes: string[] = [];
-    const saltRounds = this.configService.get<number>('auth.bcrypt.saltRounds') || 12;
+    const saltRounds =
+      this.configService.get<number>('auth.bcrypt.saltRounds') || 12;
 
     for (let i = 0; i < 10; i++) {
       const code = crypto.randomBytes(4).toString('hex'); // 8 hex chars

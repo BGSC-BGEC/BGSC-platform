@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThanOrEqual, Repository } from 'typeorm';
 import { UserCredential } from '../entities/user-credential.entity';
@@ -72,7 +77,9 @@ export class AccountService {
     actorId: string,
     targetUserId: string,
   ): Promise<{ message: string }> {
-    const user = await this.userRepository.findOne({ where: { id: targetUserId } });
+    const user = await this.userRepository.findOne({
+      where: { id: targetUserId },
+    });
     if (!user) {
       throw new NotFoundException('Account not found');
     }
@@ -116,7 +123,9 @@ export class AccountService {
       timestamp: new Date().toISOString(),
     });
 
-    this.logger.log(`Account deletion scheduled: userId=${userId}, scheduledFor=${user.deletionScheduled.toISOString()}`);
+    this.logger.log(
+      `Account deletion scheduled: userId=${userId}, scheduledFor=${user.deletionScheduled.toISOString()}`,
+    );
 
     return { message: 'Account scheduled for deletion in 30 days' };
   }
@@ -179,6 +188,8 @@ export class AccountService {
 
     this.logger.log(`Data export requested: userId=${userId}`);
 
-    return { message: 'Data export request submitted. You will receive an email.' };
+    return {
+      message: 'Data export request submitted. You will receive an email.',
+    };
   }
 }

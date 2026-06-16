@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import Redis from 'ioredis';
@@ -29,6 +35,33 @@ export interface GoogleProfilePayload {
   picture?: string;
 }
 
+export interface AuthUserResponse {
+  id: string;
+  username: string;
+  email: string;
+  role: UserRole;
+}
+
+export interface RegisterResult {
+  user: AuthUserResponse;
+  accessToken: string;
+  refreshToken: string;
+  isNewUser: boolean;
+}
+
+export type LoginResult =
+  | {
+      requiresTOTP: true;
+      tempToken: string;
+    }
+  | {
+      requiresTOTP: false;
+      user: AuthUserResponse;
+      accessToken: string;
+      refreshToken: string;
+      isNewUser: boolean;
+    };
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -50,7 +83,7 @@ export class AuthService {
     dto: RegisterDto,
     ip: string,
     userAgent: string,
-  ): Promise<{ user: any; accessToken: string; refreshToken: string; isNewUser: boolean }> {
+  ): Promise<RegisterResult> {
     const normalizedEmail = dto.email.toLowerCase().trim();
     const normalizedUsername = dto.username.toLowerCase().trim();
 
@@ -79,8 +112,19 @@ export class AuthService {
     });
     await this.userRepository.save(user);
 
-    const { raw: refreshToken, hash: tokenHash, familyId } = this.tokenService.generateRefreshToken(user.id);
-    await this.sessionService.createSession(user.id, tokenHash, familyId, ip, userAgent, true);
+    const {
+      raw: refreshToken,
+      hash: tokenHash,
+      familyId,
+    } = this.tokenService.generateRefreshToken(user.id);
+    await this.sessionService.createSession(
+      user.id,
+      tokenHash,
+      familyId,
+      ip,
+      userAgent,
+      true,
+    );
 
     const accessToken = this.tokenService.signAccessToken(user);
 
@@ -113,30 +157,60 @@ export class AuthService {
     const normalized = usernameOrEmail.toLowerCase().trim();
 
     const user = await this.userRepository.findOne({
-      where: [
-        { username: normalized },
-        { email: normalized },
-      ],
+      where: [{ username: normalized }, { email: normalized }],
     });
 
     if (!user) {
-      await this.logLoginAttempt(undefined, ip, userAgent, 'local', false, 'invalid_credentials');
+      await this.logLoginAttempt(
+        undefined,
+        ip,
+        userAgent,
+        'local',
+        false,
+        'invalid_credentials',
+      );
       throw new InvalidCredentialsException();
     }
 
     if (user.status === UserStatus.DISABLED) {
-      await this.logLoginAttempt(user.id, ip, userAgent, 'local', false, 'account_disabled');
-      throw new AccountDisabledException('Account is disabled. Contact support.');
+      await this.logLoginAttempt(
+        user.id,
+        ip,
+        userAgent,
+        'local',
+        false,
+        'account_disabled',
+      );
+      throw new AccountDisabledException(
+        'Account is disabled. Contact support.',
+      );
     }
 
     if (!user.passwordHash) {
-      await this.logLoginAttempt(user.id, ip, userAgent, 'local', false, 'no_password_set');
+      await this.logLoginAttempt(
+        user.id,
+        ip,
+        userAgent,
+        'local',
+        false,
+        'no_password_set',
+      );
       throw new InvalidCredentialsException();
     }
 
-    const isValid = await this.passwordService.verifyPassword(pass, user.passwordHash);
+    const isValid = await this.passwordService.verifyPassword(
+      pass,
+      user.passwordHash,
+    );
     if (!isValid) {
-      await this.logLoginAttempt(user.id, ip, userAgent, 'local', false, 'invalid_credentials');
+      await this.logLoginAttempt(
+        user.id,
+        ip,
+        userAgent,
+        'local',
+        false,
+        'invalid_credentials',
+      );
       throw new InvalidCredentialsException();
     }
 
@@ -149,17 +223,31 @@ export class AuthService {
     ip: string,
     userAgent: string,
     keepMeLoggedIn?: boolean,
-  ): Promise<{ requiresTOTP: boolean; tempToken?: string; user?: any; accessToken?: string; refreshToken?: string; isNewUser?: boolean }> {
+  ): Promise<LoginResult> {
     if (user.totpEnabled) {
-      const tempToken = this.tokenService.signTempToken(user.id, 'totp_verification');
+      const tempToken = this.tokenService.signTempToken(
+        user.id,
+        'totp_verification',
+      );
       return {
         requiresTOTP: true,
         tempToken,
       };
     }
 
-    const { raw: refreshToken, hash: tokenHash, familyId } = this.tokenService.generateRefreshToken(user.id);
-    await this.sessionService.createSession(user.id, tokenHash, familyId, ip, userAgent, !!keepMeLoggedIn);
+    const {
+      raw: refreshToken,
+      hash: tokenHash,
+      familyId,
+    } = this.tokenService.generateRefreshToken(user.id);
+    await this.sessionService.createSession(
+      user.id,
+      tokenHash,
+      familyId,
+      ip,
+      userAgent,
+      !!keepMeLoggedIn,
+    );
 
     const accessToken = this.tokenService.signAccessToken(user);
 
@@ -185,7 +273,9 @@ export class AuthService {
     };
   }
 
-  async findOrCreateGoogleUser(profile: GoogleProfilePayload): Promise<{ user: UserCredential; isNewUser: boolean }> {
+  async findOrCreateGoogleUser(
+    profile: GoogleProfilePayload,
+  ): Promise<{ user: UserCredential; isNewUser: boolean }> {
     const existingByGoogleId = await this.userRepository.findOne({
       where: { googleId: profile.googleId },
     });
@@ -206,10 +296,13 @@ export class AuthService {
     }
 
     if (!normalizedEmail) {
-      throw new ConflictException('Google account must provide a verified email to register');
+      throw new ConflictException(
+        'Google account must provide a verified email to register',
+      );
     }
 
-    const generatedUsername = await this.generateUniqueUsername(normalizedEmail);
+    const generatedUsername =
+      await this.generateUniqueUsername(normalizedEmail);
 
     const created = this.userRepository.create({
       username: generatedUsername,
@@ -237,14 +330,38 @@ export class AuthService {
     isNewUser: boolean,
     ip: string,
     userAgent: string,
-  ): Promise<{ accessToken: string; refreshToken: string; isNewUser: boolean }> {
+  ): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    isNewUser: boolean;
+  }> {
     if (user.status === UserStatus.DISABLED) {
-      await this.logLoginAttempt(user.id, ip, userAgent, 'google', false, 'account_disabled');
-      throw new AccountDisabledException('Account is disabled. Contact support.');
+      await this.logLoginAttempt(
+        user.id,
+        ip,
+        userAgent,
+        'google',
+        false,
+        'account_disabled',
+      );
+      throw new AccountDisabledException(
+        'Account is disabled. Contact support.',
+      );
     }
 
-    const { raw: refreshToken, hash: tokenHash, familyId } = this.tokenService.generateRefreshToken(user.id);
-    await this.sessionService.createSession(user.id, tokenHash, familyId, ip, userAgent, true);
+    const {
+      raw: refreshToken,
+      hash: tokenHash,
+      familyId,
+    } = this.tokenService.generateRefreshToken(user.id);
+    await this.sessionService.createSession(
+      user.id,
+      tokenHash,
+      familyId,
+      ip,
+      userAgent,
+      true,
+    );
 
     const accessToken = this.tokenService.signAccessToken(user);
 
@@ -267,14 +384,21 @@ export class AuthService {
   }
 
   private async generateUniqueUsername(email: string): Promise<string> {
-    const basePrefix = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '').toLowerCase() || 'user';
+    const basePrefix =
+      email
+        .split('@')[0]
+        .replace(/[^a-zA-Z0-9_]/g, '')
+        .toLowerCase() || 'user';
 
     for (let attempt = 0; attempt < 10; attempt++) {
-      const candidate = attempt === 0
-        ? basePrefix.slice(0, 46)
-        : `${basePrefix.slice(0, 42)}.${randomBytes(2).toString('hex')}`;
+      const candidate =
+        attempt === 0
+          ? basePrefix.slice(0, 46)
+          : `${basePrefix.slice(0, 42)}.${randomBytes(2).toString('hex')}`;
 
-      const collision = await this.userRepository.findOne({ where: { username: candidate } });
+      const collision = await this.userRepository.findOne({
+        where: { username: candidate },
+      });
       if (!collision) {
         return candidate;
       }
@@ -287,9 +411,14 @@ export class AuthService {
     rawToken: string,
     ip: string,
     userAgent: string,
-  ): Promise<{ accessToken: string; refreshToken: string; keepMeLoggedIn: boolean }> {
+  ): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    keepMeLoggedIn: boolean;
+  }> {
     const parts = rawToken.split('.');
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const randomHexRegex = /^[0-9a-f]{64}$/i;
 
     if (
@@ -298,7 +427,14 @@ export class AuthService {
       !uuidRegex.test(parts[1]) ||
       !randomHexRegex.test(parts[2])
     ) {
-      await this.logLoginAttempt(undefined, ip, userAgent, 'refresh', false, 'malformed_token');
+      await this.logLoginAttempt(
+        undefined,
+        ip,
+        userAgent,
+        'refresh',
+        false,
+        'malformed_token',
+      );
       throw new InvalidCredentialsException();
     }
 
@@ -311,12 +447,20 @@ export class AuthService {
 
     if (!user || user.status !== UserStatus.ACTIVE) {
       await this.sessionService.revokeSession(userId, familyId);
-      await this.logLoginAttempt(user?.id, ip, userAgent, 'refresh', false, user ? 'account_inactive' : 'invalid_token');
+      await this.logLoginAttempt(
+        user?.id,
+        ip,
+        userAgent,
+        'refresh',
+        false,
+        user ? 'account_inactive' : 'invalid_token',
+      );
       throw new InvalidCredentialsException();
     }
 
-    const { raw: newRefreshToken, hash: newTokenHash } = this.tokenService.generateRefreshToken(userId, familyId);
-    
+    const { raw: newRefreshToken, hash: newTokenHash } =
+      this.tokenService.generateRefreshToken(userId, familyId);
+
     try {
       const keepMeLoggedIn = await this.sessionService.validateAndRotateSession(
         userId,
@@ -330,7 +474,6 @@ export class AuthService {
       const accessToken = this.tokenService.signAccessToken(user);
       await this.logLoginAttempt(user.id, ip, userAgent, 'refresh', true);
 
-
       return {
         accessToken,
         refreshToken: newRefreshToken,
@@ -343,7 +486,9 @@ export class AuthService {
         userAgent,
         'refresh',
         false,
-        err instanceof TokenReuseDetectedException ? 'token_reuse' : 'invalid_token',
+        err instanceof TokenReuseDetectedException
+          ? 'token_reuse'
+          : 'invalid_token',
       );
       if (err instanceof TokenReuseDetectedException) {
         // Log token reuse / breach
@@ -358,9 +503,14 @@ export class AuthService {
     }
   }
 
-  async logout(userId: string, familyId: string, jti: string, exp: number): Promise<void> {
+  async logout(
+    userId: string,
+    familyId: string,
+    jti: string,
+    exp: number,
+  ): Promise<void> {
     await this.sessionService.revokeSession(userId, familyId);
-    
+
     const remainingTtl = Math.max(1, exp - Math.floor(Date.now() / 1000));
     await this.sessionService.blacklistJti(jti, remainingTtl);
   }
@@ -380,9 +530,14 @@ export class AuthService {
 
   async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
     const normalizedEmail = dto.email.toLowerCase().trim();
-    const response = { message: 'If an account with that email exists, a reset link has been sent.' };
+    const response = {
+      message:
+        'If an account with that email exists, a reset link has been sent.',
+    };
 
-    const user = await this.userRepository.findOne({ where: { email: normalizedEmail } });
+    const user = await this.userRepository.findOne({
+      where: { email: normalizedEmail },
+    });
     if (!user || user.status !== UserStatus.ACTIVE) {
       return response;
     }
@@ -404,7 +559,10 @@ export class AuthService {
 
       await this.emailService.sendPasswordResetEmail(user.email, raw);
     } catch (error) {
-      this.logger.error(`Password reset request failed for user ${user.id}`, error instanceof Error ? error.stack : undefined);
+      this.logger.error(
+        `Password reset request failed for user ${user.id}`,
+        error instanceof Error ? error.stack : undefined,
+      );
     }
 
     return response;
@@ -418,7 +576,9 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired reset token');
     }
 
-    user.passwordHash = await this.passwordService.hashPassword(dto.newPassword);
+    user.passwordHash = await this.passwordService.hashPassword(
+      dto.newPassword,
+    );
     user.passwordResetTokenHash = null;
     user.passwordResetExpires = null;
     await this.userRepository.save(user);
@@ -449,16 +609,23 @@ export class AuthService {
         throw new BadRequestException('Current password is required');
       }
       if (dto.currentPassword === dto.newPassword) {
-        throw new BadRequestException('New password must be different from current password');
+        throw new BadRequestException(
+          'New password must be different from current password',
+        );
       }
 
-      const currentPasswordValid = await this.passwordService.verifyPassword(dto.currentPassword, user.passwordHash);
+      const currentPasswordValid = await this.passwordService.verifyPassword(
+        dto.currentPassword,
+        user.passwordHash,
+      );
       if (!currentPasswordValid) {
         throw new InvalidCredentialsException();
       }
     }
 
-    user.passwordHash = await this.passwordService.hashPassword(dto.newPassword);
+    user.passwordHash = await this.passwordService.hashPassword(
+      dto.newPassword,
+    );
     user.passwordResetTokenHash = null;
     user.passwordResetExpires = null;
     await this.userRepository.save(user);
@@ -473,7 +640,9 @@ export class AuthService {
     return { message: 'Password changed successfully.' };
   }
 
-  private async findUserForPasswordReset(tokenHash: string): Promise<UserCredential | null> {
+  private async findUserForPasswordReset(
+    tokenHash: string,
+  ): Promise<UserCredential | null> {
     const key = this.getPasswordResetKey(tokenHash);
     const reset = await this.redis.hgetall(key);
     let user: UserCredential | null = null;
@@ -481,14 +650,19 @@ export class AuthService {
     if (reset?.userId) {
       user = await this.userRepository.findOne({ where: { id: reset.userId } });
     } else {
-      user = await this.userRepository.findOne({ where: { passwordResetTokenHash: tokenHash } });
+      user = await this.userRepository.findOne({
+        where: { passwordResetTokenHash: tokenHash },
+      });
     }
 
     if (!user || user.status !== UserStatus.ACTIVE) {
       return null;
     }
 
-    if (user.passwordResetTokenHash !== tokenHash || !user.passwordResetExpires) {
+    if (
+      user.passwordResetTokenHash !== tokenHash ||
+      !user.passwordResetExpires
+    ) {
       return null;
     }
 

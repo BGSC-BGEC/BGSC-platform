@@ -14,11 +14,11 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     });
   }
 
-  async validate(
+  validate(
     accessToken: string,
     refreshToken: string,
     profile: Profile,
-  ): Promise<{
+  ): {
     accessToken: string;
     refreshToken: string;
     googleId: string;
@@ -27,7 +27,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
     firstName: string | undefined;
     lastName: string | undefined;
     picture: string | undefined;
-  }> {
+  } {
     const primaryEmail = profile.emails?.[0];
 
     return {
