@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package*.json nest-cli.json tsconfig*.json ./
 RUN npm ci
 
-COPY src ./src
+COPY apps/user-service ./apps/user-service
 
 RUN npm run build
 
@@ -18,6 +18,6 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 
-EXPOSE 3000
+EXPOSE 3002
 
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/apps/user-service/main"]

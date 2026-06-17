@@ -5,9 +5,9 @@ WORKDIR /app
 COPY package*.json nest-cli.json tsconfig*.json ./
 RUN npm ci
 
-COPY src ./src
+COPY apps/auth-service ./apps/auth-service
 
-RUN npm run build
+RUN npm run build auth-service
 
 RUN npm prune --omit=dev
 
@@ -18,6 +18,6 @@ WORKDIR /app
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 
-EXPOSE 3000
+EXPOSE 3001
 
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/apps/auth-service/main.js"]
