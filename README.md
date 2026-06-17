@@ -1,1 +1,0 @@
-# BGSC-Application-Backend
