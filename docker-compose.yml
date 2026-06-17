@@ -1,0 +1,115 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bgsc-postgres
+    ports:
+      - '5432:5432'
+    environment:
+      POSTGRES_USER: bgsc
+      POSTGRES_PASSWORD: bgsc_pass
+      POSTGRES_DB: bgsc_dev
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bgsc -d bgsc_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bgsc-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: bgsc-redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bgsc-network
+
+  backend:
+    build: ./backend
+    container_name: bgsc-backend
+    ports:
+      - '3000:3000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 3000
+      NODE_ENV: development
+      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev_secret_change_in_prod
+    networks:
+      - bgsc-network
+
+  user-service:
+    build:
+      context: ./backend
+      dockerfile: apps/user-service/Dockerfile
+    container_name: bgsc-user-service
+    ports:
+      - '3002:3002'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3002
+      NODE_ENV: development
+      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
+      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      JWT_ISSUER: bgsc-auth-service
+    networks:
+      - bgsc-network
+
+  auth-service:
+    build:
+      context: ./backend
+      dockerfile: apps/auth-service/Dockerfile
+    container_name: bgsc-auth-service
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      NODE_ENV: development
+      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      JWT_REFRESH_SECRET: dev_refresh_secret_change_in_prod_1234567890abcdef
+      GOOGLE_CLIENT_ID: dummy_google_client_id
+      GOOGLE_CLIENT_SECRET: dummy_google_client_secret
+      GOOGLE_CALLBACK_URL: http://localhost:3001/auth/google/callback
+      AUTH_TOTP_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      SMTP_HOST: smtp.mailtrap.io
+      SMTP_PORT: 2525
+      SMTP_USER: dummy_smtp_user
+      SMTP_PASSWORD: dummy_smtp_password
+      SMTP_FROM: noreply@bgsc-platform.in
+      CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
+      BCRYPT_SALT_ROUNDS: 12
+    networks:
+      - bgsc-network
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  bgsc-network:
+    driver: bridge
