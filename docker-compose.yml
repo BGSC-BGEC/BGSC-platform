@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:16-alpine
@@ -35,22 +33,29 @@ services:
     networks:
       - bgsc-network
 
-  backend:
+  # The root backend app (backend/src) IS the API Gateway — the public entry
+  # point that routes to the auth/user microservices in backend/apps/*.
+  api-gateway:
     build: ./backend
-    container_name: bgsc-backend
+    container_name: bgsc-api-gateway
     ports:
       - '3000:3000'
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
+      auth-service:
+        condition: service_started
+      user-service:
+        condition: service_started
     environment:
       PORT: 3000
       NODE_ENV: development
-      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
       REDIS_URL: redis://redis:6379
-      JWT_SECRET: dev_secret_change_in_prod
+      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      JWT_ISSUER: bgsc-auth-service
+      AUTH_SERVICE_URL: http://auth-service:3001
+      USER_SERVICE_URL: http://user-service:3002
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
     networks:
       - bgsc-network
 
@@ -59,8 +64,10 @@ services:
       context: ./backend
       dockerfile: apps/user-service/Dockerfile
     container_name: bgsc-user-service
-    ports:
-      - '3002:3002'
+    # Internal only — reachable by the gateway via the bgsc-network, not the
+    # host. docker-compose.override.yml republishes this for local dev.
+    expose:
+      - '3002'
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,8 +85,10 @@ services:
       context: ./backend
       dockerfile: apps/auth-service/Dockerfile
     container_name: bgsc-auth-service
-    ports:
-      - '3001:3001'
+    # Internal only — reachable by the gateway via the bgsc-network, not the
+    # host. docker-compose.override.yml republishes this for local dev.
+    expose:
+      - '3001'
     depends_on:
       postgres:
         condition: service_healthy

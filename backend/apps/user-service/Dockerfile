@@ -7,7 +7,7 @@ RUN npm ci
 
 COPY apps/user-service ./apps/user-service
 
-RUN npm run build
+RUN npm run build user-service
 
 RUN npm prune --omit=dev
 
@@ -20,4 +20,4 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 3002
 
-CMD ["node", "dist/apps/user-service/main"]
+CMD ["node", "dist/apps/user-service/main.js"]
