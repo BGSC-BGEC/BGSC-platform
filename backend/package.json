@@ -38,6 +38,7 @@
     "class-validator": "^0.15.1",
     "cookie-parser": "^1.4.7",
     "helmet": "^8.2.0",
+    "http-proxy-middleware": "^3.0.3",
     "ioredis": "^5.11.1",
     "joi": "^18.2.1",
     "nodemailer": "^9.0.0",
@@ -109,6 +110,7 @@
     "coverageDirectory": "./coverage",
     "testEnvironment": "node",
     "roots": [
+      "<rootDir>/src/",
       "<rootDir>/apps/"
     ],
     "transformIgnorePatterns": [

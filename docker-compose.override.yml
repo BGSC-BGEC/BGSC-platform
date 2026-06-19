@@ -1,0 +1,19 @@
+# Local development overrides — auto-merged by `docker compose up`.
+#
+# The base docker-compose.yml is the FINAL, locked-down topology: only the
+# api-gateway (:3000) is published; auth-service and user-service are reachable
+# only internally via the gateway. This file republishes those service ports to
+# the host so you can hit them directly during development (debugging, Swagger
+# at /auth/docs, etc.).
+#
+# Toggle:
+#   docker compose up                          -> DEV (this override applies; :3001/:3002 exposed)
+#   docker compose -f docker-compose.yml up    -> LOCKED (gateway-only; production-like)
+services:
+  auth-service:
+    ports:
+      - '3001:3001'
+
+  user-service:
+    ports:
+      - '3002:3002'

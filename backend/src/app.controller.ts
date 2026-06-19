@@ -1,12 +1,22 @@
 import { Controller, Get } from '@nestjs/common';
-import { AppService } from './app.service';
 
+/**
+ * Local routes served by the gateway itself (not proxied). Everything else is
+ * routed to the downstream services by the edge pipeline in `main.ts`.
+ */
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  @Get('health')
+  health() {
+    return {
+      status: 'ok',
+      service: 'api-gateway',
+      timestamp: new Date().toISOString(),
+    };
+  }
 
   @Get()
-  getHello(): string {
-    return this.appService.getHello();
+  root() {
+    return { service: 'api-gateway', status: 'ok' };
   }
 }
