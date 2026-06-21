@@ -9,21 +9,6 @@ export class CreateSponsorsAndAffiliations1762000000000
     await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
 
     await queryRunner.query(`
-      CREATE TABLE IF NOT EXISTS "users" (
-        "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
-        "username" character varying(50) NOT NULL,
-        "email" character varying(320) NOT NULL,
-        "role" character varying(50) NOT NULL DEFAULT 'user',
-        "status" character varying(50) NOT NULL DEFAULT 'active',
-        "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-        "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
-        CONSTRAINT "PK_users_id" PRIMARY KEY ("id"),
-        CONSTRAINT "UQ_users_username" UNIQUE ("username"),
-        CONSTRAINT "UQ_users_email" UNIQUE ("email")
-      )
-    `);
-
-    await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS "sponsors" (
         "id" uuid NOT NULL DEFAULT uuid_generate_v4(),
         "name" character varying(120) NOT NULL,
@@ -53,7 +38,6 @@ export class CreateSponsorsAndAffiliations1762000000000
         "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
         "updated_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
         CONSTRAINT "PK_user_sponsor_affiliations_id" PRIMARY KEY ("id"),
-        CONSTRAINT "FK_user_sponsor_affiliations_user" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE,
         CONSTRAINT "FK_user_sponsor_affiliations_sponsor" FOREIGN KEY ("sponsor_id") REFERENCES "sponsors"("id") ON DELETE CASCADE
       )
     `);

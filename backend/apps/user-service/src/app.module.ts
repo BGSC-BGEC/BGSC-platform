@@ -2,12 +2,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
-import {
-  userConfig,
-  userConfigValidationSchema,
-} from './config/user.config';
+import { userConfig, userConfigValidationSchema } from './config/user.config';
 import { UsersModule } from './users/users.module';
 import { AddUserProfileColumns1750000000000 } from './migrations/1750000000000-AddUserProfileColumns';
+import { AddLastSponsorChange1762000001000 } from './migrations/1762000001000-AddLastSponsorChange';
 
 @Module({
   imports: [
@@ -24,7 +22,10 @@ import { AddUserProfileColumns1750000000000 } from './migrations/1750000000000-A
         url: configService.get<string>('user.db.url'),
         autoLoadEntities: true,
         synchronize: false,
-        migrations: [AddUserProfileColumns1750000000000],
+        migrations: [
+          AddUserProfileColumns1750000000000,
+          AddLastSponsorChange1762000001000,
+        ],
         migrationsRun: true,
       }),
     }),

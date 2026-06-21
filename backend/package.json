@@ -108,7 +108,19 @@
     "collectCoverageFrom": [
       "src/**/*.(t|j)s",
       "apps/**/*.(t|j)s",
-      "!**/*.spec.ts"
+      "!**/*.spec.ts",
+      "!**/*.e2e-spec.ts",
+      "!**/main.ts",
+      "!**/*.module.ts",
+      "!**/migrations/**",
+      "!**/dto/**",
+      "!**/entities/**",
+      "!**/enums/**",
+      "!**/strategies/**",
+      "!**/*.strategy.ts",
+      "!**/*.config.ts",
+      "!**/*.decorator.ts",
+      "!src/seed.ts"
     ],
     "coverageDirectory": "./coverage",
     "testEnvironment": "node",

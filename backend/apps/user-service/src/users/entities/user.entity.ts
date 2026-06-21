@@ -63,6 +63,9 @@ export class User {
   @Column({ name: 'last_active', type: 'timestamptz', nullable: true })
   lastActive?: Date | null;
 
+  @Column({ name: 'last_sponsor_change', type: 'timestamptz', nullable: true })
+  lastSponsorChange?: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

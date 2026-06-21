@@ -8,6 +8,9 @@ import { LocalAuthGuard } from '../src/guards/local-auth.guard';
 import { JwtAuthGuard } from '../src/guards/jwt-auth.guard';
 import { GoogleAuthGuard } from '../src/guards/google-auth.guard';
 import { EmailAlreadyLinkedException } from '../src/exceptions/email-already-linked.exception';
+import { UserRole, UserStatus } from '../src/constants/roles.constant';
+import type { JwtPayload } from '../src/interfaces/jwt-payload.interface';
+import type { UserCredential } from '../src/entities/user-credential.entity';
 
 interface MockRes {
   status: jest.Mock;
@@ -46,6 +49,30 @@ describe('AuthController', () => {
     res.redirect = jest.fn().mockReturnValue(res);
     return res;
   };
+
+  const mockCredential = (
+    partial: Partial<UserCredential> = {},
+  ): UserCredential =>
+    ({
+      id: '1',
+      username: 'testuser',
+      email: 'test@example.com',
+      role: UserRole.USER,
+      status: UserStatus.ACTIVE,
+      totpEnabled: false,
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      ...partial,
+    }) as UserCredential;
+
+  const mockJwtPayload = (partial: Partial<JwtPayload> = {}): JwtPayload => ({
+    sub: '1',
+    username: 'testuser',
+    email: 'test@example.com',
+    role: UserRole.USER,
+    jti: 'jti-1',
+    ...partial,
+  });
 
   beforeEach(async () => {
     authService = {
@@ -265,7 +292,7 @@ describe('AuthController', () => {
       };
       authService.login.mockResolvedValue(mockResult);
 
-      const user = { id: '1', username: 'testuser' };
+      const user = mockCredential();
       const req = { headers: {}, socket: {} } as unknown as Request;
       const res = mockResponse();
 
@@ -296,7 +323,7 @@ describe('AuthController', () => {
       };
       authService.login.mockResolvedValue(mockResult);
 
-      const user = { id: '1', username: 'testuser' };
+      const user = mockCredential();
       const req = { headers: {}, socket: {} } as unknown as Request;
       const res = mockResponse();
 
@@ -359,7 +386,11 @@ describe('AuthController', () => {
         currentPassword: 'OldPassword1!',
         newPassword: 'NewPassword1!',
       };
-      const result = await controller.changePassword({ sub: userId }, dto, req);
+      const result = await controller.changePassword(
+        mockJwtPayload({ sub: userId }),
+        dto,
+        req,
+      );
 
       expect(authService.changePassword).toHaveBeenCalledWith(
         userId,

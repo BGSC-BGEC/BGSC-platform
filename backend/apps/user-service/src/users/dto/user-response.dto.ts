@@ -18,6 +18,7 @@ export class UserResponseDto {
   newsletterSubscriptions!: string[];
   activeSponsorId?: string | null;
   lastActive?: Date | null;
+  lastSponsorChange?: Date | null;
   createdAt!: Date;
   updatedAt!: Date;
 }

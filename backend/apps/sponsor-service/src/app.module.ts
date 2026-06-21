@@ -6,6 +6,8 @@ import {
   sponsorConfig,
   sponsorConfigValidationSchema,
 } from './config/sponsor.config';
+import { AddAffiliationUniqueness1763000000000 } from './migrations/1763000000000-AddAffiliationUniqueness';
+import { RemoveAffiliationUserForeignKey1763000001000 } from './migrations/1763000001000-RemoveAffiliationUserForeignKey';
 import { CreateSponsorsAndAffiliations1762000000000 } from './migrations/1762000000000-CreateSponsorsAndAffiliations';
 import { SponsorsModule } from './sponsors/sponsors.module';
 
@@ -24,7 +26,11 @@ import { SponsorsModule } from './sponsors/sponsors.module';
         url: configService.get<string>('sponsor.db.url'),
         autoLoadEntities: true,
         synchronize: false,
-        migrations: [CreateSponsorsAndAffiliations1762000000000],
+        migrations: [
+          CreateSponsorsAndAffiliations1762000000000,
+          AddAffiliationUniqueness1763000000000,
+          RemoveAffiliationUserForeignKey1763000001000,
+        ],
         migrationsRun: true,
       }),
     }),
