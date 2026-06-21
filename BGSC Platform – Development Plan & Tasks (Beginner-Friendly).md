@@ -218,7 +218,7 @@ Each client (mobile & web) follows the same MVVM pattern:
 |--------|------|-----------|------|---------|
 | [ ]    | PostgreSQL schema | – Run migrations for `users`, `events`, `registrations`, `sponsors`, `points_transactions`, `announcements` | 2 | — |
 | [ ]    | Redis cache layer | – Cache user sessions (refresh tokens) <br> – Cache event list (5 min TTL) | 1 | — |
-| [ ]    | Basic seeding | – Script to insert dummy users, sponsors, events | 0.5 | — |
+| [x]    | Basic seeding | – Script to insert dummy users, sponsors, events | 0.5 | Dhruvin (only Users for now to be maintianed when other tables come in) |
 
 ### Milestone 0.4 – Frontend Shell (Mobile + Web)
 

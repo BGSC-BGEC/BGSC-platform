@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./apps/auth-service/test/jest-e2e.json",
     "start:user-service": "nest start user-service",
     "start:user-service:dev": "nest start user-service --watch",
+    "seed": "ts-node src/seed.ts",
     "start:auth-service": "nest start auth-service",
     "start:auth-service:dev": "nest start auth-service --watch"
   },
