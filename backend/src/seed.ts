@@ -190,7 +190,7 @@ async function seed() {
   let skippedUsers = 0;
 
   for (const u of users) {
-    const existing = await ds.query(
+    const existing = await ds.query<Array<{ id: string }>>(
       'SELECT id FROM users WHERE username = $1 OR email = $2',
       [u.username, u.email],
     );
@@ -204,7 +204,7 @@ async function seed() {
 
     const passwordHash = await bcrypt.hash(u.password, SALT_ROUNDS);
 
-    const inserted = await ds.query(
+    const inserted = await ds.query<Array<{ id: string }>>(
       `INSERT INTO users (username, email, password_hash, role, status, interests, contact, points_balance, socials, settings, newsletter_subscriptions)
        VALUES ($1, $2, $3, $4, 'active', $5, $6, $7, '{}'::jsonb, '{}'::jsonb, '{}')
        RETURNING id`,
@@ -228,7 +228,7 @@ async function seed() {
   let upsertedSponsors = 0;
 
   for (const sponsor of sponsors) {
-    const result = await ds.query(
+    const result = await ds.query<Array<{ id: string }>>(
       `INSERT INTO sponsors (name, logo_url, description, website_url, tenure_start, tenure_end, status, total_fans)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 0)
        ON CONFLICT (name) DO UPDATE SET

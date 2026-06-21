@@ -57,7 +57,8 @@ describe('gatewayConfig', () => {
     process.env.AUTH_SERVICE_URL = 'http://auth.internal:3001';
     process.env.USER_SERVICE_URL = 'http://user.internal:3002';
     process.env.SPONSOR_SERVICE_URL = 'http://sponsor.internal:3003';
-    process.env.CORS_ORIGINS = 'https://app.example.com,https://admin.example.com';
+    process.env.CORS_ORIGINS =
+      'https://app.example.com,https://admin.example.com';
 
     expect(gatewayConfig()).toEqual({
       port: 3000,

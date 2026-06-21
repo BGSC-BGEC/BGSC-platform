@@ -110,8 +110,9 @@ export class SponsorsService {
   ): Promise<SponsorResponseDto> {
     const sponsor = await this.dataSource.transaction(async (manager) => {
       const sponsorRepository = manager.getRepository(Sponsor);
-      const affiliationRepository =
-        manager.getRepository(UserSponsorAffiliation);
+      const affiliationRepository = manager.getRepository(
+        UserSponsorAffiliation,
+      );
 
       const sponsor = await sponsorRepository.findOne({
         where: { id: sponsorId },
@@ -136,7 +137,9 @@ export class SponsorsService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!affiliation) {
-        throw new BadRequestException('User is not affiliated with this sponsor');
+        throw new BadRequestException(
+          'User is not affiliated with this sponsor',
+        );
       }
 
       affiliation.fanCount += dto.amount;

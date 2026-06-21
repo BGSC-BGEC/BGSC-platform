@@ -1,7 +1,4 @@
-import {
-  sponsorConfig,
-  sponsorConfigValidationSchema,
-} from './sponsor.config';
+import { sponsorConfig, sponsorConfigValidationSchema } from './sponsor.config';
 
 describe('sponsorConfig', () => {
   const originalEnv = process.env;

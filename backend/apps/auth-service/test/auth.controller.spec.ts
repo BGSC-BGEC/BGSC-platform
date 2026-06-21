@@ -52,18 +52,17 @@ describe('AuthController', () => {
 
   const mockCredential = (
     partial: Partial<UserCredential> = {},
-  ): UserCredential =>
-    ({
-      id: '1',
-      username: 'testuser',
-      email: 'test@example.com',
-      role: UserRole.USER,
-      status: UserStatus.ACTIVE,
-      totpEnabled: false,
-      createdAt: new Date('2026-01-01T00:00:00.000Z'),
-      updatedAt: new Date('2026-01-01T00:00:00.000Z'),
-      ...partial,
-    }) as UserCredential;
+  ): UserCredential => ({
+    id: '1',
+    username: 'testuser',
+    email: 'test@example.com',
+    role: UserRole.USER,
+    status: UserStatus.ACTIVE,
+    totpEnabled: false,
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...partial,
+  });
 
   const mockJwtPayload = (partial: Partial<JwtPayload> = {}): JwtPayload => ({
     sub: '1',

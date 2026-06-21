@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class RemoveAffiliationUserForeignKey1763000001000
-  implements MigrationInterface
-{
+export class RemoveAffiliationUserForeignKey1763000001000 implements MigrationInterface {
   name = 'RemoveAffiliationUserForeignKey1763000001000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

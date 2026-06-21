@@ -199,23 +199,25 @@ describe('SponsorsService', () => {
         }),
       } as unknown as EntityManager;
 
-      dataSource.transaction.mockImplementationOnce((async (
-        callbackOrIsolation:
-          | ((entityManager: EntityManager) => Promise<unknown>)
-          | string,
-        maybeCallback?: (entityManager: EntityManager) => Promise<unknown>,
-      ) => {
-        const callback =
-          typeof callbackOrIsolation === 'function'
-            ? callbackOrIsolation
-            : maybeCallback;
+      dataSource.transaction.mockImplementationOnce(
+        async (
+          callbackOrIsolation:
+            | ((entityManager: EntityManager) => Promise<unknown>)
+            | string,
+          maybeCallback?: (entityManager: EntityManager) => Promise<unknown>,
+        ) => {
+          const callback =
+            typeof callbackOrIsolation === 'function'
+              ? callbackOrIsolation
+              : maybeCallback;
 
-        if (!callback) {
-          throw new Error('Missing transaction callback');
-        }
+          if (!callback) {
+            throw new Error('Missing transaction callback');
+          }
 
-        return callback(manager);
-      }) as DataSource['transaction']);
+          return callback(manager);
+        },
+      );
 
       return { sponsorRepo, affiliationRepo, sponsor, affiliation };
     }

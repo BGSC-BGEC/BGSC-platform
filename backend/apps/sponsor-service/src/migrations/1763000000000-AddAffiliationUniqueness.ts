@@ -1,8 +1,6 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddAffiliationUniqueness1763000000000
-  implements MigrationInterface
-{
+export class AddAffiliationUniqueness1763000000000 implements MigrationInterface {
   name = 'AddAffiliationUniqueness1763000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
