@@ -17,3 +17,7 @@ services:
   user-service:
     ports:
       - '3002:3002'
+
+  sponsor-service:
+    ports:
+      - '3003:3003'

@@ -1,22 +1,33 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
+import { userConfig, userConfigValidationSchema } from './config/user.config';
 import { UsersModule } from './users/users.module';
 import { AddUserProfileColumns1750000000000 } from './migrations/1750000000000-AddUserProfileColumns';
+import { AddLastSponsorChange1762000001000 } from './migrations/1762000001000-AddLastSponsorChange';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
-    TypeOrmModule.forRoot({
-      type: 'postgres',
-      url:
-        process.env.DATABASE_URL ??
-        'postgresql://bgsc:bgsc_pass@localhost:5432/bgsc_dev',
-      autoLoadEntities: true,
-      synchronize: false,
-      migrations: [AddUserProfileColumns1750000000000],
-      migrationsRun: true,
+    ConfigModule.forRoot({
+      isGlobal: true,
+      load: [userConfig],
+      validationSchema: userConfigValidationSchema,
+    }),
+    TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        type: 'postgres',
+        url: configService.get<string>('user.db.url'),
+        autoLoadEntities: true,
+        synchronize: false,
+        migrations: [
+          AddUserProfileColumns1750000000000,
+          AddLastSponsorChange1762000001000,
+        ],
+        migrationsRun: true,
+      }),
     }),
     AuthModule,
     UsersModule,

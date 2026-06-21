@@ -218,7 +218,7 @@ Each client (mobile & web) follows the same MVVM pattern:
 |--------|------|-----------|------|---------|
 | [ ]    | PostgreSQL schema | – Run migrations for `users`, `events`, `registrations`, `sponsors`, `points_transactions`, `announcements` | 2 | — |
 | [ ]    | Redis cache layer | – Cache user sessions (refresh tokens) <br> – Cache event list (5 min TTL) | 1 | — |
-| [ ]    | Basic seeding | – Script to insert dummy users, sponsors, events | 0.5 | — |
+| [x]    | Basic seeding | – Script to insert dummy users, sponsors, events | 0.5 | Dhruvin (only Users for now to be maintianed when other tables come in) |
 
 ### Milestone 0.4 – Frontend Shell (Mobile + Web)
 
@@ -249,10 +249,10 @@ We split Phase 1 into **Backend (6 weeks)** and **Frontend (2 weeks)** so the ba
 
 | Status | Task                         | Sub‑tasks                                                                                                                          | Est. | Done By |
 |--------|------------------------------|------------------------------------------------------------------------------------------------------------------------------------|------|---------|
-| [ ]    | Sponsor service              | – CRUD for `sponsors` (name, logo, tenure_start/end) <br> – `UserSponsorAffiliation` table <br> – Endpoint: `GET /sponsors/active` | 2    | —       |
-| [ ]    | Onboarding sponsor selection | – `POST /users/me/sponsor` (with semester change limit) <br> – Validate that user can change only once per semester                | 1    | —       |
-| [ ]    | Basic fan counting           | – Emit `FanEarned` event when user wins an event (stub for now)                                                                    | 1    | —       |
-| [ ]    | Sponsor leaderboard          | – `GET /sponsors/leaderboard?sort=fans` – aggregate fan counts                                                                     | 1    | —       |
+| [x]    | Sponsor service              | – CRUD for `sponsors` (name, logo, tenure_start/end) <br> – `UserSponsorAffiliation` table <br> – Endpoint: `GET /sponsors/active` | 2    | Dhruvin       |
+| [x]    | Onboarding sponsor selection | – `POST /users/me/sponsor` (with semester change limit) <br> – Validate that user can change only once per semester                | 1    | Dhruvin       |
+| [x]    | Basic fan counting           | – `POST /sponsors/:id/fans` to award fans <br> – Emit `FanEarned` event via in-memory event bus (stub for Kafka)                     | 1    | Dhruvin       |
+| [x]    | Sponsor leaderboard          | – `GET /sponsors/leaderboard?sort=fans|events|users` – aggregate fan counts, events won, affiliated users                         | 1    | Dhruvin       |
 
 #### ✅ Milestone 1.2 – Events & Registration (Weeks 2‑3)
 

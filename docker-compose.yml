@@ -47,6 +47,8 @@ services:
         condition: service_started
       user-service:
         condition: service_started
+      sponsor-service:
+        condition: service_started
     environment:
       PORT: 3000
       NODE_ENV: development
@@ -55,6 +57,7 @@ services:
       JWT_ISSUER: bgsc-auth-service
       AUTH_SERVICE_URL: http://auth-service:3001
       USER_SERVICE_URL: http://user-service:3002
+      SPONSOR_SERVICE_URL: http://sponsor-service:3003
       CORS_ORIGINS: http://localhost:3000,http://localhost:5173
     networks:
       - bgsc-network
@@ -101,6 +104,7 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
       JWT_REFRESH_SECRET: dev_refresh_secret_change_in_prod_1234567890abcdef
+      JWT_ISSUER: bgsc-auth-service
       GOOGLE_CLIENT_ID: dummy_google_client_id
       GOOGLE_CLIENT_SECRET: dummy_google_client_secret
       GOOGLE_CALLBACK_URL: http://localhost:3001/auth/google/callback
@@ -112,6 +116,25 @@ services:
       SMTP_FROM: noreply@bgsc-platform.in
       CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
       BCRYPT_SALT_ROUNDS: 12
+    networks:
+      - bgsc-network
+
+  sponsor-service:
+    build:
+      context: ./backend
+      dockerfile: apps/sponsor-service/Dockerfile
+    container_name: bgsc-sponsor-service
+    expose:
+      - '3003'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3003
+      NODE_ENV: development
+      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
+      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      JWT_ISSUER: bgsc-auth-service
     networks:
       - bgsc-network
 

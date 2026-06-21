@@ -24,30 +24,74 @@ export class AddUserProfileColumns1750000000000 implements MigrationInterface {
     `);
 
     // Profile columns — all idempotent via IF NOT EXISTS
-    await queryRunner.query(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "contact" character varying(30)`);
-    await queryRunner.query(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "avatar_url" text`);
-    await queryRunner.query(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "interests" text[] NOT NULL DEFAULT '{}'`);
-    await queryRunner.query(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "socials" jsonb NOT NULL DEFAULT '{}'`);
-    await queryRunner.query(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "strava_id" character varying`);
-    await queryRunner.query(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "steam_id" character varying`);
-    await queryRunner.query(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "points_balance" integer NOT NULL DEFAULT 0`);
-    await queryRunner.query(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "settings" jsonb NOT NULL DEFAULT '{}'`);
-    await queryRunner.query(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "newsletter_subscriptions" text[] NOT NULL DEFAULT '{}'`);
-    await queryRunner.query(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "active_sponsor_id" uuid`);
-    await queryRunner.query(`ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "last_active" TIMESTAMP WITH TIME ZONE`);
+    await queryRunner.query(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "contact" character varying(30)`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "avatar_url" text`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "interests" text[] NOT NULL DEFAULT '{}'`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "socials" jsonb NOT NULL DEFAULT '{}'`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "strava_id" character varying`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "steam_id" character varying`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "points_balance" integer NOT NULL DEFAULT 0`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "settings" jsonb NOT NULL DEFAULT '{}'`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "newsletter_subscriptions" text[] NOT NULL DEFAULT '{}'`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "active_sponsor_id" uuid`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" ADD COLUMN IF NOT EXISTS "last_active" TIMESTAMP WITH TIME ZONE`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "last_active"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "active_sponsor_id"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "newsletter_subscriptions"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "settings"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "points_balance"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "steam_id"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "strava_id"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "socials"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "interests"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "avatar_url"`);
-    await queryRunner.query(`ALTER TABLE "users" DROP COLUMN IF EXISTS "contact"`);
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN IF EXISTS "last_active"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN IF EXISTS "active_sponsor_id"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN IF EXISTS "newsletter_subscriptions"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN IF EXISTS "settings"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN IF EXISTS "points_balance"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN IF EXISTS "steam_id"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN IF EXISTS "strava_id"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN IF EXISTS "socials"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN IF EXISTS "interests"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN IF EXISTS "avatar_url"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "users" DROP COLUMN IF EXISTS "contact"`,
+    );
   }
 }

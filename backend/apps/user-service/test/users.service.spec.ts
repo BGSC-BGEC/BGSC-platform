@@ -1,7 +1,13 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { CreateUserDto } from '../src/users/dto/create-user.dto';
+import { Sponsor } from '../src/users/entities/sponsor.entity';
 import { User } from '../src/users/entities/user.entity';
+import { UserSponsorAffiliation } from '../src/users/entities/user-sponsor-affiliation.entity';
 import { UserRole } from '../src/users/enums/user-role.enum';
 import { UserStatus } from '../src/users/enums/user-status.enum';
 import { UsersService } from '../src/users/users.service';
@@ -10,9 +16,19 @@ type UsersRepositoryMock = Pick<
   jest.Mocked<Repository<User>>,
   'create' | 'find' | 'findOneBy' | 'save'
 >;
+type SponsorsRepositoryMock = Pick<
+  jest.Mocked<Repository<Sponsor>>,
+  'findOneBy'
+>;
+type AffiliationsRepositoryMock = Pick<
+  jest.Mocked<Repository<UserSponsorAffiliation>>,
+  'create' | 'findOneBy' | 'save'
+>;
 
 describe('UsersService', () => {
   let repository: UsersRepositoryMock;
+  let sponsorsRepository: SponsorsRepositoryMock;
+  let affiliationsRepository: AffiliationsRepositoryMock;
   let service: UsersService;
 
   beforeEach(() => {
@@ -23,7 +39,21 @@ describe('UsersService', () => {
       save: jest.fn(),
     };
 
-    service = new UsersService(repository as unknown as Repository<User>);
+    sponsorsRepository = {
+      findOneBy: jest.fn(),
+    };
+
+    affiliationsRepository = {
+      create: jest.fn(),
+      findOneBy: jest.fn(),
+      save: jest.fn(),
+    };
+
+    service = new UsersService(
+      repository as unknown as Repository<User>,
+      sponsorsRepository as unknown as Repository<Sponsor>,
+      affiliationsRepository as unknown as Repository<UserSponsorAffiliation>,
+    );
   });
 
   it('creates a user with default role and active status', async () => {
@@ -111,6 +141,138 @@ describe('UsersService', () => {
 
     await expect(service.create(dto)).rejects.toBeInstanceOf(ConflictException);
   });
+
+  describe('selectSponsor', () => {
+    const sponsorId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+    const activeSponsor = makeSponsor({
+      id: sponsorId,
+      status: 'active',
+      tenureStart: '2026-01-01',
+      tenureEnd: '2026-12-31',
+    });
+
+    it('selects a sponsor and creates an affiliation', async () => {
+      const user = makeUser();
+      repository.findOneBy.mockResolvedValue(user);
+      sponsorsRepository.findOneBy.mockResolvedValue(activeSponsor);
+      repository.save.mockResolvedValue(user);
+      affiliationsRepository.findOneBy.mockResolvedValue(null);
+      affiliationsRepository.create.mockReturnValue(
+        makeAffiliation(user.id, sponsorId),
+      );
+      affiliationsRepository.save.mockResolvedValue(
+        makeAffiliation(user.id, sponsorId),
+      );
+
+      const result = await service.selectSponsor(user.id, sponsorId);
+
+      expect(result.activeSponsorId).toBe(sponsorId);
+      expect(result.lastSponsorChange).toBeNull();
+      expect(affiliationsRepository.create).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: user.id, sponsorId }),
+      );
+      expect(affiliationsRepository.save).toHaveBeenCalled();
+    });
+
+    it('returns user unchanged when selecting same sponsor', async () => {
+      const user = makeUser({ activeSponsorId: sponsorId });
+      repository.findOneBy.mockResolvedValue(user);
+      sponsorsRepository.findOneBy.mockResolvedValue(activeSponsor);
+
+      const result = await service.selectSponsor(user.id, sponsorId);
+
+      expect(result.activeSponsorId).toBe(sponsorId);
+      expect(affiliationsRepository.create).not.toHaveBeenCalled();
+    });
+
+    it('reuses an existing affiliation when switching back to a previous sponsor', async () => {
+      const user = makeUser({
+        activeSponsorId: 'other-sponsor-id',
+        lastSponsorChange: new Date('2025-01-01T00:00:00.000Z'),
+      });
+      repository.findOneBy.mockResolvedValue(user);
+      sponsorsRepository.findOneBy.mockResolvedValue(activeSponsor);
+      repository.save.mockResolvedValue(user);
+      affiliationsRepository.findOneBy.mockResolvedValue(
+        makeAffiliation(user.id, sponsorId),
+      );
+
+      const result = await service.selectSponsor(user.id, sponsorId);
+
+      expect(result.activeSponsorId).toBe(sponsorId);
+      expect(result.lastSponsorChange).toBeInstanceOf(Date);
+      expect(affiliationsRepository.create).not.toHaveBeenCalled();
+      expect(affiliationsRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException for missing sponsor', async () => {
+      const user = makeUser();
+      repository.findOneBy.mockResolvedValue(user);
+      sponsorsRepository.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.selectSponsor(user.id, 'missing-id'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws BadRequestException for inactive sponsor', async () => {
+      const user = makeUser();
+      repository.findOneBy.mockResolvedValue(user);
+      sponsorsRepository.findOneBy.mockResolvedValue(
+        makeSponsor({ id: sponsorId, status: 'inactive' }),
+      );
+
+      await expect(
+        service.selectSponsor(user.id, sponsorId),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('throws BadRequestException when sponsor tenure has not started', async () => {
+      const user = makeUser();
+      repository.findOneBy.mockResolvedValue(user);
+      sponsorsRepository.findOneBy.mockResolvedValue(
+        makeSponsor({
+          id: sponsorId,
+          status: 'active',
+          tenureStart: '2099-01-01',
+        }),
+      );
+
+      await expect(
+        service.selectSponsor(user.id, sponsorId),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('throws BadRequestException when sponsor tenure has ended', async () => {
+      const user = makeUser();
+      repository.findOneBy.mockResolvedValue(user);
+      sponsorsRepository.findOneBy.mockResolvedValue(
+        makeSponsor({
+          id: sponsorId,
+          status: 'active',
+          tenureStart: '2020-01-01',
+          tenureEnd: '2020-12-31',
+        }),
+      );
+
+      await expect(
+        service.selectSponsor(user.id, sponsorId),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('throws BadRequestException when changing sponsor twice in same semester', async () => {
+      const user = makeUser({
+        activeSponsorId: 'other-sponsor-id',
+        lastSponsorChange: new Date(),
+      });
+      repository.findOneBy.mockResolvedValue(user);
+      sponsorsRepository.findOneBy.mockResolvedValue(activeSponsor);
+
+      await expect(
+        service.selectSponsor(user.id, sponsorId),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
 });
 
 function makeUser(partial: Partial<User> = {}): User {
@@ -123,6 +285,7 @@ function makeUser(partial: Partial<User> = {}): User {
     id: 'd07dd637-4f44-4e65-b10e-f8db25356f3c',
     interests: [],
     lastActive: null,
+    lastSponsorChange: null,
     newsletterSubscriptions: [],
     pointsBalance: 0,
     role: UserRole.USER,
@@ -134,5 +297,35 @@ function makeUser(partial: Partial<User> = {}): User {
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     username: 'user1',
     ...partial,
+  });
+}
+
+function makeSponsor(partial: Partial<Sponsor> = {}): Sponsor {
+  return Object.assign(new Sponsor(), {
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
+    id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+    name: 'Test Sponsor',
+    status: 'active',
+    tenureEnd: null,
+    tenureStart: '2026-01-01',
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+    ...partial,
+  });
+}
+
+function makeAffiliation(
+  userId: string,
+  sponsorId: string,
+): UserSponsorAffiliation {
+  return Object.assign(new UserSponsorAffiliation(), {
+    affiliatedAt: new Date(),
+    createdAt: new Date(),
+    eventsWon: [],
+    fanCount: 0,
+    id: 'affiliation-id',
+    sponsorId,
+    totalPointsContributed: 0,
+    updatedAt: new Date(),
+    userId,
   });
 }

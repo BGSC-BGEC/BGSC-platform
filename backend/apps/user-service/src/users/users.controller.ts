@@ -15,6 +15,7 @@ import { CurrentUserId } from '../rbac/current-user-id.decorator';
 import { Roles } from '../rbac/roles.decorator';
 import { RolesGuard } from '../rbac/roles.guard';
 import { CreateUserDto } from './dto/create-user.dto';
+import { SelectSponsorDto } from './dto/select-sponsor.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
@@ -67,6 +68,24 @@ export class UsersController {
     @Body() updateMeDto: UpdateMeDto,
   ): Promise<UserResponseDto> {
     return this.usersService.updateMe(this.requireUserId(userId), updateMeDto);
+  }
+
+  @Post('me/sponsor')
+  @Roles(
+    UserRole.USER,
+    UserRole.MEMBER,
+    UserRole.CORE,
+    UserRole.COORDINATOR,
+    UserRole.FOUNDER,
+  )
+  selectSponsor(
+    @CurrentUserId() userId: string | undefined,
+    @Body() selectSponsorDto: SelectSponsorDto,
+  ): Promise<UserResponseDto> {
+    return this.usersService.selectSponsor(
+      this.requireUserId(userId),
+      selectSponsorDto.sponsorId,
+    );
   }
 
   @Get(':id')

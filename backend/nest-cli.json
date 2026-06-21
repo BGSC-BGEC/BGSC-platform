@@ -25,6 +25,15 @@
       "compilerOptions": {
         "tsConfigPath": "apps/auth-service/tsconfig.app.json"
       }
+    },
+    "sponsor-service": {
+      "type": "application",
+      "root": "apps/sponsor-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/sponsor-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/sponsor-service/tsconfig.app.json"
+      }
     }
   }
 }

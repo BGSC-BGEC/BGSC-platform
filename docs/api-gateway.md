@@ -62,7 +62,7 @@ backend/
 │   └── app.e2e-spec.ts                  — e2e: gateway local routes (/health, /)
 ├── Dockerfile                           — Root image → node dist/main.js
 ├── nest-cli.json                        — Monorepo: root app + apps/* projects
-└── apps/                                — Downstream microservices (auth-service, user-service)
+└── apps/                                — Downstream microservices (auth-service, user-service, sponsor-service)
 ```
 
 ---
@@ -78,7 +78,7 @@ npm run start:dev                  # watch mode
 npm run build                      # compile root app -> dist/main.js
 
 # or the whole stack
-docker-compose up                  # gateway on :3000, auth on :3001, user on :3002
+docker-compose up                  # gateway on :3000, auth on :3001, user on :3002, sponsor on :3003
 ```
 
 The gateway boots even if Redis or the downstream services are unavailable: rate limiting **fails open** when Redis is down, and unreachable upstreams return `502 Bad Gateway` per request.
@@ -96,6 +96,7 @@ The gateway boots even if Redis or the downstream services are unavailable: rate
 | `JWT_ISSUER` | No | `bgsc-auth-service` | Validated against the token's `iss` claim |
 | `AUTH_SERVICE_URL` | No | `http://localhost:3001` | Upstream for `/auth/**` and `/account/**` |
 | `USER_SERVICE_URL` | No | `http://localhost:3002` | Upstream for `/users/**` |
+| `SPONSOR_SERVICE_URL` | No | `http://localhost:3003` | Upstream for `/sponsors/**` |
 | `CORS_ORIGINS` | No | `` (empty → reflect any) | Comma-separated allowed origins |
 | `RATE_LIMIT_GENERAL_MAX` | No | `100` | General requests per window |
 | `RATE_LIMIT_GENERAL_WINDOW_MS` | No | `60000` | General window (1 min) |
@@ -105,7 +106,7 @@ The gateway boots even if Redis or the downstream services are unavailable: rate
 
 > `JWT_ACCESS_SECRET` and `JWT_ISSUER` must be identical across the gateway, Auth Service, and User Service — otherwise edge verification rejects tokens the services would have accepted (or vice versa).
 
-In Docker, upstream URLs use container names (`http://auth-service:3001`, `http://user-service:3002`) on the shared `bgsc-network`.
+In Docker, upstream URLs use container names (`http://auth-service:3001`, `http://user-service:3002`, `http://sponsor-service:3003`) on the shared `bgsc-network`.
 
 ---
 
@@ -118,6 +119,7 @@ The gateway preserves the incoming path as-is — downstream services expose the
 | `/auth/**` | auth-service | 3001 |
 | `/account/**` | auth-service | 3001 |
 | `/users/**` | user-service | 3002 |
+| `/sponsors/**` | sponsor-service | 3003 |
 | `/health`, `/` | gateway (local) | 3000 |
 
 Classification lives in `gateway/routing.ts`. Prefix matching is exact-segment aware: `/users` and `/users/me` match the user service, but `/users-export` does **not**.

@@ -2,6 +2,7 @@ import {
   isAuthAttempt,
   isAuthServiceRoute,
   isProtectedRoute,
+  isSponsorServiceRoute,
   isUserServiceRoute,
 } from './routing';
 
@@ -68,6 +69,12 @@ describe('routing', () => {
     it('routes users to the user service', () => {
       expect(isUserServiceRoute('/users/me')).toBe(true);
       expect(isUserServiceRoute('/auth/login')).toBe(false);
+    });
+
+    it('routes sponsors to the sponsor service', () => {
+      expect(isSponsorServiceRoute('/sponsors')).toBe(true);
+      expect(isSponsorServiceRoute('/sponsors/active')).toBe(true);
+      expect(isSponsorServiceRoute('/users/me')).toBe(false);
     });
   });
 });
