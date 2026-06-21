@@ -7,7 +7,11 @@ import { AppModule } from './app.module';
 import { createRateLimitMiddleware } from './gateway/rate-limit.middleware';
 import { createJwtAuthMiddleware } from './gateway/jwt-auth.middleware';
 import { createServiceProxy } from './gateway/proxy';
-import { isAuthServiceRoute, isUserServiceRoute } from './gateway/routing';
+import {
+  isAuthServiceRoute,
+  isSponsorServiceRoute,
+  isUserServiceRoute,
+} from './gateway/routing';
 
 async function bootstrap() {
   // bodyParser:false so request bodies stream straight to the proxy untouched.
@@ -23,6 +27,7 @@ async function bootstrap() {
   const jwtIssuer = config.get<string>('gateway.jwt.issuer')!;
   const authTarget = config.get<string>('gateway.services.auth')!;
   const userTarget = config.get<string>('gateway.services.user')!;
+  const sponsorTarget = config.get<string>('gateway.services.sponsor')!;
   const proxyTimeoutMs = config.get<number>('gateway.proxyTimeoutMs', 30000);
   const rateLimit = {
     general: config.get<{ max: number; windowMs: number }>(
@@ -66,6 +71,13 @@ async function bootstrap() {
     createServiceProxy({
       target: userTarget,
       pathFilter: (path) => isUserServiceRoute(path),
+      timeoutMs: proxyTimeoutMs,
+    }),
+  );
+  app.use(
+    createServiceProxy({
+      target: sponsorTarget,
+      pathFilter: (path) => isSponsorServiceRoute(path),
       timeoutMs: proxyTimeoutMs,
     }),
   );

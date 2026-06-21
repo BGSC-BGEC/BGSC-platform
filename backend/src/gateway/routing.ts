@@ -5,10 +5,12 @@
  * so no path rewriting is needed:
  *   - auth-service: /auth/**, /account/**
  *   - user-service: /users/**
+ *   - sponsor-service: /sponsors/**
  */
 
 export const AUTH_SERVICE_PREFIXES = ['/auth', '/account'];
 export const USER_SERVICE_PREFIXES = ['/users'];
+export const SPONSOR_SERVICE_PREFIXES = ['/sponsors'];
 
 /** Auth "attempt" endpoints that get the stricter rate limit (5 / 15 min). */
 const AUTH_ATTEMPT_PATHS = ['/auth/login', '/auth/register'];
@@ -59,4 +61,8 @@ export function isAuthServiceRoute(url: string): boolean {
 
 export function isUserServiceRoute(url: string): boolean {
   return startsWithAny(pathOf(url), USER_SERVICE_PREFIXES);
+}
+
+export function isSponsorServiceRoute(url: string): boolean {
+  return startsWithAny(pathOf(url), SPONSOR_SERVICE_PREFIXES);
 }

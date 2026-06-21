@@ -9,8 +9,9 @@ export const gatewayConfigValidationSchema = Joi.object({
   REDIS_URL: Joi.string().uri().required(),
   JWT_ACCESS_SECRET: Joi.string().required(),
   JWT_ISSUER: Joi.string().default('bgsc-auth-service'),
-  AUTH_SERVICE_URL: Joi.string().uri().default('http://localhost:3001'),
-  USER_SERVICE_URL: Joi.string().uri().default('http://localhost:3002'),
+  AUTH_SERVICE_URL: Joi.string().uri().required(),
+  USER_SERVICE_URL: Joi.string().uri().required(),
+  SPONSOR_SERVICE_URL: Joi.string().uri().required(),
   CORS_ORIGINS: Joi.string().default(''),
   RATE_LIMIT_GENERAL_MAX: Joi.number().integer().min(1).default(100),
   RATE_LIMIT_GENERAL_WINDOW_MS: Joi.number()
@@ -39,8 +40,9 @@ export const gatewayConfig = registerAs('gateway', () => ({
     issuer: process.env.JWT_ISSUER || 'bgsc-auth-service',
   },
   services: {
-    auth: process.env.AUTH_SERVICE_URL || 'http://localhost:3001',
-    user: process.env.USER_SERVICE_URL || 'http://localhost:3002',
+    auth: process.env.AUTH_SERVICE_URL,
+    user: process.env.USER_SERVICE_URL,
+    sponsor: process.env.SPONSOR_SERVICE_URL,
   },
   cors: {
     origins: process.env.CORS_ORIGINS
