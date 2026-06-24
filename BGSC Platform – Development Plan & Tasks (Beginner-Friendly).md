@@ -206,7 +206,7 @@ Each client (mobile & web) follows the same MVVM pattern:
 
 | Status | Task | Sub‑tasks | Est. | Notes | Done By |
 |--------|------|-----------|------|-------|---------|
-| [x]    | Auth Service (NestJS) | – JWT issuance (access/refresh) <br> – Google OAuth2 flow <br> – `/register`, `/login`, `/refresh`, `/logout` | 3 | Use `@nestjs/jwt` and `@nestjs/passport`. Store refresh tokens in Redis. | Dhruvin,Kashyap |
+| [x]    | Auth Service (NestJS) | – JWT issuance (access/refresh) <br> – Google OAuth2 flow <br> – `/register`, `/login`, `/refresh`, `/logout` | 3 | Use `@nestjs/jwt` and `@nestjs/passport`. Store refresh tokens in Redis. | Kashyap |
 | [x]    | User Service | – CRUD for users (PostgreSQL) <br> – RBAC middleware (roles: guest, user, member, core, coordinator, founder) | 2 | Create `users` table with `role` enum. Integration between auth and user in the next task | Dhruvin |
 | [x]    | Integrate auth and user service | Integrate the two services to make sure they go hand in hand and no issues come up | 3 | integrate | Dhruvin |
 | [x]    | API Gateway (Kong / Express Gateway) | – Route requests to services <br> – JWT verification <br> – Rate limiting (5 auth attempts/15min, 100 req/min for general) | 2 | Implemented as the **root backend app** (`backend/src`) that proxies to the `apps/*` microservices, using `http-proxy-middleware` + Redis sliding-window limiter. See `docs/api-gateway.md`. | Dhruvin |
@@ -227,13 +227,14 @@ Each client (mobile & web) follows the same MVVM pattern:
 | [x]    | React Native (Expo) app | – Navigation drawer (Side Drawer) <br> – Dynamic status bar component <br> – Theme switching (dark/light) | 3    | Dhruvin |
 | [x]    | React Web (Admin PWA)   | – Tailwind CSS + Vite <br> – Router (login, basic event table)                                            | 2    | Dhruvin |
 | [x]    | MVVM base classes       | – `BaseViewModel` with observable state <br> – Repository pattern for API calls                           | 2    | Dhruvin |
-| [ ]| Cleaup of AI gen code and testing | Clean up web/ and mobile/ | 2 | - |
+| [x]| Cleaup of AI gen code and testing | Clean up web/ and mobile/ | 2 | Adit |
 
 **Phase 0 Success Criteria**
-- [ ] `docker-compose up` starts all services (auth, user, gateway, postgres, redis)
-- [ ] User can register via API (POST `/register`) and receive JWT
+- [x] `docker-compose up` starts all services (auth, user, gateway, postgres, redis)
+- [x] User can register via API (POST `/register`) and receive JWT
 - [x] The mobile app shows the status bar and navigation drawer (even if empty)
-- [ ] Unit test coverage > 50% for auth & user services
+- [x] Unit test coverage > 50% for auth & user services
+- [ ] Pending tasks on event bus and cache layer
 
 ---
 
