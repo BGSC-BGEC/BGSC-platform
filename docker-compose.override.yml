@@ -21,3 +21,11 @@ services:
   sponsor-service:
     ports:
       - '3003:3003'
+
+  event-service:
+    ports:
+      - '3004:3004'
+
+  points-service:
+    ports:
+      - '3005:3005'
