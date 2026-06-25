@@ -496,7 +496,6 @@ async function seed() {
   // ── Events ────────────────────────────────────────────────────────────────
   console.log('\n── Events ──');
   let insertedEvents = 0;
-  let skippedEvents = 0;
 
   for (const ev of events) {
     const createdBy = userIds.get(ev.createdByUsername);

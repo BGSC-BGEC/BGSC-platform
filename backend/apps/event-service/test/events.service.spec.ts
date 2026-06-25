@@ -68,7 +68,7 @@ describe('EventsService', () => {
         const manager: Partial<EntityManager> = {
           delete: jest.fn().mockResolvedValue({ affected: 0, raw: [] }),
           create: jest.fn((_entity, data) => data),
-          save: jest.fn().mockImplementation(async (_entity, items) => items),
+          save: jest.fn().mockImplementation((_entity, items) => Promise.resolve(items)),
         };
         await cb(manager);
       }),
