@@ -21,6 +21,8 @@ describe('gatewayConfig', () => {
       AUTH_SERVICE_URL: 'http://auth-service:3001',
       USER_SERVICE_URL: 'http://user-service:3002',
       SPONSOR_SERVICE_URL: 'http://sponsor-service:3003',
+      EVENT_SERVICE_URL: 'http://event-service:3004',
+      POINTS_SERVICE_URL: 'http://points-service:3005',
     });
 
     expect(error).toBeUndefined();
@@ -44,6 +46,8 @@ describe('gatewayConfig', () => {
         'AUTH_SERVICE_URL',
         'USER_SERVICE_URL',
         'SPONSOR_SERVICE_URL',
+        'EVENT_SERVICE_URL',
+        'POINTS_SERVICE_URL',
       ]),
     );
   });
@@ -57,6 +61,8 @@ describe('gatewayConfig', () => {
     process.env.AUTH_SERVICE_URL = 'http://auth.internal:3001';
     process.env.USER_SERVICE_URL = 'http://user.internal:3002';
     process.env.SPONSOR_SERVICE_URL = 'http://sponsor.internal:3003';
+    process.env.EVENT_SERVICE_URL = 'http://event.internal:3004';
+    process.env.POINTS_SERVICE_URL = 'http://points.internal:3005';
     process.env.CORS_ORIGINS =
       'https://app.example.com,https://admin.example.com';
 
@@ -74,6 +80,8 @@ describe('gatewayConfig', () => {
         auth: 'http://auth.internal:3001',
         user: 'http://user.internal:3002',
         sponsor: 'http://sponsor.internal:3003',
+        event: 'http://event.internal:3004',
+        points: 'http://points.internal:3005',
       },
       cors: {
         origins: ['https://app.example.com', 'https://admin.example.com'],
@@ -101,11 +109,15 @@ describe('gatewayConfig', () => {
     delete process.env.AUTH_SERVICE_URL;
     delete process.env.USER_SERVICE_URL;
     delete process.env.SPONSOR_SERVICE_URL;
+    delete process.env.EVENT_SERVICE_URL;
+    delete process.env.POINTS_SERVICE_URL;
 
     expect(gatewayConfig().services).toEqual({
       auth: undefined,
       user: undefined,
       sponsor: undefined,
+      event: undefined,
+      points: undefined,
     });
   });
 });

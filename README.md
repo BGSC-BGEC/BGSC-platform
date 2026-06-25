@@ -74,18 +74,9 @@ Pie — Phase 0 Done
 ### Contribution — Completed Work Only
 
 ```
-  Dhruvin   ████████████████████  ~5.0 days  (100%)
+  Dhruvin   ████████████████████  ~15.0 days  (100%)
   ──────────────────────────────────────────────────
-  Total done: ~5.0 days
-```
-
-```
-Pie — Phase 1 Done So Far
-  ┌──────────────────────┐
-  │       Dhruvin        │
-  │        100%          │
-  │   (Sponsor System)   │
-  └──────────────────────┘
+  Total done: ~15.0 days
 ```
 
 ### Tasks Done
@@ -96,22 +87,23 @@ Pie — Phase 1 Done So Far
 | ✅ | Onboarding sponsor selection (semester limit) | 1.0 | Dhruvin |
 | ✅ | Fan counting + `FanEarned` event | 1.0 | Dhruvin |
 | ✅ | Sponsor leaderboard | 1.0 | Dhruvin |
+| ✅ | Event service (CRUD + filters) | 3.0 | Dhruvin |
+| ✅ | Registration flow + `RegistrationCreated` event | 2.0 | Dhruvin |
+| ✅ | Points service (consume events, award points) | 2.0 | Dhruvin |
+| ✅ | Event leaderboard (manual score entry) | 2.0 | Dhruvin |
+| ✅ | Points balance + transaction history | 1.0 | Dhruvin |
 
 ### Work Left — Backend (due Jun 26)
 
 ```
-  Done  ████                   ~5 days   (20%)
-  Left  ████████████████       ~20 days  (80%)
+  Done  ████████████          ~15 days  (60%)
+  Left  ████████               ~10 days  (40%)
   ──────────────────────────────────────────────
   Backend total: ~25 days
 ```
 
 | ⬜ | Milestone | Task | Est. |
 |----|-----------|------|------|
-| ⬜ | 1.2 Events | Event service (CRUD + filters) | 3 days |
-| ⬜ | 1.2 Events | Registration flow + `RegistrationCreated` event | 2 days |
-| ⬜ | 1.2 Events | Points service (consume events, award points) | 2 days |
-| ⬜ | 1.2 Events | Event leaderboard (manual score entry) | 2 days |
 | ⬜ | 1.2 Events | Post-event fan award to sponsors | 1 day |
 | ⬜ | 1.3 Profile | Profile API (GET public + PATCH own) | 2 days |
 | ⬜ | 1.3 Profile | Player card JSON endpoint | 1 day |
@@ -120,7 +112,6 @@ Pie — Phase 1 Done So Far
 | ⬜ | 1.4 Admin | Announcement service (CRUD + tags) | 2 days |
 | ⬜ | 1.4 Admin | Admin users table (paginated, filtered) | 2 days |
 | ⬜ | 1.4 Admin | Sponsor management (admin) | 1 day |
-| ⬜ | 1.5 Points | Points balance + transaction history | 1 day |
 | ⬜ | 1.5 Points | Hall of Fame (event winners + sponsor champions) | 2 days |
 | ⬜ | 1.5 Points | Notification service (in-app: store, read, unread count) | 2 days |
 

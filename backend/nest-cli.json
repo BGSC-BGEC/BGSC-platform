@@ -34,6 +34,24 @@
       "compilerOptions": {
         "tsConfigPath": "apps/sponsor-service/tsconfig.app.json"
       }
+    },
+    "event-service": {
+      "type": "application",
+      "root": "apps/event-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/event-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/event-service/tsconfig.app.json"
+      }
+    },
+    "points-service": {
+      "type": "application",
+      "root": "apps/points-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/points-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/points-service/tsconfig.app.json"
+      }
     }
   }
 }

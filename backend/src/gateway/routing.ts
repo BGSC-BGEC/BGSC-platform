@@ -6,11 +6,15 @@
  *   - auth-service: /auth/**, /account/**
  *   - user-service: /users/**
  *   - sponsor-service: /sponsors/**
+ *   - event-service: /events/**
+ *   - points-service: /points/**
  */
 
 export const AUTH_SERVICE_PREFIXES = ['/auth', '/account'];
 export const USER_SERVICE_PREFIXES = ['/users'];
 export const SPONSOR_SERVICE_PREFIXES = ['/sponsors'];
+export const EVENT_SERVICE_PREFIXES = ['/events'];
+export const POINTS_SERVICE_PREFIXES = ['/points'];
 
 /** Auth "attempt" endpoints that get the stricter rate limit (5 / 15 min). */
 const AUTH_ATTEMPT_PATHS = ['/auth/login', '/auth/register'];
@@ -65,4 +69,12 @@ export function isUserServiceRoute(url: string): boolean {
 
 export function isSponsorServiceRoute(url: string): boolean {
   return startsWithAny(pathOf(url), SPONSOR_SERVICE_PREFIXES);
+}
+
+export function isEventServiceRoute(url: string): boolean {
+  return startsWithAny(pathOf(url), EVENT_SERVICE_PREFIXES);
+}
+
+export function isPointsServiceRoute(url: string): boolean {
+  return startsWithAny(pathOf(url), POINTS_SERVICE_PREFIXES);
 }

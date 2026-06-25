@@ -9,6 +9,8 @@ import { createJwtAuthMiddleware } from './gateway/jwt-auth.middleware';
 import { createServiceProxy } from './gateway/proxy';
 import {
   isAuthServiceRoute,
+  isEventServiceRoute,
+  isPointsServiceRoute,
   isSponsorServiceRoute,
   isUserServiceRoute,
 } from './gateway/routing';
@@ -28,6 +30,8 @@ async function bootstrap() {
   const authTarget = config.get<string>('gateway.services.auth')!;
   const userTarget = config.get<string>('gateway.services.user')!;
   const sponsorTarget = config.get<string>('gateway.services.sponsor')!;
+  const eventTarget = config.get<string>('gateway.services.event')!;
+  const pointsTarget = config.get<string>('gateway.services.points')!;
   const proxyTimeoutMs = config.get<number>('gateway.proxyTimeoutMs', 30000);
   const rateLimit = {
     general: config.get<{ max: number; windowMs: number }>(
@@ -78,6 +82,20 @@ async function bootstrap() {
     createServiceProxy({
       target: sponsorTarget,
       pathFilter: (path) => isSponsorServiceRoute(path),
+      timeoutMs: proxyTimeoutMs,
+    }),
+  );
+  app.use(
+    createServiceProxy({
+      target: eventTarget,
+      pathFilter: (path) => isEventServiceRoute(path),
+      timeoutMs: proxyTimeoutMs,
+    }),
+  );
+  app.use(
+    createServiceProxy({
+      target: pointsTarget,
+      pathFilter: (path) => isPointsServiceRoute(path),
       timeoutMs: proxyTimeoutMs,
     }),
   );

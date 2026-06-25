@@ -259,10 +259,10 @@ We split Phase 1 into **Backend (6 weeks)** and **Frontend (2 weeks)** so the ba
 
 | Status | Task | Sub‑tasks | Est. | Done By |
 |--------|------|-----------|------|---------|
-| [ ]    | Event service | – `POST /events` (admin only) <br> – `GET /events` (with filters: upcoming/ongoing/past) <br> – `GET /events/:id` | 3 | — |
-| [ ]    | Registration flow | – `POST /events/:id/register` (solo only, no teams in MVP) <br> – Check registration deadline, capacity <br> – Emit `RegistrationCreated` event | 2 | — |
-| [ ]    | Points service (basic) | – Consume `RegistrationCreated` → award participation points <br> – Emit `PointsEarned` | 2 | — |
-| [ ]    | Event leaderboard (MVP) | – For `LE` events: admin can manually enter scores via `POST /events/:id/scores` <br> – `GET /events/:id/leaderboard` | 2 | — |
+| [x]    | Event service | – `POST /events` (admin only) <br> – `GET /events` (with filters: upcoming/ongoing/past) <br> – `GET /events/:id` | 3 | Dhruvin |
+| [x]    | Registration flow | – `POST /events/:id/register` (solo only, no teams in MVP) <br> – Check registration deadline, capacity <br> – Emit `RegistrationCreated` event | 2 | Dhruvin |
+| [x]    | Points service (basic) | – Consume `RegistrationCreated` → award participation points <br> – Emit `PointsEarned` | 2 | Dhruvin |
+| [x]    | Event leaderboard (MVP) | – For `LE` events: admin can manually enter scores via `POST /events/:id/scores` <br> – `GET /events/:id/leaderboard` | 2 | Dhruvin |
 | [ ]    | Post‑event fan award | – When `EventCompleted` is emitted, award fans to winners’ sponsors | 1 | — |
 
 #### ✅ Milestone 1.3 – User Profile & Player Card (Week 4)
@@ -286,7 +286,7 @@ We split Phase 1 into **Backend (6 weeks)** and **Frontend (2 weeks)** so the ba
 
 | Status | Task | Sub‑tasks | Est. | Done By |
 |--------|------|-----------|------|---------|
-| [ ]    | Points balance | – `GET /users/me/points` <br> – Transaction history (`GET /points/transactions`) | 1 | — |
+| [x]    | Points balance | – `GET /users/me/points` <br> – Transaction history (`GET /points/transactions`) | 1 | Dhruvin |
 | [ ]    | Hall of Fame | – `GET /hall-of-fame/event-winners` <br> – `GET /hall-of-fame/sponsor-champions` (hardcoded or manually seeded) | 2 | — |
 | [ ]    | Notification service (in‑app) | – Store notifications in DB <br> – `GET /notifications` (unread count) <br> – `PATCH /notifications/:id/read` | 2 | — |
 
