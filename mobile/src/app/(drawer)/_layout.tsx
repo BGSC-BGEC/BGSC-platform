@@ -17,7 +17,7 @@ export default function DrawerLayout() {
       drawerContent={(props) => <DrawerContent {...props} />}
       screenOptions={{
         header: (props) => <DynamicStatusBar {...props} />,
-        drawerActiveTintColor: colors.primary,
+        drawerActiveTintColor: colors.accent,
         drawerInactiveTintColor: colors.text,
       }}>
       <Drawer.Screen name="index" options={{ drawerLabel: 'Home', title: 'Home' }} />

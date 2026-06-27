@@ -62,7 +62,7 @@ export default function LoginScreen() {
           colors={colors}
         />
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
 
         <Pressable
           disabled={submitting}
@@ -80,7 +80,7 @@ export default function LoginScreen() {
         </Pressable>
 
         <Pressable onPress={() => router.replace('/register')} style={styles.switch}>
-          <Text style={{ color: colors.primary }}>Don&apos;t have an account? Register</Text>
+          <Text style={{ color: colors.accent }}>Don&apos;t have an account? Register</Text>
         </Pressable>
       </KeyboardAvoidingView>
     </Screen>

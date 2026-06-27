@@ -66,7 +66,7 @@ export default function RegisterScreen() {
           </Text>
         </View>
 
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Text style={[styles.error, { color: colors.danger }]}>{error}</Text> : null}
 
         <Pressable
           disabled={submitting || !acceptedTos}
@@ -81,7 +81,7 @@ export default function RegisterScreen() {
         </Pressable>
 
         <Pressable onPress={() => router.replace('/login')} style={styles.switch}>
-          <Text style={{ color: colors.primary }}>Already have an account? Sign in</Text>
+          <Text style={{ color: colors.accent }}>Already have an account? Sign in</Text>
         </Pressable>
       </KeyboardAvoidingView>
     </Screen>

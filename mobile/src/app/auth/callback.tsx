@@ -42,7 +42,7 @@ export default function AuthCallbackScreen() {
     <Screen center>
       {error ? (
         <>
-          <Text style={{ color: '#dc2626', marginBottom: 16 }}>{error}</Text>
+          <Text style={{ color: colors.danger, marginBottom: 16 }}>{error}</Text>
           <Pressable
             onPress={() => router.replace('/login')}
             style={[styles.button, { backgroundColor: colors.primary }]}>
@@ -50,7 +50,7 @@ export default function AuthCallbackScreen() {
           </Pressable>
         </>
       ) : (
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={colors.accent} />
       )}
     </Screen>
   );

@@ -35,7 +35,7 @@ export default function ProfileScreen() {
   if (profile.status === 'loading' || profile.status === 'idle') {
     return (
       <Screen center>
-        <ActivityIndicator color={colors.primary} />
+        <ActivityIndicator color={colors.accent} />
       </Screen>
     );
   }
@@ -43,7 +43,7 @@ export default function ProfileScreen() {
   if (profile.status === 'error') {
     return (
       <Screen center>
-        <Text style={{ color: '#dc2626' }}>{profile.error}</Text>
+        <Text style={{ color: colors.danger }}>{profile.error}</Text>
       </Screen>
     );
   }
@@ -52,8 +52,8 @@ export default function ProfileScreen() {
   return (
     <Screen>
       <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-          <Text style={[styles.avatarText, { color: colors.primaryText }]}>
+        <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
+          <Text style={[styles.avatarText, { color: colors.accentText }]}>
             {user.username.slice(0, 1).toUpperCase()}
           </Text>
         </View>

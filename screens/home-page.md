@@ -304,6 +304,8 @@ Triggered from the hamburger icon in the status bar.
 **Permissions:** Coordinator, Founder, or Core with announcement permission granted (spec §6.4). Core without explicit permission cannot open this popup.
 **Appearance:** Full-screen bottom sheet with handle.
 
+> ⚠️ **Design divergence (not yet reconciled).** A later mockup (`screens/popups-and-modals.md` §3, `assets/modals-account.png`) shows a different visual: a rich-text toolbar (B/I/link/image), a reduced **BGEC · FitSoc · General** category set (vs. the full 9 tags below), an **"Add visual asset" (16:9)** upload, and **no schedule toggle**. The behaviour documented here matches the **current implementation**; do not change it until the canonical design is confirmed. See `popups-and-modals.md` §3 and §11.
+
 ### Fields (top-to-bottom)
 
 | Field | Type | Notes |
@@ -404,6 +406,8 @@ Triggered from the hamburger icon in the status bar.
 
 **Trigger:** FAB on Tab 3 (Feed).
 **Appearance:** Full-screen modal with three sequential tabs at the top.
+
+> ⚠️ **Design divergence (not yet reconciled).** A later mockup (`screens/popups-and-modals.md` §4, `assets/modals-account.png`) shows a lighter pattern: a **2-tab segmented control (Media / Details)** with **"Post" in the header** (vs. the 3-step Media→Details→Privacy wizard below), plus **friend tagging** ("Tagging N friends"). The flow documented here matches the **current implementation**; do not change it until the canonical design is confirmed. See `popups-and-modals.md` §4 and §11.
 
 ### Tab 1 — Media Selection
 

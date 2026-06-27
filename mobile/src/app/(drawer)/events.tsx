@@ -6,10 +6,11 @@ import { EventRepository } from '@/core/repositories/EventRepository';
 import type { EventStatus } from '@/core/types';
 import { useColors } from '@/hooks/use-colors';
 
+// Status colors mirror design-system tokens (info / success / muted).
 const STATUS_COLOR: Record<EventStatus, string> = {
-  upcoming: '#2563eb',
-  ongoing: '#16a34a',
-  past: '#64748b',
+  upcoming: '#3b82f6',
+  ongoing: '#22c55e',
+  past: '#8c857a',
 };
 
 export default function EventsScreen() {
@@ -27,9 +28,9 @@ export default function EventsScreen() {
       </Text>
 
       {isPending ? (
-        <ActivityIndicator color={colors.primary} style={{ marginTop: 24 }} />
+        <ActivityIndicator color={colors.accent} style={{ marginTop: 24 }} />
       ) : isError ? (
-        <Text style={{ color: '#dc2626', marginTop: 16 }}>
+        <Text style={{ color: colors.danger, marginTop: 16 }}>
           Failed to load events: {(error as Error).message}
         </Text>
       ) : (
