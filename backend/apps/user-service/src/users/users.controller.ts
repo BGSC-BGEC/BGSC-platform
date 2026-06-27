@@ -15,6 +15,7 @@ import { CurrentUserId } from '../rbac/current-user-id.decorator';
 import { Roles } from '../rbac/roles.decorator';
 import { RolesGuard } from '../rbac/roles.guard';
 import { CreateUserDto } from './dto/create-user.dto';
+import { PublicProfileDto } from './dto/public-profile.dto';
 import { SelectSponsorDto } from './dto/select-sponsor.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -89,9 +90,15 @@ export class UsersController {
   }
 
   @Get(':id')
-  @Roles(UserRole.COORDINATOR, UserRole.FOUNDER)
-  findOne(@Param('id') id: string): Promise<UserResponseDto> {
-    return this.usersService.findOne(id);
+  @Roles(
+    UserRole.USER,
+    UserRole.MEMBER,
+    UserRole.CORE,
+    UserRole.COORDINATOR,
+    UserRole.FOUNDER,
+  )
+  findOne(@Param('id') id: string): Promise<PublicProfileDto> {
+    return this.usersService.findPublicProfile(id);
   }
 
   @Patch(':id')

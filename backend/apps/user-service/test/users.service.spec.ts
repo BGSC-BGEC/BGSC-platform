@@ -101,6 +101,37 @@ describe('UsersService', () => {
     );
   });
 
+  describe('findPublicProfile', () => {
+    it('returns public profile fields for a user', async () => {
+      const user = makeUser({
+        username: 'publicuser',
+        bio: 'Hello world',
+        interests: ['Football', 'Valorant'],
+        socials: { instagram: '@publicuser' },
+      });
+      repository.findOneBy.mockResolvedValue(user);
+
+      const result = await service.findPublicProfile(user.id);
+
+      expect(result).toEqual({
+        id: user.id,
+        username: user.username,
+        avatarUrl: user.avatarUrl,
+        bio: user.bio,
+        interests: user.interests,
+        socials: user.socials,
+      });
+    });
+
+    it('throws NotFoundException when user does not exist', async () => {
+      repository.findOneBy.mockResolvedValue(null);
+
+      await expect(
+        service.findPublicProfile('missing-id'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
   it('updates an existing user', async () => {
     const user = makeUser({ username: 'oldname' });
     const updatedUser = makeUser({ ...user, username: 'newname' });

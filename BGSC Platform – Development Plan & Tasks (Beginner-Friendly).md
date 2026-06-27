@@ -269,7 +269,7 @@ We split Phase 1 into **Backend (6 weeks)** and **Frontend (2 weeks)** so the ba
 
 | Status | Task | Sub‑tasks | Est. | Done By |
 |--------|------|-----------|------|---------|
-| [ ]    | Profile API | – `GET /users/:id` (public fields) <br> – `PATCH /users/me` (bio, interests, social links) | 2 | — |
+| [x]    | Profile API | – `GET /users/:id` (public fields) <br> – `PATCH /users/me` (bio, interests, social links) | 2 | Dhruvin |
 | [ ]    | Player card generation | – Endpoint that returns a JSON with avatar, username, sponsor badge, stats | 1 | — |
 | [ ]    | Interest fields | – `GET /interests` (list of sports/esports) <br> – `PATCH /users/me/interests` | 1 | — |
 | [ ]    | Sponsor stats on profile | – `GET /users/me/sponsor-stats` (personal fan count, events won) | 1 | — |

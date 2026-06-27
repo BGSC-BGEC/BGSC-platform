@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CreateUserDto } from './dto/create-user.dto';
+import { PublicProfileDto } from './dto/public-profile.dto';
 import { UpdateMeDto } from './dto/update-me.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserResponseDto } from './dto/user-response.dto';
@@ -61,6 +62,18 @@ export class UsersService {
     });
 
     return users.map((user) => this.toResponse(user));
+  }
+
+  async findPublicProfile(id: string): Promise<PublicProfileDto> {
+    const user = await this.findEntity(id);
+    return {
+      id: user.id,
+      username: user.username,
+      avatarUrl: user.avatarUrl,
+      bio: user.bio,
+      interests: user.interests,
+      socials: user.socials,
+    };
   }
 
   async findOne(id: string): Promise<UserResponseDto> {
@@ -169,6 +182,7 @@ export class UsersService {
     return {
       activeSponsorId: user.activeSponsorId,
       avatarUrl: user.avatarUrl,
+      bio: user.bio,
       contact: user.contact,
       createdAt: user.createdAt,
       email: user.email,
