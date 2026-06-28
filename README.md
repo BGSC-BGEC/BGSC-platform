@@ -69,17 +69,17 @@ Pie — Phase 0 Done
 
 ---
 
-## 🚧 Phase 1: MVP (May 4 – Jun 26 backend / Jul 10 frontend) — IN PROGRESS
+## 🚧 Phase 1: MVP (May 4 – Jun 27 backend / Jul 10 frontend) — IN PROGRESS
 
 ### Contribution — Completed Work Only
 
 ```
-  Dhruvin   ████████████████████  ~15.0 days  (100%)
+  Dhruvin   ████████████████████  ~30.0 days  (100%)
   ──────────────────────────────────────────────────
-  Total done: ~15.0 days
+  Total done: ~30.0 days
 ```
 
-### Tasks Done
+### Tasks Done — Backend
 
 | ✅ | Task | Days | By |
 |----|------|------|----|
@@ -92,43 +92,38 @@ Pie — Phase 0 Done
 | ✅ | Points service (consume events, award points) | 2.0 | Dhruvin |
 | ✅ | Event leaderboard (manual score entry) | 2.0 | Dhruvin |
 | ✅ | Points balance + transaction history | 1.0 | Dhruvin |
+| ✅ | Post-event fan award to sponsors | 1.0 | Dhruvin |
+| ✅ | Profile API (GET public + PATCH own) | 2.0 | Dhruvin |
+| ✅ | Player card JSON endpoint | 1.0 | Dhruvin |
+| ✅ | Interests CRUD | 1.0 | Dhruvin |
+| ✅ | Sponsor stats on profile | 1.0 | Dhruvin |
+| ✅ | Announcement service (CRUD + tags) | 2.0 | Dhruvin |
+| ✅ | Admin users table (paginated, filtered) | 2.0 | Dhruvin |
+| ✅ | Sponsor management (admin) | 1.0 | Dhruvin |
+| ✅ | Hall of Fame (event winners + sponsor champions) | 2.0 | Dhruvin |
+| ✅ | Notification service (in-app: store, read, unread count) | 2.0 | Dhruvin |
 
-### Work Left — Backend (due Jun 26)
+### Tasks Done — Frontend (Mobile)
+
+| ✅ | Task | Days | By |
+|----|------|------|----|
+| ✅ | Auth screens (login, register, Google OAuth) | 2.0 | Dhruvin |
+| ✅ | Home page (announcements + feed) | 2.0 | Dhruvin |
+| ✅ | Events page (browse + register) | 2.0 | Dhruvin |
+| ✅ | User profile (view + edit) | 1.0 | Dhruvin |
+| ✅ | Points & Hall of Fame screens | 1.0 | Dhruvin |
+
+### Work Left — Web Admin (Jun 27 – Jul 10)
 
 ```
-  Done  ████████████          ~15 days  (60%)
-  Left  ████████               ~10 days  (40%)
+  Done  ████████████████  ~3.5 days  (78%)
+  Left  ████               ~3.5 days  (22%)
   ──────────────────────────────────────────────
-  Backend total: ~25 days
+  Web Admin total: ~7.0 days (est.)
 ```
 
 | ⬜ | Milestone | Task | Est. |
 |----|-----------|------|------|
-| ⬜ | 1.2 Events | Post-event fan award to sponsors | 1 day |
-| ⬜ | 1.3 Profile | Profile API (GET public + PATCH own) | 2 days |
-| ⬜ | 1.3 Profile | Player card JSON endpoint | 1 day |
-| ⬜ | 1.3 Profile | Interests CRUD | 1 day |
-| ⬜ | 1.3 Profile | Sponsor stats on profile | 1 day |
-| ⬜ | 1.4 Admin | Announcement service (CRUD + tags) | 2 days |
-| ⬜ | 1.4 Admin | Admin users table (paginated, filtered) | 2 days |
-| ⬜ | 1.4 Admin | Sponsor management (admin) | 1 day |
-| ⬜ | 1.5 Points | Hall of Fame (event winners + sponsor champions) | 2 days |
-| ⬜ | 1.5 Points | Notification service (in-app: store, read, unread count) | 2 days |
-
-### Work Left — Frontend (Jun 27 – Jul 10)
-
-```
-  Done  (none yet)
-  Left  ████████████████████  ~8.5 days  (100%)
-```
-
-| ⬜ | Milestone | Task | Est. |
-|----|-----------|------|------|
-| ⬜ | 1.6 Mobile | Auth screens (login, register, Google OAuth) | 2 days |
-| ⬜ | 1.6 Mobile | Home page (announcements + feed) | 2 days |
-| ⬜ | 1.6 Mobile | Events page (browse + register) | 2 days |
-| ⬜ | 1.6 Mobile | User profile (view + edit) | 1 day |
-| ⬜ | 1.6 Mobile | Points & Hall of Fame screens | 1 day |
 | ⬜ | 1.7 Web | Login + RBAC redirect | 0.5 days |
 | ⬜ | 1.7 Web | Event management form | 1 day |
 | ⬜ | 1.7 Web | Announcement creator | 1 day |
@@ -224,8 +219,8 @@ Pie — Phase 0 Done
 | Milestone | Description | Deadline | Status |
 |-----------|-------------|----------|--------|
 | M0 | Foundation | May 3, 2026 | ✅ Done (partial) |
-| M1 | **Backend MVP** | **Jun 26, 2026** | 🚧 In Progress |
-| M2 | Frontend MVP | Jul 10, 2026 | ⬜ Pending |
+| M1-Backend | **Backend MVP** | **Jun 27, 2026** | ✅ Done |
+| M1-Frontend | **Frontend MVP** | **Jul 10, 2026** | 🚧 Web admin in progress |
 | M3 | Community features | Aug 21, 2026 | ⬜ Pending |
 | M4 | Operations | Oct 16, 2026 | ⬜ Pending |
 | M5 | Integrations & Polish | Nov 13, 2026 | ⬜ Pending |
