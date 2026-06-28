@@ -23,6 +23,9 @@ export class Sponsor {
   @Column({ type: 'varchar', length: 50 })
   status!: string;
 
+  @Column({ name: 'logo_url', type: 'text', nullable: true })
+  logoUrl?: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

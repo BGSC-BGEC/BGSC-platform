@@ -1,62 +1,85 @@
 import { router } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Screen } from '@/components/screen';
 import { useAuthStore } from '@/core/stores/authStore';
 import { useColors } from '@/hooks/use-colors';
 
-function tokenFromUrl(url: string | null): string | null {
-  if (!url) return null;
-  // The auth-service returns the token in the URL fragment: ...#access_token=...
+function parseCallbackUrl(url: string | null): { token: string | null; isNewUser: boolean } {
+  if (!url) return { token: null, isNewUser: false };
   const hashIndex = url.indexOf('#');
+  const queryIndex = url.indexOf('?');
+  // Isolate fragment and query independently to avoid one masking the other
   const fragment = hashIndex >= 0 ? url.slice(hashIndex + 1) : '';
-  const params = new URLSearchParams(fragment || url.split('?')[1] || '');
-  return params.get('access_token');
+  const query = queryIndex >= 0 ? url.slice(queryIndex + 1, hashIndex >= 0 ? hashIndex : undefined) : '';
+  const params = new URLSearchParams(fragment || query);
+  return {
+    token: params.get('access_token'),
+    isNewUser: params.get('is_new_user') === 'true',
+  };
 }
 
-/**
- * Handles the Google OAuth2 redirect on mobile/web. Mirrors the web app's
- * /auth/callback. Native cookie round-tripping is a known follow-up (see README).
- */
 export default function AuthCallbackScreen() {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const adoptToken = useAuthStore((s) => s.adoptToken);
   const incomingUrl = Linking.useURL();
   const [error, setError] = useState<string | null>(null);
   const ran = useRef(false);
 
+  // Fail-safe: if no token arrives within 12s, surface an error
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (!ran.current) setError('No auth token received. Please try again.');
+    }, 12_000);
+    return () => clearTimeout(t);
+  }, []);
+
   useEffect(() => {
     if (ran.current) return;
-    const token = tokenFromUrl(incomingUrl);
-    if (!token) return; // wait until the deep link URL is available
+    const { token, isNewUser } = parseCallbackUrl(incomingUrl);
+    if (!token) return;
     ran.current = true;
 
     adoptToken(token)
-      .then(() => router.replace('/'))
+      .then(() => {
+        if (isNewUser) {
+          router.replace('/auth/complete-profile');
+        } else {
+          router.replace('/');
+        }
+      })
       .catch((err) => setError(err instanceof Error ? err.message : 'Sign-in failed'));
   }, [incomingUrl, adoptToken]);
 
   return (
-    <Screen center>
+    <View style={[s.container, { backgroundColor: colors.background, paddingBottom: insets.bottom }]}>
       {error ? (
         <>
-          <Text style={{ color: '#dc2626', marginBottom: 16 }}>{error}</Text>
+          <Text style={[s.errorText, { color: colors.danger }]}>{error}</Text>
           <Pressable
             onPress={() => router.replace('/login')}
-            style={[styles.button, { backgroundColor: colors.primary }]}>
-            <Text style={[styles.buttonText, { color: colors.primaryText }]}>Back to login</Text>
+            style={[s.btn, { backgroundColor: colors.primary }]}
+          >
+            <Text style={[s.btnLabel, { color: colors.primaryText }]}>Back to login</Text>
           </Pressable>
         </>
       ) : (
-        <ActivityIndicator color={colors.primary} />
+        <>
+          <ActivityIndicator color={colors.accent} size="large" />
+          <Text style={[s.signingIn, { color: colors.textMuted }]}>Signing you in…</Text>
+        </>
       )}
-    </Screen>
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  button: { paddingHorizontal: 18, paddingVertical: 11, borderRadius: 8 },
-  buttonText: { fontSize: 15, fontWeight: '600' },
+const s = StyleSheet.create({
+  container: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, paddingHorizontal: 24 },
+  signingIn: { fontSize: 14 },
+  errorText: { fontSize: 14, textAlign: 'center' },
+  btn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 999 },
+  btnLabel: { fontSize: 15, fontWeight: '600' },
 });

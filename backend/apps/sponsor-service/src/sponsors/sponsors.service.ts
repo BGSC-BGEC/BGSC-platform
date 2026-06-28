@@ -239,6 +239,28 @@ export class SponsorsService {
     return entries;
   }
 
+  async endTenure(id: string, endDate?: string): Promise<SponsorResponseDto> {
+    const sponsor = await this.findEntity(id);
+
+    if (sponsor.status === SponsorStatus.INACTIVE) {
+      throw new BadRequestException('Sponsor tenure already ended');
+    }
+
+    const today = this.getToday();
+    sponsor.tenureEnd = endDate ?? today;
+    sponsor.status = SponsorStatus.INACTIVE;
+    await this.sponsorsRepository.save(sponsor);
+
+    this.eventBus.emit('SponsorTenureEnded', {
+      sponsorId: id,
+      finalRank: 0, // ponytail: rank calc is async; frontend reads leaderboard for final rank
+      totalFans: sponsor.totalFans,
+      timestamp: new Date().toISOString(),
+    });
+
+    return this.toResponse(sponsor);
+  }
+
   async countAffiliationsForSponsor(sponsorId: string): Promise<number> {
     return this.affiliationsRepository.count({ where: { sponsorId } });
   }

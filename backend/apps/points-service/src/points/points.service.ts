@@ -71,6 +71,20 @@ export class PointsService {
     return { userId, balance: Number(result?.balance ?? 0) };
   }
 
+  async getMyTransactions(
+    userId: string,
+    page: number,
+    limit: number,
+  ): Promise<TransactionResponseDto[]> {
+    const transactions = await this.transactionsRepository.find({
+      where: { userId },
+      order: { createdAt: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+    return transactions.map((t) => this.toResponse(t));
+  }
+
   private toResponse(t: PointTransaction): TransactionResponseDto {
     return {
       id: t.id,

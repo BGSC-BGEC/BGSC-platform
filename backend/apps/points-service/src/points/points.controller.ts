@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
@@ -26,6 +27,28 @@ const ADMIN_ROLES: UserRole[] = [UserRole.COORDINATOR, UserRole.FOUNDER, UserRol
 @Controller('points')
 export class PointsController {
   constructor(private readonly pointsService: PointsService) {}
+
+  @Get('me/balance')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  getMyBalance(@Request() req: AuthRequest): Promise<PointsBalanceResponseDto> {
+    return this.pointsService.getBalance(req.user.id);
+  }
+
+  @Get('me/transactions')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  getMyTransactions(
+    @Request() req: AuthRequest,
+    @Query('page') page = '1',
+    @Query('limit') limit = '20',
+  ): Promise<TransactionResponseDto[]> {
+    return this.pointsService.getMyTransactions(
+      req.user.id,
+      Math.max(1, parseInt(page, 10) || 1),
+      Math.min(100, Math.max(1, parseInt(limit, 10) || 20)),
+    );
+  }
 
   @Get('balance/:userId')
   @ApiBearerAuth()
