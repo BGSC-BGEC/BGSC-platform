@@ -263,32 +263,32 @@ We split Phase 1 into **Backend (6 weeks)** and **Frontend (2 weeks)** so the ba
 | [x]    | Registration flow | – `POST /events/:id/register` (solo only, no teams in MVP) <br> – Check registration deadline, capacity <br> – Emit `RegistrationCreated` event | 2 | Dhruvin |
 | [x]    | Points service (basic) | – Consume `RegistrationCreated` → award participation points <br> – Emit `PointsEarned` | 2 | Dhruvin |
 | [x]    | Event leaderboard (MVP) | – For `LE` events: admin can manually enter scores via `POST /events/:id/scores` <br> – `GET /events/:id/leaderboard` | 2 | Dhruvin |
-| [ ]    | Post‑event fan award | – When `EventCompleted` is emitted, award fans to winners’ sponsors | 1 | — |
+| [x]    | Post‑event fan award | – `PATCH /events/:id/complete` fires `awardFansToWinners()` for each winner in dto; HTTP POSTs to sponsor-service `POST /sponsors/:id/fans`; failures logged, not thrown | 1 | Dhruvin |
 
 #### ✅ Milestone 1.3 – User Profile & Player Card (Week 4)
 
 | Status | Task | Sub‑tasks | Est. | Done By |
 |--------|------|-----------|------|---------|
-| [x]    | Profile API | – `GET /users/:id` (public fields) <br> – `PATCH /users/me` (bio, interests, social links) | 2 | Dhruvin |
-| [ ]    | Player card generation | – Endpoint that returns a JSON with avatar, username, sponsor badge, stats | 1 | — |
-| [ ]    | Interest fields | – `GET /interests` (list of sports/esports) <br> – `PATCH /users/me/interests` | 1 | — |
-| [ ]    | Sponsor stats on profile | – `GET /users/me/sponsor-stats` (personal fan count, events won) | 1 | — |
+| [x]    | Profile API | – `GET /users/:id` (public fields) <br> – `PATCH /users/me` (bio, interests, social links) <br> – `GET/PATCH /users/me/profile` (extended profile incl. displayName, customTags, socialLinks) | 2 | Dhruvin |
+| [x]    | Player card generation | – `GET /users/me/player-card` returns JSON with avatar, username, sponsor badge, stats | 1 | Dhruvin |
+| [x]    | Interest fields | – `GET /users/interests` (catalog: sports/esports/gaming) <br> – `PATCH /users/me/interests` (validated against catalog) | 1 | Dhruvin |
+| [x]    | Sponsor stats on profile | – `GET /users/me/sponsor-stats` (personal fan count, rank, events won) | 1 | Dhruvin |
 
 #### ✅ Milestone 1.4 – Announcements & Admin Panel (Week 5)
 
 | Status | Task | Sub‑tasks | Est. | Done By |
 |--------|------|-----------|------|---------|
-| [ ]    | Announcement service | – `POST /announcements` (coordinator+) <br> – `GET /announcements` (public, last 4 months) <br> – Announcement types & tags | 2 | — |
-| [ ]    | Basic users table (admin) | – `GET /admin/users` (paginated, filter by role/status) – coordinator+ | 2 | — |
-| [ ]    | Sponsor management (admin) | – `POST /admin/sponsors` <br> – `PATCH /admin/sponsors/:id/tenure-end` (manual for MVP) | 1 | — |
+| [x]    | Announcement service | – `POST /announcements` (coordinator/founder/core) <br> – `GET /announcements` (public, 4-month expiry window, type filter) <br> – `DELETE /announcements/:id` (coordinator+) <br> – Types: BGEC/FITSOC/AIRBALL/OFFSIDE/POWERPLAY/AROUND_THE_NET/DEUCE/HIGHLIGHT/TEAMS | 2 | Dhruvin |
+| [x]    | Basic users table (admin) | – `GET /users` now paginated (`page`/`limit`, default 50/page) – coordinator+ | 2 | Dhruvin |
+| [x]    | Sponsor management (admin) | – `POST /sponsors` (coordinator+, existed from M1.1) <br> – `PATCH /sponsors/:id/tenure-end` (sets status=inactive, emits SponsorTenureEnded) | 1 | Dhruvin |
 
 #### ✅ Milestone 1.5 – Points & Hall of Fame v1 (Week 6)
 
 | Status | Task | Sub‑tasks | Est. | Done By |
 |--------|------|-----------|------|---------|
-| [x]    | Points balance | – `GET /users/me/points` <br> – Transaction history (`GET /points/transactions`) | 1 | Dhruvin |
-| [ ]    | Hall of Fame | – `GET /hall-of-fame/event-winners` <br> – `GET /hall-of-fame/sponsor-champions` (hardcoded or manually seeded) | 2 | — |
-| [ ]    | Notification service (in‑app) | – Store notifications in DB <br> – `GET /notifications` (unread count) <br> – `PATCH /notifications/:id/read` | 2 | — |
+| [x]    | Points balance | – `GET /points/me/balance` <br> – Transaction history `GET /points/me/transactions` (paginated) <br> – Admin lookup: `GET /points/balance/:userId` | 1 | Dhruvin |
+| [x]    | Hall of Fame | – `GET /hall-of-fame/event-winners` (top scorer per completed LE event) <br> – `GET /hall-of-fame/sponsor-champions` (proxies sponsor-service leaderboard, top 10 by fans) | 2 | Dhruvin |
+| [x]    | Notification service (in‑app) | – Store notifications in DB (`notifications` table) <br> – `GET /notifications/me` (list + unread count) <br> – `PATCH /notifications/:id/read` <br> – `POST /notifications` (internal, for other services) | 2 | Dhruvin |
 
 **Final Backend MVP Checklist (June 26)**
 - [ ] All endpoints above are implemented, documented (Swagger), and tested.
@@ -306,11 +306,11 @@ Now the frontend team consumes the ready APIs.
 
 | Status | Task | Sub‑tasks | Est. | Done By |
 |--------|------|-----------|------|---------|
-| [ ]    | Auth screens | – Login / Register (email + Google OAuth) <br> – Sponsor selection during onboarding <br> – Interest selection | 2 | — |
-| [ ]    | Home page | – Landing intro (static) <br> – Announcements list (from API) <br> – Public social feed (read‑only) | 2 | — |
-| [ ]    | Events page | – Browse events (upcoming/ongoing/past) <br> – Solo registration flow <br> – Event details view | 2 | — |
-| [ ]    | User profile | – View own profile (player card, sponsor badge) <br> – Edit bio/interests | 1 | — |
-| [ ]    | Points & Hall of Fame | – Display points balance <br> – Hall of Fame screen (winners + sponsor champions) | 1 | — |
+| [x]    | Auth screens | – Login / Register (email + Google OAuth) <br> – Sponsor selection during onboarding <br> – Interest selection | 2 | Dhruvin |
+| [x]    | Home page | – Landing intro (static) <br> – Announcements list (from API) <br> – Public social feed (read‑only) | 2 | Dhruvin |
+| [x]    | Events page | – Browse events (upcoming/ongoing/past) <br> – Solo registration flow <br> – Event details view | 2 | Dhruvin |
+| [x]    | User profile | – View own profile (player card, sponsor badge) <br> – Edit bio/interests | 1 | Dhruvin |
+| [x]    | Points & Hall of Fame | – Display points balance <br> – Hall of Fame screen (winners + sponsor champions) | 1 | Dhruvin |
 
 #### ✅ Milestone 1.7 – Web Admin Console (React + Tailwind)
 

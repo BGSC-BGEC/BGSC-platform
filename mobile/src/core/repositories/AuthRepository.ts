@@ -34,4 +34,17 @@ export const AuthRepository = {
   googleAuthUrl(): string {
     return `${API_BASE_URL}/auth/google`;
   },
+
+  verifyEmail(input: { email: string; code: string }): Promise<void> {
+    return apiClient.post('/auth/verify-email', input, { skipAuth: true });
+  },
+
+  resendOtp(input: { email: string }): Promise<void> {
+    return apiClient.post('/auth/resend-otp', input, { skipAuth: true });
+  },
+
+  /** Finalizes a Google OAuth profile by adding password + contact. */
+  completeGoogleProfile(input: { password: string; contact: string }): Promise<void> {
+    return apiClient.post('/auth/complete-profile', input);
+  },
 };

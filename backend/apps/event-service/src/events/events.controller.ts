@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -18,6 +21,10 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { EventResponseDto } from './dto/event-response.dto';
 import { LeaderboardEntryDto } from './dto/leaderboard-entry.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
+import {
+  RegistrationHistoryItemDto,
+  UserEventStatsDto,
+} from './dto/registration-history-response.dto';
 import { RegistrationResponseDto } from './dto/registration-response.dto';
 import { SubmitScoresDto } from './dto/submit-scores.dto';
 import { UserRole } from './enums/user-role.enum';
@@ -33,6 +40,36 @@ export class EventsController {
   @Get()
   findAll(@Query() query: ListEventsQueryDto): Promise<EventResponseDto[]> {
     return this.eventsService.findAll(query);
+  }
+
+  /**
+   * M1.3 — Paginated event registration history for the authenticated user.
+   * Called directly by the mobile frontend (JWT protected at gateway + service level).
+   */
+  @Get('me/registrations')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  getMyRegistrations(
+    @Request() req: AuthRequest,
+    @Query('page') page = '1',
+    @Query('limit') limit = '20',
+  ): Promise<RegistrationHistoryItemDto[]> {
+    return this.eventsService.getMyRegistrations(
+      req.user.id,
+      Math.max(1, parseInt(page, 10) || 1),
+      Math.min(100, parseInt(limit, 10) || 20),
+    );
+  }
+
+  /**
+   * M1.3 — Total registration + win counts for the authenticated user's profile.
+   * Called directly by the mobile frontend (JWT protected at gateway + service level).
+   */
+  @Get('me/stats')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  getMyEventStats(@Request() req: AuthRequest): Promise<UserEventStatsDto> {
+    return this.eventsService.getMyEventStats(req.user.id);
   }
 
   @Get(':id')
@@ -88,5 +125,37 @@ export class EventsController {
     @Request() req: AuthRequest,
   ): Promise<EventResponseDto> {
     return this.eventsService.complete(id, dto, req.user.id);
+  }
+
+  @Get(':id/my-registration')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  getMyRegistration(
+    @Param('id') id: string,
+    @Request() req: AuthRequest,
+  ): Promise<RegistrationResponseDto | null> {
+    return this.eventsService.getMyRegistrationForEvent(id, req.user.id);
+  }
+
+  @Delete(':id/registrations/:registrationId')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  withdrawRegistration(
+    @Param('id') id: string,
+    @Param('registrationId') registrationId: string,
+    @Request() req: AuthRequest,
+  ): Promise<void> {
+    return this.eventsService.withdrawRegistration(id, registrationId, req.user.id);
+  }
+
+  @Post(':id/captain-application')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  applyCaptain(
+    @Param('id') id: string,
+    @Request() req: AuthRequest,
+  ): Promise<{ status: 'pending' }> {
+    return this.eventsService.applyCaptain(id, req.user.id);
   }
 }

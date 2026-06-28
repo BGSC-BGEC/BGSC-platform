@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 
+import { AnnouncementRepository } from '@/core/repositories/AnnouncementRepository';
 import { useColors } from '@/hooks/use-colors';
 
 import { ALL_ANNOUNCEMENT_TAGS, TAG_COLORS, type AnnouncementTag } from './types';
@@ -98,7 +99,6 @@ export function MakeAnnouncementModal({ visible, onClose }: Props) {
 
     // ── WhatsApp rate-limit simulation ───────────────────────────────────
     // On the 2nd+ submission attempt, BGEC triggers a rate limit (1 per hour).
-    // This demonstrates the inline error UI from spec §8.
     const newErrors: RateLimitErrors = {};
     if (submitCount >= 1 && selectedTags.includes('BGEC')) {
       newErrors['BGEC'] = 45;
@@ -110,10 +110,15 @@ export function MakeAnnouncementModal({ visible, onClose }: Props) {
     // ────────────────────────────────────────────────────────────────────
 
     setSubmitting(true);
-    await new Promise<void>((resolve) => setTimeout(resolve, 900));
-    setSubmitting(false);
-    resetForm();
-    onClose();
+    try {
+      await AnnouncementRepository.create(title.trim(), body.trim(), selectedTags);
+      resetForm();
+      onClose();
+    } catch (err) {
+      Alert.alert('Failed to post', err instanceof Error ? err.message : 'Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (

@@ -1,82 +1,117 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useState } from 'react';
 
-import { Screen } from '@/components/screen';
+import { AccountActionsSheet } from '@/components/profile/AccountActionsSheet';
+import { EventSuggestionsSection } from '@/components/profile/EventSuggestionsSection';
+import { FriendSuggestionsSection } from '@/components/profile/FriendSuggestionsSection';
+import { HistorySection } from '@/components/profile/HistorySection';
+import { PlayerCard } from '@/components/profile/PlayerCard';
+import { UserInfoPanel } from '@/components/profile/UserInfoPanel';
 import { useAuthStore } from '@/core/stores/authStore';
-import { useViewModel } from '@/core/viewmodel/useViewModel';
-import { ProfileViewModel } from '@/viewmodels/ProfileViewModel';
 import { useColors } from '@/hooks/use-colors';
+
+type SheetTab = 'edit' | 'actions';
 
 export default function ProfileScreen() {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const status = useAuthStore((s) => s.status);
+  const user = useAuthStore((s) => s.user);
 
-  const [vm] = useState(() => new ProfileViewModel());
-  const { profile } = useViewModel(vm);
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [sheetTab, setSheetTab] = useState<SheetTab>('edit');
 
-  useEffect(() => {
-    if (status === 'authenticated') void vm.load();
-  }, [status, vm]);
+  const openSheet = (tab: SheetTab = 'edit') => {
+    setSheetTab(tab);
+    setSheetVisible(true);
+  };
 
-  if (status !== 'authenticated') {
+  if (status !== 'authenticated' || !user) {
     return (
-      <Screen center>
-        <Text style={[styles.title, { color: colors.text }]}>You&apos;re signed out</Text>
+      <View style={[s.gate, { backgroundColor: colors.background, paddingTop: insets.top + 16 }]}>
+        <Text style={[s.gateTitle, { color: colors.text }]}>Sign in to view your profile</Text>
         <Pressable
           onPress={() => router.push('/login')}
-          style={[styles.button, { backgroundColor: colors.primary }]}>
-          <Text style={[styles.buttonText, { color: colors.primaryText }]}>Login / Register</Text>
+          style={[s.gateBtn, { backgroundColor: colors.primary }]}
+        >
+          <Text style={[s.gateBtnText, { color: colors.primaryText }]}>Login / Register</Text>
         </Pressable>
-      </Screen>
-    );
-  }
-
-  if (profile.status === 'loading' || profile.status === 'idle') {
-    return (
-      <Screen center>
-        <ActivityIndicator color={colors.accent} />
-      </Screen>
-    );
-  }
-
-  if (profile.status === 'error') {
-    return (
-      <Screen center>
-        <Text style={{ color: colors.danger }}>{profile.error}</Text>
-      </Screen>
-    );
-  }
-
-  const user = profile.data!;
-  return (
-    <Screen>
-      <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
-          <Text style={[styles.avatarText, { color: colors.accentText }]}>
-            {user.username.slice(0, 1).toUpperCase()}
-          </Text>
-        </View>
-        <Text style={[styles.name, { color: colors.text }]}>{user.username}</Text>
-        <Text style={[styles.row, { color: colors.textMuted }]}>{user.email}</Text>
-        <Text style={[styles.row, { color: colors.textMuted }]}>Role: {user.role}</Text>
-        {typeof user.pointsBalance === 'number' && (
-          <Text style={[styles.row, { color: colors.textMuted }]}>
-            Points: {user.pointsBalance}
-          </Text>
-        )}
       </View>
-    </Screen>
+    );
+  }
+
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Custom status bar — spec §2 */}
+      <View
+        style={[
+          s.topBar,
+          {
+            paddingTop: insets.top + 8,
+            backgroundColor: colors.surface,
+            borderBottomColor: colors.border,
+          },
+        ]}
+      >
+        <Pressable onPress={() => router.back()} hitSlop={12} style={s.topBarBtn}>
+          <Text style={[s.topBarBack, { color: colors.text }]}>←</Text>
+        </Pressable>
+
+        <Pressable onPress={() => openSheet('edit')} hitSlop={8}>
+          <Text style={[s.topBarCenter, { color: colors.text }]}>Account Actions</Text>
+        </Pressable>
+
+        {/* Right: avatar circle — tap opens Account Actions (spec §2) */}
+        <Pressable onPress={() => openSheet('edit')} style={s.topBarBtn}>
+          <View style={[s.topBarAvatar, { backgroundColor: colors.accent }]}>
+            <Text style={[s.topBarAvatarText, { color: colors.accentText }]}>
+              {user.username.slice(0, 1).toUpperCase()}
+            </Text>
+          </View>
+        </Pressable>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={[s.scroll, { paddingBottom: insets.bottom + 32 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <PlayerCard onEditProfile={() => openSheet('edit')} />
+        <UserInfoPanel />
+        <EventSuggestionsSection />
+        <FriendSuggestionsSection />
+        <HistorySection />
+      </ScrollView>
+
+      <AccountActionsSheet
+        visible={sheetVisible}
+        onClose={() => setSheetVisible(false)}
+        initialTab={sheetTab}
+      />
+    </View>
   );
 }
 
-const styles = StyleSheet.create({
-  title: { fontSize: 20, fontWeight: '700', marginBottom: 16 },
-  button: { paddingHorizontal: 18, paddingVertical: 11, borderRadius: 8 },
-  buttonText: { fontSize: 15, fontWeight: '600' },
-  card: { borderWidth: 1, borderRadius: 12, padding: 20, alignItems: 'center', gap: 6 },
-  avatar: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
-  avatarText: { fontSize: 30, fontWeight: '700' },
-  name: { fontSize: 20, fontWeight: '700' },
-  row: { fontSize: 14 },
+const s = StyleSheet.create({
+  gate: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 24 },
+  gateTitle: { fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  gateBtn: { borderRadius: 999, paddingHorizontal: 28, paddingVertical: 13 },
+  gateBtnText: { fontSize: 15, fontWeight: '600' },
+
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  topBarBtn: { width: 40, alignItems: 'center' },
+  topBarBack: { fontSize: 22 },
+  topBarCenter: { fontSize: 15, fontWeight: '600' },
+  topBarAvatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  topBarAvatarText: { fontSize: 15, fontWeight: '700' },
+
+  scroll: { paddingTop: 8 },
 });

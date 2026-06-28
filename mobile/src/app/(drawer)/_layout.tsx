@@ -32,7 +32,7 @@ export default function DrawerLayout() {
       <Drawer.Screen name="feedback" options={{ drawerLabel: 'Feedback & Contact', title: 'Feedback' }} />
       <Drawer.Screen
         name="profile"
-        options={{ drawerLabel: 'My Profile', title: 'Profile' }}
+        options={{ drawerLabel: 'My Profile', title: 'Profile', headerShown: false }}
       />
     </Drawer>
   );

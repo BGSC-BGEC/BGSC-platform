@@ -22,9 +22,14 @@ export default function RootLayout() {
         <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
           <Stack screenOptions={{ headerShown: false }}>
             <Stack.Screen name="(drawer)" />
-            <Stack.Screen name="login" options={{ presentation: 'modal' }} />
-            <Stack.Screen name="register" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="event/[id]" />
+            <Stack.Screen name="event/bracket/[id]" />
+            <Stack.Screen name="event/auction/[id]" />
+            <Stack.Screen name="login" />
+            <Stack.Screen name="register" />
             <Stack.Screen name="auth/callback" />
+            <Stack.Screen name="auth/otp" />
+            <Stack.Screen name="auth/complete-profile" />
           </Stack>
           <StatusBar style="auto" />
         </ThemeProvider>

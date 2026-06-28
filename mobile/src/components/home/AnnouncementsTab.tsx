@@ -8,13 +8,14 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useQuery } from '@tanstack/react-query';
 
 import { useAuthStore } from '@/core/stores/authStore';
+import { AnnouncementRepository } from '@/core/repositories/AnnouncementRepository';
 import { useColors } from '@/hooks/use-colors';
 
 import { AnnouncementDetailSheet } from './AnnouncementDetailSheet';
 import { MakeAnnouncementModal } from './MakeAnnouncementModal';
-import { MOCK_ANNOUNCEMENTS } from './mock-data';
 import { SkeletonBox } from './SkeletonBox';
 import {
   ALL_ANNOUNCEMENT_TAGS,
@@ -25,11 +26,10 @@ import {
 } from './types';
 
 interface Props {
-  isLoading?: boolean;
   scrollToAnnouncementId?: string | null;
 }
 
-export function AnnouncementsTab({ isLoading, scrollToAnnouncementId }: Props) {
+export function AnnouncementsTab({ scrollToAnnouncementId }: Props) {
   const colors = useColors();
   const user = useAuthStore((s) => s.user);
 
@@ -40,7 +40,12 @@ export function AnnouncementsTab({ isLoading, scrollToAnnouncementId }: Props) {
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
   const [showMakeAnnouncement, setShowMakeAnnouncement] = useState(false);
   const [hasNewBanner, setHasNewBanner] = useState(false);
-  const [hasError, setHasError] = useState(false);
+
+  const { data: announcements = [], isPending, isError, refetch, isRefetching } = useQuery({
+    queryKey: ['announcements'],
+    queryFn: () => AnnouncementRepository.list({ limit: 50 }),
+    staleTime: 60_000,
+  });
 
   const visibleTags: Array<AnnouncementTag | 'All'> = [
     'All',
@@ -49,14 +54,14 @@ export function AnnouncementsTab({ isLoading, scrollToAnnouncementId }: Props) {
 
   const filteredAnnouncements =
     activeFilter === 'All'
-      ? MOCK_ANNOUNCEMENTS
-      : MOCK_ANNOUNCEMENTS.filter((a) => a.tags.includes(activeFilter as AnnouncementTag));
+      ? announcements
+      : announcements.filter((a) => a.tags.includes(activeFilter as AnnouncementTag));
 
-  if (isLoading) {
+  if (isPending) {
     return <AnnouncementsSkeleton colors={colors} />;
   }
 
-  if (hasError) {
+  if (isError) {
     return (
       <View style={[styles.errorState, { backgroundColor: colors.background }]}>
         <Text style={styles.errorIcon}>⚠️</Text>
@@ -66,7 +71,7 @@ export function AnnouncementsTab({ isLoading, scrollToAnnouncementId }: Props) {
         </Text>
         <Pressable
           style={[styles.retryBtn, { backgroundColor: colors.primary }]}
-          onPress={() => setHasError(false)}>
+          onPress={() => refetch()}>
           <Text style={[styles.retryBtnText, { color: colors.primaryText }]}>Retry</Text>
         </Pressable>
       </View>
@@ -79,9 +84,9 @@ export function AnnouncementsTab({ isLoading, scrollToAnnouncementId }: Props) {
       {hasNewBanner && (
         <Pressable
           style={[styles.newBanner, { backgroundColor: colors.accent }]}
-          onPress={() => setHasNewBanner(false)}>
+          onPress={() => { setHasNewBanner(false); refetch(); }}>
           <Text style={[styles.newBannerText, { color: colors.accentText }]}>
-            1 new announcement — tap to refresh
+            New announcements — tap to refresh
           </Text>
         </Pressable>
       )}
@@ -141,8 +146,8 @@ export function AnnouncementsTab({ isLoading, scrollToAnnouncementId }: Props) {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.feedContent}
           showsVerticalScrollIndicator={false}
-          onRefresh={() => { /* production: refetch */ }}
-          refreshing={false}
+          onRefresh={() => refetch()}
+          refreshing={isRefetching}
           renderItem={({ item }) => (
             <AnnouncementCard
               announcement={item}
@@ -169,7 +174,7 @@ export function AnnouncementsTab({ isLoading, scrollToAnnouncementId }: Props) {
       />
       <MakeAnnouncementModal
         visible={showMakeAnnouncement}
-        onClose={() => setShowMakeAnnouncement(false)}
+        onClose={() => { setShowMakeAnnouncement(false); refetch(); }}
       />
     </View>
   );
