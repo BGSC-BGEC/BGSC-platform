@@ -10,8 +10,8 @@ export function Logo({ label = 'BGSC' }: { label?: string }) {
   const colors = useColors();
   return (
     <View style={styles.row}>
-      <View style={[styles.badge, { backgroundColor: colors.primary }]}>
-        <Text style={[styles.badgeText, { color: colors.primaryText }]}>
+      <View style={[styles.badge, { backgroundColor: colors.accent }]}>
+        <Text style={[styles.badgeText, { color: colors.accentText }]}>
           {label.slice(0, 2)}
         </Text>
       </View>

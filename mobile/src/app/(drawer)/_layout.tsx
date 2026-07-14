@@ -17,7 +17,7 @@ export default function DrawerLayout() {
       drawerContent={(props) => <DrawerContent {...props} />}
       screenOptions={{
         header: (props) => <DynamicStatusBar {...props} />,
-        drawerActiveTintColor: colors.primary,
+        drawerActiveTintColor: colors.accent,
         drawerInactiveTintColor: colors.text,
       }}>
       <Drawer.Screen name="index" options={{ drawerLabel: 'Home', title: 'Home' }} />
@@ -32,7 +32,7 @@ export default function DrawerLayout() {
       <Drawer.Screen name="feedback" options={{ drawerLabel: 'Feedback & Contact', title: 'Feedback' }} />
       <Drawer.Screen
         name="profile"
-        options={{ drawerLabel: 'My Profile', title: 'Profile' }}
+        options={{ drawerLabel: 'My Profile', title: 'Profile', headerShown: false }}
       />
     </Drawer>
   );

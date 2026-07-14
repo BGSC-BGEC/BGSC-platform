@@ -79,6 +79,17 @@ export class SponsorsController {
     return this.sponsorsService.remove(id);
   }
 
+  @Patch(':id/tenure-end')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.COORDINATOR, UserRole.FOUNDER)
+  endTenure(
+    @Param('id') id: string,
+    @Body('endDate') endDate?: string,
+  ): Promise<SponsorResponseDto> {
+    return this.sponsorsService.endTenure(id, endDate);
+  }
+
   @Post(':id/fans')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

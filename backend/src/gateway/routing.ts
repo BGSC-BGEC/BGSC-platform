@@ -6,15 +6,18 @@
  *   - auth-service: /auth/**, /account/**
  *   - user-service: /users/**
  *   - sponsor-service: /sponsors/**
- *   - event-service: /events/**
+ *   - event-service: /events/**, /hall-of-fame/**
  *   - points-service: /points/**
+ *   - notification-service: /notifications/**
  */
 
 export const AUTH_SERVICE_PREFIXES = ['/auth', '/account'];
 export const USER_SERVICE_PREFIXES = ['/users'];
 export const SPONSOR_SERVICE_PREFIXES = ['/sponsors'];
-export const EVENT_SERVICE_PREFIXES = ['/events'];
+export const EVENT_SERVICE_PREFIXES = ['/events', '/hall-of-fame'];
 export const POINTS_SERVICE_PREFIXES = ['/points'];
+export const NOTIFICATION_SERVICE_PREFIXES = ['/notifications'];
+export const ANNOUNCEMENT_SERVICE_PREFIXES = ['/announcements'];
 
 /** Auth "attempt" endpoints that get the stricter rate limit (5 / 15 min). */
 const AUTH_ATTEMPT_PATHS = ['/auth/login', '/auth/register'];
@@ -24,9 +27,15 @@ const AUTH_ATTEMPT_PATHS = ['/auth/login', '/auth/register'];
  * full access token (not the TOTP temp token), so verifying them at the
  * gateway is safe. Everything else is passed through and enforced downstream.
  */
+// NOTE: GET /announcements is public — only POST/DELETE require auth.
+// The announcement-service enforces auth internally via JwtAuthGuard on those routes.
+// Gateway only enforces JWT for prefixes listed here (all methods).
 const PROTECTED_PREFIXES = [
   '/users',
   '/account',
+  '/events/me',
+  '/points/me',
+  '/notifications',
   '/auth/logout',
   '/auth/logout-all',
   '/auth/change-password',
@@ -77,4 +86,12 @@ export function isEventServiceRoute(url: string): boolean {
 
 export function isPointsServiceRoute(url: string): boolean {
   return startsWithAny(pathOf(url), POINTS_SERVICE_PREFIXES);
+}
+
+export function isNotificationServiceRoute(url: string): boolean {
+  return startsWithAny(pathOf(url), NOTIFICATION_SERVICE_PREFIXES);
+}
+
+export function isAnnouncementServiceRoute(url: string): boolean {
+  return startsWithAny(pathOf(url), ANNOUNCEMENT_SERVICE_PREFIXES);
 }

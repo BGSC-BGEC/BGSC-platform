@@ -1,3 +1,4 @@
+import { HttpModule } from '@nestjs/axios';
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { RolesGuard } from '../rbac/roles.guard';
@@ -9,7 +10,7 @@ import { EventsController } from './events.controller';
 import { EventsService } from './events.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Event, Registration, EventScore])],
+  imports: [TypeOrmModule.forFeature([Event, Registration, EventScore]), HttpModule],
   controllers: [EventsController],
   providers: [EventsService, RolesGuard, EventBusService],
 })

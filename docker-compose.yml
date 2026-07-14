@@ -53,6 +53,10 @@ services:
         condition: service_started
       points-service:
         condition: service_started
+      notification-service:
+        condition: service_started
+      announcement-service:
+        condition: service_started
     environment:
       PORT: 3000
       NODE_ENV: development
@@ -64,6 +68,8 @@ services:
       SPONSOR_SERVICE_URL: http://sponsor-service:3003
       EVENT_SERVICE_URL: http://event-service:3004
       POINTS_SERVICE_URL: http://points-service:3005
+      NOTIFICATION_SERVICE_URL: http://notification-service:3006
+      ANNOUNCEMENT_SERVICE_URL: http://announcement-service:3007
       CORS_ORIGINS: http://localhost:3000,http://localhost:5173
     networks:
       - bgsc-network
@@ -154,12 +160,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      sponsor-service:
+        condition: service_started
     environment:
       PORT: 3004
       NODE_ENV: development
       DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
       JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
       JWT_ISSUER: bgsc-auth-service
+      SPONSOR_SERVICE_URL: http://sponsor-service:3003
     networks:
       - bgsc-network
 
@@ -175,6 +184,44 @@ services:
         condition: service_healthy
     environment:
       PORT: 3005
+      NODE_ENV: development
+      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
+      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      JWT_ISSUER: bgsc-auth-service
+    networks:
+      - bgsc-network
+
+  notification-service:
+    build:
+      context: ./backend
+      dockerfile: apps/notification-service/Dockerfile
+    container_name: bgsc-notification-service
+    expose:
+      - '3006'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3006
+      NODE_ENV: development
+      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
+      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      JWT_ISSUER: bgsc-auth-service
+    networks:
+      - bgsc-network
+
+  announcement-service:
+    build:
+      context: ./backend
+      dockerfile: apps/announcement-service/Dockerfile
+    container_name: bgsc-announcement-service
+    expose:
+      - '3007'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 3007
       NODE_ENV: development
       DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
       JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef

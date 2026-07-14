@@ -1,16 +1,24 @@
+import { HttpService } from '@nestjs/axios';
 import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { firstValueFrom } from 'rxjs';
+import { DataSource, In, Repository } from 'typeorm';
 import { CompleteEventDto } from './dto/complete-event.dto';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventResponseDto } from './dto/event-response.dto';
 import { LeaderboardEntryDto } from './dto/leaderboard-entry.dto';
 import { ListEventsQueryDto } from './dto/list-events-query.dto';
+import {
+  RegistrationHistoryItemDto,
+  UserEventStatsDto,
+} from './dto/registration-history-response.dto';
 import { RegistrationResponseDto } from './dto/registration-response.dto';
 import { SubmitScoresDto } from './dto/submit-scores.dto';
 import { EventCompletedEvent } from './domain-events/event-completed.event';
@@ -25,6 +33,9 @@ import { EventBusService } from './event-bus.service';
 
 @Injectable()
 export class EventsService {
+  private readonly logger = new Logger(EventsService.name);
+  private readonly sponsorServiceUrl: string;
+
   constructor(
     @InjectRepository(Event)
     private readonly eventsRepository: Repository<Event>,
@@ -34,7 +45,12 @@ export class EventsService {
     private readonly scoresRepository: Repository<EventScore>,
     private readonly eventBus: EventBusService,
     private readonly dataSource: DataSource,
-  ) {}
+    private readonly httpService: HttpService,
+    private readonly configService: ConfigService,
+  ) {
+    this.sponsorServiceUrl =
+      this.configService.get<string>('event.sponsorServiceUrl') ?? 'http://localhost:3003';
+  }
 
   async create(dto: CreateEventDto, createdBy: string): Promise<EventResponseDto> {
     const event = this.eventsRepository.create({
@@ -66,38 +82,47 @@ export class EventsService {
     eventId: string,
     userId: string,
   ): Promise<RegistrationResponseDto> {
-    const event = await this.findEntity(eventId);
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const eventsRepo = manager.getRepository(Event);
+      const regsRepo = manager.getRepository(Registration);
 
-    if (new Date() > event.registrationDeadline) {
-      throw new BadRequestException('Registration deadline has passed');
-    }
-
-    if (event.status !== EventStatus.UPCOMING && event.status !== EventStatus.ONGOING) {
-      throw new BadRequestException('Event is not open for registration');
-    }
-
-    if (event.maxParticipants !== null && event.maxParticipants !== undefined) {
-      const count = await this.registrationsRepository.count({
-        where: { eventId, status: RegistrationStatus.CONFIRMED },
+      const event = await eventsRepo.findOne({
+        where: { id: eventId },
+        lock: { mode: 'pessimistic_write' },
       });
-      if (count >= event.maxParticipants) {
-        throw new BadRequestException('Event is at full capacity');
+      if (!event) throw new NotFoundException('Event not found');
+
+      if (new Date() > event.registrationDeadline) {
+        throw new BadRequestException('Registration deadline has passed');
       }
-    }
 
-    const existing = await this.registrationsRepository.findOne({
-      where: { eventId, userId, status: RegistrationStatus.CONFIRMED },
-    });
-    if (existing) {
-      throw new ConflictException('Already registered for this event');
-    }
+      if (event.status !== EventStatus.UPCOMING && event.status !== EventStatus.ONGOING) {
+        throw new BadRequestException('Event is not open for registration');
+      }
 
-    const registration = this.registrationsRepository.create({
-      eventId,
-      userId,
-      status: RegistrationStatus.CONFIRMED,
+      if (event.maxParticipants !== null && event.maxParticipants !== undefined) {
+        const count = await regsRepo.count({
+          where: { eventId, status: RegistrationStatus.CONFIRMED },
+        });
+        if (count >= event.maxParticipants) {
+          throw new BadRequestException('Event is at full capacity');
+        }
+      }
+
+      const existing = await regsRepo.findOne({
+        where: { eventId, userId, status: RegistrationStatus.CONFIRMED },
+      });
+      if (existing) {
+        throw new ConflictException('Already registered for this event');
+      }
+
+      const registration = regsRepo.create({
+        eventId,
+        userId,
+        status: RegistrationStatus.CONFIRMED,
+      });
+      return regsRepo.save(registration);
     });
-    const saved = await this.registrationsRepository.save(registration);
 
     const domainEvent: RegistrationCreatedEvent = {
       registrationId: saved.id,
@@ -126,7 +151,7 @@ export class EventsService {
 
       const registeredUserIds = new Set(
         (
-          await this.registrationsRepository.find({
+          await manager.getRepository(Registration).find({
             where: { eventId, status: RegistrationStatus.CONFIRMED },
             select: ['userId'],
           })
@@ -171,6 +196,9 @@ export class EventsService {
     if (event.status === EventStatus.PAST) {
       throw new ConflictException('Event already completed');
     }
+    if (event.status === EventStatus.UPCOMING) {
+      throw new BadRequestException('Event has not started yet');
+    }
 
     event.status = EventStatus.PAST;
     await this.eventsRepository.save(event);
@@ -182,7 +210,153 @@ export class EventsService {
     };
     this.eventBus.emit('EventCompleted', domainEvent);
 
+    // Award fans to winners' sponsors (fire-and-forget; failures logged, not thrown)
+    void this.awardFansToWinners(eventId, dto.winners);
+
     return this.toResponse(event);
+  }
+
+  // ─── M1.3: User history & stats (internal service endpoints) ────────────────
+
+  async getMyRegistrations(
+    userId: string,
+    page: number,
+    limit: number,
+  ): Promise<RegistrationHistoryItemDto[]> {
+    const offset = (page - 1) * limit;
+    const registrations = await this.registrationsRepository.find({
+      where: { userId, status: RegistrationStatus.CONFIRMED },
+      order: { registeredAt: 'DESC' },
+      skip: offset,
+      take: limit,
+    });
+
+    if (registrations.length === 0) return [];
+
+    const eventIds = registrations.map((r) => r.eventId);
+
+    // Batch fetch events and top scores — no N+1
+    const events = await this.eventsRepository.findBy({ id: In(eventIds) });
+    const eventMap = new Map(events.map((e) => [e.id, e]));
+
+    // One query: top scorer per event for this user's registered events
+    const topScores = await this.scoresRepository
+      .createQueryBuilder('s')
+      .select('s.event_id', 'eventId')
+      .addSelect('s.user_id', 'userId')
+      .addSelect('s.score', 'score')
+      .where('s.event_id IN (:...eventIds)', { eventIds })
+      .andWhere(
+        's.score = (SELECT MAX(s2.score) FROM event_scores s2 WHERE s2.event_id = s.event_id)',
+      )
+      .getRawMany<{ eventId: string; userId: string; score: number }>();
+    const topScoreMap = topScores.reduce((map, s) => {
+      if (!map.has(s.eventId)) map.set(s.eventId, new Set<string>());
+      map.get(s.eventId)!.add(s.userId);
+      return map;
+    }, new Map<string, Set<string>>());
+
+    return registrations.flatMap((reg) => {
+      const event = eventMap.get(reg.eventId);
+      if (!event) return [];
+      const result =
+        event.needsLeaderboard && topScoreMap.get(reg.eventId)?.has(userId)
+          ? '1st Place'
+          : undefined;
+      return [{
+        id: reg.id,
+        eventId: reg.eventId,
+        eventTitle: event.title,
+        eventCoverUrl: null,
+        date: reg.registeredAt.toISOString(),
+        role: 'solo',
+        result,
+      }];
+    });
+  }
+
+  async getMyEventStats(userId: string): Promise<UserEventStatsDto> {
+    const totalRegistrations = await this.registrationsRepository.count({
+      where: { userId, status: RegistrationStatus.CONFIRMED },
+    });
+
+    if (totalRegistrations === 0) return { totalRegistrations, totalWins: 0 };
+
+    const registeredEventIds = (
+      await this.registrationsRepository.find({
+        where: { userId, status: RegistrationStatus.CONFIRMED },
+        select: ['eventId'],
+      })
+    ).map((r) => r.eventId);
+
+    // One query: events where this user has the top score
+    const wins = await this.scoresRepository
+      .createQueryBuilder('s')
+      .where('s.event_id IN (:...eventIds)', { eventIds: registeredEventIds })
+      .andWhere('s.user_id = :userId', { userId })
+      .andWhere(
+        's.score = (SELECT MAX(s2.score) FROM event_scores s2 WHERE s2.event_id = s.event_id)',
+      )
+      .getCount();
+
+    return { totalRegistrations, totalWins: wins };
+  }
+
+  async getMyRegistrationForEvent(
+    eventId: string,
+    userId: string,
+  ): Promise<RegistrationResponseDto | null> {
+    const reg = await this.registrationsRepository.findOne({
+      where: { eventId, userId, status: RegistrationStatus.CONFIRMED },
+    });
+    return reg ? this.toRegistrationResponse(reg) : null;
+  }
+
+  async withdrawRegistration(
+    eventId: string,
+    registrationId: string,
+    userId: string,
+  ): Promise<void> {
+    const reg = await this.registrationsRepository.findOne({
+      where: { id: registrationId, eventId, userId },
+    });
+    if (!reg) throw new NotFoundException('Registration not found');
+    const event = await this.findEntity(eventId);
+    if (event.status === EventStatus.PAST) {
+      throw new BadRequestException('Cannot withdraw from a completed event');
+    }
+    reg.status = RegistrationStatus.CANCELLED;
+    await this.registrationsRepository.save(reg);
+  }
+
+  // ponytail: no DB table yet, returns pending immediately if user is registered
+  async applyCaptain(eventId: string, userId: string): Promise<{ status: 'pending' }> {
+    const reg = await this.registrationsRepository.findOne({
+      where: { eventId, userId, status: RegistrationStatus.CONFIRMED },
+    });
+    if (!reg) throw new BadRequestException('Must be registered to apply for captain');
+    return { status: 'pending' };
+  }
+
+  private async awardFansToWinners(
+    eventId: string,
+    winners: Array<{ userId: string; sponsorId?: string; fanAmount?: number }>,
+  ): Promise<void> {
+    for (const winner of winners) {
+      if (!winner.sponsorId || !winner.fanAmount) continue;
+      try {
+        await firstValueFrom(
+          this.httpService.post(
+            `${this.sponsorServiceUrl}/sponsors/${winner.sponsorId}/fans`,
+            { userId: winner.userId, eventId, amount: winner.fanAmount, reason: 'event_win' },
+          ),
+        );
+      } catch (err) {
+        this.logger.error(
+          `Fan award failed for user ${winner.userId} sponsor ${winner.sponsorId}: ${(err as Error).message}`,
+        );
+      }
+    }
   }
 
   private async buildLeaderboard(eventId: string): Promise<LeaderboardEntryDto[]> {

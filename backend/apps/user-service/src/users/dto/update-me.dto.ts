@@ -21,6 +21,11 @@ export class UpdateMeDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(500)
+  bio?: string;
+
+  @IsOptional()
+  @IsString()
   avatarUrl?: string;
 
   @IsOptional()

@@ -29,3 +29,11 @@ services:
   points-service:
     ports:
       - '3005:3005'
+
+  notification-service:
+    ports:
+      - '3006:3006'
+
+  announcement-service:
+    ports:
+      - '3007:3007'

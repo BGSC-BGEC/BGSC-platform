@@ -6,6 +6,7 @@ import { userConfig, userConfigValidationSchema } from './config/user.config';
 import { UsersModule } from './users/users.module';
 import { AddUserProfileColumns1750000000000 } from './migrations/1750000000000-AddUserProfileColumns';
 import { AddLastSponsorChange1762000001000 } from './migrations/1762000001000-AddLastSponsorChange';
+import { AddBioColumn1769000000000 } from './migrations/1769000000000-AddBioColumn';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { AddLastSponsorChange1762000001000 } from './migrations/1762000001000-Ad
         migrations: [
           AddUserProfileColumns1750000000000,
           AddLastSponsorChange1762000001000,
+          AddBioColumn1769000000000,
         ],
         migrationsRun: true,
       }),

@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module';
 import { eventConfig, eventConfigValidationSchema } from './config/event.config';
 import { CreateEvents1764000000000 } from './migrations/1764000000000-CreateEvents';
 import { EventsModule } from './events/events.module';
+import { HallOfFameModule } from './hall-of-fame/hall-of-fame.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { EventsModule } from './events/events.module';
     }),
     AuthModule,
     EventsModule,
+    HallOfFameModule,
   ],
 })
 export class AppModule {}

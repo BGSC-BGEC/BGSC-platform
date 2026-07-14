@@ -1,8 +1,8 @@
 import { Type } from 'class-transformer';
 import {
-  ArrayMinSize,
   IsArray,
   IsInt,
+  IsOptional,
   IsUUID,
   Min,
   ValidateNested,
@@ -12,17 +12,18 @@ export class WinnerEntryDto {
   @IsUUID('4')
   userId!: string;
 
+  @IsOptional()
   @IsUUID('4')
-  sponsorId!: string;
+  sponsorId?: string;
 
+  @IsOptional()
   @IsInt()
   @Min(1)
-  fanAmount!: number;
+  fanAmount?: number;
 }
 
 export class CompleteEventDto {
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => WinnerEntryDto)
   winners!: WinnerEntryDto[];

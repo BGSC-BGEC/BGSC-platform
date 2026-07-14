@@ -8,8 +8,10 @@ import { createRateLimitMiddleware } from './gateway/rate-limit.middleware';
 import { createJwtAuthMiddleware } from './gateway/jwt-auth.middleware';
 import { createServiceProxy } from './gateway/proxy';
 import {
+  isAnnouncementServiceRoute,
   isAuthServiceRoute,
   isEventServiceRoute,
+  isNotificationServiceRoute,
   isPointsServiceRoute,
   isSponsorServiceRoute,
   isUserServiceRoute,
@@ -32,6 +34,8 @@ async function bootstrap() {
   const sponsorTarget = config.get<string>('gateway.services.sponsor')!;
   const eventTarget = config.get<string>('gateway.services.event')!;
   const pointsTarget = config.get<string>('gateway.services.points')!;
+  const notificationTarget = config.get<string>('gateway.services.notification')!;
+  const announcementTarget = config.get<string>('gateway.services.announcement')!;
   const proxyTimeoutMs = config.get<number>('gateway.proxyTimeoutMs', 30000);
   const rateLimit = {
     general: config.get<{ max: number; windowMs: number }>(
@@ -57,6 +61,16 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: ['Content-Type', 'Authorization'],
     exposedHeaders: ['X-RateLimit-Remaining', 'Retry-After'],
+  });
+
+  // Block POST /notifications at the edge — internal-only endpoint, services
+  // must call notification-service directly on the internal network.
+  app.use('/notifications', (req, res, next) => {
+    if (req.method === 'POST') {
+      res.status(403).json({ message: 'Forbidden: internal endpoint' });
+      return;
+    }
+    next();
   });
 
   // Edge pipeline: rate limit -> JWT verification -> reverse proxy.
@@ -96,6 +110,20 @@ async function bootstrap() {
     createServiceProxy({
       target: pointsTarget,
       pathFilter: (path) => isPointsServiceRoute(path),
+      timeoutMs: proxyTimeoutMs,
+    }),
+  );
+  app.use(
+    createServiceProxy({
+      target: notificationTarget,
+      pathFilter: (path) => isNotificationServiceRoute(path),
+      timeoutMs: proxyTimeoutMs,
+    }),
+  );
+  app.use(
+    createServiceProxy({
+      target: announcementTarget,
+      pathFilter: (path) => isAnnouncementServiceRoute(path),
       timeoutMs: proxyTimeoutMs,
     }),
   );

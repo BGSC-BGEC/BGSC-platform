@@ -66,6 +66,15 @@ export class User {
   @Column({ name: 'last_sponsor_change', type: 'timestamptz', nullable: true })
   lastSponsorChange?: Date | null;
 
+  @Column({ type: 'text', nullable: true })
+  bio?: string | null;
+
+  @Column({ name: 'display_name', type: 'varchar', length: 50, nullable: true })
+  displayName?: string | null;
+
+  @Column({ name: 'custom_tags', type: 'text', array: true, default: () => "'{}'" })
+  customTags!: string[];
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

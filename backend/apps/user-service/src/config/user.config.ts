@@ -9,6 +9,7 @@ export const userConfigValidationSchema = Joi.object({
   DATABASE_URL: Joi.string().uri().required(),
   JWT_ACCESS_SECRET: Joi.string().required(),
   JWT_ISSUER: Joi.string().required(),
+  EVENT_SERVICE_URL: Joi.string().uri().default('http://localhost:3003'),
 });
 
 export const userConfig = registerAs('user', () => ({
@@ -21,4 +22,5 @@ export const userConfig = registerAs('user', () => ({
     accessSecret: process.env.JWT_ACCESS_SECRET,
     issuer: process.env.JWT_ISSUER,
   },
+  eventServiceUrl: process.env.EVENT_SERVICE_URL ?? 'http://localhost:3003',
 }));

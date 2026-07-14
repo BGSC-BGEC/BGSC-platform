@@ -14,6 +14,8 @@ export const gatewayConfigValidationSchema = Joi.object({
   SPONSOR_SERVICE_URL: Joi.string().uri().required(),
   EVENT_SERVICE_URL: Joi.string().uri().required(),
   POINTS_SERVICE_URL: Joi.string().uri().required(),
+  NOTIFICATION_SERVICE_URL: Joi.string().uri().required(),
+  ANNOUNCEMENT_SERVICE_URL: Joi.string().uri().required(),
   CORS_ORIGINS: Joi.string().default(''),
   RATE_LIMIT_GENERAL_MAX: Joi.number().integer().min(1).default(100),
   RATE_LIMIT_GENERAL_WINDOW_MS: Joi.number()
@@ -47,6 +49,8 @@ export const gatewayConfig = registerAs('gateway', () => ({
     sponsor: process.env.SPONSOR_SERVICE_URL,
     event: process.env.EVENT_SERVICE_URL,
     points: process.env.POINTS_SERVICE_URL,
+    notification: process.env.NOTIFICATION_SERVICE_URL,
+    announcement: process.env.ANNOUNCEMENT_SERVICE_URL,
   },
   cors: {
     origins: process.env.CORS_ORIGINS

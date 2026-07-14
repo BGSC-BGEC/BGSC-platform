@@ -8,6 +8,7 @@ export class UserResponseDto {
   contact?: string | null;
   role!: UserRole;
   avatarUrl?: string | null;
+  bio?: string | null;
   interests!: string[];
   socials!: Record<string, string>;
   stravaId?: string | null;

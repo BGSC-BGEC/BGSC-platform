@@ -57,8 +57,8 @@ export function DynamicStatusBar({ navigation, route }: HeaderProps) {
         <Pressable
           onPress={() => router.push('/profile')}
           accessibilityLabel="Open profile">
-          <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-            <Text style={[styles.avatarText, { color: colors.primaryText }]}>
+          <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
+            <Text style={[styles.avatarText, { color: colors.accentText }]}>
               {user.username.slice(0, 1).toUpperCase()}
             </Text>
           </View>

@@ -52,6 +52,24 @@
       "compilerOptions": {
         "tsConfigPath": "apps/points-service/tsconfig.app.json"
       }
+    },
+    "notification-service": {
+      "type": "application",
+      "root": "apps/notification-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/notification-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/notification-service/tsconfig.app.json"
+      }
+    },
+    "announcement-service": {
+      "type": "application",
+      "root": "apps/announcement-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/announcement-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/announcement-service/tsconfig.app.json"
+      }
     }
   }
 }
