@@ -175,66 +175,63 @@ Each client (mobile & web) follows the same MVVM pattern:
 
 ## Timeline Overview
 
-| Phase | Focus | Duration | Start Date | End Date |
-|-------|-------|----------|------------|----------|
-| **Phase 0** | Foundation (infra, design system, auth) | 2 weeks | April 20, 2026 | May 3, 2026 |
-| **Phase 1 (Backend MVP)** | All backend APIs for MVP features | 6 weeks | May 4, 2026 | **June 26, 2026** |
-| **Phase 1 (Frontend MVP)** | Mobile + Web frontend & integration | 2 weeks | June 27, 2026 | July 10, 2026 |
-| **Phase 2** | Community & Engagement (friends, posts, challenges) | 6 weeks | July 11, 2026 | August 21, 2026 |
-| **Phase 3** | Operations & League Management (Union Page, auctions, teams) | 8 weeks | August 22, 2026 | October 16, 2026 |
-| **Phase 4** | Integrations & Polish (Strava, Steam, WhatsApp, etc.) | 4 weeks | October 17, 2026 | November 13, 2026 |
-| **Phase 5** | Buffer & Contingency (bug fixes, load testing, launch prep) | 4 weeks | November 14, 2026 | December 11, 2026 |
+| Phase                      | Focus                                                        | Duration | Start Date        | End Date          |
+| -------------------------- | ------------------------------------------------------------ | -------- | ----------------- | ----------------- |
+| **Phase 0**                | Foundation (infra, design system, auth)                      | 2 weeks  | Jun 14, 2026      |                   |
+| **Phase 1 (Backend MVP)**  | All backend APIs for MVP features                            | 6 weeks  |                   | **June 26, 2026** |
+| **Phase 1 (Frontend MVP)** | Mobile + Web frontend & integration                          | 2 weeks  | June 27, 2026     | July 10, 2026     |
+| **Phase 2**                | Community & Engagement (friends, posts, challenges)          | 6 weeks  | July 11, 2026     | August 21, 2026   |
+| **Phase 3**                | Operations & League Management (Union Page, auctions, teams) | 8 weeks  | August 22, 2026   | October 16, 2026  |
+| **Phase 4**                | Integrations & Polish (Strava, Steam, WhatsApp, etc.)        | 4 weeks  | October 17, 2026  | November 13, 2026 |
+| **Phase 5**                | Buffer & Contingency (bug fixes, load testing, launch prep)  | 4 weeks  | November 14, 2026 | December 11, 2026 |
 
 > **Note:** The **Backend MVP** milestone (June 27) is **non‑negotiable**. All tasks under Phase 1 (Backend) must be done by June 26.
 
 ---
 
-## Phase 0: Foundation (April 20 – May 3)
+## Phase 0: Foundation (June 14th - )
 
 **Goal:** Build the skeleton – nothing user‑facing yet, but every service can start, communicate, and pass basic tests.
 
 ### Milestone 0.1 – Infrastructure & CI/CD
 
-| Status | Task                      | Sub‑tasks                                                                                                                 | Est. (person‑days) | Beginner notes                                                                                       | Done By |
-| ------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------- | ------- |
-| [x]    | Set up GitHub repository  | – Create `bgsc-platform` repo <br> – Branch protection: `main`, `dev` <br> – Add `.gitignore` (Node, React Native, env)   | 0.5                | Use GitHub UI; protect `main` so no direct pushes.                                                   | Nikunj  |
-| [x]    | Configure CI/CD pipelines | – GitHub Actions workflow for backend lint/test <br> – Docker build on each PR <br> – Deploy to staging on merge to `dev` | 1                  | Starter template: `node.js` workflow. For Docker, use `docker/build-push-action`.                    | Nikunj  |
-| [x]    | Staging environment       | – Set up Railway / Render account <br> – Provision PostgreSQL, Redis, S3‑compatible storage                               | 1                  | Follow Railway’s “New Project” → PostgreSQL, Redis.                                                  | Nikunj  |
-| [x]    | Monitoring basics         | – Prometheus + Grafana (Docker‑compose) <br> – Sentry (create project, get DSN)                                           | 1                  | Use [Prometheus node_exporter](https://prometheus.io/docs/guides/node-exporter/) for server metrics. | Nikunj  |
+| Task                      | Sub‑tasks                                                                                                                 | Est. (person‑days) | Beginner notes                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------- |
+| Set up GitHub repository  | – Create `bgsc-platform` repo <br> – Branch protection: `main`, `dev` <br> – Add `.gitignore` (Node, React Native, env)   | 0.5                | Use GitHub UI; protect `main` so no direct pushes.                                                   |
+| Configure CI/CD pipelines | – GitHub Actions workflow for backend lint/test <br> – Docker build on each PR <br> – Deploy to staging on merge to `dev` | 1                  | Starter template: `node.js` workflow. For Docker, use `docker/build-push-action`.                    |
+| Staging environment       | – Set up Railway / Render account <br> – Provision PostgreSQL, Redis, S3‑compatible storage                               | 1                  | Follow Railway’s “New Project” → PostgreSQL, Redis.                                                  |
+| Monitoring basics         | – Prometheus + Grafana (Docker‑compose) <br> – Sentry (create project, get DSN)                                           | 1                  | Use [Prometheus node_exporter](https://prometheus.io/docs/guides/node-exporter/) for server metrics. |
 
 ### Milestone 0.2 – Backend Core Services
 
-| Status | Task | Sub‑tasks | Est. | Notes | Done By |
-|--------|------|-----------|------|-------|---------|
-| [x]    | Auth Service (NestJS) | – JWT issuance (access/refresh) <br> – Google OAuth2 flow <br> – `/register`, `/login`, `/refresh`, `/logout` | 3 | Use `@nestjs/jwt` and `@nestjs/passport`. Store refresh tokens in Redis. | Kashyap |
-| [x]    | User Service | – CRUD for users (PostgreSQL) <br> – RBAC middleware (roles: guest, user, member, core, coordinator, founder) | 2 | Create `users` table with `role` enum. Integration between auth and user in the next task | Dhruvin |
-| [x]    | Integrate auth and user service | Integrate the two services to make sure they go hand in hand and no issues come up | 3 | integrate | Dhruvin |
-| [x]    | API Gateway (Kong / Express Gateway) | – Route requests to services <br> – JWT verification <br> – Rate limiting (5 auth attempts/15min, 100 req/min for general) | 2 | Implemented as the **root backend app** (`backend/src`) that proxies to the `apps/*` microservices, using `http-proxy-middleware` + Redis sliding-window limiter. See `docs/api-gateway.md`. | Dhruvin |
-| [ ]    | Event Bus (MVP: in‑memory) | – Simple `EventEmitter` based bus <br> – Define domain events (`UserRegistered`, `EventCreated`) | 1 | We will replace with Kafka in Phase 2. For MVP, this is enough. | — |
+| Task | Sub‑tasks | Est. | Notes |
+|------|-----------|------|-------|
+| Auth Service (NestJS) | – JWT issuance (access/refresh) <br> – Google OAuth2 flow <br> – `/register`, `/login`, `/refresh`, `/logout` | 3 | Use `@nestjs/jwt` and `@nestjs/passport`. Store refresh tokens in Redis. |
+| User Service | – CRUD for users (PostgreSQL) <br> – RBAC middleware (roles: guest, user, member, core, coordinator, founder) | 2 | Create `users` table with `role` enum. |
+| API Gateway (Kong / Express Gateway) | – Route requests to services <br> – JWT verification <br> – Rate limiting (5 auth attempts/15min, 100 req/min for general) | 2 | Start with Express Gateway for simplicity; later replace with Kong. |
+| Event Bus (MVP: in‑memory) | – Simple `EventEmitter` based bus <br> – Define domain events (`UserRegistered`, `EventCreated`) | 1 | We will replace with Kafka in Phase 2. For MVP, this is enough. |
 
 ### Milestone 0.3 – Database & Cache
 
-| Status | Task | Sub‑tasks | Est. | Done By |
-|--------|------|-----------|------|---------|
-| [ ]    | PostgreSQL schema | – Run migrations for `users`, `events`, `registrations`, `sponsors`, `points_transactions`, `announcements` | 2 | — |
-| [ ]    | Redis cache layer | – Cache user sessions (refresh tokens) <br> – Cache event list (5 min TTL) | 1 | — |
-| [x]    | Basic seeding | – Script to insert dummy users, sponsors, events | 0.5 | Dhruvin (only Users for now to be maintianed when other tables come in) |
+| Task | Sub‑tasks | Est. |
+|------|-----------|------|
+| PostgreSQL schema | – Run migrations for `users`, `events`, `registrations`, `sponsors`, `points_transactions`, `announcements` | 2 |
+| Redis cache layer | – Cache user sessions (refresh tokens) <br> – Cache event list (5 min TTL) | 1 |
+| Basic seeding | – Script to insert dummy users, sponsors, events | 0.5 |
 
 ### Milestone 0.4 – Frontend Shell (Mobile + Web)
 
-| Status | Task                    | Sub‑tasks                                                                                                 | Est. | Done By |
-|--------|-------------------------|-----------------------------------------------------------------------------------------------------------|------|---------|
-| [x]    | React Native (Expo) app | – Navigation drawer (Side Drawer) <br> – Dynamic status bar component <br> – Theme switching (dark/light) | 3    | Dhruvin |
-| [x]    | React Web (Admin PWA)   | – Tailwind CSS + Vite <br> – Router (login, basic event table)                                            | 2    | Dhruvin |
-| [x]    | MVVM base classes       | – `BaseViewModel` with observable state <br> – Repository pattern for API calls                           | 2    | Dhruvin |
-| [x]| Cleaup of AI gen code and testing | Clean up web/ and mobile/ | 2 | Adit |
+| Task                    | Sub‑tasks                                                                                                 | Est. |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- | ---- |
+| React Native (Expo) app | – Navigation drawer (Side Drawer) <br> – Dynamic status bar component <br> – Theme switching (dark/light) | 3    |
+| React Web (Admin PWA)   | – Tailwind CSS + Vite <br> – Router (login, basic event table)                                            | 2    |
+| MVVM base classes       | – `BaseViewModel` with observable state <br> – Repository pattern for API calls                           | 2    |
 
 **Phase 0 Success Criteria**
-- [x] `docker-compose up` starts all services (auth, user, gateway, postgres, redis)
-- [x] User can register via API (POST `/register`) and receive JWT
-- [x] The mobile app shows the status bar and navigation drawer (even if empty)
-- [x] Unit test coverage > 50% for auth & user services
-- [ ] Pending tasks on event bus and cache layer
+- [ ] `docker-compose up` starts all services (auth, user, gateway, postgres, redis)
+- [ ] User can register via API (POST `/register`) and receive JWT
+- [ ] The mobile app shows the status bar and navigation drawer (even if empty)
+- [ ] Unit test coverage > 50% for auth & user services
 
 ---
 
@@ -244,51 +241,51 @@ Each client (mobile & web) follows the same MVVM pattern:
 
 We split Phase 1 into **Backend (6 weeks)** and **Frontend (2 weeks)** so the backend team can work independently.
 
-### Part A – Backend MVP (May 4 – June 26)
+### Part A – Backend MVP ( – June 26)
 
 #### Milestone 1.1 – Sponsor System v1 (Week 1 of Phase 1)
 
-| Status | Task                         | Sub‑tasks                                                                                                                          | Est. | Done By |
-|--------|------------------------------|------------------------------------------------------------------------------------------------------------------------------------|------|---------|
-| [x]    | Sponsor service              | – CRUD for `sponsors` (name, logo, tenure_start/end) <br> – `UserSponsorAffiliation` table <br> – Endpoint: `GET /sponsors/active` | 2    | Dhruvin       |
-| [x]    | Onboarding sponsor selection | – `POST /users/me/sponsor` (with semester change limit) <br> – Validate that user can change only once per semester                | 1    | Dhruvin       |
-| [x]    | Basic fan counting           | – `POST /sponsors/:id/fans` to award fans <br> – Emit `FanEarned` event via in-memory event bus (stub for Kafka)                     | 1    | Dhruvin       |
-| [x]    | Sponsor leaderboard          | – `GET /sponsors/leaderboard?sort=fans|events|users` – aggregate fan counts, events won, affiliated users                         | 1    | Dhruvin       |
+| Task                         | Sub‑tasks                                                                                                                          | Est. |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| Sponsor service              | – CRUD for `sponsors` (name, logo, tenure_start/end) <br> – `UserSponsorAffiliation` table <br> – Endpoint: `GET /sponsors/active` | 2    |
+| Onboarding sponsor selection | – `POST /users/me/sponsor` (with semester change limit) <br> – Validate that user can change only once per semester                | 1    |
+| Basic fan counting           | – Emit `FanEarned` event when user wins an event (stub for now)                                                                    | 1    |
+| Sponsor leaderboard          | – `GET /sponsors/leaderboard?sort=fans` – aggregate fan counts                                                                     | 1    |
 
 #### ✅ Milestone 1.2 – Events & Registration (Weeks 2‑3)
 
-| Status | Task | Sub‑tasks | Est. | Done By |
-|--------|------|-----------|------|---------|
-| [x]    | Event service | – `POST /events` (admin only) <br> – `GET /events` (with filters: upcoming/ongoing/past) <br> – `GET /events/:id` | 3 | Dhruvin |
-| [x]    | Registration flow | – `POST /events/:id/register` (solo only, no teams in MVP) <br> – Check registration deadline, capacity <br> – Emit `RegistrationCreated` event | 2 | Dhruvin |
-| [x]    | Points service (basic) | – Consume `RegistrationCreated` → award participation points <br> – Emit `PointsEarned` | 2 | Dhruvin |
-| [x]    | Event leaderboard (MVP) | – For `LE` events: admin can manually enter scores via `POST /events/:id/scores` <br> – `GET /events/:id/leaderboard` | 2 | Dhruvin |
-| [x]    | Post‑event fan award | – `PATCH /events/:id/complete` fires `awardFansToWinners()` for each winner in dto; HTTP POSTs to sponsor-service `POST /sponsors/:id/fans`; failures logged, not thrown | 1 | Dhruvin |
+| Task | Sub‑tasks | Est. |
+|------|-----------|------|
+| Event service | – `POST /events` (admin only) <br> – `GET /events` (with filters: upcoming/ongoing/past) <br> – `GET /events/:id` | 3 |
+| Registration flow | – `POST /events/:id/register` (solo only, no teams in MVP) <br> – Check registration deadline, capacity <br> – Emit `RegistrationCreated` event | 2 |
+| Points service (basic) | – Consume `RegistrationCreated` → award participation points <br> – Emit `PointsEarned` | 2 |
+| Event leaderboard (MVP) | – For `LE` events: admin can manually enter scores via `POST /events/:id/scores` <br> – `GET /events/:id/leaderboard` | 2 |
+| Post‑event fan award | – When `EventCompleted` is emitted, award fans to winners’ sponsors | 1 |
 
 #### ✅ Milestone 1.3 – User Profile & Player Card (Week 4)
 
-| Status | Task | Sub‑tasks | Est. | Done By |
-|--------|------|-----------|------|---------|
-| [x]    | Profile API | – `GET /users/:id` (public fields) <br> – `PATCH /users/me` (bio, interests, social links) <br> – `GET/PATCH /users/me/profile` (extended profile incl. displayName, customTags, socialLinks) | 2 | Dhruvin |
-| [x]    | Player card generation | – `GET /users/me/player-card` returns JSON with avatar, username, sponsor badge, stats | 1 | Dhruvin |
-| [x]    | Interest fields | – `GET /users/interests` (catalog: sports/esports/gaming) <br> – `PATCH /users/me/interests` (validated against catalog) | 1 | Dhruvin |
-| [x]    | Sponsor stats on profile | – `GET /users/me/sponsor-stats` (personal fan count, rank, events won) | 1 | Dhruvin |
+| Task | Sub‑tasks | Est. |
+|------|-----------|------|
+| Profile API | – `GET /users/:id` (public fields) <br> – `PATCH /users/me` (bio, interests, social links) | 2 |
+| Player card generation | – Endpoint that returns a JSON with avatar, username, sponsor badge, stats | 1 |
+| Interest fields | – `GET /interests` (list of sports/esports) <br> – `PATCH /users/me/interests` | 1 |
+| Sponsor stats on profile | – `GET /users/me/sponsor-stats` (personal fan count, events won) | 1 |
 
 #### ✅ Milestone 1.4 – Announcements & Admin Panel (Week 5)
 
-| Status | Task | Sub‑tasks | Est. | Done By |
-|--------|------|-----------|------|---------|
-| [x]    | Announcement service | – `POST /announcements` (coordinator/founder/core) <br> – `GET /announcements` (public, 4-month expiry window, type filter) <br> – `DELETE /announcements/:id` (coordinator+) <br> – Types: BGEC/FITSOC/AIRBALL/OFFSIDE/POWERPLAY/AROUND_THE_NET/DEUCE/HIGHLIGHT/TEAMS | 2 | Dhruvin |
-| [x]    | Basic users table (admin) | – `GET /users` now paginated (`page`/`limit`, default 50/page) – coordinator+ | 2 | Dhruvin |
-| [x]    | Sponsor management (admin) | – `POST /sponsors` (coordinator+, existed from M1.1) <br> – `PATCH /sponsors/:id/tenure-end` (sets status=inactive, emits SponsorTenureEnded) | 1 | Dhruvin |
+| Task | Sub‑tasks | Est. |
+|------|-----------|------|
+| Announcement service | – `POST /announcements` (coordinator+) <br> – `GET /announcements` (public, last 4 months) <br> – Announcement types & tags | 2 |
+| Basic users table (admin) | – `GET /admin/users` (paginated, filter by role/status) – coordinator+ | 2 |
+| Sponsor management (admin) | – `POST /admin/sponsors` <br> – `PATCH /admin/sponsors/:id/tenure-end` (manual for MVP) | 1 |
 
 #### ✅ Milestone 1.5 – Points & Hall of Fame v1 (Week 6)
 
-| Status | Task | Sub‑tasks | Est. | Done By |
-|--------|------|-----------|------|---------|
-| [x]    | Points balance | – `GET /points/me/balance` <br> – Transaction history `GET /points/me/transactions` (paginated) <br> – Admin lookup: `GET /points/balance/:userId` | 1 | Dhruvin |
-| [x]    | Hall of Fame | – `GET /hall-of-fame/event-winners` (top scorer per completed LE event) <br> – `GET /hall-of-fame/sponsor-champions` (proxies sponsor-service leaderboard, top 10 by fans) | 2 | Dhruvin |
-| [x]    | Notification service (in‑app) | – Store notifications in DB (`notifications` table) <br> – `GET /notifications/me` (list + unread count) <br> – `PATCH /notifications/:id/read` <br> – `POST /notifications` (internal, for other services) | 2 | Dhruvin |
+| Task | Sub‑tasks | Est. |
+|------|-----------|------|
+| Points balance | – `GET /users/me/points` <br> – Transaction history (`GET /points/transactions`) | 1 |
+| Hall of Fame | – `GET /hall-of-fame/event-winners` <br> – `GET /hall-of-fame/sponsor-champions` (hardcoded or manually seeded) | 2 |
+| Notification service (in‑app) | – Store notifications in DB <br> – `GET /notifications` (unread count) <br> – `PATCH /notifications/:id/read` | 2 |
 
 **Final Backend MVP Checklist (June 26)**
 - [ ] All endpoints above are implemented, documented (Swagger), and tested.
@@ -304,22 +301,22 @@ Now the frontend team consumes the ready APIs.
 
 #### ✅ Milestone 1.6 – Mobile App (React Native)
 
-| Status | Task | Sub‑tasks | Est. | Done By |
-|--------|------|-----------|------|---------|
-| [x]    | Auth screens | – Login / Register (email + Google OAuth) <br> – Sponsor selection during onboarding <br> – Interest selection | 2 | Dhruvin |
-| [x]    | Home page | – Landing intro (static) <br> – Announcements list (from API) <br> – Public social feed (read‑only) | 2 | Dhruvin |
-| [x]    | Events page | – Browse events (upcoming/ongoing/past) <br> – Solo registration flow <br> – Event details view | 2 | Dhruvin |
-| [x]    | User profile | – View own profile (player card, sponsor badge) <br> – Edit bio/interests | 1 | Dhruvin |
-| [x]    | Points & Hall of Fame | – Display points balance <br> – Hall of Fame screen (winners + sponsor champions) | 1 | Dhruvin |
+| Task | Sub‑tasks | Est. |
+|------|-----------|------|
+| Auth screens | – Login / Register (email + Google OAuth) <br> – Sponsor selection during onboarding <br> – Interest selection | 2 |
+| Home page | – Landing intro (static) <br> – Announcements list (from API) <br> – Public social feed (read‑only) | 2 |
+| Events page | – Browse events (upcoming/ongoing/past) <br> – Solo registration flow <br> – Event details view | 2 |
+| User profile | – View own profile (player card, sponsor badge) <br> – Edit bio/interests | 1 |
+| Points & Hall of Fame | – Display points balance <br> – Hall of Fame screen (winners + sponsor champions) | 1 |
 
 #### ✅ Milestone 1.7 – Web Admin Console (React + Tailwind)
 
-| Status | Task | Sub‑tasks | Est. | Done By |
-|--------|------|-----------|------|---------|
-| [ ]    | Login & RBAC | – Coordinator/Founder login redirects to admin dashboard | 0.5 | — |
-| [ ]    | Event management | – Create/edit events (form with title, dates, type, etc.) | 1 | — |
-| [ ]    | Announcement creator | – Make Announcement Popup (rich text, tag selection) | 1 | — |
-| [ ]    | Users table | – View users, filter by role/sponsor | 1 | — |
+| Task | Sub‑tasks | Est. |
+|------|-----------|------|
+| Login & RBAC | – Coordinator/Founder login redirects to admin dashboard | 0.5 |
+| Event management | – Create/edit events (form with title, dates, type, etc.) | 1 |
+| Announcement creator | – Make Announcement Popup (rich text, tag selection) | 1 |
+| Users table | – View users, filter by role/sponsor | 1 |
 
 **Frontend MVP Success Criteria**
 - [ ] A user can complete the full onboarding (interests → sponsor → add friends suggestion skip) and see the home feed.
@@ -335,30 +332,30 @@ Now we add social features, challenges, and richer gamification.
 
 ### ✅ Milestone 2.1 – Friends System (2 weeks)
 
-| Status | Task | Details | Est. | Done By |
-|--------|------|---------|------|---------|
-| [ ]    | Friend request API | Send/accept/reject/block, list friends, mutual friends | 3 days | — |
-| [ ]    | Friend suggestions | Based on shared interests + sponsor affiliation + mutual events | 2 days | — |
-| [ ]    | Friends UI (mobile) | Friend list tab, request inbox, add friend button | 3 days | — |
-| [ ]    | Online status | Redis‑based presence tracking (last active, online/offline) | 2 days | — |
+| Task | Details | Est. |
+|------|---------|------|
+| Friend request API | Send/accept/reject/block, list friends, mutual friends | 3 days |
+| Friend suggestions | Based on shared interests + sponsor affiliation + mutual events | 2 days |
+| Friends UI (mobile) | Friend list tab, request inbox, add friend button | 3 days |
+| Online status | Redis‑based presence tracking (last active, online/offline) | 2 days |
 
 ### ✅ Milestone 2.2 – Social Feed v2 (2 weeks)
 
-| Status | Task | Details | Est. | Done By |
-|--------|------|---------|------|---------|
-| [ ]    | Post creation | Image upload (camera/gallery), caption, tags, visibility (public/protected/private) | 3 days | — |
-| [ ]    | Like & comment | Like/unlike, create comment, delete own comment | 2 days | — |
-| [ ]    | Feed aggregation | `GET /feed` – posts from friends + public posts, paginated | 2 days | — |
-| [ ]    | Privacy enforcement | Backend filters posts based on visibility & friendship | 2 days | — |
+| Task | Details | Est. |
+|------|---------|------|
+| Post creation | Image upload (camera/gallery), caption, tags, visibility (public/protected/private) | 3 days |
+| Like & comment | Like/unlike, create comment, delete own comment | 2 days |
+| Feed aggregation | `GET /feed` – posts from friends + public posts, paginated | 2 days |
+| Privacy enforcement | Backend filters posts based on visibility & friendship | 2 days |
 
 ### ✅ Milestone 2.3 – Challenges & Leaderboards v2 (2 weeks)
 
-| Status | Task | Details | Est. | Done By |
-|--------|------|---------|------|---------|
-| [ ]    | Challenge service | CRUD for challenges (title, domain, difficulty, award points) | 2 days | — |
-| [ ]    | Accept & submit | `POST /challenges/:id/accept`, `POST /submissions` (with proof media) | 2 days | — |
-| [ ]    | Points award on completion | Consume `ChallengeCompleted` event → award points | 1 day | — |
-| [ ]    | Auto‑leaderboards for LE events | Scores entered by admin → leaderboard auto‑updates via WebSockets | 3 days | — |
+| Task | Details | Est. |
+|------|---------|------|
+| Challenge service | CRUD for challenges (title, domain, difficulty, award points) | 2 days |
+| Accept & submit | `POST /challenges/:id/accept`, `POST /submissions` (with proof media) | 2 days |
+| Points award on completion | Consume `ChallengeCompleted` event → award points | 1 day |
+| Auto‑leaderboards for LE events | Scores entered by admin → leaderboard auto‑updates via WebSockets | 3 days |
 
 **Phase 2 Success Criteria**
 - [ ] Users can send 10+ friend requests, and see mutual friends.
@@ -373,31 +370,31 @@ Now we add social features, challenges, and richer gamification.
 
 ### ✅ Milestone 3.1 – Union Page (Tasks & Project Management)
 
-| Status | Task | Details | Est. | Done By |
-|--------|------|---------|------|---------|
-| [ ]    | Task service | Task types: quick, standard, pathway, event_task. Status: active/abandoned/completed | 3 days | — |
-| [ ]    | Task views (Web) | List view, Kanban board, Gantt chart (using `dhtmlx-gantt` or similar) | 5 days | — |
-| [ ]    | Task assignments | Assign multiple users, auto‑create group chat (via internal messaging) | 2 days | — |
-| [ ]    | Crew heatmap | Visual grid showing workload per member (Redis + cron) | 2 days | — |
+| Task | Details | Est. |
+|------|---------|------|
+| Task service | Task types: quick, standard, pathway, event_task. Status: active/abandoned/completed | 3 days |
+| Task views (Web) | List view, Kanban board, Gantt chart (using `dhtmlx-gantt` or similar) | 5 days |
+| Task assignments | Assign multiple users, auto‑create group chat (via internal messaging) | 2 days |
+| Crew heatmap | Visual grid showing workload per member (Redis + cron) | 2 days |
 
 ### ✅ Milestone 3.2 – Teams & Leagues (3 weeks)
 
-| Status | Task | Details | Est. | Done By |
-|--------|------|---------|------|---------|
-| [ ]    | Team service | Create team, join with invite code, captain role, open/closed status | 3 days | — |
-| [ ]    | League registration flow | Captain application (with review by Core), approval endpoint | 2 days | — |
-| [ ]    | Bracket generator | Round‑robin, single/double elimination. Store match tree in JSONB | 4 days | — |
-| [ ]    | Match score entry | Admin form to enter scores (custom parameters e.g., goals, kills) | 2 days | — |
-| [ ]    | Spectator bracket view (mobile) | Read‑only tree with match details | 3 days | — |
+| Task | Details | Est. |
+|------|---------|------|
+| Team service | Create team, join with invite code, captain role, open/closed status | 3 days |
+| League registration flow | Captain application (with review by Core), approval endpoint | 2 days |
+| Bracket generator | Round‑robin, single/double elimination. Store match tree in JSONB | 4 days |
+| Match score entry | Admin form to enter scores (custom parameters e.g., goals, kills) | 2 days |
+| Spectator bracket view (mobile) | Read‑only tree with match details | 3 days |
 
 ### ✅ Milestone 3.3 – Auction System (2 weeks)
 
-| Status | Task | Details | Est. | Done By |
-|--------|------|---------|------|---------|
-| [ ]    | Player base price submission | Captains submit base price for each player, OC override (3/7ths quota) | 2 days | — |
-| [ ]    | Live auction engine | WebSocket rooms, server‑authoritative timer, bid validation (purse check) | 4 days | — |
-| [ ]    | Admin auction controller | Start/stop block, override sold/unsold, adjust timers | 2 days | — |
-| [ ]    | Captain bidding interface (PWA) | Real‑time wallet, place bid button, bid log | 2 days | — |
+| Task | Details | Est. |
+|------|---------|------|
+| Player base price submission | Captains submit base price for each player, OC override (3/7ths quota) | 2 days |
+| Live auction engine | WebSocket rooms, server‑authoritative timer, bid validation (purse check) | 4 days |
+| Admin auction controller | Start/stop block, override sold/unsold, adjust timers | 2 days |
+| Captain bidding interface (PWA) | Real‑time wallet, place bid button, bid log | 2 days |
 
 **Phase 3 Success Criteria**
 - [ ] 100% of Core team uses Union Page for task tracking.
@@ -412,28 +409,28 @@ Make the platform “smart” and connected.
 
 ### ✅ Milestone 4.1 – External Integrations
 
-| Status | Integration | Tasks | Est. | Done By |
-|--------|-------------|-------|------|---------|
-| [ ]    | Strava | OAuth2, webhook to pull activities, display on profile | 2 days | — |
-| [ ]    | Steam | OpenID login, fetch owned games & playtime (daily sync) | 2 days | — |
-| [ ]    | Google Calendar | Two‑way sync for Union tasks (create/update events) | 2 days | — |
-| [ ]    | WhatsApp Business API | Auto‑post announcements to community groups based on tag | 2 days | — |
+| Integration | Tasks | Est. |
+|-------------|-------|------|
+| Strava | OAuth2, webhook to pull activities, display on profile | 2 days |
+| Steam | OpenID login, fetch owned games & playtime (daily sync) | 2 days |
+| Google Calendar | Two‑way sync for Union tasks (create/update events) | 2 days |
+| WhatsApp Business API | Auto‑post announcements to community groups based on tag | 2 days |
 
 ### ✅ Milestone 4.2 – Media & Memories
 
-| Status | Task | Details | Est. | Done By |
-|--------|------|---------|------|---------|
-| [ ]    | Image processing pipeline | Upload → resize to thumbnails (150x150, 800x800) → store in S3 → CDN | 2 days | — |
-| [ ]    | Video transcoding | Transcode to 480p/720p using FFmpeg (serverless or worker) | 2 days | — |
-| [ ]    | “Year in Review” | Script that collects user’s top moments (events, posts, fans) | 2 days | — |
+| Task | Details | Est. |
+|------|---------|------|
+| Image processing pipeline | Upload → resize to thumbnails (150x150, 800x800) → store in S3 → CDN | 2 days |
+| Video transcoding | Transcode to 480p/720p using FFmpeg (serverless or worker) | 2 days |
+| “Year in Review” | Script that collects user’s top moments (events, posts, fans) | 2 days |
 
 ### ✅ Milestone 4.3 – Advanced Analytics & Hardening
 
-| Status | Task | Details | Est. | Done By |
-|--------|------|---------|------|---------|
-| [ ]    | Coordinator dashboard | Graphs: registrations over time, popular events, sponsor ranking | 2 days | — |
-| [ ]    | Performance audit | Identify N+1 queries, add indexes, enable Redis caching for feed | 2 days | — |
-| [ ]    | Security hardening | Run penetration test (OWASP ZAP), fix findings, add rate limiting per user | 2 days | — |
+| Task | Details | Est. |
+|------|---------|------|
+| Coordinator dashboard | Graphs: registrations over time, popular events, sponsor ranking | 2 days |
+| Performance audit | Identify N+1 queries, add indexes, enable Redis caching for feed | 2 days |
+| Security hardening | Run penetration test (OWASP ZAP), fix findings, add rate limiting per user | 2 days |
 
 **Phase 4 Success Criteria**
 - [ ] 30% of users connect at least one external integration (Strava/Steam).
@@ -446,13 +443,13 @@ Make the platform “smart” and connected.
 
 **Do not schedule new features in this phase.** Use it to stabilise and prepare for launch.
 
-| Status | Activity | Who | Duration | Done By |
-|--------|----------|-----|----------|---------|
-| [ ]    | Bug bash (all team members) | Everyone | 1 week | — |
-| [ ]    | Load testing with K6 (target 1000 concurrent users) | Backend + QA | 3 days | — |
-| [ ]    | Finalise documentation (API docs, user guides, admin runbooks) | Tech writers + leads | 1 week | — |
-| [ ]    | Soft launch with 100 beta users (campus ambassadors) | Product + Marketing | 1 week | — |
-| [ ]    | App store submission (if releasing publicly) | Mobile lead | 3 days | — |
+| Activity | Who | Duration |
+|----------|-----|----------|
+| Bug bash (all team members) | Everyone | 1 week |
+| Load testing with K6 (target 1000 concurrent users) | Backend + QA | 3 days |
+| Finalise documentation (API docs, user guides, admin runbooks) | Tech writers + leads | 1 week |
+| Soft launch with 100 beta users (campus ambassadors) | Product + Marketing | 1 week |
+| App store submission (if releasing publicly) | Mobile lead | 3 days |
 
 ---
 
