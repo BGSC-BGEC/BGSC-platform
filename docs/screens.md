@@ -134,18 +134,7 @@ Each tab supports **Past / Upcoming / Ongoing** multi-select filters.
 |---|---|---|
 | Feedback Tickets | Public | Submit bug/feature/complaint/general tickets; severity, rich text, attachments; anonymous toggle; status tracking |
 | Contact Directory | Public | Current + past coordinators; email, masked WhatsApp; quick action buttons |
-| FAQ | Public | Accordion by section (Account, Events, Points, Union, Technical, Privacy, Sponsors); keyword search |
-
-#### Union Page (Mobile Subset) [doorbin]
-
-| Section | Visibility | Key Content |
-|---|---|---|
-| Quick Add Task | Member+ | Floating overlay for rapid unassigned task logging |
-| Task Reminder Banner | Member+ | Active task reminders shown inline |
-| Automated Task Chat | Member+ | Group chat rooms auto-created per task assignment |
-| On-Duty Status | Member+ | Daily coordinator on-duty calendar view |
-
-Full Union workspace (Kanban, Gantt, strict task creation) is **Web-only** — mobile shows a "Manage on Web" redirect for those views.
+| FAQ | Public | Accordion by section (Account, Events, Points, Technical, Privacy, Sponsors); keyword search |
 
 ---
 
@@ -173,21 +162,6 @@ Full Union workspace (Kanban, Gantt, strict task creation) is **Web-only** — m
 
 ---
 
-### Union Workspace
-
-**Full Task & Project Management** (`Member+`)
-
-| View | Key Content |
-|---|---|
-| List View | Hierarchical task rows with status, assignees, priority, deadline |
-| Kanban Board | Cards across customizable columns (Active, On-Hold, Abandoned, Completed) |
-| Gantt Chart | Visual dependency lines and timelines |
-| Calendar View | Grid-aligned task and meeting schedule |
-| Crew Allocation Heatmap | Member on-duty calendars overlaid with active task workloads |
-| Strict Task Creation Form | Deadline, multiple assignees, event association, priority, sub-task trees, Google Calendar sync |
-
----
-
 ### Users & Administration
 
 **Users Page** (`Coordinator+`)
@@ -207,7 +181,6 @@ Full Union workspace (Kanban, Gantt, strict task creation) is **Web-only** — m
 |---|---|---|
 | Coordinator Dashboard | Coordinator+ | Event analytics, registration trends, user growth, sponsor rankings |
 | Founder Dashboard | Founder | Platform-wide metrics, sponsor ROI, system health |
-| Union Dashboard | Member+ | Task completion rates, crew availability heatmap, project timelines |
 
 ---
 

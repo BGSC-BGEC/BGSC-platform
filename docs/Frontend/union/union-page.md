@@ -1,3 +1,5 @@
+> ⚠️ **DEPRECATED — The Union Page feature has been removed from the platform. Do not implement this screen. This file is kept only as a historical reference.**
+
 # Union Page — UI/UX Specification
 
 **Platform:** Mobile (React Native / Expo)

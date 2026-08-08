@@ -1,4 +1,6 @@
 
+> ⚠️ **NOTE — Union Page feature has been removed from the platform.** All sections referencing the Union Page, Union Workspace, or internal task management tools in this document are superseded by this decision and should be ignored during implementation.
+
 ## 1. Application Overview
 
 ### 1.1 Introduction
@@ -767,11 +769,8 @@ Inspired by: https://pin.it/81Wcd43Gj
 #### Spectator Bracket View
 
 - View highly styled, real-time updated match bracket trees (Round Robin grids, Single/Double Elimination brackets, bypass rounds) rendered beautifully on device screen.
-    
 - Clicking any match in the tree displays scheduled venue, date, team roster sheets, historical head-to-head parameters, and real-time score feeds.
-    
 - **Operational Boundaries Clarification:** Admins/Coordinators get a "Manage on Web" redirection anchor link instead of on-device editing capabilities. All structural layouts, ruleset definitions, bracket configurations, and scores parameters mapping take place strictly inside the dedicated Web Console to prevent layout bloat on mobile screens.
-    
 
 #### Auction Event Interface (Mobile Spectator View)
 

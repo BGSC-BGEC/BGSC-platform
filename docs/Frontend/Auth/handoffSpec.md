@@ -1,7 +1,7 @@
 # BGSC Authentication Screens — Design Specification
 
 > **Document version:** 1.0  
-> **Last updated:** 2026-08-08  
+> **Last updated:** 2026-08-08
 > **Target:** Mobile-first React Native / React (responsive web PWA)  
 > **Screens covered:** Login · Sign Up · OTP Verification · Complete Profile (Google Sign-Up only) · Get Started 1–4 (Onboarding)
 
@@ -9,11 +9,11 @@
 
 ## 📸 Reference Screenshots
 
-![BGSC Auth Screens Reference](./auth.png)
+![BGSC Auth Screens Reference](auth.png)
 
-![BGSC Get Started Onboarding Screens](./onboard.png)
+![BGSC Get Started Onboarding Screens](onboard.png)
 
-![Color Scheme — Teal/Green Gradient Palette](./colorscheme.png)
+![Color Scheme — Teal/Green Gradient Palette](Frontend/Auth/colorscheme.png)
 
 > [!IMPORTANT]
 > The implementation must reproduce all eight screens **pixel-for-pixel** against these references. Every spacing value, color, radius, font weight, and animation described below is derived directly from the screenshots. The **teal/green color palette** shown above is the canonical color system for the entire auth + onboarding flow.
@@ -69,6 +69,8 @@
 | Font | Weight(s) | Usage | Source |
 |---|---|---|---|
 | **Helvetica Neue** | 400 (Regular), 500 (Medium), 700 (Bold) | Primary typeface — all headings, labels, body text, placeholders | System font stack / licensed web font. Fallback: `"Helvetica Neue", Helvetica, Arial, sans-serif` |
+
+> **Font migration note:** `Helvetica Neue` is iOS-only and unavailable cross-platform. When rebuilding auth screens, replace with `Inter` (body/UI) and `BarlowCondensed_700Bold` (section headings), per `UI-UX-Master-Doc.md §5`. Helvetica Neue is documented here for backward-compat with existing native screens only.
 | **SF Pro Display** | 600 (Semibold) | Status bar clock (iOS chrome only — native) | System |
 | **Monospace** (JetBrains Mono or SF Mono) | 500 | OTP digit boxes only | `fonts.google.com` for JetBrains Mono |
 
@@ -95,7 +97,7 @@ Derived from the canonical palette: `#051F20` → `#0B2B26` → `#163832` → `#
 
 /* ─── Semantic Mappings (Light Theme — auth + onboarding screens) ─── */
 
---color-bg-page:              #DAF1DE;        /* Lightest mint — replaces warm parchment */
+--color-bg-page:              #FAF7F2;        /* Warm cream — light mode canvas (semantic token: background light) */
 --color-bg-card:              #FFFFFF;        /* Pure white for input fields, cards */
 --color-bg-input:             #FFFFFF;        /* Input background */
 --color-bg-button-primary:    #235347;        /* Rich teal — primary CTA fill */

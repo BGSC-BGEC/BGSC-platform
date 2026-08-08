@@ -2,6 +2,8 @@
 > This document translates the high‑level specification into actionable development phases, tasks, and milestones. It is written for developers of all skill levels – from juniors to leads.  
 > **Key Deadline:** Backend MVP must be fully functional by **June 27, 2026**.
 
+> ⚠️ **NOTE — Union Page feature has been removed from the platform.** All milestones, tasks, and phases referencing the Union Page or internal task management workspace in this document are cancelled and should be skipped.
+
 # Architecture and Dev timeline Overview:
 Here's the **architecture overview** for the BGSC platform, broken down by layer and mapped to the development phase where each component is introduced. I'll keep it plain text but structured.
 
@@ -273,11 +275,11 @@ We split Phase 1 into **Backend (6 weeks)** and **Frontend (2 weeks)** so the ba
 
 #### ✅ Milestone 1.4 – Announcements & Admin Panel (Week 5)
 
-| Task | Sub‑tasks | Est. |
-|------|-----------|------|
-| Announcement service | – `POST /announcements` (coordinator+) <br> – `GET /announcements` (public, last 4 months) <br> – Announcement types & tags | 2 |
-| Basic users table (admin) | – `GET /admin/users` (paginated, filter by role/status) – coordinator+ | 2 |
-| Sponsor management (admin) | – `POST /admin/sponsors` <br> – `PATCH /admin/sponsors/:id/tenure-end` (manual for MVP) | 1 |
+| Task                       | Sub‑tasks                                                                                                                   | Est. |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ---- |
+| Announcement service       | – `POST /announcements` (coordinator+) <br> – `GET /announcements` (public, last 4 months) <br> – Announcement types & tags | 2    |
+| Basic users table (admin)  | – `GET /admin/users` (paginated, filter by role/status) – coordinator+                                                      | 2    |
+| Sponsor management (admin) | – `POST /admin/sponsors` <br> – `PATCH /admin/sponsors/:id/tenure-end` (manual for MVP)                                     | 1    |
 
 #### ✅ Milestone 1.5 – Points & Hall of Fame v1 (Week 6)
 

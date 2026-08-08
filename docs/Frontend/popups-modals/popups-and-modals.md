@@ -8,8 +8,8 @@
 - `screens/assets/modals-account.png` — Make Announcement · New Post · Edit Profile · Account Settings
 - `screens/assets/modal-change-photo.png` — Change Photo
 
-![Onboarding modals](./assets/modals-onboarding.png)
-![Account & content modals](./assets/modals-account.png)
+![Onboarding modals](modals-onboarding.png)
+![Account & content modals](modals-account.png)
 
 > This single spec collects the platform's popups/modals, mirroring the `screens.md` "Popups & Modals" grouping. Two of them — **Make Announcement** and **Add Post** — are already specced as part of `home-page.md` (§8 and §10); this doc captures their **visual design** from the new mockups and flags any deltas rather than restating behaviour.
 
@@ -361,7 +361,7 @@ Reuses the auth-screen vocabulary (see `login-register-page.md` §9) consolidate
 **Visibility:** Authenticated.
 **Appearance:** Bottom sheet with drag handle.
 
-![Change Photo modal](./assets/modal-change-photo.png)
+![Change Photo modal](modal-change-photo.png)
 
 ```
 ┌─────────────────────────────────────┐

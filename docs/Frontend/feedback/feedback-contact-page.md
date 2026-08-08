@@ -50,21 +50,21 @@ The **Feedback & Contact Us** mobile screen implements a **Segmented View-Swappi
 - **Component**: Rendered by `mobile/src/components/dynamic-status-bar.tsx`.
 - **Positioning**: Fixed at the top of the screen viewport (`headerShown: true` / `position: 'fixed'`, `zIndex: 100`).
 - **Slots**:
-  - **Left Slot**: Standard Drawer Hamburger trigger **`☰`** (three horizontal bars) rendered in `#051F20` / `#235347` (`fontSize: 24`, `width: 32`) → Opens navigation drawer.
+  - **Left Slot**: Standard Drawer Hamburger trigger **`☰`** (three horizontal bars) rendered in `colors.text` (#DAF1DE) / `colors.accent` (#E8662A) (`fontSize: 24`, `width: 32`) → Opens navigation drawer.
   - **Center Slot**: BGSC / Community Emblem (Height: 28pt).
   - **Right Slot**: Guest mode renders `"Login"` pill; Authenticated mode renders 36pt circular user profile avatar.
 
 ### 2.2 Sticky Segmented Navigation Bar & Sliding Transitions
 - **Positioning**: Sticky directly below the status bar (`zIndex: 90`).
-- **Container Styling**: `backgroundColor: rgba(142, 182, 155, 0.2)` with 1 dp `#8EB69B` solid border, `borderRadius: 24`, `padding: 4`, `marginHorizontal: 16`, `marginVertical: 12`.
+- **Container Styling**: `backgroundColor: colors.surfaceMuted /* rgba(10,26,27,0.40) */` with 1 dp `#8EB69B` solid border, `borderRadius: 24`, `padding: 4`, `marginHorizontal: 16`, `marginVertical: 12`.
 - **Tabs (Clean Text-Only)**:
   - `Index 0`: **Submit Ticket**
   - `Index 1`: **FAQ**
   - `Index 2`: **Directory**
 - **Interaction & Feedback**:
   - Tapping fires `Haptics.selectionAsync()`.
-  - Active sliding pill indicator (`backgroundColor: '#235347'`, `borderRadius: 20`, `height: 36`) glides smoothly behind the active tab via `react-native-reanimated` spring physics (`damping: 18, stiffness: 150`).
-  - Active tab text renders in `Mograph-Medium` (`#DAF1DE`), while inactive tabs render in `Mograph-Medium` (`#163B32`).
+  - Active sliding pill indicator (`backgroundColor: colors.accent /* #E8662A */`, `borderRadius: 20`, `height: 36`) glides smoothly behind the active tab via `react-native-reanimated` spring physics (`damping: 18, stiffness: 150`).
+  - Active tab text renders in `Inter_600SemiBold` (`#DAF1DE`), while inactive tabs render in `Inter_600SemiBold` (`colors.textMuted` (#8EB69B)).
 - **Directional Screen Slide Animation**:
   - Tapping a tab or swiping triggers a 60fps horizontal slide of the main viewport:
     - **Moving Forward (e.g. Tab 0 → Tab 1)**: Incoming tab enters from `+SCREEN_WIDTH` to `0`, while previous tab exits to `-SCREEN_WIDTH`.
@@ -125,13 +125,13 @@ Selecting the **`[ Submit Ticket ]`** tab displays the feedback submission form 
 
 | Field Name | Component Type | Options / Rules | Default / Notes |
 |---|---|---|---|
-| **Category** | Inline Label + Dropdown Selector | `Bug Report`, `Feature Request`, `Event Complaint`, `General` | Label `"Category: "` in `Mograph-Medium` (`#051F20`). Dropdown trigger pill on right (`borderRadius: 20`, `height: 36`, `borderWidth: 1`, `borderColor: '#8EB69B'`). Tapping opens picker sheet. Default: `Bug Report`. |
-| **Severity Level** | Segmented pill button group | `Low`, `Medium`, `High`, `Critical` (Rendered cleanly without parentheses: `[ Low ]  [ Med ]  [ High ]  [ Crit ]`) | Default: `Low`. Custom tinted badge fills: Low (`#DAF1DE` / `#235347`), Medium (`#FEF3C7` / `#92400E`), High (`#FFEDD5` / `#C2410C`), Critical (`#FEE2E2` / `#991B1B`). Inactive buttons have 1 dp `#8EB69B` border. |
-| **Description** | Multi-line rich text editor / textarea | Min 10 characters, Max 2,000 characters. Live character counter positioned bottom-right. | Default: Empty. Background: `#FFFFFF`, `borderWidth: 1`, `borderColor: '#8EB69B'`, `borderRadius: 8`, Focus: 2 dp `#235347`. Live counter in `#163B32` (turns `#991B1B` at max). |
-| **Attachments** | Upload tile with centered vector `+` icon + thumbnail grid | Up to 3 files (PNG, JPG, WEBP, PDF). Max 5MB per file. | Displays 72×72pt square rounded tile (`borderRadius: 8`, `borderWidth: 1`, `borderColor: '#8EB69B'`, `backgroundColor: rgba(142, 182, 155, 0.2)`, `alignItems: 'center'`, `justifyContent: 'center'`). Uses symmetric vector SVG plus cross (`size: 28`, `strokeWidth: 2.5`, `color: '#235347'`) for 100% optical and geometric centering (no font baseline drift). Thumbnails show file size badge and top-right `[x]` delete trigger. |
-| **Anonymous Submission** | Switch toggle | Boolean (`true` / `false`) | Default: `Off` for logged-in users. When `On`, strips `userId` from request payload. Auto-enforced to `true` for Guest users. Track: `#8EB69B`, Thumb: `#235347`. |
-| **Contact Email** | Single-line text input | Standard email regex validation (`^.+@.+\..+$`). | Visible & required for Guest users; hidden for logged-in users unless submitting anonymously. Background: `#FFFFFF`, `borderColor: '#8EB69B'`. |
-| **Submit Button** | Full-width Primary Action Button | Tap action: Validates & dispatches payload. | Full-width button (`borderRadius: 8`, `height: 48`, `backgroundColor: '#235347'`, `color: '#DAF1DE'`, `elevation: 0`, `marginTop: 16`). Disabled when empty or description < 10 characters. |
+| **Category** | Inline Label + Dropdown Selector | `Bug Report`, `Feature Request`, `Event Complaint`, `General` | Label `"Category: "` in `Inter_600SemiBold` (`colors.text` (#DAF1DE)). Dropdown trigger pill on right (`borderRadius: 20`, `height: 36`, `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`). Tapping opens picker sheet. Default: `Bug Report`. |
+| **Severity Level** | Segmented pill button group | `Low`, `Medium`, `High`, `Critical` (Rendered cleanly without parentheses: `[ Low ]  [ Med ]  [ High ]  [ Crit ]`) | Default: `Low`. Custom tinted badge fills: Low (`#DAF1DE` / `colors.accent` (#E8662A)), Medium (`#FEF3C7` / `#92400E`), High (`#FFEDD5` / `#C2410C`), Critical (`#FEE2E2` / `#991B1B`). Inactive buttons have 1 dp `#8EB69B` border. |
+| **Description** | Multi-line rich text editor / textarea | Min 10 characters, Max 2,000 characters. Live character counter positioned bottom-right. | Default: Empty. Background: glass surface (rgba(15,36,38,0.55) + blur), `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`, `borderRadius: 8`, Focus: 2 dp `colors.accent` (#E8662A). Live counter in `colors.textMuted` (#8EB69B) (turns `#991B1B` at max). |
+| **Attachments** | Upload tile with centered vector `+` icon + thumbnail grid | Up to 3 files (PNG, JPG, WEBP, PDF). Max 5MB per file. | Displays 72×72pt square rounded tile (`borderRadius: 8`, `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`, `backgroundColor: colors.surfaceMuted /* rgba(10,26,27,0.40) */`, `alignItems: 'center'`, `justifyContent: 'center'`). Uses symmetric vector SVG plus cross (`size: 28`, `strokeWidth: 2.5`, `color: colors.accent /* #E8662A */`) for 100% optical and geometric centering (no font baseline drift). Thumbnails show file size badge and top-right `[x]` delete trigger. |
+| **Anonymous Submission** | Switch toggle | Boolean (`true` / `false`) | Default: `Off` for logged-in users. When `On`, strips `userId` from request payload. Auto-enforced to `true` for Guest users. Track: `#8EB69B`, Thumb: `colors.accent` (#E8662A). |
+| **Contact Email** | Single-line text input | Standard email regex validation (`^.+@.+\..+$`). | Visible & required for Guest users; hidden for logged-in users unless submitting anonymously. Background: glass surface (rgba(15,36,38,0.55) + blur), `borderColor: colors.border /* rgba(142,182,155,0.15) */`. |
+| **Submit Button** | Full-width Primary Action Button | Tap action: Validates & dispatches payload. | Full-width button (`borderRadius: 8`, `height: 48`, `backgroundColor: colors.accent /* #E8662A */`, `color: colors.accentText /* #FFFFFF */`, `elevation: 0`, `marginTop: 16`). Disabled when empty or description < 10 characters. |
 
 ---
 
@@ -216,8 +216,8 @@ Selecting the **`[ Submit Ticket ]`** tab displays the feedback submission form 
 
 ### 4.2 Search Bar & Real-Time Filtering
 - **Placeholder**: `'Search frequently asked questions...'`
-- **Styling**: `height: 48`, `borderRadius: 24`, `backgroundColor: '#FFFFFF'`, `borderWidth: 1`, `borderColor: '#8EB69B'`, `paddingHorizontal: 16`, `color: '#0B2B25'`.
-- **Real-Time Keyword Search**: Typing automatically filters questions and answers across all 7 categories in real time; matching category accordions and question cards automatically expand (`isExpanded = true`) with matching terms highlighted in `#235347` bold.
+- **Styling**: `height: 48`, `borderRadius: 24`, `/* glass surface: rgba(15,36,38,0.55) + blur(20px) */`, `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`, `paddingHorizontal: 16`, `color: colors.text /* #DAF1DE */`.
+- **Real-Time Keyword Search**: Typing automatically filters questions and answers across all 7 categories in real time; matching category accordions and question cards automatically expand (`isExpanded = true`) with matching terms highlighted in `colors.accent` (#E8662A) bold.
 - **Clear Action (`[x]`)**: Pinned on right side when query > 0; tapping immediately clears search, restores all categories, and collapses cards back to default.
 
 ### 4.3 7 Accordion Categories & Motion Accordion Mechanics
@@ -261,7 +261,7 @@ Selecting the **`[ Submit Ticket ]`** tab displays the feedback submission form 
 
 6. **Layout & Scroll Rule**:
    - The outer accordion container uses `borderRadius: 34`, `padding: 12`, `gap: 10`.
-   - Each accordion card uses `borderRadius: 30`, `backgroundColor: '#FFFFFF'`, `overflow: 'hidden'`, `borderWidth: 1`, `borderColor: '#8EB69B'`.
+   - Each accordion card uses `borderRadius: 30`, `/* glass surface: rgba(15,36,38,0.55) + blur(20px) */`, `overflow: 'hidden'`, `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`.
    - Accordions expand dynamically **in-line** within the tab's `ScrollView`. Nested `ScrollView` or `FlatList` containers are strictly prohibited.
 
 ### 4.4 FAQ States Matrix
@@ -300,20 +300,20 @@ Selecting the **`[ Submit Ticket ]`** tab displays the feedback submission form 
 ```
 
 ### 5.2 Current Coordinators Section & Mechanics
-- **Container**: Card in `#FFFFFF`, `borderWidth: 1`, `borderColor: '#8EB69B'`, `borderRadius: 8`, `padding: 16`, `marginBottom: 12`.
-- **48dp Circular Avatar**: Profile image with fallback initials avatar (`backgroundColor: rgba(142, 182, 155, 0.2)`).
-- **Name & Role**: Name in `Mograph-Medium` (`#051F20`, 16sp), Role in System Regular (`#163B32`, 13sp), Email in `#163B32` (13sp).
+- **Container**: Glass card (`rgba(15,36,38,0.55)` + blur(20px)), `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`, `borderRadius: 8`, `padding: 16`, `marginBottom: 12`.
+- **48dp Circular Avatar**: Profile image with fallback initials avatar (`backgroundColor: colors.surfaceMuted /* rgba(10,26,27,0.40) */`).
+- **Name & Role**: Name in `Inter_600SemiBold` (`colors.text` (#DAF1DE), 16sp), Role in Inter_400Regular (`colors.textMuted` (#8EB69B), 13sp), Email in `colors.textMuted` (#8EB69B) (13sp).
 - **Dedicated WhatsApp & Blurred Phone Row**:
-  - **Left (WhatsApp SVG Button `[✆]`)**: `width: 36`, `height: 36`, `borderRadius: 6`, `borderWidth: 1`, `borderColor: '#8EB69B'`, `backgroundColor: 'transparent'`. Renders the custom SVG logo asset from [`screens/assets/svg logos/whatsapp-logo-variant.svg`](file:///C:/Users/SAT/Desktop/BGSC/New/BGSC-platform/screens/assets/svg%20logos/whatsapp-logo-variant.svg) (icon size: 20×20, no text label). Tapping triggers light haptics, unblurs the phone number, and opens WhatsApp chat directly via `https://wa.me/<number>`.
-  - **Right (Blurred Phone Container)**: `height: 36`, `borderRadius: 6`, `borderWidth: 1`, `borderColor: '#8EB69B'`, `flex: 1`, `paddingHorizontal: 12`, `justifyContent: 'center'`. Protected by default with a native frosted glass blur overlay using `BlurView` (`intensity: 20`, `borderRadius: 6`, `tint="light"`) or `filter: 'blur(6px)'`. Tapping triggers light haptics (`Haptics.impactAsync(Light)`), smoothly animates blur opacity to `0`, and reveals the unmasked number (`+91 98765 43210`).
+  - **Left (WhatsApp SVG Button `[✆]`)**: `width: 36`, `height: 36`, `borderRadius: 6`, `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`, `backgroundColor: 'transparent'`. Renders the custom SVG logo asset from [`screens/assets/svg logos/whatsapp-logo-variant.svg`](file:///C:/Users/SAT/Desktop/BGSC/New/BGSC-platform/screens/assets/svg%20logos/whatsapp-logo-variant.svg) (icon size: 20×20, no text label). Tapping triggers light haptics, unblurs the phone number, and opens WhatsApp chat directly via `https://wa.me/<number>`.
+  - **Right (Blurred Phone Container)**: `height: 36`, `borderRadius: 6`, `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`, `flex: 1`, `paddingHorizontal: 12`, `justifyContent: 'center'`. Protected by default with a native frosted glass blur overlay using `BlurView` (`intensity: 20`, `borderRadius: 6`, `tint="light"`) or `filter: 'blur(6px)'`. Tapping triggers light haptics (`Haptics.impactAsync(Light)`), smoothly animates blur opacity to `0`, and reveals the unmasked number (`+91 98765 43210`).
 - **Bottom 3-Action Button Row**:
-  1. **Email (`[ Email ]`)**: `borderRadius: 6`, `height: 36`, `borderWidth: 1`, `borderColor: '#8EB69B'`, `flex: 1`. Opens system mail client pre-addressed to that coordinator (`mailto:`).
-  2. **Copy Contact (`[ Copy ]`)**: `borderRadius: 6`, `height: 36`, `borderWidth: 1`, `borderColor: '#8EB69B'`, `flex: 1`. Copies contact details to clipboard with snackbar confirmation (*"Contact details copied"*).
-  3. **Report Issue (`[ Report Issue ]`)**: `borderRadius: 6`, `height: 36`, `borderWidth: 1`, `borderColor: '#8EB69B'`, `flex: 1`. Switches directly to Tab 0 and pre-assigns this coordinator in the description.
+  1. **Email (`[ Email ]`)**: `borderRadius: 6`, `height: 36`, `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`, `flex: 1`. Opens system mail client pre-addressed to that coordinator (`mailto:`).
+  2. **Copy Contact (`[ Copy ]`)**: `borderRadius: 6`, `height: 36`, `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`, `flex: 1`. Copies contact details to clipboard with snackbar confirmation (*"Contact details copied"*).
+  3. **Report Issue (`[ Report Issue ]`)**: `borderRadius: 6`, `height: 36`, `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`, `flex: 1`. Switches directly to Tab 0 and pre-assigns this coordinator in the description.
 
 ### 5.3 Past Coordinators — "Hall of Admin"
-- **Component**: Expandable accordion positioned at the bottom of the directory (`backgroundColor: rgba(218, 241, 222, 0.5)`, `borderWidth: 1`, `borderColor: '#8EB69B'`, `borderRadius: 8`). Default: Collapsed.
-- **Card Content**: 40dp circular portrait, Name in `Mograph-Medium`, Former Role, Tenure Period (`2024–2025`), and a memorable legacy quote.
+- **Component**: Expandable accordion positioned at the bottom of the directory (`backgroundColor: rgba(218, 241, 222, 0.5)`, `borderWidth: 1`, `borderColor: colors.border /* rgba(142,182,155,0.15) */`, `borderRadius: 8`). Default: Collapsed.
+- **Card Content**: 40dp circular portrait, Name in `Inter_600SemiBold`, Former Role, Tenure Period (`2024–2025`), and a memorable legacy quote.
 - **Read-Only**: Non-interactive archive without contact buttons.
 
 ### 5.4 Directory States Matrix
@@ -345,60 +345,69 @@ Selecting the **`[ Submit Ticket ]`** tab displays the feedback submission form 
 ## 7. Typography & Custom Font Configuration
 
 ### 7.1 Font Families & Loading Architecture
-1. **Primary Custom Display Font**: `Mograph` (Loaded via `expo-font` from `assets/fonts/Mograph-[Bold|Medium|Regular].otf` / `.ttf`).
-2. **Fallback Font Stack**: `Platform.select({ ios: 'System', android: 'sans-serif' })`.
+1. **Display/Hero**: `BebasNeue_400Regular` — screen title (48 sp). Installed via `@expo-google-fonts/bebas-neue`.
+2. **UI Headings**: `BarlowCondensed_700Bold` — section headers, coordinator names (18–28 sp). Installed via `@expo-google-fonts/barlow-condensed`.
+3. **Body / UI**: `Inter` family (400/500/600/700) — all labels, buttons, body text, form inputs. Installed via `@expo-google-fonts/inter`.
+4. **Monospace**: `JetBrainsMono_500Medium` — ticket IDs, phone numbers. Installed via `@expo-google-fonts/jetbrains-mono`.
+5. **Fallback**: `Platform.select({ ios: 'Helvetica Neue', android: 'sans-serif' })`.
 
 ### 7.2 Font Family Application Rules Table
 
 | UI Context | Font Variant | Font Size (sp) | Line Height | Weight / Token | Example UI Elements |
 |---|---|---|---|---|---|
-| **Screen & Section Titles** | `Mograph-Bold` | `22sp – 24sp` | `28sp` | Bold (`700`) | Screen Title, Section Headers ("Feedback & Bug Reporting", "FAQ") |
-| **Card Titles & Headers** | `Mograph-Medium` | `18sp – 20sp` | `24sp` | Medium (`600`) | Section Headers, Coordinator Names |
-| **Buttons & Action Pills** | `Mograph-Medium` | `14sp – 16sp` | `20sp` | Medium (`600`) | `[ Submit Ticket ]`, `[ Email ]`, `[ Copy ]` |
-| **Category Chips & Badges**| `Mograph-Medium` | `12sp – 13sp` | `16sp` | Medium (`600`) | Category Pills (`[Points]`), Tenure Badges (`2025–2026`), Status Pills |
-| **Body & Paragraph Text** | System Sans / `Mograph-Regular` | `14sp` | `20sp` | Regular (`400`) | FAQ markdown answers, coordinator quotes, helper subtitles |
-| **Form Inputs & Textarea** | System Sans | `14sp – 15sp` | `20sp` | Regular (`400`) | Description textarea, contact email input |
-| **Monospace / IDs & Phone**| `Platform Mono` | `13sp` | `16sp` | Medium (`500`) | Ticket IDs (`#TICK-84920`), Unblurred Phone Numbers (`+91 98765 43210`) |
+| **Screen & Section Titles** | `BarlowCondensed_700Bold` | `22sp – 24sp` | `28sp` | Bold (`700`) | Screen Title, Section Headers ("Feedback & Bug Reporting", "FAQ") |
+| **Card Titles & Headers** | `Inter_600SemiBold` | `18sp – 20sp` | `24sp` | Medium (`600`) | Section Headers, Coordinator Names |
+| **Buttons & Action Pills** | `Inter_600SemiBold` | `14sp – 16sp` | `20sp` | Medium (`600`) | `[ Submit Ticket ]`, `[ Email ]`, `[ Copy ]` |
+| **Category Chips & Badges**| `Inter_600SemiBold` | `12sp – 13sp` | `16sp` | Medium (`600`) | Category Pills (`[Points]`), Tenure Badges (`2025–2026`), Status Pills |
+| **Body & Paragraph Text** | Inter_400Regular / `Inter_400Regular` | `14sp` | `20sp` | Regular (`400`) | FAQ markdown answers, coordinator quotes, helper subtitles |
+| **Form Inputs & Textarea** | Inter_400Regular | `14sp – 15sp` | `20sp` | Regular (`400`) | Description textarea, contact email input |
+| **Monospace / IDs & Phone**| `JetBrainsMono_500Medium` | `13sp` | `16sp` | Medium (`500`) | Ticket IDs (`#TICK-84920`), Unblurred Phone Numbers (`+91 98765 43210`) |
 
 ---
 
-## 8. Palette & Color System — Light Sage Theme
+## 8. Palette & Colour System — Dark Glassmorphism Theme
+
+> **Tokens from `UI-UX-Master-Doc.md §4`.** Always consume via `useColors()` — never hardcode hex. Dark mode is primary; light mode token overrides are defined in the master doc §4.2.
 
 ```typescript
-export const sageThemeTokens = {
-  // Backgrounds & Fills
-  background: '#DAF1DE', // Soft sage canvas
-  surface: '#FFFFFF', // Pure white card surface
-  surfaceTranslucent: 'rgba(218, 241, 222, 0.5)', // 50% opacity sage surface
-  surfaceMuted: 'rgba(142, 182, 155, 0.2)', // 20% opacity #8EB69B fill
-  
-  // Borders & Dividers
-  border: '#8EB69B', // 1dp solid sage border
-  borderMuted: 'rgba(142, 182, 155, 0.3)',
-  focusRing: '#235347', // 2dp active focus ring
+export const feedbackThemeTokens = {
+  // ── Backgrounds ─────────────────────────────────────────────────────────
+  background:           '#060D0E',               // App canvas           (token: background)
+  backgroundMid:        '#0F2426',               // Section bg           (token: backgroundMid)
 
-  // Typography & Contrast (WCAG AAA Compliant)
-  textPrimary: '#051F20', // Headers & Titles (12:1 contrast ratio on #DAF1DE)
-  textBody: '#0B2B25', // 14sp body text & text inputs
-  textMuted: '#163B32', // 12sp helper labels & character counters
+  // ── Glass Surfaces ───────────────────────────────────────────────────────
+  surface:              'rgba(15,36,38,0.55)',   // Card/panel + blur(20px) (token: surface)
+  surfaceMuted:         'rgba(10,26,27,0.40)',   // Input bg, chips        (token: surfaceMuted)
+  surfaceSolid:         '#163832',               // No-blur fallback       (token: surfaceSolid)
 
-  // Primary Interactive & Accent
-  primary: '#235347', // Submit button, active tab pill, active chip background
-  primaryText: '#DAF1DE', // Text inside primary filled elements
-  accent: '#235347', // Interactive highlights & borders
-  whatsappBrand: '#25D366', // WhatsApp Official Accent
+  // ── Borders ──────────────────────────────────────────────────────────────
+  border:               'rgba(142,182,155,0.15)',// Hairline               (token: border)
+  borderActive:         'rgba(142,182,155,0.40)',// Focus ring             (token: borderActive)
 
-  // Severity Badges (Custom Tinted Fills over Sage)
-  severityLowBg: '#DAF1DE',
-  severityLowText: '#235347',
-  severityMediumBg: '#FEF3C7',
-  severityMediumText: '#92400E',
-  severityHighBg: '#FFEDD5',
-  severityHighText: '#C2410C',
-  severityCriticalBg: '#FEE2E2',
-  severityCriticalText: '#991B1B',
+  // ── Typography ───────────────────────────────────────────────────────────
+  text:                 '#DAF1DE',               // Primary text           (token: text)
+  textMuted:            '#8EB69B',               // Labels, helpers        (token: textMuted)
+
+  // ── Interactive ──────────────────────────────────────────────────────────
+  accent:               '#E8662A',               // Active tab, CTAs, links (token: accent)
+  accentText:           '#FFFFFF',               // Text on accent fill    (token: accentText)
+
+  // ── Severity Badges ───────────────────────────────────────────────────────
+  severityLowBg:        'rgba(52,210,123,0.15)',
+  severityLowText:      '#34D27B',
+  severityMediumBg:     'rgba(251,191,36,0.15)',
+  severityMediumText:   '#FCD34D',
+  severityHighBg:       'rgba(251,146,60,0.15)',
+  severityHighText:     '#FB923C',
+  severityCriticalBg:   'rgba(242,104,108,0.15)',
+  severityCriticalText: '#F2686C',
+
+  // ── States ───────────────────────────────────────────────────────────────
+  success:              '#34D27B',
+  danger:               '#F2686C',
+  info:                 '#5B9CF8',
+  whatsappBrand:        '#25D366',
 };
-```
 
 ---
 
@@ -408,16 +417,16 @@ The screen enforces a strict 3-tier geometry hierarchy:
 
 | Button / Trigger | Tier | Shape & Radius | Height (dp) | Background Fill | Border | Text / Icon Style |
 |---|---|---|---|---|---|---|
-| **`[ Submit Ticket ]`** | Primary | Slightly Rounded (`8 dp`) | `48 dp` (Full Width) | `#235347` (Flat) | None | `15 sp` `Mograph-Medium` (`#DAF1DE`) |
-| **Drawer Toggle (`☰`)** | Primary | Borderless Icon | `32 dp` | Transparent | None | `24 sp` `#051F20` (High Contrast) |
-| **Active Tab Pill** | Secondary | Capsule (`20 dp`) | `36 dp` | `#235347` | None | `13 sp` `Mograph-Medium` (`#DAF1DE`) |
-| **Inactive Tab Item** | Secondary | Capsule (`20 dp`) | `36 dp` | Transparent | None | `13 sp` `Mograph-Medium` (`#163B32`) |
-| **Active Severity Pill** | Secondary | Capsule (`16 dp`) | `32 dp` | Tinted Fill (`#235347` / Badge) | None | `12 sp` `Mograph-Medium` |
-| **Inactive Severity Pill**| Secondary | Capsule (`16 dp`) | `32 dp` | Transparent | 1 dp `#8EB69B` | `12 sp` System Regular (`#0B2B25`) |
-| **Media Upload Tile (`+`)**| Secondary | Soft Square (`8 dp`) | `72 dp` (72×72) | `rgba(142, 182, 155, 0.2)` | 1 dp `#8EB69B` | Perfectly Centered Vector SVG Cross (`size: 28`, `#235347`) |
-| **Active Filter Chip** | Secondary | Capsule (`20 dp`) | `36 dp` | `#235347` | None | `12 sp` `Mograph-Medium` (`#DAF1DE`) |
-| **Inactive Filter Chip** | Secondary | Capsule (`20 dp`) | `36 dp` | Transparent | 1 dp `#8EB69B` | `12 sp` System Regular (`#0B2B25`) |
+| **`[ Submit Ticket ]`** | Primary | Slightly Rounded (`8 dp`) | `48 dp` (Full Width) | `colors.accent` (#E8662A) (Flat) | None | `15 sp` `Inter_600SemiBold` (`#DAF1DE`) |
+| **Drawer Toggle (`☰`)** | Primary | Borderless Icon | `32 dp` | Transparent | None | `24 sp` `colors.text` (#DAF1DE) (High Contrast) |
+| **Active Tab Pill** | Secondary | Capsule (`20 dp`) | `36 dp` | `colors.accent` (#E8662A) | None | `13 sp` `Inter_600SemiBold` (`#DAF1DE`) |
+| **Inactive Tab Item** | Secondary | Capsule (`20 dp`) | `36 dp` | Transparent | None | `13 sp` `Inter_600SemiBold` (`colors.textMuted` (#8EB69B)) |
+| **Active Severity Pill** | Secondary | Capsule (`16 dp`) | `32 dp` | Tinted Fill (`colors.accent` (#E8662A) / Badge) | None | `12 sp` `Inter_600SemiBold` |
+| **Inactive Severity Pill**| Secondary | Capsule (`16 dp`) | `32 dp` | Transparent | 1 dp `#8EB69B` | `12 sp` Inter_400Regular (`colors.text` (#DAF1DE)) |
+| **Media Upload Tile (`+`)**| Secondary | Soft Square (`8 dp`) | `72 dp` (72×72) | `colors.surfaceMuted` | 1 dp `#8EB69B` | Perfectly Centered Vector SVG Cross (`size: 28`, `colors.accent` (#E8662A)) |
+| **Active Filter Chip** | Secondary | Capsule (`20 dp`) | `36 dp` | `colors.accent` (#E8662A) | None | `12 sp` `Inter_600SemiBold` (`#DAF1DE`) |
+| **Inactive Filter Chip** | Secondary | Capsule (`20 dp`) | `36 dp` | Transparent | 1 dp `#8EB69B` | `12 sp` Inter_400Regular (`colors.text` (#DAF1DE)) |
 | **WhatsApp SVG Button `[✆]`**| Tertiary | Soft Square (`6 dp`) | `36 dp` (36×36) | Transparent | 1 dp `#8EB69B` | Custom SVG (`screens/assets/svg logos/whatsapp-logo-variant.svg`) |
-| **Blurred Phone Container**| Tertiary | Soft Rectangle (`6 dp`) | `36 dp` (`flex: 1`) | `rgba(142, 182, 155, 0.2)` | 1 dp `#8EB69B` | Frosted Glass Blur (`intensity: 20`) |
-| **`[ Email ]` / `[ Copy ]`**| Tertiary | Soft Rectangle (`6 dp`) | `36 dp` | Transparent | 1 dp `#8EB69B` | `12 sp` System Regular (`#0B2B25`) |
-| **`[ Clear x ]` (Search)**| Tertiary | Borderless Icon / Text | `24 dp` | Transparent | None | `#163B32` |
+| **Blurred Phone Container**| Tertiary | Soft Rectangle (`6 dp`) | `36 dp` (`flex: 1`) | `colors.surfaceMuted` | 1 dp `#8EB69B` | Frosted Glass Blur (`intensity: 20`) |
+| **`[ Email ]` / `[ Copy ]`**| Tertiary | Soft Rectangle (`6 dp`) | `36 dp` | Transparent | 1 dp `#8EB69B` | `12 sp` Inter_400Regular (`colors.text` (#DAF1DE)) |
+| **`[ Clear x ]` (Search)**| Tertiary | Borderless Icon / Text | `24 dp` | Transparent | None | `colors.textMuted` (#8EB69B) |

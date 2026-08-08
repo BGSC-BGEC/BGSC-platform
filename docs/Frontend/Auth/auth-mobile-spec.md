@@ -6,7 +6,7 @@
 **Source:** Complete Feature Specification & Architecture §5.1 (Login / Registration) and §3.3 (Authentication States); Screen Inventory "Auth".
 **Design reference:** `screens/assets/auth-screens-light.png` (light mode)
 
-![Auth screens — light mode](./assets/auth-screens-light.png)
+![Auth screens — light mode](auth-screens-light.png)
 
 > This single spec covers the whole unlit auth funnel because the design presents Login and Sign Up as **one screen with a segmented toggle**, with two follow-on screens (OTP verification, Complete Profile) sharing the same shell.
 

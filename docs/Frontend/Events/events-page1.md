@@ -19,7 +19,7 @@ persistent filter row that survives tab switches, with a single scrolling conten
 ┌────────────────────────────────────────────────────────┐
 │ [≡]                 [ BGSC LOGO ]         [ Profile] │ ← Fixed Dynamic Status Bar
 ├────────────────────────────────────────────────────────┤
-│ EVENTS                                                  │ ← Screen Title (CharSenz)
+│ EVENTS                                                  │ ← Screen Title (BebasNeue_400Regular)
 ├────────────────────────────────────────────────────────┤
 │ TAB BAR: [Leagues| BGEC| FitSoc| General]      │ ← Sticky Category Tab Bar
 ├────────────────────────────────────────────────────────┤
@@ -60,13 +60,13 @@ sub-routes reached from inside Event Details.
   - **Right Slot**: Guest mode renders `"Login"` pill; Authenticated mode renders 36pt circular user profile avatar.
 
 ### 2.2 Screen Title
-- **Text**: `"Events"`, `CharSenz-Heavy`, 34sp, color `#DAF1DE`, `paddingHorizontal: 16`, `marginTop: 12`.
-- CharSenz is reserved for this title, active tab labels, event titles, and any large numeral
+- **Text**: `"Events"`, `BebasNeue_400Regular`, 48sp, color `colors.text` (`#DAF1DE`), `paddingHorizontal: 16`, `marginTop: 12`.
+- Use `BebasNeue_400Regular` for the screen title (48sp+); `BarlowCondensed_700Bold` for event/league titles, active tab labels, and large numerals
   (streak count, bid amount, scores) — never body copy (see §8).
 
 ### 2.3 Sticky Category Tab Bar
 - **Positioning**: Sticky directly below the screen title (`zIndex: 90`).
-- **Container Styling**: `backgroundColor: rgba(22, 59, 50, 0.55)` (glass fill over `#163B32`), 1 dp `#8EB69B` border at 20% opacity, `borderRadius: 24`, `padding: 4`, `marginHorizontal: 16`, `marginVertical: 12`. Backdrop blur `24pt`.
+- **Container Styling**: `backgroundColor: rgba(15,36,38,0.55)` (glass fill over `#163B32`), 1 dp `#8EB69B` border at 20% opacity, `borderRadius: 24`, `padding: 4`, `marginHorizontal: 16`, `marginVertical: 12`. Backdrop blur `24pt`.
 - **Tabs** (icon + label, all four fit without horizontal scroll on any supported width):
   - `Index 0`: **Leagues** (`trophy-outline`)
   - `Index 1`: **BGEC** (`game-controller-outline`)
@@ -76,13 +76,13 @@ sub-routes reached from inside Event Details.
   - Tapping fires `Haptics.selectionAsync()`.
   - Active state uses the **Glass Press** animation (§10.1) — no separate scale transform is layered on top of it.
   - Active tab underline uses the **Tab Underline Glide** animation (§10.2).
-  - Active tab label renders in `CharSenz-Heavy` (`#05F120` underline, `#DAF1DE` text); inactive tabs render in `Helvetica Neue Medium` (`#8EB69B`).
+  - Active tab label renders in `BarlowCondensed_700Bold` (`#E8662A` underline, `#DAF1DE` text); inactive tabs render in `Inter_600SemiBold` (`#8EB69B`).
 
 ### 2.4 Sticky Filter Row
 - **Positioning**: Sticky directly below the tab bar (`zIndex: 85`).
 - **Chips**: `Past`, `Upcoming`, `Ongoing` — multi-select (toggle, not radio); any combination may be active simultaneously.
 - **Persistence Rule**: Filter selection is held in one screen-level state object, **not** reset or re-scoped per tab. Selecting `Ongoing` on Leagues and switching to FitSoc keeps `Ongoing` selected.
-- **Chip Styling**: Capsule (`borderRadius: 20`), `height: 36`. Active: fill `#235347`, text `#DAF1DE`, `CharSenz` numeral badges where a count is shown. Inactive: transparent fill, 1 dp `#8EB69B` border, text `#8EB69B`.
+- **Chip Styling**: Capsule (`borderRadius: 20`), `height: 36`. Active: fill `#235347`, text `#DAF1DE`, `BarlowCondensed_700Bold` numeral badges where a count is shown. Inactive: transparent fill, 1 dp `#8EB69B` border, text `#8EB69B`.
 - **Interaction**: Each chip uses the **Glass Press** animation (§10.1) on tap.
 
 ---
@@ -114,11 +114,11 @@ sub-routes reached from inside Event Details.
 | Element | Component Type | Rules | Notes |
 |---|---|---|---|
 | **Grid** | 2-column card grid | Sports and Esports leagues render in one interleaved list — no sub-tabs. | Sort order: `Ongoing → Upcoming → Past`, then start date ascending. |
-| **Type Badge** | Top-left pill | `Sports` or `Esports`, with category icon. | `Helvetica Neue Medium`, 12sp, `#8EB69B` on `rgba(35, 83, 71, 0.4)`. |
-| **League Title** | Card title | Event/league name. | `CharSenz-Heavy`, 18sp, `#DAF1DE`. |
-| **Auction Tag** | Small pill, bottom-left | Renders only if `isAuctionBased === true`. | `#05F120` text on `rgba(5, 241, 32, 0.12)` fill. |
+| **Type Badge** | Top-left pill | `Sports` or `Esports`, with category icon. | `Inter_600SemiBold`, 12sp, `#8EB69B` on `rgba(20,50,52,0.40)`. |
+| **League Title** | Card title | Event/league name. | `BarlowCondensed_700Bold`, 18sp, `#DAF1DE`. |
+| **Auction Tag** | Small pill, bottom-left | Renders only if `isAuctionBased === true`. | `#E8662A` text on `rgba(232,102,42,0.12)` fill. |
 | **Live Indicator** | Top-right dot | Renders only if `status === 'Ongoing'`. | Uses the **Live Pulse Blob** animation (§10.4), 10pt. |
-| **Card Surface** | Glass card | `borderRadius: 24`, backdrop blur `20pt`, fill `rgba(22, 59, 50, 0.45)`, 1 dp `#8EB69B` border at 15% opacity. | Uses the **Card Press Deepen** animation (§10.3) on tap. |
+| **Card Surface** | Glass card | `borderRadius: 24`, backdrop blur `20pt`, fill `rgba(15,36,38,0.55)`, 1 dp `#8EB69B` border at 15% opacity. | Uses the **Card Press Deepen** animation (§10.3) on tap. |
 
 ### 3.3 Tap Behavior
 Tapping any card pushes the shared **Event Details View** (§7) with the League-specific
@@ -158,8 +158,8 @@ registration block active (§7.4).
 | Element | Component Type | Rules | Notes |
 |---|---|---|---|
 | **Grid** | Single-column card list | No sport badge, no auction tag — BGEC events are never auction-based. | |
-| **Event Title** | Card title | `CharSenz-Heavy`, 18sp, `#DAF1DE`. | |
-| **Schedule Caption** | Subtitle | `Helvetica Neue Regular`, 12sp, `#8EB69B`. | Date + venue string. |
+| **Event Title** | Card title | `BarlowCondensed_700Bold`, 18sp, `#DAF1DE`. | |
+| **Schedule Caption** | Subtitle | `Inter_400Regular`, 12sp, `#8EB69B`. | Date + venue string. |
 | **Live Indicator** | Top-right dot | Renders only if `status === 'Ongoing'`. | **Live Pulse Blob** (§10.4), 10pt. |
 | **Card Surface** | Glass card | Identical spec to §3.2's card surface. | **Card Press Deepen** (§10.3) on tap. |
 
@@ -220,13 +220,13 @@ Identical to §4.2's BGEC card spec, with one addition:
 
 | Element | Component Type | Rules | Notes |
 |---|---|---|---|
-| **Section Divider** | Label rule | `"STRAVA · DAILY RUNS"`, `Helvetica Neue Medium`, 12sp, `#8EB69B`, flanked by 1px `#8EB69B` hairlines at 20% opacity. | |
-| **Streak Hero Card** | Full-width glass card | Streak count in `CharSenz-Heavy`, 34sp, `#DAF1DE`. Label `"DAY STREAK"` below in `Helvetica Neue`, 12sp, `#8EB69B`. | Streak counts only if ≥1km was logged that day; a day with no ≥1km run does not extend it. |
+| **Section Divider** | Label rule | `"STRAVA · DAILY RUNS"`, `Inter_600SemiBold`, 12sp, `#8EB69B`, flanked by 1px `#8EB69B` hairlines at 20% opacity. | |
+| **Streak Hero Card** | Full-width glass card | Streak count in `BarlowCondensed_700Bold`, 34sp, `#DAF1DE`. Label `"DAY STREAK"` below in `Inter_400Regular`, 12sp, `#8EB69B`. | Streak counts only if ≥1km was logged that day; a day with no ≥1km run does not extend it. |
 | **Streak Flame** | Icon accent, beside the count | Renders only while today's streak is currently active. | Uses the **Streak Flame Ignite** animation (§10.5), 22pt. |
-| **Streak Broken Caption** | Helper text | Renders instead of the flame when today's run hasn't happened yet: *"Run at least 1km today to keep it alive."* | `Helvetica Neue Regular`, 12sp, `#8EB69B`. |
-| **Leaderboard List** | Ranked rows | Ranked by **consistency** = days-run ÷ days-in-window for the current cycle — not raw distance or streak length. | Each row: rank numeral (`CharSenz`), name, consistency %. |
+| **Streak Broken Caption** | Helper text | Renders instead of the flame when today's run hasn't happened yet: *"Run at least 1km today to keep it alive."* | `Inter_400Regular`, 12sp, `#8EB69B`. |
+| **Leaderboard List** | Ranked rows | Ranked by **consistency** = days-run ÷ days-in-window for the current cycle — not raw distance or streak length. | Each row: rank numeral (`BarlowCondensed_700Bold`), name, consistency %. |
 | **Top-3 Live Indicator** | Small dot before rank 1–3 | Only ranks 1, 2, 3 get this — it signals "currently holding this position," which can change today. | **Live Pulse Blob** (§10.4), 10pt. |
-| **Current User Row** | Highlighted row | The signed-in user's row is pinned/highlighted with a `rgba(5, 241, 32, 0.08)` fill regardless of rank. | No live blob unless the user is also top-3. |
+| **Current User Row** | Highlighted row | The signed-in user's row is pinned/highlighted with a `rgba(52,210,123,0.08)` fill regardless of rank. | No live blob unless the user is also top-3. |
 | **Strava Not Connected State** | Locked/blurred overlay | Streak hero and leaderboard render behind a light blur with a single centered `[ Connect Strava ]` glass button. | Button uses the **Glass Press** animation (§10.1). This is the only interactive element until connected. |
 
 ### 5.4 FitSoc States Matrix
@@ -265,7 +265,7 @@ Identical to §4.2's BGEC card spec, with one addition:
 |---|---|---|---|
 | **Highlight Card** | Full-width card | Renders first, above the 2-column grid, for `isFeatured === true` events. | Double column span of a standard card; otherwise identical card spec to §4.2. |
 | **Standard Grid** | 2-column card grid | Non-featured General events (Waves, sponsored, other). | |
-| **Sponsored Ribbon** | Top-right label strip | Renders only when `isSponsored === true`. | `Helvetica Neue Medium`, 11sp, `#8EB69B` text on `#235347` strip. **Not** `#05F120` — a sponsor label is not a live state and must not spend the accent budget (§8, §9). |
+| **Sponsored Ribbon** | Top-right label strip | Renders only when `isSponsored === true`. | `Inter_600SemiBold`, 11sp, `#8EB69B` text on `#235347` strip. **Not** `#E8662A` — a sponsor label is not a live state and must not spend the accent budget (§8, §9). |
 | **Live Indicator** | Top-right dot (non-sponsored cards) | Renders only if `status === 'Ongoing'`. | **Live Pulse Blob** (§10.4), 10pt. |
 
 ### 6.3 General States Matrix
@@ -335,11 +335,11 @@ events.
 
 | Field | Component Type | Notes |
 |---|---|---|
-| **Title** | Header text | `CharSenz-Heavy`, 24sp, `#DAF1DE`. |
-| **Description** | Body paragraph | `Helvetica Neue Regular`, 16sp, `#DAF1DE`. |
+| **Title** | Header text | `BarlowCondensed_700Bold`, 24sp, `#DAF1DE`. |
+| **Description** | Body paragraph | `Inter_400Regular`, 16sp, `#DAF1DE`. |
 | **Rules PDF/Link** | Inline link row | Opens system PDF viewer / browser. |
 | **Awards** | Inline text row | Renders only if present on the event. |
-| **Scheduling Dates** | Caption row | `Helvetica Neue Regular`, 12sp, `#8EB69B`. |
+| **Scheduling Dates** | Caption row | `Inter_400Regular`, 12sp, `#8EB69B`. |
 | **Coordinator Contact** | Caption row | `mailto:` link, `#8EB69B`. |
 
 No animation renders in this block — static reading content. A fourth ad-hoc use of any
@@ -373,7 +373,7 @@ Renders only if the event is currently active.
 |---|---|---|
 | **Apply Button** | Primary glass button | `"Apply for Team Captain"`. Uses **Glass Press** (§10.1). |
 | **Pending Caption** | Text, replaces the button once tapped | `"Application under review by the Core member(s) assigned to this league."` |
-| **Approval Status Pill** | Read-only chip | `pending` / `approved` / `declined`. Colored `#05F120` only when `approved` — a plain color swap, no live blob, since approval is a one-time state change rather than something continuously live. |
+| **Approval Status Pill** | Read-only chip | `pending` / `approved` / `declined`. Colored `#34D27B` (success) only when `approved` — a plain color swap, no live blob, since approval is a one-time state change rather than something continuously live. |
 
 ### 7.6 Event Team Formation Section
 
@@ -391,7 +391,7 @@ Renders only if the event is currently active.
 | **Leaderboard** | Ranked list | Renders if active and enabled. | Same row pattern as §5.3's Strava leaderboard — top-3 rows get the **Live Pulse Blob** (§10.4). |
 | **Status Indicator** | Chip | `Upcoming` / `Ongoing` / `Past`. | **Live Pulse Blob** (§10.4) only while `Ongoing`. |
 | **Results** | Read-only block | Renders post-completion. | |
-| **Post-Event Sponsor Update** | Dismissible glass card | `"+X fans earned for [Sponsor Name]"`, `CharSenz-Heavy`, `#05F120`. | The one place the accent sets large display text rather than just a dot — justified because it's a one-time reward notice the user dismisses (tap to clear), so it never sits on-screen burning accent budget. Uses the **Sponsor Reward Reveal** animation (§10.8) on first appearance. |
+| **Post-Event Sponsor Update** | Dismissible glass card | `"+X fans earned for [Sponsor Name]"`, `BarlowCondensed_700Bold`, `#34D27B` (success token — reward text). | The one place the accent sets large display text rather than just a dot — justified because it's a one-time reward notice the user dismisses (tap to clear), so it never sits on-screen burning accent budget. Uses the **Sponsor Reward Reveal** animation (§10.8) on first appearance. |
 
 ---
 
@@ -422,7 +422,7 @@ Reached from Event Details (§7) when the event has a bracket. Pushed as its own
 | Element | Component Type | Rules | Notes |
 |---|---|---|---|
 | **Bracket Layout** | Horizontally-scrollable round columns | Elimination formats (Single/Double). | Round Robin renders as a grid instead, same match-card component. |
-| **Match Card** | Glass card | Two team rows: name + score. | Uses **Card Press Deepen** (§10.3) on tap. Winner's score colored `#05F120`. |
+| **Match Card** | Glass card | Two team rows: name + score. | Uses **Card Press Deepen** (§10.3) on tap. Winner's score colored `#34D27B` (success token — positive result). |
 | **Live Match Indicator** | Dot on the match card | Renders only while the match is in progress. | **Live Pulse Blob** (§10.4), 8pt. |
 | **Round Connectors** | SVG lines between rounds | Computed from match card DOM positions. | Static — not an animation library job. |
 | **Match Detail Sheet** | Bottom sheet | Opens on match tap: venue, date, team roster sheets, historical head-to-head, live score feed. | Uses the **Bottom Sheet Rise** animation (§10.6). Live score feed carries the same **Live Pulse Blob** only while the match is live. |
@@ -472,9 +472,9 @@ sub-route. General spectators view only — no bidding controls render on mobile
 
 | Element | Component Type | Rules | Notes |
 |---|---|---|---|
-| **On-the-Block Panel** | Glass card, centered | Current player photo, name (`CharSenz-Heavy`), current bid (`CharSenz-Heavy`, `#05F120`). | Uses the **Auction Ripple Surge** animation (§10.9) continuously while a bid is active. |
+| **On-the-Block Panel** | Glass card, centered | Current player photo, name (`BarlowCondensed_700Bold`), current bid (`BarlowCondensed_700Bold`, `#E8662A`). | Uses the **Auction Ripple Surge** animation (§10.9) continuously while a bid is active. |
 | **Bid Countdown Ring** | Circular progress ring | 5-second countdown, resets on every new bid. | Uses the **Bid Countdown Ring** animation (§10.10). Starts/stops in sync with the panel's ripple. |
-| **Bid Log** | List, most recent first | Captain name + bid amount (`#05F120`). | No animation — a static, fast-updating list. |
+| **Bid Log** | List, most recent first | Captain name + bid amount (`#E8662A`). | No animation — a static, fast-updating list. |
 | **Captain Wallets** | Glass card list | Wallet remaining + roster count per captain. | Uses **Card Press Deepen** (§10.3) if tapped for a roster detail sheet. |
 
 ### 9.3 Auction States Matrix
@@ -498,17 +498,17 @@ of the three.
 | # | Animation Name | Trigger | Powered By | Behavior |
 |---|---|---|---|---|
 | 10.1 | **Glass Press** | User taps a glass button or chip (tab, filter chip, role toggle, status toggle, invite button, Connect Strava, Apply for Captain). | `dashersw/liquid-glass-js` — `Button` component, `warp: true`. | A center-out distortion ripple through the glass material itself, built into the shader. This **is** the press feedback — no separate scale/opacity transform is layered on top of it. |
-| 10.2 | **Tab Underline Glide** | Active tab changes (category tab bar, §2.3). | `react-native-reanimated` spring physics (`damping: 18, stiffness: 150`). | The `#05F120` underline slides from the previous active tab to the new one; tab content crossfades over 220ms. Fires on the same frame as the tab's Glass Press. |
+| 10.2 | **Tab Underline Glide** | Active tab changes (category tab bar, §2.3). | `react-native-reanimated` spring physics (`damping: 18, stiffness: 150`). | The `#E8662A` underline slides from the previous active tab to the new one; tab content crossfades over 220ms. Fires on the same frame as the tab's Glass Press. |
 | 10.3 | **Card Press Deepen** | User presses down on any glass card (event card, league card, team row, match card, wallet card). | `dashersw/liquid-glass-js` — `Container` component, `tintOpacity` shifted from 0.45 → 0.6 on `pointerdown`, released on `pointerup`. | The glass fill thickens/darkens under the finger, then relaxes on release — a tactile "press into glass" read. |
 | 10.4 | **Live Pulse Blob** | Any element representing a currently-live state: Ongoing status dot, sponsor-leading indicator, top-3 leaderboard rank, live bracket match. | `paper-design/liquid-logo` (`LiquidMetal` shader). | A small organic blob that continuously morphs at low amplitude — reads as "alive right now." Reserved only for things that are live at this instant; never used decoratively. |
 | 10.5 | **Streak Flame Ignite** | Renders next to the Strava streak count whenever today's ≥1km run has already been logged. | `paper-design/liquid-logo` (`LiquidMetal` shader), higher amplitude/speed variant of 10.4. | A brighter, faster blob morph than the standard Live Pulse Blob — signals "today is secured," disappears (replaced by the reminder caption) the moment midnight passes without a qualifying run. |
 | 10.6 | **Bottom Sheet Rise** | User taps a match card (bracket detail), a team row (invite detail), or any element that opens a sheet. | `react-native-reanimated` — `translateY` from 100% to 0%, `cubic-bezier(0.32, 0.72, 0, 1)`, 300ms. | Sheet content sits inside a glass container (`dashersw/liquid-glass-js`, blur 32pt, fill 65%) but the rise motion itself is a plain transform, not a shader effect. |
 | 10.7 | **Scroll-To Anchor** | User taps the "View in Strava ↓" chip on a linked FitSoc event card. | `react-native-reanimated` — `scrollTo` with `animated: true`, 400ms ease-in-out. | Smooth-scrolls the current ScrollView down to the Strava Sub-Section header, without changing tabs. |
 | 10.8 | **Sponsor Reward Reveal** | The Post-Event Sponsor Update card first mounts (results just published). | `paper-design/liquid-logo`-driven glow burst on the card border, decaying to static after ~800ms, then handled by 10.4's idle state if the card stays visible. | A one-time "reward just landed" burst rather than a continuous loop — it settles, it doesn't keep pulsing, so it doesn't compete with the dismiss action. |
-| 10.9 | **Auction Ripple Surge** | The Auction Event Interface's on-the-block panel, while a bid is actively in play. | `dashersw/liquid-glass-js` — live-updated `glassControls` (`edgeIntensity`, `rimIntensity`, `blurRadius` raised), border tint switched to `#05F120` @ 40%. | The glass surface itself visibly ripples harder the instant a bid lands, and settles the instant bidding pauses — driven directly by the real-time bid-active signal, never a fixed loop. |
-| 10.10 | **Bid Countdown Ring** | Every new bid in the Auction Event Interface. | Plain `requestAnimationFrame` SVG stroke-dashoffset animation (not one of the three libraries — tightly coupled to 10.9 and must start/stop in sync with it). | A 5-second circular countdown ring around the timer readout, resetting to full on every new bid; stroke color `#05F120`. |
+| 10.9 | **Auction Ripple Surge** | The Auction Event Interface's on-the-block panel, while a bid is actively in play. | `dashersw/liquid-glass-js` — live-updated `glassControls` (`edgeIntensity`, `rimIntensity`, `blurRadius` raised), border tint switched to `#E8662A` @ 40%. | The glass surface itself visibly ripples harder the instant a bid lands, and settles the instant bidding pauses — driven directly by the real-time bid-active signal, never a fixed loop. |
+| 10.10 | **Bid Countdown Ring** | Every new bid in the Auction Event Interface. | Plain `requestAnimationFrame` SVG stroke-dashoffset animation (not one of the three libraries — tightly coupled to 10.9 and must start/stop in sync with it). | A 5-second circular countdown ring around the timer readout, resetting to full on every new bid; stroke color `#E8662A`. |
 | 10.11 | **Shimmer Sweep** | Any loading state across all tabs and sub-views. | `react-native-reanimated` — linear gradient sweep, 1200ms loop, `#163B32` → `#235347` → `#163B32`. | Standard skeleton shimmer; not a glass/blob effect — kept plain so loading states never compete visually with the live-state language reserved for real content. |
-| — | **Ambient Background Drift** | Always running, screen-wide, non-interactive. | `ruucm/shadergradient` — `ShaderGradientCanvas`, full-bleed behind the entire screen, `z-index: -1`. | A slow, continuous gradient drift across `#0B2B26 → #163B32 → #235347`. This is the one animation with no discrete trigger — it's the ambient backdrop everything else sits on top of. Freezes to a static frame under `prefers-reduced-motion`. |
+| — | **Ambient Background Drift** | Always running, screen-wide, non-interactive. | `ruucm/shadergradient` — `ShaderGradientCanvas`, full-bleed behind the entire screen, `z-index: -1`. | A slow, continuous gradient drift across `#060D0E → #0F2426 → #163832`. This is the one animation with no discrete trigger — it's the ambient backdrop everything else sits on top of. Freezes to a static frame under `prefers-reduced-motion`. |
 
 ---
 
@@ -523,54 +523,76 @@ of the three.
 
 ---
 
-## 12. Typography & Custom Font Configuration
+## 12. Typography & Font Configuration
+
+> Fonts are defined in `UI-UX-Master-Doc.md §5`. Load all fonts in `app/_layout.tsx` via `expo-font` + `@expo-google-fonts/*`. Never reference font family strings inline — use the `FONTS` constant.
 
 ### 12.1 Font Families & Loading Architecture
-1. **Primary Custom Display Font**: `CharSenz` (Loaded via `expo-font` from `assets/fonts/CharSenz-Heavy.otf`). Condensed, heavy, sans — per the uploaded type specimen. Ships uppercase-forward in its specimen, but `text-transform: none` is set for all display uses here (title-case source strings), to keep the glass/minimalism restraint.
-2. **Body Font**: `Helvetica Neue` (system-provided on iOS; bundled `.ttf` for Android parity).
-3. **Fallback Font Stack**: `Platform.select({ ios: 'Helvetica Neue', android: 'sans-serif' })`.
+1. **Display Font**: `BebasNeue_400Regular` — screen title (48 sp+) and any numeral ≥ 32 sp. Installed via `@expo-google-fonts/bebas-neue`.
+2. **UI Heading Font**: `BarlowCondensed_700Bold` — event/league titles (18–28 sp), active tab label, large numerals below 32 sp. Installed via `@expo-google-fonts/barlow-condensed`.
+3. **Body / UI Font**: `Inter` family (400 / 600 / 700) — all captions, form labels, inactive tab labels, button labels, metadata. Installed via `@expo-google-fonts/inter`.
+4. **Fallback**: `Platform.select({ ios: 'Helvetica Neue', android: 'sans-serif' })`.
 
 ### 12.2 Font Family Application Rules Table
 
-| UI Context | Font Variant | Font Size (sp) | Weight / Token | Example UI Elements |
-|---|---|---|---|---|
-| **Screen Title** | `CharSenz-Heavy` | `34sp` | Heavy | "Events" |
-| **Event / League Titles, Active Tab Label** | `CharSenz-Heavy` | `18sp – 24sp` | Heavy | Event Details title, League card title |
-| **Large Numerals** | `CharSenz-Heavy` | `18sp – 34sp` | Heavy | Streak count, bid amount, scores, leaderboard rank |
-| **Buttons & Chips** | `Helvetica Neue Medium` | `12sp – 14sp` | Medium (`500`) | Tab labels (inactive), filter chips, role toggle, invite button |
-| **Body & Paragraph Text** | `Helvetica Neue Regular` | `14sp – 16sp` | Regular (`400`) | Event descriptions, form labels |
-| **Captions & Metadata** | `Helvetica Neue Regular` | `11sp – 12sp` | Regular (`400`) | Timestamps, coordinator contact, schedule captions, sponsor ribbon |
+| UI Context | Font Variant | Font Size (sp) | Example UI Elements |
+|---|---|---|---|
+| **Screen Title** | `BebasNeue_400Regular` | 48 sp | "EVENTS" |
+| **Event / League Titles** | `BarlowCondensed_700Bold` | 18–24 sp | Event Details title, League card title |
+| **Active Tab Label** | `BarlowCondensed_700Bold` | 13 sp | Active category tab |
+| **Large Numerals (streak, bid, scores ≥ 32 sp)** | `BebasNeue_400Regular` | 32–48 sp | Streak count, bid total |
+| **Large Numerals (< 32 sp)** | `BarlowCondensed_700Bold` | 18–28 sp | Scores, rank numbers |
+| **Buttons & Chips (inactive)** | `Inter_600SemiBold` | 12–14 sp | Filter chips, role toggle, invite button |
+| **Body & Paragraph Text** | `Inter_400Regular` | 14–16 sp | Event descriptions, form labels |
+| **Captions & Metadata** | `Inter_400Regular` | 11–12 sp | Timestamps, coordinator contact, sponsor ribbon |
 
 ---
 
-## 13. Palette & Color System — Glass Forest Theme
+## 13. Palette & Color System
+
+> **Tokens from `UI-UX-Master-Doc.md §4`.** Always consume via `useColors()` — never hardcode hex in component code. Values listed here are reference only.
 
 ```typescript
+// Reference values only — use useColors() in all component code.
 export const glassForestThemeTokens = {
-  // Backgrounds & Fills
-  background: '#0B2B26', // Void — base canvas behind the shadergradient
-  surface: 'rgba(22, 59, 50, 0.45)', // Glass card fill (45% opacity #163B32)
-  surfaceRaised: 'rgba(35, 83, 71, 0.45)', // Nested surface (bid rows, wallet rows)
-  surfaceModal: 'rgba(22, 59, 50, 0.65)', // Bottom sheet / modal fill (65% opacity)
+  // ── Backgrounds ──────────────────────────────────────────────────────────
+  background:           '#060D0E',                 // App canvas             (token: background)
+  backgroundMid:        '#0F2426',                 // Section bg variant     (token: backgroundMid)
 
-  // Borders & Dividers
-  border: 'rgba(142, 182, 155, 0.15)', // 1dp card border
-  borderTabBar: 'rgba(142, 182, 155, 0.2)', // Tab bar / filter row border
-  borderAuctionActive: 'rgba(5, 241, 32, 0.4)', // Auction panel border while a bid is active
+  // ── Glass Surfaces ────────────────────────────────────────────────────────
+  surface:              'rgba(15,36,38,0.55)',      // Card/panel + blur(20px)(token: surface)
+  surfaceRaised:        'rgba(20,50,52,0.40)',      // Nested rows, inputs    (token: surfaceMuted)
+  surfaceModal:         'rgba(15,36,38,0.65)',      // Bottom sheet + blur(32px)
+  surfaceSolid:         '#163832',                 // No-blur fallback       (token: surfaceSolid)
 
-  // Typography & Contrast
-  textPrimary: '#DAF1DE', // Titles, primary body text on dark glass
-  textMuted: '#8EB69B', // Secondary text, inactive tab labels, captions
+  // ── Borders ───────────────────────────────────────────────────────────────
+  border:               'rgba(142,182,155,0.15)',  // 1dp hairline           (token: border)
+  borderTabBar:         'rgba(142,182,155,0.20)',  // Tab bar container border
+  borderActive:         'rgba(142,182,155,0.40)',  // Focus / selected       (token: borderActive)
+  borderAuctionActive:  'rgba(232,102,42,0.40)',   // Auction bid-active panel border
 
-  // Primary Interactive & Accent — the ONE accent color, budget ≤8% of any viewport
-  signal: '#05F120', // Live indicators, active tab underline, primary CTA, "+X fans," streak flame, focus ring
+  // ── Typography ────────────────────────────────────────────────────────────
+  textPrimary:          '#DAF1DE',                 // Titles, body           (token: text)
+  textMuted:            '#8EB69B',                 // Subtitles, captions    (token: textMuted)
 
-  // Sponsor Label (explicitly NOT the accent — see §6.2)
-  sponsorRibbonBg: '#235347',
-  sponsorRibbonText: '#8EB69B',
+  // ── Accent — CTAs, active tab underline, links ───────────────────────────
+  accent:               '#E8662A',                 // Burnt orange           (token: accent)
+  accentText:           '#FFFFFF',                 // Text on accent fill    (token: accentText)
+  accentMuted:          'rgba(232,102,42,0.15)',   // Accent tint bg         (token: accentMuted)
 
-  // System Overlays
-  modalBackdrop: 'rgba(11, 43, 38, 0.65)', // Darkened scrim over #0B2B26
+  // ── Success — live indicators, positive results ───────────────────────────
+  success:              '#34D27B',                 // Live dots, scores, rewards (token: success)
+  successMuted:         'rgba(52,210,123,0.08)',   // Current-user row highlight
+
+  // ── Sponsor label (NOT the accent — see §6.2) ────────────────────────────
+  sponsorRibbonBg:      '#235347',
+  sponsorRibbonText:    '#8EB69B',
+
+  // ── States ────────────────────────────────────────────────────────────────
+  danger:               '#F2686C',                 // Error / destructive    (token: danger)
+
+  // ── Overlay ──────────────────────────────────────────────────────────────
+  modalBackdrop:        'rgba(6,13,14,0.65)',      // Scrim over canvas
 };
 ```
 
@@ -580,15 +602,15 @@ export const glassForestThemeTokens = {
 
 | Button / Trigger | Tier | Shape & Radius | Height (dp) | Background Fill | Border | Text Style |
 |---|---|---|---|---|---|---|
-| **`[ Connect Strava ]` / `[ Apply for Team Captain ]`** | Primary | Capsule (`24 dp`) | `48 dp` | `#235347` glass fill | None | `14 sp` `Helvetica Neue Medium` (`#DAF1DE`) |
-| **Active Tab Pill** | Secondary | Capsule (`24 dp`, part of tab bar) | `40 dp` | `#235347` glass fill | None | `13 sp` `CharSenz-Heavy` (`#DAF1DE`) + `#05F120` underline |
-| **Inactive Tab Item** | Secondary | Capsule (part of tab bar) | `40 dp` | Transparent | None | `13 sp` `Helvetica Neue Medium` (`#8EB69B`) |
-| **Active Filter Chip** | Secondary | Capsule (`20 dp`) | `36 dp` | `#235347` glass fill | None | `12 sp` `Helvetica Neue Medium` (`#DAF1DE`) |
-| **Inactive Filter Chip** | Secondary | Capsule (`20 dp`) | `36 dp` | Transparent | 1 dp `#8EB69B` @ 20% | `12 sp` `Helvetica Neue Regular` (`#8EB69B`) |
-| **Event / League Card** | Primary Surface | Rounded (`24 dp`) | Auto (content-based) | `rgba(22, 59, 50, 0.45)` glass | 1 dp `#8EB69B` @ 15% | Per §12.2 |
-| **`[ Invite ]` (Team Search Row)** | Tertiary | Soft Rectangle (`6 dp`) | `32 dp` | Transparent | 1 dp `#8EB69B` @ 20% | `12 sp` `Helvetica Neue Regular` (`#DAF1DE`) |
-| **`[ Copy ]` (Invite Code)** | Tertiary | Soft Rectangle (`6 dp`) | `32 dp` | Transparent | 1 dp `#8EB69B` @ 20% | `12 sp` `Helvetica Neue Regular` (`#DAF1DE`) |
-| **Bracket / Auction Match Card** | Primary Surface | Rounded (`24 dp`) | Auto | `rgba(22, 59, 50, 0.45)` glass | 1 dp `#8EB69B` @ 15% (`#05F120` @ 40% for the on-the-block panel while a bid is active) | Per §12.2 |
+| **`[ Connect Strava ]` / `[ Apply for Team Captain ]`** | Primary | Capsule (`24 dp`) | `48 dp` | `#235347` glass fill | None | `14 sp` `Inter_600SemiBold` (`#DAF1DE`) |
+| **Active Tab Pill** | Secondary | Capsule (`24 dp`, part of tab bar) | `40 dp` | `#235347` glass fill | None | `13 sp` `BarlowCondensed_700Bold` (`#DAF1DE`) + `#E8662A` underline |
+| **Inactive Tab Item** | Secondary | Capsule (part of tab bar) | `40 dp` | Transparent | None | `13 sp` `Inter_600SemiBold` (`#8EB69B`) |
+| **Active Filter Chip** | Secondary | Capsule (`20 dp`) | `36 dp` | `#235347` glass fill | None | `12 sp` `Inter_600SemiBold` (`#DAF1DE`) |
+| **Inactive Filter Chip** | Secondary | Capsule (`20 dp`) | `36 dp` | Transparent | 1 dp `#8EB69B` @ 20% | `12 sp` `Inter_400Regular` (`#8EB69B`) |
+| **Event / League Card** | Primary Surface | Rounded (`24 dp`) | Auto (content-based) | `rgba(15,36,38,0.55)` glass | 1 dp `#8EB69B` @ 15% | Per §12.2 |
+| **`[ Invite ]` (Team Search Row)** | Tertiary | Soft Rectangle (`6 dp`) | `32 dp` | Transparent | 1 dp `#8EB69B` @ 20% | `12 sp` `Inter_400Regular` (`#DAF1DE`) |
+| **`[ Copy ]` (Invite Code)** | Tertiary | Soft Rectangle (`6 dp`) | `32 dp` | Transparent | 1 dp `#8EB69B` @ 20% | `12 sp` `Inter_400Regular` (`#DAF1DE`) |
+| **Bracket / Auction Match Card** | Primary Surface | Rounded (`24 dp`) | Auto | `rgba(15,36,38,0.55)` glass | 1 dp `#8EB69B` @ 15% (`#E8662A` @ 40% for the on-the-block panel while a bid is active) | Per §12.2 |
 
 ---
 
