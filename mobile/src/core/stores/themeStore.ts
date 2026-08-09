@@ -1,39 +1,31 @@
 import { create } from 'zustand';
 import { storage } from '../storage';
 
-export type ThemeMode = 'light' | 'dark' | 'system';
-
 const THEME_KEY = 'bgsc.theme';
 
+export type ThemePreference = 'light' | 'dark' | 'system';
+
 interface ThemeState {
-  mode: ThemeMode;
-  setMode: (mode: ThemeMode) => void;
-  /** Cycle light → dark → system. */
-  toggle: () => void;
+  /** User preference — `system` follows the OS scheme. */
+  theme: ThemePreference;
+  setTheme: (theme: ThemePreference) => Promise<void>;
+  loadTheme: () => Promise<void>;
 }
 
-/**
- * Holds the user's theme preference. The effective light/dark scheme is
- * resolved in `hooks/use-color-scheme` by combining this with the OS scheme.
- */
-export const useThemeStore = create<ThemeState>((set, get) => ({
-  mode: 'system',
+/** Theme store (master doc §2.5): light / dark / system, persisted. */
+export const useThemeStore = create<ThemeState>((set) => ({
+  // Dark is the primary theme (master §4.2) — boot dark regardless of OS.
+  theme: 'dark',
 
-  setMode: (mode) => {
-    set({ mode });
-    void storage.setItem(THEME_KEY, mode);
+  setTheme: async (theme) => {
+    set({ theme });
+    await storage.setItem(THEME_KEY, theme);
   },
 
-  toggle: () => {
-    const order: ThemeMode[] = ['light', 'dark', 'system'];
-    const next = order[(order.indexOf(get().mode) + 1) % order.length];
-    get().setMode(next);
+  loadTheme: async () => {
+    const saved = await storage.getItem(THEME_KEY);
+    if (saved === 'light' || saved === 'dark' || saved === 'system') {
+      set({ theme: saved });
+    }
   },
 }));
-
-// Hydrate the persisted preference on startup.
-void storage.getItem(THEME_KEY).then((v) => {
-  if (v === 'light' || v === 'dark' || v === 'system') {
-    useThemeStore.setState({ mode: v });
-  }
-});

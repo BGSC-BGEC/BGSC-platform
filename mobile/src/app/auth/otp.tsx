@@ -1,192 +1,200 @@
-import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AuthShell } from '@/components/auth/AuthShell';
+import { OtpCells } from '@/components/auth/OtpCells';
+import { useAuthScreen } from '@/components/auth/use-auth-screen';
+import { PillButton } from '@/components/PillButton';
+import { useToast } from '@/components/Toast';
 import { AuthRepository } from '@/core/repositories/AuthRepository';
-import { useColors } from '@/hooks/use-colors';
+import { ApiError } from '@/core/api/ApiError';
+import { FONTS } from '@/core/theme/fonts';
+import { lightColors } from '@/core/theme/tokens';
 
-const RESEND_COOLDOWN = 60;
+const CODE_LENGTH = 6;
+const RESEND_SECONDS = 30;
 
+/**
+ * OTP verification (handoffSpec §6 / auth-mobile-spec §6): 6 JetBrains Mono
+ * cells, 30 s resend countdown, verify via `AuthRepository.verifyEmail`.
+ * Reached from register with the email as a route param; on success the
+ * session (already persisted by `authStore.register`) flows to the drawer.
+ */
 export default function OtpScreen() {
-  const colors = useColors();
-  const insets = useSafeAreaInsets();
-  const { email } = useLocalSearchParams<{ email?: string }>();
-  const safeEmail = typeof email === 'string' ? email : '';
+  useAuthScreen();
+  const colors = lightColors;
+  const toast = useToast();
+  const params = useLocalSearchParams<{ email?: string | string[] }>();
+  const email = Array.isArray(params.email) ? params.email[0] ?? '' : (params.email ?? '');
 
-  const [digits, setDigits] = useState(['', '', '', '']);
+  const [code, setCode] = useState('');
+  const [seconds, setSeconds] = useState(RESEND_SECONDS);
+  const [otpError, setOtpError] = useState<string | null>(null);
   const [verifying, setVerifying] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState(RESEND_COOLDOWN);
+  const [resending, setResending] = useState(false);
+  const busyRef = useRef(false);
 
-  const cellRefs = useRef<Array<TextInput | null>>([null, null, null, null]);
-  const code = digits.join('');
-
+  // Countdown → "Resend code" link (handoffSpec §6.6: 30 s).
   useEffect(() => {
-    if (countdown <= 0) return;
-    const t = setTimeout(() => setCountdown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [countdown]);
+    if (seconds <= 0) return;
+    const timer = setTimeout(() => setSeconds((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [seconds]);
 
-  const onChangeDigit = (index: number, value: string) => {
-    // Handle paste of full 4-digit code
-    if (value.length === 4 && /^\d{4}$/.test(value)) {
-      setDigits(value.split(''));
-      cellRefs.current[3]?.blur();
-      return;
-    }
-    const ch = value.replace(/\D/g, '').slice(-1);
-    const next = [...digits];
-    next[index] = ch;
-    setDigits(next);
-    if (ch && index < 3) cellRefs.current[index + 1]?.focus();
-  };
-
-  const onKeyPress = (index: number, key: string) => {
-    if (key === 'Backspace' && !digits[index] && index > 0) {
-      cellRefs.current[index - 1]?.focus();
+  const onCodeChange = (t: string) => {
+    setCode(t);
+    if (t.length !== CODE_LENGTH) {
+      busyRef.current = false;
+      setOtpError(null);
     }
   };
 
-  const onContinue = async () => {
-    if (!safeEmail) {
-      setError('Missing email — go back and try again.');
-      return;
+  const verify = useCallback(
+    async (value: string) => {
+      if (!email || value.length !== CODE_LENGTH || busyRef.current) return;
+      busyRef.current = true;
+      setVerifying(true);
+      setOtpError(null);
+      try {
+        await AuthRepository.verifyEmail({ email, code: value });
+        toast.show('Email verified — welcome to BGSC!');
+        router.replace('/(drawer)');
+      } catch (err) {
+        busyRef.current = false;
+        const msg = err instanceof Error ? err.message : '';
+        if (err instanceof ApiError && err.status === 400) {
+          setOtpError('Incorrect code, try again.');
+        } else if (/expired/i.test(msg)) {
+          setOtpError('Code expired — resend a new one.');
+        } else {
+          setOtpError("Couldn't verify the code — check your connection.");
+        }
+      } finally {
+        setVerifying(false);
+      }
+    },
+    [email, toast],
+  );
+
+  // Auto-submit on the last digit (handoffSpec §6.3).
+  useEffect(() => {
+    if (code.length === CODE_LENGTH && code.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional: submit exactly once when the 6th digit lands
+      void verify(code);
     }
-    setError(null);
-    setVerifying(true);
-    try {
-      await AuthRepository.verifyEmail({ email: safeEmail, code });
-      router.replace('/');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Incorrect code, try again.');
-      setDigits(['', '', '', '']);
-      cellRefs.current[0]?.focus();
-    } finally {
-      setVerifying(false);
-    }
-  };
+  }, [code, verify]);
 
   const onResend = async () => {
-    if (countdown > 0 || !safeEmail) return;
+    if (!email || resending) return;
+    setResending(true);
     try {
-      await AuthRepository.resendOtp({ email: safeEmail });
-      setCountdown(RESEND_COOLDOWN);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not resend code.');
+      await AuthRepository.resendOtp({ email });
+      setSeconds(RESEND_SECONDS);
+      setOtpError(null);
+      toast.show('Verification code sent.');
+    } catch {
+      toast.show("Couldn't send the code — check your connection.");
+    } finally {
+      setResending(false);
     }
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={[s.container, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }]}>
-          {/* Back */}
-          <Pressable onPress={() => router.back()} style={[s.backBtn, { backgroundColor: colors.surface }]} hitSlop={8}>
-            <Ionicons name="arrow-back" size={20} color={colors.text} />
-          </Pressable>
-
-          <Text style={[s.heading, { color: colors.text }]}>Verification Code</Text>
-          <Text style={[s.subtitle, { color: colors.textMuted }]}>
-            We have sent the verification code to your email address
-            {safeEmail ? `\n${maskEmail(safeEmail)}` : ''}
+    <AuthShell
+      compact
+      onBack={() => router.back()}
+      heading="Verification Code"
+      subtitle="We have sent the verification code to your email address."
+    >
+      {!email ? (
+        <View style={[styles.missing, { backgroundColor: colors.accentMuted, borderColor: colors.border }]}>
+          <Text style={[styles.missingText, { color: colors.text }]}>
+            Missing your email — please go back and sign up again.
           </Text>
-
-          {/* OTP cells */}
-          <View style={s.cellRow}>
-            {digits.map((d, i) => (
-              <TextInput
-                key={i}
-                ref={(r) => { cellRefs.current[i] = r; }}
-                value={d}
-                onChangeText={(v) => onChangeDigit(i, v)}
-                onKeyPress={({ nativeEvent }) => onKeyPress(i, nativeEvent.key)}
-                keyboardType="numeric"
-                maxLength={4}
-                selectTextOnFocus
-                style={[
-                  s.cell,
-                  {
-                    borderColor: d ? colors.accent : colors.border,
-                    backgroundColor: colors.surface,
-                    color: colors.text,
-                  },
-                ]}
-              />
-            ))}
-          </View>
-
-          {error ? <Text style={[s.errorText, { color: colors.danger }]}>{error}</Text> : null}
-
           <Pressable
-            onPress={onContinue}
-            disabled={code.length < 4 || verifying}
-            style={[
-              s.primaryBtn,
-              { backgroundColor: colors.primary, opacity: code.length < 4 || verifying ? 0.5 : 1 },
-            ]}
+            onPress={() => router.replace('/register')}
+            accessibilityRole="link"
+            accessibilityLabel="Back to sign up"
+            hitSlop={8}
           >
-            <Text style={[s.primaryLabel, { color: colors.primaryText }]}>
-              {verifying ? 'Please wait…' : 'Continue'}
-            </Text>
-          </Pressable>
-
-          {/* Resend */}
-          <Pressable onPress={onResend} disabled={countdown > 0} style={s.resendRow}>
-            <Text style={[s.resendText, { color: countdown > 0 ? colors.textMuted : colors.accent }]}>
-              {countdown > 0 ? `Resend in 0:${String(countdown).padStart(2, '0')}` : 'Resend code'}
-            </Text>
+            <Text style={[styles.missingLink, { color: colors.accent }]}>Back to Sign Up</Text>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
-    </View>
+      ) : (
+        <>
+          <OtpCells
+            value={code}
+            onChange={onCodeChange}
+            length={CODE_LENGTH}
+            error={otpError}
+            disabled={verifying}
+          />
+
+          {seconds > 0 ? (
+            <Text style={[styles.countdown, { color: colors.textMuted }]}>
+              Resend in 0:{String(seconds).padStart(2, '0')}
+            </Text>
+          ) : (
+            <Pressable
+              onPress={() => void onResend()}
+              disabled={resending}
+              accessibilityRole="button"
+              accessibilityLabel="Resend code"
+              style={({ pressed }) => [styles.resend, { opacity: pressed ? 0.8 : 1 }]}
+            >
+              <Text style={[styles.resendText, { color: colors.accent }]}>
+                {resending ? 'Sending…' : 'Resend code'}
+              </Text>
+            </Pressable>
+          )}
+
+          <PillButton
+            label="Continue"
+            variant="primary"
+            loading={verifying}
+            disabled={code.length !== CODE_LENGTH || verifying}
+            onPress={() => void verify(code)}
+            accessibilityLabel="Verify code"
+          />
+        </>
+      )}
+    </AuthShell>
   );
 }
 
-function maskEmail(email: string): string {
-  const [local, domain] = email.split('@');
-  if (!local || !domain) return email;
-  return `${local[0]}***@${domain}`;
-}
-
-const s = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: 16 },
-
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 28,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-
-  heading: { fontSize: 22, fontWeight: '700', marginBottom: 8 },
-  subtitle: { fontSize: 13, lineHeight: 20, marginBottom: 32 },
-
-  cellRow: { flexDirection: 'row', gap: 12, justifyContent: 'center', marginBottom: 24 },
-  cell: {
-    width: 62,
-    height: 62,
-    borderWidth: 1.5,
-    borderRadius: 12,
-    fontSize: 24,
-    fontWeight: '700',
+const styles = StyleSheet.create({
+  countdown: {
+    fontFamily: FONTS.mono,
+    fontSize: 13,
     textAlign: 'center',
+    fontVariant: ['tabular-nums'],
   },
-
-  errorText: { fontSize: 13, marginBottom: 10, textAlign: 'center' },
-
-  primaryBtn: { borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
-  primaryLabel: { fontSize: 16, fontWeight: '600' },
-
-  resendRow: { alignItems: 'center', marginTop: 20 },
-  resendText: { fontSize: 14, fontWeight: '500' },
+  resend: {
+    alignSelf: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  resendText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 13,
+    textDecorationLine: 'underline',
+  },
+  missing: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 6,
+  },
+  missingText: {
+    fontFamily: FONTS.body,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  missingLink: {
+    fontFamily: FONTS.semibold,
+    fontSize: 13,
+    textDecorationLine: 'underline',
+  },
 });

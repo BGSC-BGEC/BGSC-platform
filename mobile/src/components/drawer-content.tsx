@@ -9,12 +9,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Logo } from '@/components/logo';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useAuthStore } from '@/core/stores/authStore';
+import { FONTS } from '@/core/theme/fonts';
 import { useColors } from '@/hooks/use-colors';
 
 /**
- * Side Drawer content (spec §3.2). Header shows brand + the current user (or a
- * guest prompt); the middle auto-renders the registered drawer screens; the
- * footer holds the theme switch and the login/logout action.
+ * Side drawer content (master §2.3): brand + user (or guest prompt), the
+ * registered drawer screens, and a footer with theme switch + login/logout.
  */
 export function DrawerContent(props: DrawerContentComponentProps) {
   const colors = useColors();
@@ -23,7 +23,7 @@ export function DrawerContent(props: DrawerContentComponentProps) {
   const logout = useAuthStore((s) => s.logout);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.surface }]}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <DrawerContentScrollView {...props}>
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <Logo />
@@ -41,16 +41,20 @@ export function DrawerContent(props: DrawerContentComponentProps) {
         <ThemeToggle />
         {status === 'authenticated' ? (
           <Pressable
-            onPress={() => {
-              void logout();
-            }}
-            style={[styles.action, { borderColor: colors.border }]}>
+            onPress={() => void logout()}
+            accessibilityRole="button"
+            accessibilityLabel="Logout"
+            style={[styles.action, { borderColor: colors.border }]}
+          >
             <Text style={[styles.actionText, { color: colors.text }]}>Logout</Text>
           </Pressable>
         ) : (
           <Pressable
             onPress={() => router.push('/login')}
-            style={[styles.action, { backgroundColor: colors.primary, borderColor: colors.primary }]}>
+            accessibilityRole="button"
+            accessibilityLabel="Login or register"
+            style={[styles.action, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+          >
             <Text style={[styles.actionText, { color: colors.primaryText }]}>Login / Register</Text>
           </Pressable>
         )}
@@ -61,9 +65,20 @@ export function DrawerContent(props: DrawerContentComponentProps) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingBottom: 16, marginBottom: 8, borderBottomWidth: StyleSheet.hairlineWidth, gap: 8 },
-  subtitle: { fontSize: 13 },
+  header: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    marginBottom: 8,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+  },
+  subtitle: { fontFamily: FONTS.body, fontSize: 13 },
   footer: { padding: 16, gap: 10, borderTopWidth: StyleSheet.hairlineWidth },
-  action: { borderWidth: 1, borderRadius: 8, paddingVertical: 11, alignItems: 'center' },
-  actionText: { fontSize: 14, fontWeight: '600' },
+  action: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  actionText: { fontFamily: FONTS.semibold, fontSize: 14 },
 });

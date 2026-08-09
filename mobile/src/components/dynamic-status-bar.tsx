@@ -1,21 +1,14 @@
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Logo } from '@/components/logo';
 import { useAuthStore } from '@/core/stores/authStore';
+import { FONTS } from '@/core/theme/fonts';
 import { useColors } from '@/hooks/use-colors';
 
-/**
- * Dynamic Status Bar (spec §3.1) — the persistent context-aware top bar.
- *  - Left:   side-drawer toggle
- *  - Center: contextual logo (swaps per module)
- *  - Right:  profile avatar (authed) or Login button (guest)
- *
- * Wired as the Drawer's custom `header`.
- */
-
-/** Maps a route to the contextual brand shown in the center (spec §3.1). */
+/** Maps a route to the contextual brand shown in the center (master §9 home). */
 const ROUTE_BRAND: Record<string, string> = {
   index: 'BGSC',
   events: 'BGEC',
@@ -28,6 +21,12 @@ interface HeaderProps {
   route: { name: string };
 }
 
+/**
+ * Dynamic status bar — persistent context-aware top bar (master §2.3):
+ * left drawer toggle, centre contextual brand, right avatar (authed) or
+ * Login (guest). Canvas background + hairline border; glass-free so the
+ * drawer screens' glass reads clearly beneath it.
+ */
 export function DynamicStatusBar({ navigation, route }: HeaderProps) {
   const insets = useSafeAreaInsets();
   const colors = useColors();
@@ -40,15 +39,19 @@ export function DynamicStatusBar({ navigation, route }: HeaderProps) {
         styles.bar,
         {
           paddingTop: insets.top + 8,
-          backgroundColor: colors.surface,
+          backgroundColor: colors.background,
           borderBottomColor: colors.border,
         },
-      ]}>
+      ]}
+    >
       <Pressable
         onPress={navigation.toggleDrawer}
         hitSlop={12}
-        accessibilityLabel="Open navigation drawer">
-        <Text style={[styles.menu, { color: colors.text }]}>☰</Text>
+        accessibilityRole="button"
+        accessibilityLabel="Open navigation drawer"
+        style={styles.side}
+      >
+        <Ionicons name="menu" size={24} color={colors.text} />
       </Pressable>
 
       <Logo label={brand} />
@@ -56,7 +59,10 @@ export function DynamicStatusBar({ navigation, route }: HeaderProps) {
       {user ? (
         <Pressable
           onPress={() => router.push('/profile')}
-          accessibilityLabel="Open profile">
+          accessibilityRole="button"
+          accessibilityLabel="Open profile"
+          style={styles.side}
+        >
           <View style={[styles.avatar, { backgroundColor: colors.accent }]}>
             <Text style={[styles.avatarText, { color: colors.accentText }]}>
               {user.username.slice(0, 1).toUpperCase()}
@@ -66,7 +72,10 @@ export function DynamicStatusBar({ navigation, route }: HeaderProps) {
       ) : (
         <Pressable
           onPress={() => router.push('/login')}
-          style={[styles.loginBtn, { backgroundColor: colors.primary }]}>
+          accessibilityRole="button"
+          accessibilityLabel="Login"
+          style={[styles.loginBtn, { backgroundColor: colors.primary }]}
+        >
           <Text style={[styles.loginText, { color: colors.primaryText }]}>Login</Text>
         </Pressable>
       )}
@@ -83,9 +92,30 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  menu: { fontSize: 24, width: 32 },
-  avatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 15, fontWeight: '700' },
-  loginBtn: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8 },
-  loginText: { fontSize: 14, fontWeight: '600' },
+  side: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    fontFamily: FONTS.bold,
+    fontSize: 15,
+  },
+  loginBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  loginText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 14,
+  },
 });

@@ -1,27 +1,28 @@
 import { apiClient } from '../api/ApiClient';
-import type { Announcement, AnnouncementTag } from '../../components/home/types';
+import type { Announcement, AnnouncementTag } from '../types';
 
-const PALETTE = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316','#ec4899'];
+const PALETTE = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899'];
+// ponytail: deterministic avatar colour — component-level CATEGORY_COLORS is the upgrade path once avatars are real images
 function colorFromId(id: string): string {
   const n = id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
   return PALETTE[n % PALETTE.length];
 }
 
-function toAnnouncement(dto: any): Announcement {
-  const id: string = dto.createdBy ?? '';
+function toAnnouncement(dto: Record<string, unknown>): Announcement {
+  const id: string = String(dto.createdBy ?? '');
   return {
-    id: dto.id,
-    title: dto.title,
-    body: dto.body,
+    id: String(dto.id),
+    title: String(dto.title ?? ''),
+    body: String(dto.body ?? ''),
     tags: (dto.tags ?? []) as AnnouncementTag[],
     author: {
       id,
-      name: dto.authorUsername ?? 'Staff',
+      name: String(dto.authorUsername ?? 'Staff'),
       role: 'Coordinator',
-      avatarInitial: (dto.authorUsername?.[0] ?? id[0] ?? 'S').toUpperCase(),
+      avatarInitial: String(String(dto.authorUsername ?? '')[0] ?? id[0] ?? 'S').toUpperCase(),
       avatarColor: colorFromId(id),
     },
-    createdAt: typeof dto.createdAt === 'string' ? dto.createdAt : new Date(dto.createdAt).toISOString(),
+    createdAt: typeof dto.createdAt === 'string' ? dto.createdAt : new Date(String(dto.createdAt)).toISOString(),
   };
 }
 
@@ -43,13 +44,13 @@ export const AnnouncementRepository = {
     if (params?.page != null) qs.set('page', String(params.page));
     if (params?.limit != null) qs.set('limit', String(params.limit));
     const query = qs.toString();
-    const dtos = await apiClient.get<any[]>(`/announcements${query ? '?' + query : ''}`);
+    const dtos = await apiClient.get<Record<string, unknown>[]>(`/announcements${query ? '?' + query : ''}`);
     return dtos.map(toAnnouncement);
   },
 
   async create(title: string, body: string, tags: AnnouncementTag[]): Promise<Announcement> {
     const type = TAG_TO_TYPE[tags[0]] ?? 'BGEC';
-    const dto = await apiClient.post<any>('/announcements', { title, body, type, tags });
+    const dto = await apiClient.post<Record<string, unknown>>('/announcements', { title, body, type, tags });
     return toAnnouncement(dto);
   },
 };

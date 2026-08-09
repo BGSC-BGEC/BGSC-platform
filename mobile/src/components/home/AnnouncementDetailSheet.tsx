@@ -1,119 +1,186 @@
-import { ScrollView, Share, StyleSheet, Text, View, Pressable } from 'react-native';
+import { Dimensions, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 
+import { BottomSheet } from '@/components/BottomSheet';
+import { PillButton } from '@/components/PillButton';
+import { CATEGORY_COLORS } from '@/core/theme/tokens';
+import type { Announcement } from '@/core/types';
+import { FONTS } from '@/core/theme/fonts';
 import { useColors } from '@/hooks/use-colors';
+import { absoluteDate } from './utils';
 
-import { BottomSheet } from './BottomSheet';
-import { TAG_COLORS, relativeTime, type Announcement } from './types';
-
-interface Props {
+export interface AnnouncementDetailSheetProps {
   announcement: Announcement | null;
   onClose: () => void;
 }
 
-export function AnnouncementDetailSheet({ announcement, onClose }: Props) {
+/**
+ * Announcement detail (home-page.md H3): glass sheet, header metadata
+ * (category pills + official + absolute date), title, author row, full body,
+ * fixed Share footer. Share falls back to a text deep-link (home-page.md §8.2).
+ */
+export function AnnouncementDetailSheet({ announcement, onClose }: AnnouncementDetailSheetProps) {
   const colors = useColors();
-  const visible = announcement !== null;
 
-  const handleShare = async () => {
+  const share = () => {
     if (!announcement) return;
-    try {
-      await Share.share({
-        message: `${announcement.title}\n\n${announcement.body}`,
-        title: announcement.title,
-      });
-    } catch {
-      // share cancelled — no action needed
-    }
+    // TODO(announcements): use a real deep link (bgsc://announcement/:id) once
+    // linking is wired — §8.2 prefers deep link, text fallback is fine today.
+    void Share.share({
+      message: `${announcement.title}\n\n${announcement.body}`,
+    });
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} heightRatio={0.78}>
-      {announcement && (
-        <View style={styles.container}>
-          {/* Tag row */}
-          <View style={styles.tagRow}>
-            {announcement.tags.map((tag) => (
-              <View key={tag} style={[styles.tagPill, { backgroundColor: TAG_COLORS[tag] + '22', borderColor: TAG_COLORS[tag] }]}>
-                <Text style={[styles.tagText, { color: TAG_COLORS[tag] }]}>{tag}</Text>
-              </View>
-            ))}
-            <Text style={[styles.timestamp, { color: colors.textMuted }]}>
-              {relativeTime(announcement.createdAt)}
-            </Text>
-          </View>
-
+    <BottomSheet
+      visible={announcement !== null}
+      onClose={onClose}
+      title="Announcement"
+    >
+      {announcement ? (
+        <>
           <ScrollView
             style={styles.scroll}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.scrollContent}>
+            keyboardShouldPersistTaps="handled"
+          >
+            <View style={styles.metaRow}>
+              {announcement.tags.slice(0, 2).map((tag) => (
+                <View
+                  key={tag}
+                  style={[styles.pill, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}
+                >
+                  <View
+                    style={[
+                      styles.dot,
+                      { backgroundColor: CATEGORY_COLORS[tag] ?? colors.accent },
+                    ]}
+                  />
+                  <Text style={[styles.pillLabel, { color: colors.textMuted }]}>{tag}</Text>
+                </View>
+              ))}
+              <Text style={[styles.official, { color: colors.textMuted }]}>Official</Text>
+              <View style={styles.spacer} />
+              <Text style={[styles.date, { color: colors.textMuted }]}>
+                {absoluteDate(announcement.createdAt)}
+              </Text>
+            </View>
+
             <Text style={[styles.title, { color: colors.text }]}>{announcement.title}</Text>
 
             <View style={styles.authorRow}>
-              <View style={[styles.avatar, { backgroundColor: announcement.author.avatarColor }]}>
-                <Text style={styles.avatarText}>{announcement.author.avatarInitial}</Text>
+              <View
+                style={[
+                  styles.avatar,
+                  { backgroundColor: announcement.author.avatarColor ?? colors.accent },
+                ]}
+              >
+                <Text style={[styles.avatarText, { color: colors.accentText }]}>
+                  {announcement.author.avatarInitial}
+                </Text>
               </View>
-              <View>
-                <Text style={[styles.authorName, { color: colors.text }]}>{announcement.author.name}</Text>
-                <Text style={[styles.authorRole, { color: colors.textMuted }]}>{announcement.author.role}</Text>
-              </View>
+              <Text style={[styles.authorName, { color: colors.text }]}>
+                {announcement.author.name}
+              </Text>
+              <Text style={[styles.authorRole, { color: colors.textMuted }]}>
+                {announcement.author.role}
+              </Text>
             </View>
 
             <Text style={[styles.body, { color: colors.text }]}>{announcement.body}</Text>
           </ScrollView>
 
-          {/* Share button */}
-          <Pressable
-            style={[styles.shareBtn, { borderColor: colors.border, backgroundColor: colors.surface }]}
-            onPress={handleShare}
-            accessibilityRole="button"
-            accessibilityLabel="Share announcement">
-            <Text style={[styles.shareBtnText, { color: colors.text }]}>↗  Share</Text>
-          </Pressable>
-        </View>
-      )}
+          <PillButton
+            label="Share announcement"
+            variant="ghost"
+            onPress={share}
+            accessibilityLabel="Share announcement"
+            style={styles.share}
+          />
+        </>
+      ) : null}
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: 16 },
-
-  tagRow: {
+  scroll: {
+    maxHeight: Dimensions.get('window').height * 0.6,
+  },
+  metaRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
     alignItems: 'center',
-    paddingTop: 8,
-    paddingBottom: 12,
+    gap: 8,
   },
-  tagPill: {
-    paddingHorizontal: 8,
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 9,
     paddingVertical: 3,
-    borderRadius: 20,
-    borderWidth: 1,
   },
-  tagText: { fontSize: 11, fontWeight: '600' },
-  timestamp: { fontSize: 12, marginLeft: 'auto' },
-
-  scroll: { flex: 1 },
-  scrollContent: { paddingBottom: 16 },
-
-  title: { fontSize: 20, fontWeight: '700', lineHeight: 28, marginBottom: 14 },
-
-  authorRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 18 },
-  avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  authorName: { fontSize: 14, fontWeight: '600' },
-  authorRole: { fontSize: 12 },
-
-  body: { fontSize: 15, lineHeight: 24 },
-
-  shareBtn: {
-    margin: 16,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 13,
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  pillLabel: {
+    fontFamily: FONTS.medium,
+    fontSize: 11,
+  },
+  official: {
+    fontFamily: FONTS.semibold,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  spacer: {
+    flex: 1,
+  },
+  date: {
+    fontFamily: FONTS.body,
+    fontSize: 12,
+  },
+  title: {
+    fontFamily: FONTS.heading,
+    fontSize: 26,
+    lineHeight: 30,
+    marginTop: 12,
+  },
+  authorRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
   },
-  shareBtnText: { fontSize: 14, fontWeight: '600' },
+  avatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    fontFamily: FONTS.bold,
+    fontSize: 13,
+  },
+  authorName: {
+    fontFamily: FONTS.semibold,
+    fontSize: 14,
+  },
+  authorRole: {
+    fontFamily: FONTS.body,
+    fontSize: 12,
+  },
+  body: {
+    fontFamily: FONTS.body,
+    fontSize: 15,
+    lineHeight: 23,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  share: {
+    marginTop: 12,
+  },
 });

@@ -1,7 +1,6 @@
 import { apiClient } from '../api/ApiClient';
 import type {
   EventCategory,
-  EventStatus,
   EventType,
   LeaderboardEntry,
   PlatformEvent,
@@ -33,6 +32,12 @@ function toEvent(dto: any): PlatformEvent {
     isTeamed: dto.is_teamed ?? dto.isTeamed,
     teamSize: dto.team_size ?? dto.teamSize,
     maxTeams: dto.max_teams ?? dto.maxTeams,
+    // TODO(events): backend doesn't ship these display flags yet (Phase 2/3).
+    // Client-side defaults keep the spec-driven card rendering deterministic.
+    isAuctionBased: dto.is_auction_based ?? dto.isAuctionBased ?? dto.type === 'ALL',
+    linkedToStrava: dto.linked_to_strava ?? dto.linkedToStrava ?? false,
+    isFeatured: dto.is_featured ?? dto.isFeatured ?? false,
+    isSponsored: dto.is_sponsored ?? dto.isSponsored ?? false,
   };
 }
 

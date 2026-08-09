@@ -1,313 +1,463 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
+import { useState } from 'react';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { SkeletonBox } from '@/components/home/SkeletonBox';
-import { apiClient } from '@/core/api/ApiClient';
-import { UserRepository } from '@/core/repositories/UserRepository';
-import { useAuthStore } from '@/core/stores/authStore';
+import { GlassCard } from '@/components/GlassCard';
+import { PillButton } from '@/components/PillButton';
+import { SkeletonBlock } from '@/components/SkeletonBlock';
+import { useToast } from '@/components/Toast';
+import { FONTS } from '@/core/theme/fonts';
+import { DOMAIN_COLORS } from '@/core/theme/tokens';
 import type { UserProfile, UserRole } from '@/core/types';
 import { useColors } from '@/hooks/use-colors';
+import type { PlayerCardData } from '@/hooks/use-profile';
 
-const ROLE_COLORS: Partial<Record<UserRole, string>> = {
-  founder: '#22c55e',
-  coordinator: '#3b82f6',
-  core: '#8b5cf6',
-  member: '#8c857a',
-};
-
-const DOMAIN_COLORS: Record<string, string> = {
-  sports: '#f59e0b',
-  esports: '#8b5cf6',
-  gaming_industry: '#3b82f6',
-  game_dev: '#e8662a',
-};
-
-function fmt(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+export interface PlayerCardProps {
+  card: PlayerCardData | undefined;
+  profile: UserProfile | undefined;
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
 }
 
-interface Props {
-  onEditProfile: () => void;
+/** "1.2k" / "45k" / "1.4M" — compact stat numerals (player card fans, sponsor counts). */
+export function formatCompact(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k`;
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
 }
 
-export function PlayerCard({ onEditProfile }: Props) {
-  const colors = useColors();
-  const status = useAuthStore((s) => s.status);
-
-  const { data: profile, isLoading } = useQuery({
-    queryKey: ['profile'],
-    queryFn: UserRepository.getProfile,
-    enabled: status === 'authenticated',
-  });
-
-  // Shared query — no extra network call (UserInfoPanel fetches it too with same key)
-  const { data: sponsorStats } = useQuery({
-    queryKey: ['sponsorStats'],
-    queryFn: UserRepository.getSponsorStats,
-    enabled: status === 'authenticated' && !!profile?.activeSponsorId,
-  });
-
-  const entranceAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnims = useRef([0, 1, 2, 3].map(() => new Animated.Value(1))).current;
-
-  useEffect(() => {
-    if (profile) {
-      Animated.timing(entranceAnim, {
-        toValue: 1,
-        duration: 350,
-        useNativeDriver: true,
-      }).start();
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!profile]);
-
-  if (isLoading || !profile) {
-    return <PlayerCardSkeleton colors={colors} />;
+/** Role tag colours (spec §3.2): founder green · coordinator blue · core purple · member grey. */
+function roleColor(role: UserRole, colors: ReturnType<typeof useColors>): string {
+  switch (role) {
+    case 'founder':
+      return colors.success;
+    case 'coordinator':
+      return colors.info;
+    case 'core':
+      // tokens have no dedicated role palette — reuse the game_dev purple. TODO(design): add ROLE_COLORS to tokens.
+      return DOMAIN_COLORS.game_dev;
+    default:
+      return colors.textMuted;
   }
-
-  const displayName = profile.displayName || profile.username;
-  const roleColor = ROLE_COLORS[profile.role];
-  const showRole = profile.role !== 'user' && profile.role !== 'guest';
-
-  // Pull live event stats from event-service directly (JWT protected route)
-  const { data: eventStats } = useQuery({
-    queryKey: ['eventStats'],
-    queryFn: () => apiClient.get<{ totalRegistrations: number; totalWins: number }>('/events/me/stats'),
-    enabled: status === 'authenticated',
-  });
-
-  return (
-    <Animated.View
-      style={[
-        s.card,
-        { backgroundColor: colors.surface, borderColor: colors.border },
-        {
-          opacity: entranceAnim,
-          transform: [{ translateY: entranceAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
-        },
-      ]}
-    >
-      {/* Cover */}
-      <View style={[s.cover, { backgroundColor: colors.surfaceMuted }]} />
-
-      {/* Avatar + identity row */}
-      <View style={s.identityRow}>
-        <View style={[s.avatarRing, { borderColor: colors.accent }]}>
-          <View style={[s.avatar, { backgroundColor: colors.accent }]}>
-            <Text style={[s.avatarInitial, { color: colors.accentText }]}>
-              {displayName.slice(0, 1).toUpperCase()}
-            </Text>
-          </View>
-        </View>
-
-        <View style={s.nameBlock}>
-          <Text style={[s.displayName, { color: colors.text }]} numberOfLines={1}>
-            {displayName}
-          </Text>
-          <Text style={[s.username, { color: colors.textMuted }]}>@{profile.username}</Text>
-          {sponsorStats && (
-            <Pressable
-              style={[s.sponsorBadge, { backgroundColor: colors.accentMuted, borderColor: colors.accent }]}
-              onPress={() => {}}
-            >
-              <Text style={[s.sponsorBadgeText, { color: colors.accent }]}>
-                {sponsorStats.sponsorName}
-              </Text>
-            </Pressable>
-          )}
-        </View>
-      </View>
-
-      <View style={s.body}>
-        {/* Bio */}
-        <BioText bio={profile.bio} colors={colors} onEdit={onEditProfile} />
-
-        {/* Interest chips */}
-        {profile.interests.length > 0 && (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.chipScroll}>
-            {profile.interests.map((i) => (
-              <View
-                key={i.id}
-                style={[
-                  s.chip,
-                  { backgroundColor: DOMAIN_COLORS[i.domain] + '22', borderColor: DOMAIN_COLORS[i.domain] + '88' },
-                ]}
-              >
-                <Text style={[s.chipText, { color: DOMAIN_COLORS[i.domain] }]}>{i.label}</Text>
-              </View>
-            ))}
-          </ScrollView>
-        )}
-
-        {/* Role + custom tags */}
-        <View style={s.tagRow}>
-          {showRole && roleColor && (
-            <View style={[s.roleTag, { backgroundColor: roleColor + '22', borderColor: roleColor + '88' }]}>
-              <Text style={[s.roleTagText, { color: roleColor }]}>
-                {profile.role.charAt(0).toUpperCase() + profile.role.slice(1)}
-              </Text>
-            </View>
-          )}
-          {profile.customTags.map((tag) => (
-            <View key={tag} style={[s.customTag, { borderColor: colors.border }]}>
-              <Text style={[s.customTagText, { color: colors.textMuted }]}>{tag}</Text>
-            </View>
-          ))}
-        </View>
-
-        {/* Stats row */}
-        <View style={[s.statsRow, { borderColor: colors.border }]}>
-          {[
-            { label: 'Events', value: fmt(eventStats?.totalRegistrations ?? 0) },
-            { label: 'Wins', value: fmt(eventStats?.totalWins ?? 0) },
-            { label: 'Fans', value: fmt(sponsorStats?.fansContributed ?? 0) },
-            { label: 'Rating', value: profile.rating ? `${profile.rating}⭐` : '—' },
-          ].map((stat, i) => (
-            <Pressable
-              key={stat.label}
-              style={[
-                s.statBlock,
-                i < 3 && { borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.border },
-              ]}
-              onPress={() => {
-                Animated.sequence([
-                  Animated.spring(scaleAnims[i], { toValue: 1.2, useNativeDriver: true, speed: 20, bounciness: 15 }),
-                  Animated.spring(scaleAnims[i], { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 8 }),
-                ]).start();
-              }}
-              accessibilityLabel={`${stat.label}: ${stat.value}`}
-            >
-              <Animated.View style={{ transform: [{ scale: scaleAnims[i] }] }}>
-                <Text style={[s.statValue, { color: colors.text }]}>{stat.value}</Text>
-                <Text style={[s.statLabel, { color: colors.textMuted }]}>{stat.label}</Text>
-              </Animated.View>
-            </Pressable>
-          ))}
-        </View>
-
-        {/* Action buttons */}
-        <View style={s.actionsRow}>
-          <Pressable
-            onPress={onEditProfile}
-            style={[s.primaryActionBtn, { backgroundColor: colors.primary }]}
-          >
-            <Text style={[s.primaryActionText, { color: colors.primaryText }]}>Edit Profile</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => Alert.alert('Share Card', 'Shareable card generation coming soon.')}
-            style={[s.outlineActionBtn, { borderColor: colors.border }]}
-          >
-            <Ionicons name="share-outline" size={16} color={colors.text} />
-            <Text style={[s.outlineActionText, { color: colors.text }]}>Share Card</Text>
-          </Pressable>
-        </View>
-      </View>
-    </Animated.View>
-  );
 }
 
-function BioText({
-  bio,
-  colors,
-  onEdit,
-}: {
-  bio?: string;
-  colors: ReturnType<typeof useColors>;
-  onEdit: () => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
+/**
+ * Hero card (profile spec §3): cover, 96 dp avatar with accent ring, display
+ * name + @username, sponsor badge, expandable bio, interest / custom / role
+ * pills, four-stat row and the two hero actions. Skeleton on first load;
+ * inline retry on error.
+ *
+ * TODO(Phase 2): Edit Profile → Account Actions popup (spec §8.1); Share Card →
+ * card-image export flow (spec §3.2, §5.3); avatar tap → picture popup (§8.2).
+ */
+export function PlayerCard({ card, profile, loading, error, onRetry }: PlayerCardProps) {
+  const colors = useColors();
+  const toast = useToast();
+  const [bioExpanded, setBioExpanded] = useState(false);
 
-  if (!bio) {
+  if (loading && !card) return <PlayerCardSkeleton />;
+  if (error && !card) {
     return (
-      <Pressable onPress={onEdit}>
-        <Text style={[s.bioEmpty, { color: colors.textMuted }]}>
-          Tap <Text style={{ color: colors.accent }}>Edit Profile</Text> to add a bio
+      <GlassCard accessibilityLabel="Player card failed to load">
+        <Text style={[styles.errorText, { color: colors.textMuted }]}>
+          Could not load your player card
         </Text>
-      </Pressable>
+        <Pressable
+          onPress={onRetry}
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading player card"
+          hitSlop={8}
+          style={styles.retry}
+        >
+          <Text style={[styles.retryText, { color: colors.accent }]}>Retry</Text>
+        </Pressable>
+      </GlassCard>
     );
   }
-  return (
-    <View>
-      <Text style={[s.bio, { color: colors.textMuted }]} numberOfLines={expanded ? 8 : 3}>
-        {bio}
-      </Text>
-      {bio.length > 120 && (
-        <Pressable onPress={() => setExpanded((v) => !v)} hitSlop={8}>
-          <Text style={[s.bioToggle, { color: colors.accent }]}>
-            {expanded ? 'less' : 'more'}
-          </Text>
-        </Pressable>
-      )}
-    </View>
-  );
-}
+  if (!card) return null;
 
-function PlayerCardSkeleton({ colors }: { colors: ReturnType<typeof useColors> }) {
+  const displayName = card.displayName || card.username;
+  const bio = profile?.bio ?? '';
+  const showRolePill = card.role !== 'guest' && card.role !== 'user';
+  const stats: { label: string; value: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+    { label: 'Events', value: formatCompact(card.totalEvents), icon: 'calendar-outline' },
+    { label: 'Wins', value: formatCompact(card.totalWins), icon: 'trophy-outline' },
+    { label: 'Fans', value: formatCompact(card.totalFans), icon: 'people-outline' },
+    { label: 'Rating', value: card.rating != null ? card.rating.toFixed(1) : '—', icon: 'star-outline' },
+  ];
+
   return (
-    <View style={[s.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <View style={[s.cover, { backgroundColor: colors.surfaceMuted }]} />
-      <View style={s.body}>
-        <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-          <SkeletonBox width={96} height={96} borderRadius={48} />
-          <View style={{ flex: 1, gap: 8, justifyContent: 'center' }}>
-            <SkeletonBox width="70%" height={18} />
-            <SkeletonBox width="45%" height={14} />
-          </View>
+    <GlassCard accessibilityLabel={`Player card for ${displayName}`} style={styles.card}>
+      {profile?.coverImageUrl ? (
+        <Image
+          source={{ uri: profile.coverImageUrl }}
+          style={styles.cover}
+          contentFit="cover"
+          accessibilityLabel="Profile cover image"
+        />
+      ) : (
+        <View style={[styles.cover, { backgroundColor: colors.backgroundMid }]} />
+      )}
+
+      <View style={styles.identityRow}>
+        <View style={[styles.avatarRing, { borderColor: colors.accent }]}>
+          {card.avatarUrl ? (
+            <Image
+              source={{ uri: card.avatarUrl }}
+              style={styles.avatar}
+              contentFit="cover"
+              accessibilityLabel={`${displayName} avatar`}
+            />
+          ) : (
+            <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: colors.surfaceSolid }]}>
+              <Text style={[styles.avatarInitial, { color: colors.text }]}>
+                {displayName.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+          )}
         </View>
-        <SkeletonBox width="100%" height={14} style={{ marginBottom: 6 }} />
-        <SkeletonBox width="80%" height={14} style={{ marginBottom: 16 }} />
-        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-          {[80, 90, 70].map((w) => <SkeletonBox key={w} width={w} height={28} borderRadius={14} />)}
-        </View>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          {[1, 2, 3, 4].map((i) => <SkeletonBox key={i} style={{ flex: 1 }} height={56} borderRadius={8} />)}
+        <View style={styles.nameCol}>
+          <Text style={[styles.displayName, { color: colors.text }]} numberOfLines={1}>
+            {displayName}
+          </Text>
+          <Text style={[styles.username, { color: colors.textMuted }]} numberOfLines={1}>
+            @{card.username}
+          </Text>
+          {card.sponsorName ? (
+            <Pressable
+              onPress={() => {
+                // TODO(Phase 2): sponsor detail route — toast until /sponsor/[id] exists.
+                toast.show(`${card.sponsorName} — sponsor page coming soon`);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`${card.sponsorName} sponsor badge`}
+              hitSlop={8}
+              style={[styles.sponsorBadge, { backgroundColor: colors.accentMuted, borderColor: colors.borderActive }]}
+            >
+              {card.sponsorLogoUrl ? (
+                <Image source={{ uri: card.sponsorLogoUrl }} style={styles.sponsorLogo} contentFit="contain" />
+              ) : (
+                <Ionicons name="trophy-outline" size={12} color={colors.accent} />
+              )}
+              <Text style={[styles.sponsorName, { color: colors.accent }]} numberOfLines={1}>
+                {card.sponsorName}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
-    </View>
+
+      {bio ? (
+        <View style={styles.bioBlock}>
+          <Text style={[styles.bio, { color: colors.textMuted }]} numberOfLines={bioExpanded ? undefined : 3}>
+            {bio}
+          </Text>
+          {bio.length > 120 ? (
+            <Pressable
+              onPress={() => setBioExpanded((v) => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={bioExpanded ? 'Collapse bio' : 'Expand bio'}
+              hitSlop={8}
+            >
+              <Text style={[styles.bioMore, { color: colors.accent }]}>
+                {bioExpanded ? 'less' : 'more'}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : (
+        <Text style={[styles.bio, { color: colors.textMuted }]}>
+          No bio yet — tap Edit Profile to add one.
+        </Text>
+      )}
+
+      {(card.interests.length > 0 || card.customTags.length > 0 || showRolePill) && (
+        <View style={styles.chipRow}>
+          {showRolePill ? (
+            <View style={[styles.rolePill, { backgroundColor: roleColor(card.role as UserRole, colors) }]}>
+              <Text style={[styles.rolePillText, { color: colors.accentText }]}>{card.role}</Text>
+            </View>
+          ) : null}
+          {card.interests.map((i) => (
+            <View key={i} style={[styles.infoChip, { borderColor: colors.border }]}>
+              <Text style={[styles.infoChipText, { color: colors.textMuted }]}>{i}</Text>
+            </View>
+          ))}
+          {card.customTags.map((t) => (
+            <View key={t} style={[styles.infoChip, { borderColor: colors.border }]}>
+              <Text style={[styles.infoChipText, { color: colors.textMuted }]}>{t}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      <View style={styles.statsRow}>
+        {stats.map((s) => (
+          <StatBlock key={s.label} {...s} />
+        ))}
+      </View>
+
+      <View style={styles.actionsRow}>
+        <PillButton
+          variant="primary"
+          label="Edit Profile"
+          onPress={() => {
+            // TODO(Phase 2): open Account Actions popup (spec §8.1) — edit flow not in this milestone.
+            toast.show('Profile editing is coming soon');
+          }}
+          accessibilityLabel="Edit profile"
+          style={styles.actionButton}
+        />
+        <PillButton
+          variant="ghost"
+          label="Share Card"
+          onPress={() => {
+            // TODO(Phase 2): player-card image export → preview sheet → native share (spec §3.2 / §5.3).
+            toast.show('Card sharing is coming soon');
+          }}
+          accessibilityLabel="Share player card"
+          style={styles.actionButton}
+        />
+      </View>
+    </GlassCard>
   );
 }
 
-const s = StyleSheet.create({
-  card: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 16, overflow: 'hidden', margin: 16 },
-  cover: { height: 110, width: '100%' },
+/** One stat block (spec §3.2) — hero numerals, subtle scale bounce on press. */
+function StatBlock({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}) {
+  const colors = useColors();
+  const [scale] = useState(() => new Animated.Value(1));
 
-  identityRow: { flexDirection: 'row', paddingHorizontal: 16, marginTop: -32, gap: 12, alignItems: 'flex-end' },
-  avatarRing: { width: 100, height: 100, borderRadius: 50, borderWidth: 3, padding: 2 },
-  avatar: { flex: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
-  avatarInitial: { fontSize: 36, fontWeight: '700' },
+  return (
+    <Pressable
+      onPressIn={() =>
+        Animated.spring(scale, { toValue: 0.94, speed: 40, bounciness: 0, useNativeDriver: true }).start()
+      }
+      onPressOut={() =>
+        Animated.spring(scale, { toValue: 1, speed: 40, bounciness: 0, useNativeDriver: true }).start()
+      }
+      accessibilityRole="button"
+      accessibilityLabel={`${label}: ${value}`}
+      style={styles.stat}
+    >
+      <Animated.View style={[styles.statInner, { transform: [{ scale }] }]}>
+        <Ionicons name={icon} size={14} color={colors.textMuted} />
+        <Text
+          style={[styles.statValue, { color: colors.text }]}
+          adjustsFontSizeToFit
+          numberOfLines={1}
+        >
+          {value}
+        </Text>
+        <Text style={[styles.statLabel, { color: colors.textMuted }]}>{label}</Text>
+      </Animated.View>
+    </Pressable>
+  );
+}
 
-  nameBlock: { flex: 1, paddingBottom: 6, gap: 2 },
-  displayName: { fontSize: 20, fontWeight: '700' },
-  username: { fontSize: 14 },
-  sponsorBadge: { alignSelf: 'flex-start', borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3, marginTop: 4 },
-  sponsorBadgeText: { fontSize: 11, fontWeight: '600' },
+/** Skeleton matching the live hero shape (spec §11): avatar circle, lines, 4 stat blocks. */
+export function PlayerCardSkeleton() {
+  return (
+    <GlassCard accessibilityLabel="Loading player card">
+      <SkeletonBlock height={96} radius={16} />
+      <View style={styles.skeletonIdentity}>
+        <SkeletonBlock width={96} height={96} radius={48} />
+        <View style={styles.skeletonCol}>
+          <SkeletonBlock width={140} height={20} radius={4} />
+          <SkeletonBlock width={90} height={14} radius={4} />
+          <SkeletonBlock width={120} height={22} radius={20} />
+        </View>
+      </View>
+      <SkeletonBlock width="100%" height={14} radius={4} />
+      <SkeletonBlock width="70%" height={14} radius={4} />
+      <View style={styles.statsRow}>
+        {[1, 2, 3, 4].map((i) => (
+          <SkeletonBlock key={i} height={64} radius={12} style={{ flex: 1 }} />
+        ))}
+      </View>
+      <SkeletonBlock height={52} radius={999} />
+    </GlassCard>
+  );
+}
 
-  body: { padding: 16, gap: 12 },
-
-  bio: { fontSize: 14, lineHeight: 20 },
-  bioEmpty: { fontSize: 14, lineHeight: 20, fontStyle: 'italic' },
-  bioToggle: { fontSize: 13, fontWeight: '600', marginTop: 4 },
-
-  chipScroll: { marginHorizontal: -4 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4, marginHorizontal: 4 },
-  chipText: { fontSize: 12, fontWeight: '500' },
-
-  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  roleTag: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  roleTagText: { fontSize: 11, fontWeight: '600' },
-  customTag: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
-  customTagText: { fontSize: 11 },
-
-  statsRow: { flexDirection: 'row', borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, overflow: 'hidden' },
-  statBlock: { flex: 1, alignItems: 'center', paddingVertical: 12 },
-  statValue: { fontSize: 17, fontWeight: '700' },
-  statLabel: { fontSize: 11, fontWeight: '500', marginTop: 2 },
-
-  actionsRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  primaryActionBtn: { flex: 1, borderRadius: 999, height: 44, alignItems: 'center', justifyContent: 'center' },
-  primaryActionText: { fontSize: 14, fontWeight: '600' },
-  outlineActionBtn: { flex: 1, borderWidth: 1, borderRadius: 999, height: 44, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 },
-  outlineActionText: { fontSize: 14, fontWeight: '500' },
+const styles = StyleSheet.create({
+  card: {
+    padding: 0,
+  },
+  cover: {
+    width: '100%',
+    height: 108,
+  },
+  identityRow: {
+    flexDirection: 'row',
+    gap: 14,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    alignItems: 'center',
+  },
+  avatarRing: {
+    width: 102,
+    height: 102,
+    borderRadius: 51,
+    borderWidth: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatar: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+  },
+  avatarFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarInitial: {
+    fontFamily: FONTS.heading,
+    fontSize: 40,
+  },
+  nameCol: {
+    flex: 1,
+    gap: 2,
+  },
+  displayName: {
+    fontFamily: FONTS.heading,
+    fontSize: 24,
+  },
+  username: {
+    fontFamily: FONTS.body,
+    fontSize: 14,
+  },
+  sponsorBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  sponsorLogo: {
+    width: 14,
+    height: 14,
+  },
+  sponsorName: {
+    fontFamily: FONTS.semibold,
+    fontSize: 12,
+  },
+  bioBlock: {
+    paddingHorizontal: 14,
+    paddingTop: 12,
+  },
+  bio: {
+    fontFamily: FONTS.body,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  bioMore: {
+    fontFamily: FONTS.semibold,
+    fontSize: 13,
+    marginTop: 4,
+  },
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+  },
+  rolePill: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  rolePillText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 12,
+    textTransform: 'capitalize',
+  },
+  infoChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  infoChipText: {
+    fontFamily: FONTS.medium,
+    fontSize: 12,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingTop: 16,
+  },
+  stat: {
+    flex: 1,
+    minHeight: 64,
+  },
+  statInner: {
+    alignItems: 'center',
+    gap: 2,
+    paddingVertical: 8,
+    borderRadius: 12,
+  },
+  statValue: {
+    fontFamily: FONTS.hero,
+    fontSize: 32,
+    fontVariant: ['tabular-nums'],
+    lineHeight: 34,
+  },
+  statLabel: {
+    fontFamily: FONTS.medium,
+    fontSize: 11,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    padding: 14,
+  },
+  actionButton: {
+    flex: 1,
+  },
+  errorText: {
+    fontFamily: FONTS.body,
+    fontSize: 14,
+    textAlign: 'center',
+    paddingTop: 8,
+  },
+  retry: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 14,
+  },
+  skeletonIdentity: {
+    flexDirection: 'row',
+    gap: 14,
+    paddingTop: 14,
+  },
+  skeletonCol: {
+    flex: 1,
+    gap: 10,
+    justifyContent: 'center',
+  },
 });

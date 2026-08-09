@@ -1,85 +1,151 @@
-import { router } from 'expo-router';
 import * as Linking from 'expo-linking';
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 
+import { AuthShell } from '@/components/auth/AuthShell';
+import { useAuthScreen } from '@/components/auth/use-auth-screen';
+import { PillButton } from '@/components/PillButton';
+import { SkeletonBlock } from '@/components/SkeletonBlock';
 import { useAuthStore } from '@/core/stores/authStore';
-import { useColors } from '@/hooks/use-colors';
+import { FONTS } from '@/core/theme/fonts';
+import { lightColors } from '@/core/theme/tokens';
 
-function parseCallbackUrl(url: string | null): { token: string | null; isNewUser: boolean } {
-  if (!url) return { token: null, isNewUser: false };
-  const hashIndex = url.indexOf('#');
-  const queryIndex = url.indexOf('?');
-  // Isolate fragment and query independently to avoid one masking the other
-  const fragment = hashIndex >= 0 ? url.slice(hashIndex + 1) : '';
-  const query = queryIndex >= 0 ? url.slice(queryIndex + 1, hashIndex >= 0 ? hashIndex : undefined) : '';
-  const params = new URLSearchParams(fragment || query);
-  return {
-    token: params.get('access_token'),
-    isNewUser: params.get('is_new_user') === 'true',
-  };
+interface ParsedCallback {
+  accessToken?: string;
+  isNewUser: boolean;
+  error?: string;
 }
 
+/**
+ * Google OAuth redirect handler (auth specs §8 / handoffSpec §15): parses the
+ * access token from the redirect URL — query params (Android forwarding via
+ * `useGoogleAuth`) or URL fragment (native deep link) — adopts it via
+ * `authStore.adoptToken`, then routes to Complete Profile for new users
+ * (explicit flag, or a profile still missing contact) and the drawer
+ * otherwise.
+ */
 export default function AuthCallbackScreen() {
-  const colors = useColors();
-  const insets = useSafeAreaInsets();
+  useAuthScreen();
+  const colors = lightColors;
   const adoptToken = useAuthStore((s) => s.adoptToken);
-  const incomingUrl = Linking.useURL();
-  const [error, setError] = useState<string | null>(null);
-  const ran = useRef(false);
+  const url = Linking.useURL();
+  const query = useLocalSearchParams<Record<string, string | string[]>>();
+  const [failed, setFailed] = useState<string | null>(null);
 
-  // Fail-safe: if no token arrives within 12s, surface an error
-  useEffect(() => {
-    const t = setTimeout(() => {
-      if (!ran.current) setError('No auth token received. Please try again.');
-    }, 12_000);
-    return () => clearTimeout(t);
-  }, []);
+  const { accessToken, isNewUser, error: urlError } = useMemo(
+    () => parseCallback(url, query),
+    [url, query],
+  );
 
   useEffect(() => {
-    if (ran.current) return;
-    const { token, isNewUser } = parseCallbackUrl(incomingUrl);
-    if (!token) return;
-    ran.current = true;
+    if (!accessToken) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await adoptToken(accessToken);
+        if (cancelled) return;
+        const user = useAuthStore.getState().user;
+        // TODO(auth): confirm `contact == null` as the new-Google-user signal
+        // with the backend team; an explicit isNewUser flag wins when present.
+        const needsProfile = isNewUser || !user?.contact;
+        router.replace(needsProfile ? '/auth/complete-profile' : '/(drawer)');
+      } catch {
+        if (!cancelled) setFailed("Couldn't sign you in — please try again.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [accessToken, isNewUser, adoptToken]);
 
-    adoptToken(token)
-      .then(() => {
-        if (isNewUser) {
-          router.replace('/auth/complete-profile');
-        } else {
-          router.replace('/');
-        }
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Sign-in failed'));
-  }, [incomingUrl, adoptToken]);
+  const error = urlError ?? failed ?? (!accessToken ? 'Sign-in failed — no access token received.' : null);
 
   return (
-    <View style={[s.container, { backgroundColor: colors.background, paddingBottom: insets.bottom }]}>
+    <AuthShell compact>
       {error ? (
-        <>
-          <Text style={[s.errorText, { color: colors.danger }]}>{error}</Text>
-          <Pressable
+        <View style={styles.errorWrap}>
+          <Text style={[styles.errorText, { color: colors.text }]}>{error}</Text>
+          <PillButton
+            label="Back to login"
+            variant="primary"
             onPress={() => router.replace('/login')}
-            style={[s.btn, { backgroundColor: colors.primary }]}
-          >
-            <Text style={[s.btnLabel, { color: colors.primaryText }]}>Back to login</Text>
-          </Pressable>
-        </>
+            accessibilityLabel="Back to login"
+          />
+        </View>
       ) : (
-        <>
-          <ActivityIndicator color={colors.accent} size="large" />
-          <Text style={[s.signingIn, { color: colors.textMuted }]}>Signing you in…</Text>
-        </>
+        <View style={styles.loadingWrap}>
+          <SkeletonBlock width={120} height={16} radius={8} />
+          <Text style={[styles.loadingText, { color: colors.textMuted }]}>Signing you in…</Text>
+        </View>
       )}
-    </View>
+    </AuthShell>
   );
 }
 
-const s = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, paddingHorizontal: 24 },
-  signingIn: { fontSize: 14 },
-  errorText: { fontSize: 14, textAlign: 'center' },
-  btn: { paddingHorizontal: 24, paddingVertical: 12, borderRadius: 999 },
-  btnLabel: { fontSize: 15, fontWeight: '600' },
+function parseCallback(
+  url: string | null,
+  query: Record<string, string | string[]>,
+): ParsedCallback {
+  const get = (v: string | string[] | undefined): string | undefined =>
+    typeof v === 'string' ? v : Array.isArray(v) ? v[0] : undefined;
+
+  let fragment: Record<string, string> = {};
+  let search: Record<string, string> = {};
+  if (url) {
+    const [preHash, hash = ''] = url.split('#');
+    fragment = parsePairs(hash);
+    search = parsePairs(preHash.split('?')[1] ?? '');
+  }
+
+  const isNew = (v: string | undefined) => v === 'true' || v === '1';
+
+  return {
+    accessToken:
+      get(query.access_token) ??
+      get(query.token) ??
+      fragment.access_token ??
+      fragment.token ??
+      search.access_token ??
+      search.token,
+    isNewUser:
+      isNew(get(query.isNewUser)) ||
+      get(query.profileComplete) === 'false' ||
+      isNew(fragment.isNewUser) ||
+      isNew(search.isNewUser),
+    error: get(query.error) ?? fragment.error ?? search.error,
+  };
+}
+
+function parsePairs(part: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const pair of part.split('&')) {
+    if (!pair) continue;
+    const eq = pair.indexOf('=');
+    const key = eq === -1 ? pair : pair.slice(0, eq);
+    const value = eq === -1 ? '' : pair.slice(eq + 1);
+    if (key) out[decodeURIComponent(key)] = decodeURIComponent(value);
+  }
+  return out;
+}
+
+const styles = StyleSheet.create({
+  loadingWrap: {
+    alignItems: 'center',
+    gap: 16,
+    paddingTop: 40,
+  },
+  loadingText: {
+    fontFamily: FONTS.body,
+    fontSize: 14,
+  },
+  errorWrap: {
+    gap: 20,
+    paddingTop: 8,
+  },
+  errorText: {
+    fontFamily: FONTS.body,
+    fontSize: 14,
+    lineHeight: 20,
+  },
 });

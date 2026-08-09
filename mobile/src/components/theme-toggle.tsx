@@ -1,24 +1,32 @@
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Pressable, StyleSheet, View } from 'react-native';
 
-import { useThemeStore } from '@/core/stores/themeStore';
+import { useThemeStore, type ThemePreference } from '@/core/stores/themeStore';
 import { useColors } from '@/hooks/use-colors';
 
-const LABELS: Record<string, string> = {
-  light: '☀️  Light',
-  dark: '🌙  Dark',
-  system: '💻  System',
-};
+const ORDER: ThemePreference[] = ['light', 'dark', 'system'];
 
+/** Cycles light → dark → system on tap (master §2.5 theme store). */
 export function ThemeToggle() {
   const colors = useColors();
-  const mode = useThemeStore((s) => s.mode);
-  const toggle = useThemeStore((s) => s.toggle);
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
+
+  const next = ORDER[(ORDER.indexOf(theme) + 1) % ORDER.length];
+  const icon =
+    theme === 'dark' ? 'moon' : theme === 'light' ? 'sunny' : 'phone-portrait-outline';
 
   return (
     <Pressable
-      onPress={toggle}
-      style={[styles.button, { borderColor: colors.border, backgroundColor: colors.surface }]}>
-      <Text style={[styles.text, { color: colors.text }]}>Theme: {LABELS[mode]}</Text>
+      onPress={() => void setTheme(next)}
+      accessibilityRole="button"
+      accessibilityLabel={`Theme: ${theme}. Tap to switch.`}
+      style={[styles.button, { borderColor: colors.border }]}
+    >
+      <View style={styles.row}>
+        <Ionicons name={icon} size={18} color={colors.textMuted} />
+        <Ionicons name="swap-horizontal" size={14} color={colors.textMuted} />
+      </View>
     </Pressable>
   );
 }
@@ -26,9 +34,13 @@ export function ThemeToggle() {
 const styles = StyleSheet.create({
   button: {
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 999,
     paddingVertical: 10,
-    paddingHorizontal: 12,
+    alignItems: 'center',
   },
-  text: { fontSize: 14, fontWeight: '500' },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
 });

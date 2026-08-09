@@ -1,244 +1,225 @@
-import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 
+import { AuthCheckbox } from '@/components/auth/AuthCheckbox';
+import { AuthShell } from '@/components/auth/AuthShell';
+import { useAuthScreen } from '@/components/auth/use-auth-screen';
+import { GlassInput } from '@/components/GlassInput';
+import { PillButton } from '@/components/PillButton';
+import { SkeletonBlock } from '@/components/SkeletonBlock';
+import { useToast } from '@/components/Toast';
 import { AuthRepository } from '@/core/repositories/AuthRepository';
 import { useAuthStore } from '@/core/stores/authStore';
-import { useColors } from '@/hooks/use-colors';
+import { FONTS } from '@/core/theme/fonts';
+import { lightColors } from '@/core/theme/tokens';
 
+const PASSWORD_RE = /^(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/;
+const CONTACT_RE = /^\d{10}$/;
+
+/**
+ * Complete Profile (handoffSpec §7 / auth-mobile-spec §7) — Google sign-ups
+ * only: set a password + contact for the OAuth profile, then
+ * `AuthRepository.completeGoogleProfile`. Requires the session adopted by the
+ * auth callback; cold entries without a session get a sign-in gate.
+ */
 export default function CompleteProfileScreen() {
-  const colors = useColors();
-  const insets = useSafeAreaInsets();
-  // Email is known from Google OAuth — show read-only as context per spec §7.2
-  const googleEmail = useAuthStore((s) => s.user?.email ?? null);
+  useAuthScreen();
+  const colors = lightColors;
+  const toast = useToast();
+  const status = useAuthStore((s) => s.status);
 
   const [password, setPassword] = useState('');
-  const [showPwd, setShowPwd] = useState(false);
-  const [repeatPwd, setRepeatPwd] = useState('');
-  const [showRepeat, setShowRepeat] = useState(false);
-  const [repeatPwdError, setRepeatPwdError] = useState<string | null>(null);
-  const [contact, setContact] = useState('+91');
-  const [acceptedTos, setAcceptedTos] = useState(false);
+  const [repeat, setRepeat] = useState('');
+  const [contactDigits, setContactDigits] = useState('');
+  const [tos, setTos] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const [banner, setBanner] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const disabled =
-    !password.trim() ||
-    !repeatPwd.trim() ||
-    password !== repeatPwd ||
-    contact.replace(/\D/g, '').length < 7 ||
-    !acceptedTos ||
-    submitting;
+  const contact = `+91 ${contactDigits}`;
+  const onChangeContact = (t: string) =>
+    setContactDigits(t.replace(/\D/g, '').replace(/^91/, '').slice(0, 10));
 
-  const onRepeatBlur = () => {
-    if (repeatPwd && password !== repeatPwd) {
-      setRepeatPwdError("Passwords don't match.");
-    } else {
-      setRepeatPwdError(null);
-    }
+  const errors = {
+    password: PASSWORD_RE.test(password) ? null : 'Min 8 chars, 1 uppercase, 1 number, 1 special',
+    repeat: repeat === password ? null : 'Passwords do not match',
+    contact: CONTACT_RE.test(contactDigits) ? null : 'Please enter a valid phone number',
+    tos: tos ? null : 'You must accept the Terms of Service',
   };
+  const canSubmit = Object.values(errors).every((e) => e === null);
 
   const onFinish = async () => {
-    setError(null);
+    setBanner(null);
+    if (!canSubmit) {
+      setAttempted(true);
+      return;
+    }
     setSubmitting(true);
     try {
-      await AuthRepository.completeGoogleProfile({ password, contact });
-      router.replace('/');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not complete profile.');
+      await AuthRepository.completeGoogleProfile({
+        password,
+        contact: `+91${contactDigits}`,
+      });
+      toast.show('Profile complete — welcome to BGSC!');
+      // TODO(auth): route to the Get Started / Onboarding flow when it ships
+      // (handoffSpec §15); drawer is the temporary landing.
+      router.replace('/(drawer)');
+    } catch {
+      setBanner("Couldn't save your profile — please try again.");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const openTos = () => Alert.alert('Terms of Service', 'Coming soon.');
-  const openPrivacy = () => Alert.alert('Privacy Policy', 'Coming soon.');
+  const onBack = () => {
+    Alert.alert('Discard changes?', 'Your progress will be lost. Go back?', [
+      { text: 'Stay', style: 'cancel' },
+      { text: 'Go back', style: 'destructive', onPress: () => router.back() },
+    ]);
+  };
 
-  return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView
-          contentContainerStyle={[s.container, { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32 }]}
-          keyboardShouldPersistTaps="handled"
-        >
-          {/* Back */}
-          <Pressable onPress={() => router.back()} style={[s.backBtn, { backgroundColor: colors.surface }]} hitSlop={8}>
-            <Ionicons name="arrow-back" size={20} color={colors.text} />
-          </Pressable>
-
-          <Text style={[s.heading, { color: colors.text }]}>Complete your profile</Text>
-
-          {/* Email read-only context per spec §7.2 */}
-          {googleEmail ? (
-            <View style={[s.emailBadge, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}>
-              <Text style={[s.emailLabel, { color: colors.textMuted }]}>SIGNED IN AS</Text>
-              <Text style={[s.emailValue, { color: colors.text }]}>{googleEmail}</Text>
-            </View>
-          ) : null}
-
-          <Field
-            label="SET A PASSWORD"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry={!showPwd}
-            placeholder="••••••••"
-            colors={colors}
-            right={
-              <Pressable onPress={() => setShowPwd((v) => !v)} hitSlop={8} style={s.eyeBtn}>
-                <Ionicons name={showPwd ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.textMuted} />
-              </Pressable>
-            }
-          />
-          <Field
-            label="REPEAT PASSWORD"
-            value={repeatPwd}
-            onChangeText={(v) => { setRepeatPwd(v); if (repeatPwdError) setRepeatPwdError(null); }}
-            onBlur={onRepeatBlur}
-            secureTextEntry={!showRepeat}
-            placeholder="••••••••"
-            colors={colors}
-            error={repeatPwdError ?? undefined}
-            right={
-              <Pressable onPress={() => setShowRepeat((v) => !v)} hitSlop={8} style={s.eyeBtn}>
-                <Ionicons name={showRepeat ? 'eye-off-outline' : 'eye-outline'} size={20} color={colors.textMuted} />
-              </Pressable>
-            }
-          />
-          <Field
-            label="CONTACT"
-            value={contact}
-            onChangeText={setContact}
-            keyboardType="phone-pad"
-            colors={colors}
-          />
-
-          {/* ToS/Privacy are tappable links per spec §7.2 */}
-          <Pressable onPress={() => setAcceptedTos((v) => !v)} style={s.checkRow} hitSlop={4}>
-            <View
-              style={[
-                s.checkBox,
-                {
-                  borderColor: acceptedTos ? colors.accent : colors.border,
-                  backgroundColor: acceptedTos ? colors.accent : 'transparent',
-                },
-              ]}
-            >
-              {acceptedTos && <Ionicons name="checkmark" size={12} color={colors.accentText} />}
-            </View>
-            <Text style={[s.checkLabel, { color: colors.textMuted, flexShrink: 1 }]}>
-              {'By signing up, you agree to our '}
-              <Text onPress={openTos} style={{ color: colors.accent }}>ToS</Text>
-              {' and '}
-              <Text onPress={openPrivacy} style={{ color: colors.accent }}>Privacy Policy</Text>
-            </Text>
-          </Pressable>
-
-          {error ? (
-            <View style={[s.errorBanner, { backgroundColor: colors.danger + '1A', borderColor: colors.danger }]}>
-              <Text style={[s.errorBannerText, { color: colors.danger }]}>{error}</Text>
-            </View>
-          ) : null}
-
-          <Pressable
-            onPress={onFinish}
-            disabled={disabled}
-            style={[s.primaryBtn, { backgroundColor: colors.primary, opacity: disabled ? 0.5 : 1 }]}
-          >
-            <Text style={[s.primaryLabel, { color: colors.primaryText }]}>
-              {submitting ? 'Please wait…' : 'Finish'}
-            </Text>
-          </Pressable>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </View>
-  );
-}
-
-function Field({
-  label,
-  colors,
-  right,
-  error,
-  ...input
-}: React.ComponentProps<typeof TextInput> & {
-  label: string;
-  colors: ReturnType<typeof useColors>;
-  right?: React.ReactNode;
-  error?: string;
-}) {
-  return (
-    <View style={s.fieldWrap}>
-      <Text style={[s.fieldLabel, { color: colors.textMuted }]}>{label}</Text>
-      <View
-        style={[
-          s.inputRow,
-          { borderColor: error ? colors.danger : colors.border, backgroundColor: colors.surface },
-        ]}
-      >
-        <TextInput
-          placeholderTextColor={colors.textMuted}
-          style={[s.inputText, { color: colors.text }]}
-          {...input}
+  // Gate: this step needs the session adopted by the OAuth callback.
+  if (status === 'unknown' || status === 'loading') {
+    return (
+      <AuthShell compact onBack={onBack} heading="Complete your profile">
+        <SkeletonBlock height={48} radius={999} />
+        <SkeletonBlock height={48} radius={999} />
+        <SkeletonBlock height={48} radius={999} />
+      </AuthShell>
+    );
+  }
+  if (status !== 'authenticated') {
+    return (
+      <AuthShell compact heading="Complete your profile">
+        <View style={[styles.banner, { backgroundColor: colors.accentMuted, borderColor: colors.border }]}>
+          <Text style={[styles.bannerText, { color: colors.text }]}>
+            Your session expired — please sign in again to finish setting up your profile.
+          </Text>
+        </View>
+        <PillButton
+          label="Back to login"
+          variant="primary"
+          onPress={() => router.replace('/login')}
+          accessibilityLabel="Back to login"
         />
-        {right}
-      </View>
-      {error ? <Text style={[s.fieldError, { color: colors.danger }]}>{error}</Text> : null}
-    </View>
+      </AuthShell>
+    );
+  }
+
+  const err = (key: keyof typeof errors) => (attempted ? errors[key] : null);
+
+  return (
+    <AuthShell
+      compact
+      onBack={onBack}
+      heading="Complete your profile"
+      subtitle="Set a password so you can sign in with email too."
+    >
+      <GlassInput
+        label="Set a Password"
+        value={password}
+        onChangeText={setPassword}
+        placeholder="••••••••"
+        secureTextEntry
+        textContentType="password"
+        error={err('password')}
+        accessibilityLabel="Set a password"
+      />
+
+      <GlassInput
+        label="Repeat Password"
+        value={repeat}
+        onChangeText={setRepeat}
+        placeholder="••••••••"
+        secureTextEntry
+        textContentType="password"
+        error={err('repeat')}
+        accessibilityLabel="Repeat password"
+      />
+
+      <GlassInput
+        label="Contact"
+        value={contact}
+        onChangeText={onChangeContact}
+        keyboardType="phone-pad"
+        textContentType="telephoneNumber"
+        error={err('contact')}
+        accessibilityLabel="Contact phone number"
+      />
+
+      <AuthCheckbox
+        checked={tos}
+        onChange={() => setTos((t) => !t)}
+        accessibilityLabel="Accept terms of service and privacy policy"
+      >
+        <Text style={[styles.caption, { color: colors.text }]}>
+          By signing up, you agree to our{' '}
+          <Text
+            onPress={() => toast.show('Terms of Service — coming soon.')}
+            accessibilityRole="link"
+            style={[styles.link, { color: colors.accent }]}
+          >
+            ToS
+          </Text>{' '}
+          and{' '}
+          <Text
+            onPress={() => toast.show('Privacy Policy — coming soon.')}
+            accessibilityRole="link"
+            style={[styles.link, { color: colors.accent }]}
+          >
+            Privacy Policy
+          </Text>
+          .
+        </Text>
+      </AuthCheckbox>
+      {attempted && errors.tos ? (
+        <Text style={[styles.tosError, { color: colors.danger }]}>{errors.tos}</Text>
+      ) : null}
+
+      {banner ? (
+        <View style={[styles.banner, { backgroundColor: colors.accentMuted, borderColor: colors.border }]}>
+          <Text style={[styles.bannerText, { color: colors.text }]}>{banner}</Text>
+        </View>
+      ) : null}
+
+      <PillButton
+        label="Finish"
+        variant="primary"
+        loading={submitting}
+        disabled={!canSubmit || submitting}
+        onPress={() => void onFinish()}
+        accessibilityLabel="Finish profile setup"
+      />
+    </AuthShell>
   );
 }
 
-const s = StyleSheet.create({
-  container: { paddingHorizontal: 16 },
-
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 28,
-    shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+const styles = StyleSheet.create({
+  caption: {
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    lineHeight: 18,
   },
-
-  heading: { fontSize: 22, fontWeight: '700', marginBottom: 20 },
-
-  emailBadge: {
+  link: {
+    fontFamily: FONTS.semibold,
+    fontSize: 12,
+    textDecorationLine: 'underline',
+  },
+  tosError: {
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    marginTop: -12,
+  },
+  banner: {
+    borderRadius: 12,
     borderWidth: 1,
-    borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    marginBottom: 20,
   },
-  emailLabel: { fontSize: 10, fontWeight: '600', letterSpacing: 0.5, marginBottom: 2 },
-  emailValue: { fontSize: 14 },
-
-  fieldWrap: { marginBottom: 14 },
-  fieldLabel: { fontSize: 11, fontWeight: '600', letterSpacing: 0.5, marginBottom: 6 },
-  fieldError: { fontSize: 12, marginTop: 4 },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 18,
-    height: 52,
+  bannerText: {
+    fontFamily: FONTS.body,
+    fontSize: 13,
+    lineHeight: 18,
   },
-  inputText: { flex: 1, fontSize: 15 },
-  eyeBtn: { paddingLeft: 8 },
-
-  checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 16 },
-  checkBox: { width: 18, height: 18, borderWidth: 1.5, borderRadius: 4, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  checkLabel: { fontSize: 13 },
-
-  errorBanner: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 12 },
-  errorBannerText: { fontSize: 13 },
-
-  primaryBtn: { borderRadius: 999, height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 4 },
-  primaryLabel: { fontSize: 16, fontWeight: '600' },
 });

@@ -5,9 +5,9 @@ import { DynamicStatusBar } from '@/components/dynamic-status-bar';
 import { useColors } from '@/hooks/use-colors';
 
 /**
- * Side Drawer navigator (spec §3.2). Each screen registers a drawerLabel that
- * DrawerItemList renders automatically. Role-gated links (Union, Users) are
- * intentionally omitted until RBAC-aware navigation lands.
+ * Side drawer navigator (master §2.3). Each screen registers a drawerLabel;
+ * DrawerItemList renders them. Role-gated routes (Union, Users) stay omitted
+ * until RBAC-aware navigation lands.
  */
 export default function DrawerLayout() {
   const colors = useColors();
@@ -18,14 +18,20 @@ export default function DrawerLayout() {
       screenOptions={{
         header: (props) => <DynamicStatusBar {...props} />,
         drawerActiveTintColor: colors.accent,
-        drawerInactiveTintColor: colors.text,
-      }}>
+        drawerInactiveTintColor: colors.textMuted,
+        drawerStyle: { backgroundColor: colors.background },
+        sceneStyle: { backgroundColor: colors.background },
+      }}
+    >
       <Drawer.Screen name="index" options={{ drawerLabel: 'Home', title: 'Home' }} />
       <Drawer.Screen name="events" options={{ drawerLabel: 'Events', title: 'Events' }} />
       <Drawer.Screen name="points" options={{ drawerLabel: 'Points & Challenges', title: 'Points' }} />
       <Drawer.Screen name="sponsors" options={{ drawerLabel: 'Sponsors', title: 'Sponsors' }} />
       <Drawer.Screen name="friends" options={{ drawerLabel: 'Friends', title: 'Friends' }} />
-      <Drawer.Screen name="leaderboards" options={{ drawerLabel: 'Leaderboards', title: 'Leaderboards' }} />
+      <Drawer.Screen
+        name="leaderboards"
+        options={{ drawerLabel: 'Leaderboards', title: 'Leaderboards' }}
+      />
       <Drawer.Screen name="hall-of-fame" options={{ drawerLabel: 'Hall of Fame', title: 'Hall of Fame' }} />
       <Drawer.Screen name="store" options={{ drawerLabel: 'Store', title: 'Store' }} />
       <Drawer.Screen name="media" options={{ drawerLabel: 'Media', title: 'Media' }} />

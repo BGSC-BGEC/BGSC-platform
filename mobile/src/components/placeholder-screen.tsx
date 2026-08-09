@@ -1,22 +1,41 @@
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
-import { Screen } from '@/components/screen';
+import { GlassCard } from '@/components/GlassCard';
+import { SkeletonBlock } from '@/components/SkeletonBlock';
+import { FONTS } from '@/core/theme/fonts';
 import { useColors } from '@/hooks/use-colors';
 
-/** Stub for drawer destinations whose features land in later milestones. */
-export function PlaceholderScreen({ title }: { title: string }) {
+/**
+ * Placeholder for routes that haven't been built yet — glass card +
+ * skeletons (never a spinner, per master §0.5).
+ */
+export function PlaceholderScreen({ title, note }: { title: string; note?: string }) {
   const colors = useColors();
   return (
-    <Screen center>
+    <View style={styles.root}>
       <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
-      <Text style={[styles.body, { color: colors.textMuted }]}>
-        Coming in a later milestone.
-      </Text>
-    </Screen>
+      <GlassCard>
+        <SkeletonBlock height={16} style={{ marginBottom: 8 }} />
+        <SkeletonBlock height={16} style={{ marginBottom: 8 }} />
+        <SkeletonBlock height={16} width="60%" />
+      </GlassCard>
+      {note ? <Text style={[styles.note, { color: colors.textMuted }]}>{note}</Text> : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  title: { fontSize: 22, fontWeight: '700', marginBottom: 6 },
-  body: { fontSize: 15 },
+  root: {
+    flex: 1,
+    padding: 16,
+    gap: 16,
+  },
+  title: {
+    fontFamily: FONTS.heading,
+    fontSize: 28,
+  },
+  note: {
+    fontFamily: FONTS.body,
+    fontSize: 13,
+  },
 });

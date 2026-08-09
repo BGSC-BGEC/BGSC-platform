@@ -1,11 +1,14 @@
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { SkeletonBox } from '@/components/home/SkeletonBox';
-import { UserRepository } from '@/core/repositories/UserRepository';
-import { useAuthStore } from '@/core/stores/authStore';
+import { GlassCard } from '@/components/GlassCard';
+import { SegmentedToggle } from '@/components/SegmentedToggle';
+import { SkeletonBlock } from '@/components/SkeletonBlock';
+import { FONTS } from '@/core/theme/fonts';
+import { DIFFICULTY_COLORS, DOMAIN_COLORS } from '@/core/theme/tokens';
 import type {
   ChallengeHistoryItem,
   EventHistoryItem,
@@ -13,367 +16,474 @@ import type {
   SponsorContributionItem,
 } from '@/core/types';
 import { useColors } from '@/hooks/use-colors';
+import {
+  useChallengeHistory,
+  useEventHistory,
+  useMatchHistory,
+  useSponsorHistory,
+} from '@/hooks/use-profile';
+import { formatEventDate, formatFullDate } from '@/lib/dates';
+import { formatCompact } from '@/components/profile/PlayerCard';
 
-type HistoryTab = 'events' | 'matches' | 'challenges' | 'sponsor';
+type HistoryTab = 'Events' | 'Matches' | 'Challenges' | 'Sponsor';
+const TABS: HistoryTab[] = ['Events', 'Matches', 'Challenges', 'Sponsor'];
 
-const TABS: { key: HistoryTab; label: string }[] = [
-  { key: 'events', label: 'Events' },
-  { key: 'matches', label: 'Matches' },
-  { key: 'challenges', label: 'Challenges' },
-  { key: 'sponsor', label: 'Sponsor' },
-];
-
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-function fmt(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-}
-
-export function HistorySection() {
-  const colors = useColors();
-  const [activeTab, setActiveTab] = useState<HistoryTab>('events');
-
-  return (
-    <View style={s.section}>
-      <Text style={[s.sectionTitle, { color: colors.text }]}>📜 History</Text>
-
-      {/* Tabs */}
-      <View style={[s.tabBar, { borderBottomColor: colors.border }]}>
-        {TABS.map((t) => (
-          <Pressable
-            key={t.key}
-            onPress={() => setActiveTab(t.key)}
-            style={[s.tab, activeTab === t.key && [s.tabActive, { borderBottomColor: colors.accent }]]}
-          >
-            <Text
-              style={[
-                s.tabLabel,
-                { color: activeTab === t.key ? colors.accent : colors.textMuted },
-              ]}
-            >
-              {t.label}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
-      {/* Tab content */}
-      {activeTab === 'events' && <EventHistoryList colors={colors} />}
-      {activeTab === 'matches' && <MatchHistoryList colors={colors} />}
-      {activeTab === 'challenges' && <ChallengeHistoryList colors={colors} />}
-      {activeTab === 'sponsor' && <SponsorHistoryList colors={colors} />}
-    </View>
-  );
-}
-
-// ─── Events ──────────────────────────────────────────────────────────────────
-
-function EventHistoryList({ colors }: { colors: ReturnType<typeof useColors> }) {
-  const status = useAuthStore((s) => s.status);
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, error, refetch } =
-    useInfiniteQuery({
-      queryKey: ['history', 'events'],
-      queryFn: ({ pageParam }) => UserRepository.getEventHistory(pageParam),
-      initialPageParam: 1,
-      getNextPageParam: (last, all) => (last.length < 20 ? undefined : all.length + 1),
-      enabled: status === 'authenticated',
-    });
-
-  const items = data?.pages.flat() ?? [];
-
-  if (isLoading) return <HistorySkeleton colors={colors} />;
-  if (error) return <RetryState onRetry={refetch} colors={colors} />;
-  if (items.length === 0) return <EmptyState text="No events participated yet" colors={colors} />;
-
-  return (
-    <FlatList
-      data={items}
-      keyExtractor={(i) => i.id}
-      scrollEnabled={false}
-      renderItem={({ item }) => <EventHistoryCard item={item} colors={colors} />}
-      onEndReached={() => { if (hasNextPage) fetchNextPage(); }}
-      onEndReachedThreshold={0.3}
-      ListFooterComponent={isFetchingNextPage ? <ActivityIndicator color={colors.accent} style={{ margin: 16 }} /> : null}
-    />
-  );
-}
-
-function EventHistoryCard({ item, colors }: { item: EventHistoryItem; colors: ReturnType<typeof useColors> }) {
-  return (
-    <Pressable
-      style={[s.historyCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-      onPress={() => router.push(`/event/${item.eventId}`)}
-    >
-      <View style={[s.historyCardCover, { backgroundColor: colors.surfaceMuted }]} />
-      <View style={s.historyCardBody}>
-        <Text style={[s.historyCardTitle, { color: colors.text }]}>{item.eventTitle}</Text>
-        <Text style={[s.historyCardMeta, { color: colors.textMuted }]}>{fmtDate(item.date)}</Text>
-        {item.teamName && (
-          <Text style={[s.historyCardMeta, { color: colors.textMuted }]}>
-            {item.role === 'captain' ? 'Captain' : 'Member'} · {item.teamName}
-          </Text>
-        )}
-        <View style={s.historyCardFooter}>
-          {item.result && (
-            <Text style={[s.historyResult, { color: colors.text }]}>{item.result}</Text>
-          )}
-          {item.pointsEarned != null && (
-            <Text style={[s.historyPoints, { color: colors.success }]}>+{item.pointsEarned} pts</Text>
-          )}
-          {item.fansEarned != null && item.sponsorName && (
-            <Text style={[s.historySponsor, { color: colors.accent }]}>
-              +{item.fansEarned} fans for {item.sponsorName}
-            </Text>
-          )}
-        </View>
-      </View>
-    </Pressable>
-  );
-}
-
-// ─── Matches ─────────────────────────────────────────────────────────────────
-
-function MatchHistoryList({ colors }: { colors: ReturnType<typeof useColors> }) {
-  const status = useAuthStore((s) => s.status);
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, error, refetch } =
-    useInfiniteQuery({
-      queryKey: ['history', 'matches'],
-      queryFn: ({ pageParam }) => UserRepository.getMatchHistory(pageParam),
-      initialPageParam: 1,
-      getNextPageParam: (last, all) => (last.length < 20 ? undefined : all.length + 1),
-      enabled: status === 'authenticated',
-    });
-
-  const items = data?.pages.flat() ?? [];
-
-  if (isLoading) return <HistorySkeleton colors={colors} />;
-  if (error) return <RetryState onRetry={refetch} colors={colors} />;
-  if (items.length === 0) return <EmptyState text="No match records yet" colors={colors} />;
-
-  return (
-    <FlatList
-      data={items}
-      keyExtractor={(i) => i.id}
-      scrollEnabled={false}
-      renderItem={({ item }) => <MatchHistoryCard item={item} colors={colors} />}
-      onEndReached={() => { if (hasNextPage) fetchNextPage(); }}
-      onEndReachedThreshold={0.3}
-      ListFooterComponent={isFetchingNextPage ? <ActivityIndicator color={colors.accent} style={{ margin: 16 }} /> : null}
-    />
-  );
-}
-
-function MatchHistoryCard({ item, colors }: { item: MatchHistoryItem; colors: ReturnType<typeof useColors> }) {
-  const resultColor = item.result === 'win' ? colors.success : item.result === 'loss' ? colors.danger : '#f59e0b';
-  const resultLabel = item.result === 'win' ? '✅ Win' : item.result === 'loss' ? '❌ Loss' : '🤝 Draw';
-
-  return (
-    <Pressable
-      style={[s.historyCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-      onPress={() => router.push(`/event/bracket/${item.matchId}`)}
-    >
-      <View style={s.historyCardBody}>
-        <Text style={[s.historyCardMeta, { color: colors.textMuted }]}>{item.leagueName} — {item.round}</Text>
-        <Text style={[s.matchScore, { color: colors.text }]}>
-          {item.teamAName}  {item.scoreA} : {item.scoreB}  {item.teamBName}
-        </Text>
-        <View style={s.historyCardFooter}>
-          <Text style={[s.historyResult, { color: resultColor }]}>{resultLabel}</Text>
-          <Text style={[s.historyCardMeta, { color: colors.textMuted }]}>{fmtDate(item.date)}</Text>
-          {item.venue && <Text style={[s.historyCardMeta, { color: colors.textMuted }]}>{item.venue}</Text>}
-        </View>
-      </View>
-    </Pressable>
-  );
-}
-
-// ─── Challenges ──────────────────────────────────────────────────────────────
-
-const DIFFICULTY_COLORS: Record<string, string> = {
-  easy: '#22c55e',
-  medium: '#3b82f6',
-  hard: '#e8662a',
-  legend: '#8b5cf6',
+const EMPTY_MESSAGES: Record<HistoryTab, string> = {
+  Events: 'No events participated yet',
+  Matches: 'No match records yet',
+  Challenges: 'No challenges completed yet',
+  Sponsor: 'No sponsor contributions yet',
 };
 
-function ChallengeHistoryList({ colors }: { colors: ReturnType<typeof useColors> }) {
-  const status = useAuthStore((s) => s.status);
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, error, refetch } =
-    useInfiniteQuery({
-      queryKey: ['history', 'challenges'],
-      queryFn: ({ pageParam }) => UserRepository.getChallengeHistory(pageParam),
-      initialPageParam: 1,
-      getNextPageParam: (last, all) => (last.length < 20 ? undefined : all.length + 1),
-      enabled: status === 'authenticated',
-    });
+/**
+ * History section (profile spec §7): four sticky tabs with per-tab skeleton,
+ * empty and error states, pull-to-refresh via the page, and a "Load older"
+ * button for the paginated events tab (spec §7.1 layout).
+ *
+ * Match/Challenge/Sponsor tabs are Phase 2/3 backend stubs — the repository
+ * resolves [] so these render their empty states until the services ship.
+ * TODO(Phase 2): swap "Load older" for true infinite scroll once the page
+ * list is virtualized.
+ */
+export function HistorySection() {
+  const colors = useColors();
+  const [tab, setTab] = useState<HistoryTab>('Events');
+  const [opacity] = useState(() => new Animated.Value(1));
 
-  const items = data?.pages.flat() ?? [];
+  const eventHistory = useEventHistory();
+  const matchHistory = useMatchHistory(tab === 'Matches');
+  const challengeHistory = useChallengeHistory(tab === 'Challenges');
+  const sponsorHistory = useSponsorHistory(tab === 'Sponsor');
 
-  if (isLoading) return <HistorySkeleton colors={colors} />;
-  if (error) return <RetryState onRetry={refetch} colors={colors} />;
-  if (items.length === 0) return <EmptyState text="No challenges completed yet" colors={colors} />;
+  const changeTab = (next: HistoryTab) => {
+    if (next === tab) return;
+    setTab(next);
+    opacity.setValue(0);
+    Animated.timing(opacity, { toValue: 1, duration: 180, useNativeDriver: true }).start();
+  };
+
+  const events = eventHistory.data?.pages.flat() ?? [];
 
   return (
-    <FlatList
-      data={items}
-      keyExtractor={(i) => i.id}
-      scrollEnabled={false}
-      renderItem={({ item }) => <ChallengeCard item={item} colors={colors} />}
-      onEndReached={() => { if (hasNextPage) fetchNextPage(); }}
-      onEndReachedThreshold={0.3}
-      ListFooterComponent={isFetchingNextPage ? <ActivityIndicator color={colors.accent} style={{ margin: 16 }} /> : null}
-    />
-  );
-}
+    <View style={styles.root}>
+      <Text style={[styles.heading, { color: colors.text }]}>📜 History</Text>
+      <SegmentedToggle
+        options={TABS}
+        value={tab}
+        onChange={(v) => changeTab(v as HistoryTab)}
+        accessibilityLabel="History tabs"
+      />
 
-function ChallengeCard({ item, colors }: { item: ChallengeHistoryItem; colors: ReturnType<typeof useColors> }) {
-  const diffColor = DIFFICULTY_COLORS[item.difficulty] ?? colors.textMuted;
-  return (
-    <View style={[s.historyCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <View style={s.historyCardBody}>
-        <Text style={[s.historyCardTitle, { color: colors.text }]}>🏆 {item.title}</Text>
-        <Text style={[s.historyCardMeta, { color: colors.textMuted }]}>
-          {item.domain} · <Text style={{ color: diffColor }}>{item.difficulty.charAt(0).toUpperCase() + item.difficulty.slice(1)}</Text>
-        </Text>
-        <Text style={[s.historyCardMeta, { color: colors.textMuted }]}>Completed: {fmtDate(item.completedAt)}</Text>
-        <Text style={[s.historyPoints, { color: colors.success }]}>+{item.pointsAwarded} pts awarded</Text>
-      </View>
+      <Animated.View style={{ opacity }}>
+        {tab === 'Events' && (
+          <EventTab
+            items={events}
+            loading={eventHistory.isPending}
+            error={eventHistory.isError}
+            hasNextPage={eventHistory.hasNextPage}
+            isFetchingNextPage={eventHistory.isFetchingNextPage}
+            onRetry={() => void eventHistory.refetch()}
+            onLoadOlder={() => void eventHistory.fetchNextPage()}
+          />
+        )}
+        {tab === 'Matches' && (
+          <HistoryList
+            items={matchHistory.data ?? []}
+            loading={matchHistory.isPending}
+            error={matchHistory.isError}
+            onRetry={() => void matchHistory.refetch()}
+            renderItem={(item) => <MatchCard item={item} />}
+            emptyMessage={EMPTY_MESSAGES.Matches}
+          />
+        )}
+        {tab === 'Challenges' && (
+          <HistoryList
+            items={challengeHistory.data ?? []}
+            loading={challengeHistory.isPending}
+            error={challengeHistory.isError}
+            onRetry={() => void challengeHistory.refetch()}
+            renderItem={(item) => <ChallengeCard item={item} />}
+            emptyMessage={EMPTY_MESSAGES.Challenges}
+          />
+        )}
+        {tab === 'Sponsor' && (
+          <HistoryList
+            items={sponsorHistory.data ?? []}
+            loading={sponsorHistory.isPending}
+            error={sponsorHistory.isError}
+            onRetry={() => void sponsorHistory.refetch()}
+            renderItem={(item) => <SponsorCard item={item} />}
+            emptyMessage={EMPTY_MESSAGES.Sponsor}
+          />
+        )}
+      </Animated.View>
     </View>
   );
 }
 
-// ─── Sponsor Timeline ────────────────────────────────────────────────────────
+// ─── Events tab (paginated) ───────────────────────────────────────────────────
 
-function SponsorHistoryList({ colors }: { colors: ReturnType<typeof useColors> }) {
-  const status = useAuthStore((s) => s.status);
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, error, refetch } =
-    useInfiniteQuery({
-      queryKey: ['history', 'sponsor'],
-      queryFn: ({ pageParam }) => UserRepository.getSponsorHistory(pageParam),
-      initialPageParam: 1,
-      getNextPageParam: (last, all) => (last.length < 20 ? undefined : all.length + 1),
-      enabled: status === 'authenticated',
-    });
-
-  const items = data?.pages.flat() ?? [];
-
-  if (isLoading) return <HistorySkeleton colors={colors} />;
-  if (error) return <RetryState onRetry={refetch} colors={colors} />;
-  if (items.length === 0) return <EmptyState text="No sponsor contributions yet" colors={colors} />;
-
-  return (
-    <FlatList
-      data={items}
-      keyExtractor={(i) => i.id}
-      scrollEnabled={false}
-      renderItem={({ item, index }) => (
-        <SponsorContribCard item={item} colors={colors} isLast={index === items.length - 1} />
-      )}
-      onEndReached={() => { if (hasNextPage) fetchNextPage(); }}
-      onEndReachedThreshold={0.3}
-      ListFooterComponent={isFetchingNextPage ? <ActivityIndicator color={colors.accent} style={{ margin: 16 }} /> : null}
-    />
-  );
-}
-
-function SponsorContribCard({
-  item,
-  colors,
-  isLast,
+function EventTab({
+  items,
+  loading,
+  error,
+  hasNextPage,
+  isFetchingNextPage,
+  onRetry,
+  onLoadOlder,
 }: {
-  item: SponsorContributionItem;
-  colors: ReturnType<typeof useColors>;
-  isLast: boolean;
+  items: EventHistoryItem[];
+  loading: boolean;
+  error: boolean;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  onRetry: () => void;
+  onLoadOlder: () => void;
 }) {
+  const colors = useColors();
+
+  if (loading && items.length === 0) return <HistorySkeletons />;
+  if (error && items.length === 0) return <SectionError onRetry={onRetry} />;
+  if (items.length === 0) return <EmptyState message={EMPTY_MESSAGES.Events} />;
+
   return (
-    <View style={s.timelineRow}>
-      <View style={s.timelineLeft}>
-        <View style={[s.timelineDot, { backgroundColor: colors.accent }]} />
-        {!isLast && <View style={[s.timelineLine, { backgroundColor: colors.border }]} />}
-      </View>
-      <View style={[s.historyCard, { backgroundColor: colors.surface, borderColor: colors.border, flex: 1 }]}>
-        <View style={s.historyCardBody}>
-          <Text style={[s.historyCardTitle, { color: colors.text }]}>● {item.eventTitle}</Text>
-          <Text style={[s.historyCardMeta, { color: colors.textMuted }]}>{fmtDate(item.date)}</Text>
-          <Text style={[s.historyPoints, { color: colors.accent }]}>
-            Fans contributed: +{item.fansContributed}
+    <View style={styles.list}>
+      {items.map((item) => (
+        <EventCard key={item.id} item={item} />
+      ))}
+      {hasNextPage ? (
+        <Pressable
+          onPress={onLoadOlder}
+          disabled={isFetchingNextPage}
+          accessibilityRole="button"
+          accessibilityLabel="Load older events"
+          style={({ pressed }) => [
+            styles.loadOlder,
+            { borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
+          ]}
+        >
+          <Text style={[styles.loadOlderText, { color: colors.text }]}>
+            {isFetchingNextPage ? 'Loading…' : 'Load older'}
           </Text>
-          <View style={[s.timelineDivider, { backgroundColor: colors.border }]} />
-          <Text style={[s.historyCardMeta, { color: colors.textMuted }]}>
-            Running total: {fmt(item.runningTotal)} fans
-          </Text>
-        </View>
-      </View>
+        </Pressable>
+      ) : (
+        <Text style={[styles.endOfList, { color: colors.textMuted }]}>You&apos;re all caught up</Text>
+      )}
     </View>
   );
 }
 
-// ─── Shared state components ─────────────────────────────────────────────────
+function EventCard({ item }: { item: EventHistoryItem }) {
+  const colors = useColors();
+  const metaBits = [
+    item.role !== 'solo' ? `Role: ${item.role}` : null,
+    item.teamName ? `Team: ${item.teamName}` : null,
+  ].filter(Boolean);
 
-function HistorySkeleton({ colors }: { colors: ReturnType<typeof useColors> }) {
   return (
-    <View style={{ gap: 10, padding: 16 }}>
-      {[1, 2, 3].map((i) => (
-        <View key={i} style={[s.historyCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-          <View style={{ padding: 14, gap: 8 }}>
-            <SkeletonBox width="70%" height={14} />
-            <SkeletonBox width="50%" height={12} />
-            <SkeletonBox width="40%" height={12} />
+    <GlassCard
+      onPress={() => router.push(`/event/${item.eventId}`)}
+      accessibilityLabel={`Open event ${item.eventTitle}`}
+      style={styles.itemCard}
+    >
+      <View style={styles.eventRow}>
+        {item.eventCoverUrl ? (
+          <Image source={{ uri: item.eventCoverUrl }} style={styles.eventCover} contentFit="cover" />
+        ) : (
+          <View style={[styles.eventCover, styles.eventCoverFallback, { backgroundColor: colors.surfaceMuted }]}>
+            <Ionicons name="calendar-outline" size={22} color={colors.textMuted} />
           </View>
+        )}
+        <View style={styles.eventCol}>
+          <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
+            {item.eventTitle}
+          </Text>
+          <Text style={[styles.cardMeta, { color: colors.textMuted }]}>
+            {formatEventDate(item.date)}
+          </Text>
+          {metaBits.length > 0 ? (
+            <Text style={[styles.cardMeta, { color: colors.textMuted }]} numberOfLines={1}>
+              {metaBits.join(' · ')}
+            </Text>
+          ) : null}
+          {item.result ? (
+            <Text style={[styles.cardMeta, { color: colors.textMuted }]} numberOfLines={1}>
+              {item.result}
+              {item.pointsEarned ? ` · +${item.pointsEarned} pts` : ''}
+            </Text>
+          ) : null}
+          {item.fansEarned ? (
+            <Text style={[styles.cardMeta, { color: colors.accent }]} numberOfLines={1}>
+              +{item.fansEarned} fans{item.sponsorName ? ` for ${item.sponsorName}` : ''}
+            </Text>
+          ) : null}
         </View>
+      </View>
+    </GlassCard>
+  );
+}
+
+// ─── Matches tab ──────────────────────────────────────────────────────────────
+
+function MatchCard({ item }: { item: MatchHistoryItem }) {
+  const colors = useColors();
+  const resultColor =
+    item.result === 'win' ? colors.success : item.result === 'loss' ? colors.danger : DIFFICULTY_COLORS.medium;
+  const resultLabel = item.result === 'win' ? 'Win' : item.result === 'loss' ? 'Loss' : 'Draw';
+
+  return (
+    <GlassCard
+      onPress={() => router.push(`/event/bracket/${item.matchId}`)}
+      accessibilityLabel={`Open match ${item.teamAName} versus ${item.teamBName}`}
+      style={styles.itemCard}
+    >
+      <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
+        {item.leagueName} — {item.round}
+      </Text>
+      <Text style={[styles.matchScore, { color: colors.text }]}>
+        {item.teamAName}  {item.scoreA} : {item.scoreB}  {item.teamBName}
+      </Text>
+      <Text style={[styles.cardMeta, { color: colors.textMuted }]}>
+        {formatEventDate(item.date)}
+        {item.venue ? ` · ${item.venue}` : ''}
+      </Text>
+      <View style={[styles.resultPill, { backgroundColor: resultColor }]}>
+        <Text style={[styles.resultPillText, { color: colors.accentText }]}>{resultLabel}</Text>
+      </View>
+    </GlassCard>
+  );
+}
+
+// ─── Challenges tab ───────────────────────────────────────────────────────────
+
+function ChallengeCard({ item }: { item: ChallengeHistoryItem }) {
+  const colors = useColors();
+  const domainColor = DOMAIN_COLORS[item.domain] ?? colors.textMuted;
+
+  return (
+    <GlassCard
+      onPress={() => router.push(`/challenge/${item.challengeId}`)}
+      accessibilityLabel={`Open challenge ${item.title}`}
+      style={styles.itemCard}
+    >
+      <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
+        🏆 {item.title}
+      </Text>
+      <Text style={[styles.cardMeta, { color: colors.textMuted }]}>
+        Domain: <Text style={{ color: domainColor }}>{item.domain}</Text> · Difficulty:{' '}
+        <Text style={{ color: DIFFICULTY_COLORS[item.difficulty] }}>{item.difficulty}</Text>
+      </Text>
+      <Text style={[styles.cardMeta, { color: colors.textMuted }]}>
+        Completed: {formatFullDate(item.completedAt)}
+      </Text>
+      <Text style={[styles.cardMeta, { color: colors.accent }]}>+{item.pointsAwarded} pts awarded</Text>
+    </GlassCard>
+  );
+}
+
+// ─── Sponsor tab ──────────────────────────────────────────────────────────────
+
+function SponsorCard({ item }: { item: SponsorContributionItem }) {
+  const colors = useColors();
+  return (
+    <View style={styles.timelineRow}>
+      <View style={styles.timelineRail}>
+        <View style={[styles.timelineDot, { backgroundColor: colors.accent }]} />
+      </View>
+      <GlassCard style={[styles.itemCard, styles.timelineCard]}>
+        <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
+          {item.eventTitle}
+        </Text>
+        <Text style={[styles.cardMeta, { color: colors.textMuted }]}>{formatEventDate(item.date)}</Text>
+        <Text style={[styles.cardMeta, { color: colors.accent }]}>
+          Fans contributed: +{item.fansContributed}
+        </Text>
+        <View style={[styles.divider, { backgroundColor: colors.border }]} />
+        <Text style={[styles.cardMeta, { color: colors.textMuted }]}>
+          Running total: {formatCompact(item.runningTotal)} fans
+        </Text>
+      </GlassCard>
+    </View>
+  );
+}
+
+// ─── Shared list + states ─────────────────────────────────────────────────────
+
+function HistoryList<T>({
+  items,
+  loading,
+  error,
+  onRetry,
+  renderItem,
+  emptyMessage,
+}: {
+  items: T[];
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+  renderItem: (item: T) => ReactElement;
+  emptyMessage: string;
+}) {
+  if (loading && items.length === 0) return <HistorySkeletons />;
+  if (error && items.length === 0) return <SectionError onRetry={onRetry} />;
+  if (items.length === 0) return <EmptyState message={emptyMessage} />;
+  return <View style={styles.list}>{items.map((item, i) => <View key={i}>{renderItem(item)}</View>)}</View>;
+}
+
+function HistorySkeletons() {
+  return (
+    <View style={styles.list}>
+      {[1, 2, 3].map((i) => (
+        <GlassCard key={i} accessibilityLabel="Loading history" style={styles.itemCard}>
+          <SkeletonBlock width="80%" height={16} radius={4} />
+          <SkeletonBlock width="55%" height={13} radius={4} />
+          <SkeletonBlock width="65%" height={13} radius={4} />
+        </GlassCard>
       ))}
     </View>
   );
 }
 
-function EmptyState({ text, colors }: { text: string; colors: ReturnType<typeof useColors> }) {
+function SectionError({ onRetry }: { onRetry: () => void }) {
+  const colors = useColors();
   return (
-    <View style={s.stateBox}>
-      <Text style={[s.stateText, { color: colors.textMuted }]}>{text}</Text>
-    </View>
-  );
-}
-
-function RetryState({ onRetry, colors }: { onRetry: () => void; colors: ReturnType<typeof useColors> }) {
-  return (
-    <View style={s.stateBox}>
-      <Text style={[s.stateText, { color: colors.textMuted }]}>Something went wrong</Text>
-      <Pressable onPress={onRetry}>
-        <Text style={[s.retryText, { color: colors.accent }]}>Retry</Text>
+    <View style={styles.state}>
+      <Text style={[styles.stateText, { color: colors.textMuted }]}>Could not load this section</Text>
+      <Pressable
+        onPress={onRetry}
+        accessibilityRole="button"
+        accessibilityLabel="Retry loading history"
+        hitSlop={8}
+        style={styles.stateRetry}
+      >
+        <Text style={[styles.stateRetryText, { color: colors.accent }]}>Retry</Text>
       </Pressable>
     </View>
   );
 }
 
-const s = StyleSheet.create({
-  section: { marginBottom: 24, paddingHorizontal: 16 },
-  sectionTitle: { fontSize: 18, fontWeight: '700', marginBottom: 12 },
+function EmptyState({ message }: { message: string }) {
+  const colors = useColors();
+  return (
+    <View style={styles.state}>
+      <Text style={[styles.stateText, { color: colors.textMuted }]}>{message}</Text>
+    </View>
+  );
+}
 
-  tabBar: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth, marginBottom: 16 },
-  tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabActive: {},
-  tabLabel: { fontSize: 13, fontWeight: '600' },
-
-  historyCard: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 12, marginBottom: 10, overflow: 'hidden', flexDirection: 'row' },
-  historyCardCover: { width: 56, height: '100%', minHeight: 80 },
-  historyCardBody: { flex: 1, padding: 12, gap: 4 },
-  historyCardTitle: { fontSize: 14, fontWeight: '600' },
-  historyCardMeta: { fontSize: 12 },
-  historyCardFooter: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
-  historyResult: { fontSize: 12, fontWeight: '600' },
-  historyPoints: { fontSize: 12, fontWeight: '600' },
-  historySponsor: { fontSize: 12 },
-  matchScore: { fontSize: 15, fontWeight: '700', marginVertical: 4 },
-
-  timelineRow: { flexDirection: 'row', gap: 12, marginBottom: 10 },
-  timelineLeft: { width: 20, alignItems: 'center', paddingTop: 14 },
-  timelineDot: { width: 10, height: 10, borderRadius: 5 },
-  timelineLine: { flex: 1, width: 2, marginTop: 4 },
-  timelineDivider: { height: StyleSheet.hairlineWidth, marginVertical: 6 },
-
-  stateBox: { padding: 16, gap: 6 },
-  stateText: { fontSize: 13 },
-  retryText: { fontSize: 13, fontWeight: '600' },
+const styles = StyleSheet.create({
+  root: {
+    gap: 12,
+  },
+  heading: {
+    fontFamily: FONTS.heading,
+    fontSize: 20,
+  },
+  list: {
+    gap: 10,
+  },
+  itemCard: {
+    padding: 12,
+  },
+  eventRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  eventCover: {
+    width: 56,
+    height: 56,
+    borderRadius: 10,
+  },
+  eventCoverFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eventCol: {
+    flex: 1,
+    gap: 1,
+  },
+  cardTitle: {
+    fontFamily: FONTS.semibold,
+    fontSize: 15,
+  },
+  cardMeta: {
+    fontFamily: FONTS.body,
+    fontSize: 13,
+  },
+  matchScore: {
+    fontFamily: FONTS.bold,
+    fontSize: 16,
+    fontVariant: ['tabular-nums'],
+    marginTop: 4,
+  },
+  resultPill: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    marginTop: 6,
+  },
+  resultPillText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  timelineRow: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  timelineRail: {
+    width: 20,
+    alignItems: 'center',
+  },
+  timelineDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginTop: 18,
+  },
+  timelineCard: {
+    flex: 1,
+  },
+  divider: {
+    height: 1,
+    marginVertical: 8,
+  },
+  loadOlder: {
+    minHeight: 44,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadOlderText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 14,
+  },
+  endOfList: {
+    fontFamily: FONTS.body,
+    fontSize: 12,
+    textAlign: 'center',
+    paddingVertical: 8,
+  },
+  state: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    gap: 4,
+  },
+  stateText: {
+    fontFamily: FONTS.body,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+  stateRetry: {
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  stateRetryText: {
+    fontFamily: FONTS.semibold,
+    fontSize: 14,
+  },
 });

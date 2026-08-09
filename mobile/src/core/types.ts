@@ -118,6 +118,15 @@ export interface PlatformEvent {
   teamSize?: number;
   maxTeams?: number;
   sponsorTop3?: SponsorTop3Entry[];
+  /**
+   * Phase 2/3 display flags — not part of event-service's EventResponseDto
+   * (Phase 1). Derived client-side (auction ⇐ type ALL) until the backend
+   * ships them. TODO(events): drop the client-side defaults when the fields land.
+   */
+  isAuctionBased?: boolean;
+  linkedToStrava?: boolean;
+  isFeatured?: boolean;
+  isSponsored?: boolean;
   tags: string[];
   createdBy: string;
   createdAt: string;
@@ -296,4 +305,152 @@ export interface HallOfFameSponsorChampion {
   totalFans: number;
   eventsWonCount: number;
   affiliatedUserCount: number;
+}
+
+// ─── Challenges (Phase 2 — challenge-service, master §13.5) ───────────────────
+
+export type ChallengeDomain = 'sports' | 'esports' | 'game_dev' | 'general';
+export type ChallengeDifficulty = 'easy' | 'medium' | 'hard' | 'legend';
+export type ChallengeStatus = 'active' | 'completed' | 'archived';
+/**
+ * Viewing user's state with a challenge — drives the detail ActionArea
+ * (points spec §6.5) and the card badges (spec §9).
+ */
+export type ChallengeUserState = 'not_accepted' | 'accepted' | 'submitted' | 'approved' | 'rejected';
+/**
+ * Physical = time limit shown up front; digital = time limit revealed on
+ * accept (points spec §5.7 / §7.1).
+ */
+export type ChallengeMode = 'physical' | 'digital';
+
+export interface ChallengeResource {
+  name: string;
+  url: string;
+}
+
+/** Mirrors ChallengeSummaryDto from the challenge-service (Phase 2). */
+export interface Challenge {
+  id: string;
+  title: string;
+  description: string;
+  domain: ChallengeDomain;
+  difficulty: ChallengeDifficulty;
+  mode: ChallengeMode;
+  /** 1 = solo play. */
+  teamLimit: number;
+  /** Days allowed after accept; null = no deadline. Digital hides this pre-accept. */
+  timeLimitDays: number | null;
+  awardPoints: number;
+  status: ChallengeStatus;
+  /** Legend-tier only — completing enrolls the user in Hall of Fame "Challenge Legends". */
+  hallOfFameEligible: boolean;
+  userState: ChallengeUserState;
+  /** acceptedAt + timeLimitDays, server-computed; null when not accepted or no time limit. */
+  deadline: string | null;
+  resources: ChallengeResource[];
+}
+
+export type ProofItemType = 'image' | 'video' | 'link';
+
+export interface ProofItem {
+  id: string;
+  type: ProofItemType;
+  /** Local asset uri for image/video, or the URL for link items. */
+  uri: string;
+}
+
+export type SubmissionStatus = 'in_progress' | 'under_review' | 'approved' | 'rejected';
+
+/** Mirrors ChallengeSubmissionDto from the challenge-service (Phase 2). */
+export interface ChallengeSubmission {
+  challengeId: string;
+  status: SubmissionStatus;
+  proofItems: ProofItem[];
+  notes: string;
+  submittedAt?: string | null;
+  reviewedAt?: string | null;
+  adminNote?: string | null;
+  pointsAwarded?: number | null;
+}
+
+export interface SubmitProofDto {
+  proofItems: ProofItem[];
+  notes: string;
+}
+
+/** Transaction-history filter (points spec §4.4). */
+export type TransactionFilter = 'all' | TransactionType;
+
+// ─── Announcements ────────────────────────────────────────────────────────────
+
+export type AnnouncementTag =
+  | 'BGEC'
+  | 'FitSoc'
+  | 'Airball'
+  | 'Offside'
+  | 'PowerPlay'
+  | 'Around The Net'
+  | 'Deuce'
+  | 'Highlight Events'
+  | 'Teams';
+
+export interface AnnouncementAuthor {
+  id: string;
+  name: string;
+  role: string;
+  avatarInitial: string;
+  avatarColor?: string;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  tags: AnnouncementTag[];
+  author: AnnouncementAuthor;
+  createdAt: string;
+}
+
+// ─── Store (store-page.md — store-service, Phase 2) ──────────────────────────
+
+export type StoreStockStatus = 'in_stock' | 'low_stock' | 'out_of_stock';
+/** Fulfilment lifecycle shown on order history (store spec §2.2). */
+export type StoreOrderStatus = 'placed' | 'fulfilled' | 'cancelled';
+
+/**
+ * Mirrors the store-service item DTO (Phase 2). `imageUrl` null → emoji
+ * placeholder in the card (no merch photography exists in the mock catalog).
+ */
+export interface StoreItem {
+  id: string;
+  title: string;
+  description?: string;
+  category: 'merch' | 'game';
+  costPoints: number;
+  stock: StoreStockStatus;
+  imageUrl?: string | null;
+}
+
+export interface StoreOrderItem {
+  itemId: string;
+  title: string;
+  quantity: number;
+  costPoints: number;
+}
+
+export interface StoreOrder {
+  id: string;
+  items: StoreOrderItem[];
+  totalPoints: number;
+  status: StoreOrderStatus;
+  createdAt: string;
+}
+
+/**
+ * Body of the redemption mutation. The backend writes the order AND a
+ * points-ledger `spend` row (type 'spend', source 'store' — master §13.3)
+ * atomically; the frontend invalidates both caches on success.
+ */
+export interface RedemptionInput {
+  items: { itemId: string; quantity: number }[];
 }
