@@ -86,6 +86,7 @@ export default function LoginScreen() {
         textContentType="username"
         error={showIdentifierError}
         accessibilityLabel="Email or username"
+        scheme="light"
       />
 
       <View>
@@ -112,6 +113,7 @@ export default function LoginScreen() {
           textContentType="password"
           error={showPasswordError}
           accessibilityLabel="Password"
+          scheme="light"
         />
       </View>
 

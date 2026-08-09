@@ -6,3 +6,12 @@
  */
 export const API_BASE_URL: string =
   process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+/**
+ * Web console URL for coordinator links (e.g. bracket management).
+ * Set EXPO_PUBLIC_WEB_CONSOLE_URL in your .env / app.config.ts.
+ * Left empty in development — any feature gated on this URL will be hidden
+ * until the env var is configured.
+ */
+export const WEB_CONSOLE_URL: string =
+  process.env.EXPO_PUBLIC_WEB_CONSOLE_URL ?? '';

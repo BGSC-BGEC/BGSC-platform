@@ -111,7 +111,7 @@ export default function FeedbackScreen() {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           setTicket(t);
           setLastFailed(false);
-          toast.show('Ticket submitted — we&apos;ll get back to you soon.');
+          toast.show("Ticket submitted — we'll get back to you soon.");
         },
         onError: (err) => {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -189,8 +189,7 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   flex: { flex: 1 },
   railWrap: {
-    paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 12,
+    paddingBottom: 4,
   },
 });

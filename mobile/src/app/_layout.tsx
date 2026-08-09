@@ -10,8 +10,9 @@ import {
   Inter_700Bold,
 } from '@expo-google-fonts/inter';
 import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
+import * as Notifications from 'expo-notifications';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -59,6 +60,7 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
+          <PointsUpdateListener />
           <Stack
             screenOptions={{
               headerShown: false,
@@ -82,4 +84,19 @@ export default function RootLayout() {
       </QueryClientProvider>
     </GestureHandlerRootView>
   );
+}
+
+/** Registers the FCM POINTS_UPDATED silent-push handler (master §12.4). Rendered inside QueryClientProvider. */
+function PointsUpdateListener() {
+  const qc = useQueryClient();
+  useEffect(() => {
+    const sub = Notifications.addNotificationReceivedListener((notif) => {
+      if (notif.request.content.data?.type === 'POINTS_UPDATED') {
+        qc.invalidateQueries({ queryKey: ['points', 'balance'] });
+        qc.invalidateQueries({ queryKey: ['points', 'transactions'] });
+      }
+    });
+    return () => sub.remove();
+  }, [qc]);
+  return null;
 }

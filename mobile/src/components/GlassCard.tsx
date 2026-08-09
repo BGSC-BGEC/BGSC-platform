@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { Animated, Pressable, StyleSheet, View } from 'react-native';
 
+import { useThemeStore } from '@/core/stores/themeStore';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useColors } from '@/hooks/use-colors';
 
 export interface GlassCardProps {
@@ -32,6 +34,9 @@ export function GlassCard({
   accessibilityLabel,
 }: GlassCardProps) {
   const colors = useColors();
+  const preference = useThemeStore((s) => s.theme);
+  const system = useColorScheme();
+  const blurTint: 'light' | 'dark' = (preference === 'system' ? system : preference) === 'light' ? 'light' : 'dark';
   const [scale] = useState(() => new Animated.Value(1));
   const [opacity] = useState(() => new Animated.Value(1));
 
@@ -50,14 +55,15 @@ export function GlassCard({
       {variant === 'glass' ? (
         <BlurView
           intensity={55}
-          tint="dark"
+          tint={blurTint}
           style={StyleSheet.absoluteFill}
           experimentalBlurMethod="dimezisBlurView"
         />
       ) : (
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surfaceSolid }]} />
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.surfaceSolid }]} />
       )}
       <View
+        pointerEvents="none"
         style={[
           StyleSheet.absoluteFill,
           { backgroundColor: selected ? colors.accentMuted : colors.surface },

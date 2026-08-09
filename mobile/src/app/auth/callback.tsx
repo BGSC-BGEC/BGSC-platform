@@ -100,14 +100,19 @@ function parseCallback(
 
   const isNew = (v: string | undefined) => v === 'true' || v === '1';
 
+  // Token resolution order:
+  //   1. expo-router query params  — Android forwards deep-link params here
+  //   2. URL fragment (#)          — the correct delivery channel for native
+  //
+  // Query-string fallbacks (search.access_token / search.token) are
+  // intentionally absent: tokens in query strings appear in server access
+  // logs, proxy logs, and browser history (audit C-08).
   return {
     accessToken:
       get(query.access_token) ??
       get(query.token) ??
       fragment.access_token ??
-      fragment.token ??
-      search.access_token ??
-      search.token,
+      fragment.token,
     isNewUser:
       isNew(get(query.isNewUser)) ||
       get(query.profileComplete) === 'false' ||

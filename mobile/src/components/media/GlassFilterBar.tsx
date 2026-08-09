@@ -35,11 +35,11 @@ export function GlassFilterBar({ query, onChangeQuery, category, onChangeCategor
 
   return (
     <BlurView intensity={50} tint="dark" style={[styles.bar, { borderBottomColor: colors.border }]} experimentalBlurMethod="dimezisBlurView">
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
 
       <View style={[styles.search, { borderColor: colors.border }]}>
         <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} experimentalBlurMethod="dimezisBlurView" />
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surfaceMuted }]} />
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.surfaceMuted }]} />
         <Ionicons name="search" size={16} color={colors.textMuted} />
         <TextInput
           value={query}

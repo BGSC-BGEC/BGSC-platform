@@ -60,8 +60,8 @@ export const EventRepository = {
     return apiClient.post<Registration>(`/events/${eventId}/register`, payload);
   },
 
-  async withdrawRegistration(eventId: string, registrationId: string): Promise<void> {
-    return apiClient.delete(`/events/${eventId}/registrations/${registrationId}`);
+  async withdrawRegistration(eventId: string): Promise<void> {
+    return apiClient.delete(`/events/${eventId}/register`);
   },
 
   async applyForCaptain(eventId: string): Promise<{ status: 'pending' }> {

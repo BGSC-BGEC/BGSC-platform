@@ -5,11 +5,9 @@ import { GlassCard } from '@/components/GlassCard';
 import { EmptyState, ErrorState } from '@/components/events/SectionStates';
 import { SkeletonBlock } from '@/components/SkeletonBlock';
 import type { PlatformEvent } from '@/core/types';
+import { WEB_CONSOLE_URL } from '@/core/env';
 import { FONTS } from '@/core/theme/fonts';
 import { useColors } from '@/hooks/use-colors';
-
-// TODO(events, Phase 2): point at the real Web Console URL when it ships.
-const WEB_CONSOLE_URL = 'http://localhost:5173';
 
 /**
  * Spectator bracket (spec §8). Bracket generation is Web-Console-only, so the
@@ -62,10 +60,12 @@ export function BracketView({
         </View>
         <EmptyState message="Bracket has not been generated yet." />
       </GlassCard>
-      <PressableLink
-        label="Manage on Web →"
-        onPress={() => void Linking.openURL(WEB_CONSOLE_URL).catch(() => {})}
-      />
+      {WEB_CONSOLE_URL ? (
+        <PressableLink
+          label="Manage on Web →"
+          onPress={() => void Linking.openURL(WEB_CONSOLE_URL).catch(() => {})}
+        />
+      ) : null}
     </>
   );
 }

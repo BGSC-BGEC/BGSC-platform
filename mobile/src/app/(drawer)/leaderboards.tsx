@@ -548,7 +548,7 @@ function SponsorsTab() {
                 sponsor={s}
                 mine={s.sponsorId === mySponsorId ? mine.data ?? null : null}
                 onVisit={() => {
-                  // TODO(Phase 2): open sponsor website once sponsor-service exposes it.
+                  toast.show('Sponsor website coming soon.');
                 }}
                 onChangeSponsor={s.sponsorId === mySponsorId ? changeSponsor : undefined}
               />

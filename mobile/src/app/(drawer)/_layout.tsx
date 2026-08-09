@@ -40,6 +40,10 @@ export default function DrawerLayout() {
         name="profile"
         options={{ drawerLabel: 'My Profile', title: 'Profile', headerShown: false }}
       />
+      <Drawer.Screen
+        name="users"
+        options={{ drawerLabel: 'Users', title: 'Users' }}
+      />
     </Drawer>
   );
 }

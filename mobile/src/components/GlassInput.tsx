@@ -4,7 +4,10 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { FONTS } from '@/core/theme/fonts';
+import { useThemeStore } from '@/core/stores/themeStore';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useColors } from '@/hooks/use-colors';
+import { darkColors, lightColors } from '@/core/theme/tokens';
 
 export interface GlassInputProps {
   label: string;
@@ -18,6 +21,8 @@ export interface GlassInputProps {
   autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
   textContentType?: 'emailAddress' | 'password' | 'username' | 'telephoneNumber' | 'none';
   accessibilityLabel?: string;
+  /** Force a blur tint — use 'light' on light-canvas screens (e.g. auth). */
+  scheme?: 'light' | 'dark';
 }
 
 /**
@@ -38,8 +43,15 @@ export function GlassInput({
   autoCapitalize = 'none',
   textContentType = 'none',
   accessibilityLabel,
+  scheme,
 }: GlassInputProps) {
-  const colors = useColors();
+  const themeColors = useColors();
+  const preference = useThemeStore((s) => s.theme);
+  const system = useColorScheme();
+  const resolved = scheme ?? ((preference === 'system' ? system : preference) === 'light' ? 'light' : 'dark');
+  const blurTint: 'light' | 'dark' = resolved;
+  // When scheme is forced (auth screens), use that palette for all colors too.
+  const colors = scheme ? (scheme === 'light' ? lightColors : darkColors) : themeColors;
   const [focused, setFocused] = useState(false);
   const [hidden, setHidden] = useState(secureTextEntry);
 
@@ -49,8 +61,8 @@ export function GlassInput({
     <View style={styles.field}>
       <Text style={[styles.label, { color: colors.textMuted }]}>{label}</Text>
       <View style={[styles.wrap, { borderColor, borderRadius: multiline ? 16 : 999 }]}>
-        <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surfaceMuted }]} />
+        <BlurView intensity={30} tint={blurTint} style={StyleSheet.absoluteFill} />
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.surfaceMuted }]} />
         <TextInput
           value={value}
           onChangeText={onChangeText}
