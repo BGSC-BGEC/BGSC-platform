@@ -81,7 +81,7 @@ export function EventCard({
   }`;
 
   return (
-    <GlassCard onPress={onPress} accessibilityLabel={`Open ${event.title}`}>
+    <GlassCard onPress={onPress} accessibilityLabel={`Open ${event.title}`} style={styles.cardRadius}>
       <View style={styles.rowBetween}>
         <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={2}>
           {event.title}
@@ -114,7 +114,7 @@ export function LeagueCard({ event, onPress }: { event: PlatformEvent; onPress: 
   const esports = isEsports(event);
 
   return (
-    <GlassCard onPress={onPress} accessibilityLabel={`Open league ${event.title}`} style={styles.league}>
+    <GlassCard onPress={onPress} accessibilityLabel={`Open league ${event.title}`} style={[styles.league, styles.cardRadius]}>
       <View style={styles.rowBetween}>
         <View style={[styles.typeBadge, { backgroundColor: colors.surfaceMuted }]}>
           <Ionicons
@@ -240,6 +240,9 @@ const styles = StyleSheet.create({
     fontFamily: FONTS.semibold,
     fontSize: 10,
     letterSpacing: 0.6,
+  },
+  cardRadius: {
+    borderRadius: 24,
   },
   skeleton: {
     borderRadius: 16,

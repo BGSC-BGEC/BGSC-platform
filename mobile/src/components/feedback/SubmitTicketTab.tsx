@@ -4,7 +4,8 @@ import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useState } from 'react';
-import { Clipboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { SectionHeader } from '@/components/feedback/SectionHeader';
@@ -81,8 +82,7 @@ export function SubmitTicketTab({
         ticket={ticket}
         onReset={onReset}
         onCopy={() => {
-          // Clipboard (RN core) is deprecated — TODO(Phase 2): @react-native-clipboard/clipboard
-          Clipboard.setString(`#${ticket.id}`);
+          void Clipboard.setStringAsync(`#${ticket.id}`).catch(() => {});
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           toast.show('Ticket ID copied');
         }}
@@ -205,7 +205,7 @@ export function SubmitTicketTab({
         ]}
       >
         <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surfaceMuted }]} />
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.surfaceMuted }]} />
         <TextInput
           value={form.description}
           onChangeText={(t) => onChange({ description: t })}

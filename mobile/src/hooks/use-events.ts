@@ -84,8 +84,8 @@ export function useWithdrawRegistration(eventId: string) {
     // TODO(events): event-service.md has no unregister endpoint (Phase 1);
     // the repo's DELETE /events/:id/registrations/:registrationId is assumed
     // from the master doc. Verify against the gateway when it ships.
-    mutationFn: (registrationId: string) =>
-      EventRepository.withdrawRegistration(eventId, registrationId),
+    mutationFn: (_registrationId?: string) =>
+      EventRepository.withdrawRegistration(eventId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events', 'detail', eventId] });
       qc.invalidateQueries({ queryKey: ['events', 'registration', eventId] });

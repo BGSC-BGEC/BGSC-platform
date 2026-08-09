@@ -104,22 +104,37 @@ function messageOf(err: unknown): string {
 }
 
 // Wire the transport layer to auth state: token injection + refresh-on-401.
+//
+// Deduplication singleton: when the access token expires while multiple queries
+// are in-flight simultaneously (the normal case after any screen navigation),
+// every concurrent 401 must share the same refresh promise rather than each
+// calling AuthRepository.refresh() independently. Rotation backends invalidate
+// the refresh token after the first use, so requests 2-N would each get a
+// 401/403, hit the catch, and log the user out despite a valid session.
+let refreshInFlight: Promise<string | null> | null = null;
+
 apiClient.setAuthHooks({
   getToken: () => useAuthStore.getState().accessToken,
-  refresh: async () => {
-    try {
-      const { accessToken } = await AuthRepository.refresh();
-      await storage.setItem(TOKEN_KEY, accessToken);
-      useAuthStore.setState({ accessToken });
-      return accessToken;
-    } catch {
-      await storage.removeItem(TOKEN_KEY);
-      useAuthStore.setState({
-        accessToken: null,
-        user: null,
-        status: 'unauthenticated',
-      });
-      return null;
-    }
+  refresh: () => {
+    if (refreshInFlight) return refreshInFlight;
+    refreshInFlight = (async () => {
+      try {
+        const { accessToken } = await AuthRepository.refresh();
+        await storage.setItem(TOKEN_KEY, accessToken);
+        useAuthStore.setState({ accessToken });
+        return accessToken;
+      } catch {
+        await storage.removeItem(TOKEN_KEY);
+        useAuthStore.setState({
+          accessToken: null,
+          user: null,
+          status: 'unauthenticated',
+        });
+        return null;
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+    return refreshInFlight;
   },
 });

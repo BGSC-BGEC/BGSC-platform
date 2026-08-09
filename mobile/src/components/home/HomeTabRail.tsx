@@ -47,7 +47,7 @@ export function HomeTabRail({ active, onChange }: HomeTabRailProps) {
         style={[styles.track, { borderColor: colors.border }]}
       >
         <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
-        <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
+        <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
         {trackWidth > 0 ? (
           <Animated.View
             pointerEvents="none"
@@ -84,7 +84,7 @@ export function HomeTabRail({ active, onChange }: HomeTabRailProps) {
                   styles.label,
                   {
                     fontFamily: isActive ? FONTS.heading : FONTS.medium,
-                    fontSize: isActive ? 17 : 13,
+                    fontSize: 14,
                     color: isActive ? colors.text : colors.textMuted,
                   },
                 ]}

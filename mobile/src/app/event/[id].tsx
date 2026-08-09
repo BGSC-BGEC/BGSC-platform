@@ -29,7 +29,7 @@ export default function EventDetailScreen() {
   const colors = useColors();
   const { data: event, isLoading, isError, refetch } = useEventDetail(eventId);
 
-  if (isLoading || !event) {
+  if (isLoading) {
     return (
       <Screen>
         <RouteHeader title="Event Details" />
@@ -42,7 +42,10 @@ export default function EventDetailScreen() {
     );
   }
 
-  if (isError) {
+  // isError || !event must be checked separately from isLoading.
+  // The previous guard `isLoading || !event` caught the error path because
+  // `event` is undefined when a query errors, making isError unreachable.
+  if (isError || !event) {
     return (
       <Screen>
         <RouteHeader title="Event Details" />

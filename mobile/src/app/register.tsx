@@ -103,6 +103,7 @@ export default function RegisterScreen() {
         textContentType="username"
         error={err('username')}
         accessibilityLabel="Username"
+        scheme="light"
       />
 
       <GlassInput
@@ -115,6 +116,7 @@ export default function RegisterScreen() {
         textContentType="emailAddress"
         error={err('email')}
         accessibilityLabel="Email"
+        scheme="light"
       />
 
       <GlassInput
@@ -126,6 +128,7 @@ export default function RegisterScreen() {
         textContentType="password"
         error={err('password')}
         accessibilityLabel="Password"
+        scheme="light"
       />
 
       <GlassInput
@@ -137,6 +140,7 @@ export default function RegisterScreen() {
         textContentType="password"
         error={err('repeat')}
         accessibilityLabel="Repeat password"
+        scheme="light"
       />
 
       <GlassInput
@@ -147,6 +151,7 @@ export default function RegisterScreen() {
         textContentType="telephoneNumber"
         error={err('contact')}
         accessibilityLabel="Contact phone number"
+        scheme="light"
       />
 
       <AuthCheckbox

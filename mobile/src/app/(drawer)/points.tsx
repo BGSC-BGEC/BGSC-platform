@@ -201,10 +201,14 @@ function PointsTab() {
   );
 }
 
-/** Row tap → related entity (points spec §4.4); unknown routes show a snackbar. */
+/** Row tap → related entity (points spec §4.4). */
 function onTransactionPress(source: string, referenceId?: string | null) {
   if (source === 'challenge' && referenceId) {
     router.push(`/challenge/${referenceId}`);
+    return;
+  }
+  if (source === 'event' && referenceId) {
+    router.push(`/event/${referenceId}`);
     return;
   }
   if (source === 'store') {
@@ -213,10 +217,7 @@ function onTransactionPress(source: string, referenceId?: string | null) {
   }
   if (source === 'leaderboard') {
     router.push('/(drawer)/leaderboards');
-    return;
   }
-  // TODO(Phase 2): event detail route — show snackbar until /event/[id] exists.
-  // event → toast('This event is no longer available')
 }
 
 // ─── Tab 1 — Challenge Browser ────────────────────────────────────────────────

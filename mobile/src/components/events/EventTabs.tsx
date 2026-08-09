@@ -1,11 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { BlurView } from 'expo-blur';
 import { useEffect, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { EventStatus } from '@/core/types';
 import { FONTS } from '@/core/theme/fonts';
+import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useThemeStore } from '@/core/stores/themeStore';
 import { useColors } from '@/hooks/use-colors';
+
+/** Teal-600 — spec §2.4 active filter chip fill (not accent/orange). */
+const FILTER_ACTIVE_BG = '#235347';
 
 export type EventsTabKey = 'leagues' | 'bgec' | 'fitsoc' | 'general';
 
@@ -17,8 +23,8 @@ const TABS: { key: EventsTabKey; label: string; icon: keyof typeof Ionicons.glyp
 ];
 
 /**
- * Sticky category tab bar (spec §2.3): glass container, 4 tabs, accent
- * underline glide (spring, §10.2) + Haptics.selectionAsync on tap.
+ * Sticky category tab bar (spec §2.3): glass container backed by BlurView,
+ * 4 tabs with icon + label, accent underline glide spring (§10.2), Haptics on tap.
  */
 export function EventTabs({
   value,
@@ -28,6 +34,11 @@ export function EventTabs({
   onChange: (tab: EventsTabKey) => void;
 }) {
   const colors = useColors();
+  const preference = useThemeStore((s) => s.theme);
+  const system = useColorScheme();
+  const blurTint: 'light' | 'dark' =
+    (preference === 'system' ? system : preference) === 'light' ? 'light' : 'dark';
+
   const activeIndex = Math.max(0, TABS.findIndex((t) => t.key === value));
   const [glide] = useState(() => new Animated.Value(activeIndex));
 
@@ -40,15 +51,15 @@ export function EventTabs({
     }).start();
   }, [activeIndex, glide]);
 
-  // translateX % is relative to the underline's own width (25% of the bar) —
-  // one step per tab.
   const underlineX = glide.interpolate({
     inputRange: [0, 1, 2, 3],
     outputRange: ['0%', '25%', '50%', '75%'],
   });
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View style={[styles.container, { borderColor: colors.border }]}>
+      <BlurView intensity={55} tint={blurTint} style={StyleSheet.absoluteFill} />
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
       {TABS.map((tab) => {
         const active = tab.key === value;
         return (
@@ -87,9 +98,8 @@ export function EventTabs({
 }
 
 /**
- * Sticky multi-select status filter row (spec §2.4) — Past/Upcoming/Ongoing,
- * toggle semantics, persists across tabs (screen-level state). Count badge
- * uses Barlow numerals.
+ * Sticky multi-select status filter row (spec §2.4): teal-600 active fill,
+ * not the accent/orange — filter chips are navigation, not CTAs.
  */
 export function StatusFilterChips({
   value,
@@ -121,7 +131,7 @@ export function StatusFilterChips({
             style={[
               styles.chip,
               {
-                backgroundColor: active ? colors.accent : 'transparent',
+                backgroundColor: active ? FILTER_ACTIVE_BG : 'transparent',
                 borderColor: active ? 'transparent' : colors.border,
               },
             ]}
@@ -129,7 +139,8 @@ export function StatusFilterChips({
             <Text
               style={[
                 styles.chipLabel,
-                { color: active ? colors.accentText : colors.textMuted },
+                { color: active ? colors.text : colors.textMuted },
+                active && { fontFamily: FONTS.heading },
               ]}
             >
               {opt.label}
@@ -137,10 +148,15 @@ export function StatusFilterChips({
             <View
               style={[
                 styles.count,
-                { backgroundColor: active ? colors.accentText : colors.surfaceMuted },
+                { backgroundColor: active ? 'rgba(218,241,222,0.20)' : colors.surfaceMuted },
               ]}
             >
-              <Text style={[styles.countText, { color: active ? colors.accent : colors.textMuted }]}>
+              <Text
+                style={[
+                  styles.countText,
+                  { color: active ? colors.text : colors.textMuted },
+                ]}
+              >
                 {counts[opt.key]}
               </Text>
             </View>
@@ -157,6 +173,8 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     padding: 4,
+    marginVertical: 8,
+    overflow: 'hidden',
     position: 'relative',
   },
   tab: {

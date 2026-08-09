@@ -10,8 +10,11 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { FONTS } from '@/core/theme/fonts';
+import { useThemeStore } from '@/core/stores/themeStore';
+import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useColors } from '@/hooks/use-colors';
 
 export interface BottomSheetProps {
@@ -28,6 +31,10 @@ export interface BottomSheetProps {
  */
 export function BottomSheet({ visible, onClose, title, children }: BottomSheetProps) {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
+  const preference = useThemeStore((s) => s.theme);
+  const system = useColorScheme();
+  const blurTint: 'light' | 'dark' = (preference === 'system' ? system : preference) === 'light' ? 'light' : 'dark';
   const [translateY] = useState(() => new Animated.Value(600));
   const [scrimOpacity] = useState(() => new Animated.Value(0));
 
@@ -93,10 +100,10 @@ export function BottomSheet({ visible, onClose, title, children }: BottomSheetPr
         <Animated.View
           // eslint-disable-next-line react-hooks/refs -- pan responders are stable imperative handles, safe to spread
           {...pan.panHandlers}
-          style={[styles.sheet, { transform: [{ translateY }], borderColor: colors.border }]}
+          style={[styles.sheet, { transform: [{ translateY }], borderColor: colors.border, paddingBottom: Math.max(32, insets.bottom + 16) }]}
         >
-          <BlurView intensity={80} tint="dark" style={StyleSheet.absoluteFill} />
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
+          <BlurView intensity={80} tint={blurTint} style={StyleSheet.absoluteFill} />
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
           <View style={[styles.handle, { backgroundColor: colors.border }]} />
           <View style={styles.header}>
             {title ? <Text style={[styles.title, { color: colors.text }]}>{title}</Text> : null}
@@ -129,7 +136,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0,
     overflow: 'hidden',
     paddingHorizontal: 20,
-    paddingBottom: 32,
   },
   handle: {
     alignSelf: 'center',

@@ -125,6 +125,7 @@ export default function CompleteProfileScreen() {
         textContentType="password"
         error={err('password')}
         accessibilityLabel="Set a password"
+        scheme="light"
       />
 
       <GlassInput
@@ -136,6 +137,7 @@ export default function CompleteProfileScreen() {
         textContentType="password"
         error={err('repeat')}
         accessibilityLabel="Repeat password"
+        scheme="light"
       />
 
       <GlassInput
@@ -146,6 +148,7 @@ export default function CompleteProfileScreen() {
         textContentType="telephoneNumber"
         error={err('contact')}
         accessibilityLabel="Contact phone number"
+        scheme="light"
       />
 
       <AuthCheckbox

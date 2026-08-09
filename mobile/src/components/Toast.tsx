@@ -79,7 +79,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         <Animated.View pointerEvents="box-none" style={[StyleSheet.absoluteFill, styles.layer]}>
           <View style={[styles.toast, { borderColor: colors.border }]}>
             <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
+            <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />
             <Text style={[styles.message, { color: colors.text }]}>{toast.message}</Text>
             {toast.actionLabel && toast.onAction ? (
               <Pressable

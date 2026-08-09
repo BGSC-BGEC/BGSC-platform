@@ -136,7 +136,7 @@ function SearchBar({ query, onChange }: { query: string; onChange: (q: string) =
   return (
     <View style={[styles.searchWrap, { borderColor: focused ? colors.borderActive : colors.border }]}>
       <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.surfaceMuted }]} />
+      <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.surfaceMuted }]} />
       <Ionicons name="search" size={18} color={colors.textMuted} />
       <TextInput
         value={query}

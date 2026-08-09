@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
     height: 220,
     top: -90,
     right: -60,
-    opacity: 0.5,
+    opacity: 0.08,
   },
   orbBottom: {
     width: 180,

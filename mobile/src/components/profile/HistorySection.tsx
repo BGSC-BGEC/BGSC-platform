@@ -66,7 +66,7 @@ export function HistorySection() {
 
   return (
     <View style={styles.root}>
-      <Text style={[styles.heading, { color: colors.text }]}>📜 History</Text>
+      <Text style={[styles.heading, { color: colors.text }]}>History</Text>
       <SegmentedToggle
         options={TABS}
         value={tab}
@@ -167,7 +167,7 @@ function EventTab({
           </Text>
         </Pressable>
       ) : (
-        <Text style={[styles.endOfList, { color: colors.textMuted }]}>You&apos;re all caught up</Text>
+        <Text style={[styles.endOfList, { color: colors.textMuted }]}>You're all caught up</Text>
       )}
     </View>
   );
@@ -267,7 +267,7 @@ function ChallengeCard({ item }: { item: ChallengeHistoryItem }) {
       style={styles.itemCard}
     >
       <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
-        🏆 {item.title}
+        {item.title}
       </Text>
       <Text style={[styles.cardMeta, { color: colors.textMuted }]}>
         Domain: <Text style={{ color: domainColor }}>{item.domain}</Text> · Difficulty:{' '}
