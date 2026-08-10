@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { apiClient } from '../api/ApiClient';
+import { ApiError } from '../api/ApiError';
 import { AuthRepository } from '../repositories/AuthRepository';
 import { UserRepository } from '../repositories/UserRepository';
 import { storage } from '../storage';
@@ -52,13 +53,14 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   adoptToken: async (token) => {
+    // H-04: set token in-memory so getMe() can use it, but don't persist to
+    // keychain until the token is validated — prevents storing invalid tokens.
     set({ status: 'loading', error: null, accessToken: token });
-    await storage.setItem(TOKEN_KEY, token);
     try {
       const user = await UserRepository.getMe();
+      await storage.setItem(TOKEN_KEY, token); // only persist after confirmed valid
       set({ user, status: 'authenticated' });
     } catch (err) {
-      await storage.removeItem(TOKEN_KEY);
       set({ accessToken: null, status: 'unauthenticated', error: messageOf(err) });
       throw err;
     }
@@ -84,9 +86,20 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       const user = await UserRepository.getMe();
       set({ user, status: 'authenticated' });
-    } catch {
-      await storage.removeItem(TOKEN_KEY);
-      set({ accessToken: null, user: null, status: 'unauthenticated' });
+    } catch (err) {
+      // H-03: only wipe the persisted token when the server explicitly rejects
+      // it (401). Transient errors (network timeout, 5xx) must not evict a valid
+      // session — the user would lose their session every time they open the app
+      // offline or on a flaky connection.
+      if (err instanceof ApiError && err.status === 401) {
+        await storage.removeItem(TOKEN_KEY);
+        set({ accessToken: null, user: null, status: 'unauthenticated' });
+      } else {
+        // Keep the token in state so the refresh hook can retry it. Mark as
+        // unauthenticated so the UI prompts a login; on the next foreground the
+        // session will be re-validated.
+        set({ user: null, status: 'unauthenticated' });
+      }
     }
   },
 }));

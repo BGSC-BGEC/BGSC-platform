@@ -93,31 +93,36 @@ export function SubmitTicketTab({
   const pickAttachments = async () => {
     const room = MAX_ATTACHMENTS - form.attachments.length;
     if (room <= 0) return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsMultipleSelection: true,
-      selectionLimit: room,
-      quality: 0.8,
-    });
-    if (result.canceled) return;
-    const picked: FeedbackAttachment[] = [];
-    for (const asset of result.assets) {
-      // fileSize is undefined on some Android builds — accept then (mock; the
-      // real upload path will reject server-side).
-      if (asset.fileSize !== undefined && asset.fileSize > MAX_ATTACHMENT_BYTES) {
-        setUploadError('File exceeds 5MB limit.');
-        continue;
-      }
-      picked.push({
-        uri: asset.uri,
-        name: asset.fileName ?? `attachment-${Date.now().toString(36)}.jpg`,
-        size: asset.fileSize ?? 0,
-        mime: asset.mimeType ?? 'image/jpeg',
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsMultipleSelection: true,
+        selectionLimit: room,
+        quality: 0.8,
       });
-    }
-    if (picked.length > 0) {
-      setUploadError(null);
-      onChange({ attachments: [...form.attachments, ...picked].slice(0, MAX_ATTACHMENTS) });
+      if (result.canceled) return;
+      const picked: FeedbackAttachment[] = [];
+      for (const asset of result.assets) {
+        // fileSize is undefined on some Android builds — accept then (mock; the
+        // real upload path will reject server-side).
+        if (asset.fileSize !== undefined && asset.fileSize > MAX_ATTACHMENT_BYTES) {
+          setUploadError('File exceeds 5MB limit.');
+          continue;
+        }
+        picked.push({
+          uri: asset.uri,
+          name: asset.fileName ?? `attachment-${Date.now().toString(36)}.jpg`,
+          size: asset.fileSize ?? 0,
+          mime: asset.mimeType ?? 'image/jpeg',
+        });
+      }
+      if (picked.length > 0) {
+        setUploadError(null);
+        onChange({ attachments: [...form.attachments, ...picked].slice(0, MAX_ATTACHMENTS) });
+      }
+    } catch {
+      // H-29: unhandled async error on some Android/iOS permission flows.
+      setUploadError("Couldn't open photo library. Check your permissions.");
     }
   };
 

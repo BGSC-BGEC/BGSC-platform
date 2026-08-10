@@ -23,6 +23,7 @@ import { useToast } from '@/components/Toast';
 import { useAuthStore } from '@/core/stores/authStore';
 import { FONTS } from '@/core/theme/fonts';
 import type { Challenge } from '@/core/types';
+import { APP_URL } from '@/core/env';
 import { useColors } from '@/hooks/use-colors';
 import { useAcceptChallenge, useChallengeDetail } from '@/hooks/use-challenges';
 
@@ -73,11 +74,10 @@ export default function ChallengeDetailScreen() {
 
   const share = () => {
     if (!challenge) return;
-    // TODO(Phase 2): real deep link once a web route exists — use expo-linking
-    // createURL('/challenge/' + id) for a platform-correct URL.
+    // L-15: use APP_URL env var so staging builds share the correct base URL.
     void Share.share({
       message: `Check out this challenge on BGSC: ${challenge.title}`,
-      url: `https://bgsc.app/challenge/${challenge.id}`,
+      url: `${APP_URL}/challenge/${challenge.id}`,
     });
   };
 

@@ -11,7 +11,9 @@ import type { TransactionFilter } from '@/core/types';
 export function usePointsBalance(userId: string) {
   return useQuery({
     queryKey: ['points', 'balance', userId],
-    queryFn: () => PointsRepository.getBalance(),
+    // M-17: userId was in the query key but never passed to getBalance().
+    // Pass it so Phase 2 can parameterise the call per-user.
+    queryFn: () => PointsRepository.getBalance(userId),
     staleTime: 30_000,
   });
 }
@@ -25,8 +27,9 @@ export function usePointsBalance(userId: string) {
  */
 export function usePointTransactions(userId: string, filter: TransactionFilter) {
   return useInfiniteQuery({
+    // M-17: userId now passed to queryFn too (consistent with usePointsBalance).
     queryKey: ['points', 'transactions', userId, filter],
-    queryFn: ({ pageParam }) => PointsRepository.getTransactions(pageParam, 30),
+    queryFn: ({ pageParam }) => PointsRepository.getTransactions(userId, pageParam, 30),
     initialPageParam: 1,
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length === 30 ? allPages.length + 1 : undefined,

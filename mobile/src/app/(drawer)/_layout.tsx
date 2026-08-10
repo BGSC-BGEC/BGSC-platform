@@ -42,7 +42,14 @@ export default function DrawerLayout() {
       />
       <Drawer.Screen
         name="users"
-        options={{ drawerLabel: 'Users', title: 'Users' }}
+        options={{
+          // L-10: hide "Users" from the drawer label so non-admin roles don't
+          // see it as a tappable item. The screen itself has an RBAC guard that
+          // redirects — this prevents the misleading item from appearing at all.
+          drawerLabel: () => null,
+          drawerItemStyle: { display: 'none' },
+          title: 'Users',
+        }}
       />
     </Drawer>
   );

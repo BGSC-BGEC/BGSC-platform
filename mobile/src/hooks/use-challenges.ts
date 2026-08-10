@@ -40,8 +40,11 @@ export function useChallengeDetail(id: string, options?: { enabled?: boolean }) 
 /** In-progress challenges for the points dashboard strip (points spec §9.3). */
 export function useActiveChallenges(userId: string) {
   return useQuery({
+    // M-16: userId is in the key but was never passed to the queryFn.
+    // The repo currently returns the same mock data regardless of userId;
+    // when Phase 2 lands, userId will parameterise the backend call.
     queryKey: ['challenges', 'active', userId],
-    queryFn: () => ChallengeRepository.getActiveChallenges(),
+    queryFn: () => ChallengeRepository.getActiveChallenges(userId),
   });
 }
 

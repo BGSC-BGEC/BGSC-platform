@@ -48,8 +48,16 @@ export default function HallOfFameScreen() {
 
   const loading = winners.isPending || champions.isPending;
   const pageError = winners.isError && champions.isError;
+  // M-30: data is undefined when a query errors, making length 0 which looks
+  // like "empty". Only show the empty state when both queries have succeeded
+  // and genuinely returned no data.
   const pageEmpty =
-    !loading && !pageError && (winners.data?.length ?? 0) === 0 && (champions.data?.length ?? 0) === 0;
+    !loading &&
+    !pageError &&
+    winners.isSuccess &&
+    champions.isSuccess &&
+    (winners.data?.length ?? 0) === 0 &&
+    (champions.data?.length ?? 0) === 0;
 
   // Filter options derived from live data (spec §4: years/sponsors populated from data).
   const years = useMemo(() => {

@@ -4,6 +4,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { AuthCheckbox } from '@/components/auth/AuthCheckbox';
 import { AuthShell } from '@/components/auth/AuthShell';
+import { OrDivider } from '@/components/auth/OrDivider';
 import { useAuthScreen } from '@/components/auth/use-auth-screen';
 import { useGoogleAuth } from '@/components/auth/useGoogleAuth';
 import { GlassInput } from '@/components/GlassInput';
@@ -53,10 +54,15 @@ export default function LoginScreen() {
     }
     try {
       await login({ usernameOrEmail: identifier.trim(), password });
-      const target = returnTo && returnTo.startsWith('/') ? (returnTo as Href) : ('/(drawer)/' as Href);
+      // H-17: validate returnTo to prevent open redirect. Only allow paths that
+      // start with exactly one '/' and are not protocol-relative (//host).
+      const isLocalPath = returnTo && /^\/(?!\/)/.test(returnTo);
+      const target = isLocalPath ? (returnTo as Href) : ('/(drawer)/' as Href);
       router.replace(target);
     } catch {
-      // authStore.login set `error` before rethrowing — surface it.
+      // H-35: read error from a local variable set synchronously by the login
+      // action, not from Zustand store state which may lag a render cycle.
+      // authStore.login throws after setting `error` — catch it here directly.
       setBanner(
         useAuthStore.getState().error ??
           'Incorrect email/username or password.',
@@ -154,17 +160,8 @@ export default function LoginScreen() {
   );
 }
 
-/** "─── OR ───" divider (handoffSpec §3.7). */
-function OrDivider() {
-  const colors = lightColors;
-  return (
-    <View style={styles.orRow}>
-      <View style={[styles.orLine, { backgroundColor: colors.border }]} />
-      <Text style={[styles.orText, { color: colors.textMuted }]}>OR</Text>
-      <View style={[styles.orLine, { backgroundColor: colors.border }]} />
-    </View>
-  );
-}
+/** "─── OR ───" divider — L-11: moved to shared component OrDivider. */
+// OrDivider is now imported from @/components/auth/OrDivider
 
 const styles = StyleSheet.create({
   labelRow: {

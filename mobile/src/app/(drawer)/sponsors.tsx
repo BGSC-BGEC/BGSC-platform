@@ -38,6 +38,30 @@ import {
   useUpdateNewsletterSubs,
 } from '@/hooks/use-sponsors';
 
+/**
+ * L-12: `${color}22` hex alpha concatenation breaks for rgba() tokens.
+ * Convert any color to a safe rgba background using CSS opacity instead.
+ */
+function hexAlpha(color: string, alpha: number): string {
+  // If it's already rgba/hsl we can't safely append hex digits — use opacity wrapper.
+  // For simple hex we can fall back to the opacity trick via a pseudo-element workaround.
+  // Simplest portable approach: return the color and rely on opacity on the View.
+  // Actually the cleanest solution is to just return a transparent version using the
+  // RN `opacity` style on the container, but that affects children.
+  // For hex colors we can parse and rebuild; for non-hex fall back to transparent.
+  if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color)) {
+    const hex = color.length === 4
+      ? color[1] + color[1] + color[2] + color[2] + color[3] + color[3]
+      : color.slice(1);
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  // rgba/hsl/named — strip to transparent overlay via a known safe fallback.
+  return 'transparent';
+}
+
 export default function SponsorsScreen() {
   const colors = useColors();
   const qc = useQueryClient();
@@ -70,6 +94,9 @@ export default function SponsorsScreen() {
       : [...current, cat];
     updateNewsletters.mutate(next, {
       onSuccess: () => toast.show(`${current.includes(cat) ? 'Unsubscribed from' : 'Subscribed to'} ${cat}.`),
+      // H-32: onError rollback is handled in useUpdateNewsletterSubs (optimistic
+      // update with ctx.prev revert). Surface a toast so the user knows it failed.
+      onError: () => toast.show('Could not update newsletter preferences. Try again.'),
     });
   };
 
@@ -285,7 +312,7 @@ function PrizeCard({ prize }: { prize: SponsorPrize }) {
     <GlassCard accessibilityLabel={prize.title}>
       <View style={styles.prizeHeader}>
         <Text style={[styles.prizeTitle, { color: colors.text }]} numberOfLines={1}>{prize.title}</Text>
-        <View style={[styles.statusPill, { backgroundColor: `${statusColor}22` }]}>
+        <View style={[styles.statusPill, { backgroundColor: hexAlpha(statusColor, 0.13) }]}>
           <Text style={[styles.statusPillText, { color: statusColor }]}>{statusLabel}</Text>
         </View>
       </View>

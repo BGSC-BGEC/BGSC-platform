@@ -65,7 +65,7 @@ export function AuctionView({
           <Text
             accessibilityRole="link"
             accessibilityLabel="View full results"
-            onPress={() => router.back()}
+            onPress={() => router.push(`/event/${event.id}`)}
             style={[styles.link, { color: colors.accent }]}
           >
             View Full Results →

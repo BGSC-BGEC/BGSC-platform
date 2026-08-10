@@ -15,8 +15,11 @@ export function useFeed() {
   return useQuery({
     queryKey: ['feed', 'posts'],
     queryFn: async (): Promise<FeedPost[]> => {
-      // Small delay so the shape-matched skeletons are visible on fast machines.
-      await new Promise((resolve) => setTimeout(resolve, 450));
+      // H-11: delay was unconditional — gated to __DEV__ so it never ships to prod.
+      if (__DEV__) {
+        // Small delay so shape-matched skeletons are visible on fast machines.
+        await new Promise((resolve) => setTimeout(resolve, 450));
+      }
       return MOCK_FEED_POSTS;
     },
     staleTime: 60_000,

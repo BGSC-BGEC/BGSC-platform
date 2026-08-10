@@ -5,20 +5,21 @@ import { UserRepository } from '@/core/repositories/UserRepository';
 
 export type UserSortKey = 'last_seen' | 'created_at_desc' | 'created_at_asc' | 'points' | 'alpha';
 
+// M-19: hoist sortMap to module scope so it is not rebuilt on every render.
+const SORT_MAP: Record<UserSortKey, string> = {
+  last_seen: 'last_seen',
+  created_at_desc: 'created_at_desc',
+  created_at_asc: 'created_at_asc',
+  points: 'points_desc',
+  alpha: 'display_name_asc',
+};
+
 export function useUsers(params: {
   search: string;
   role: string | null;
   status: string | null;
   sort: UserSortKey;
 }) {
-  const sortMap: Record<UserSortKey, string> = {
-    last_seen: 'last_seen',
-    created_at_desc: 'created_at_desc',
-    created_at_asc: 'created_at_asc',
-    points: 'points_desc',
-    alpha: 'display_name_asc',
-  };
-
   return useQuery({
     queryKey: ['users', 'list', params],
     queryFn: () =>
@@ -27,7 +28,7 @@ export function useUsers(params: {
         search: params.search || undefined,
         role: params.role ?? undefined,
         status: params.status ?? undefined,
-        sort: sortMap[params.sort],
+        sort: SORT_MAP[params.sort],
         summary: true,
       }),
     staleTime: 30_000,

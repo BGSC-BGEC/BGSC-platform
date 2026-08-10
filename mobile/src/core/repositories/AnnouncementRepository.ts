@@ -9,18 +9,21 @@ function colorFromId(id: string): string {
 }
 
 function toAnnouncement(dto: Record<string, unknown>): Announcement {
-  const id: string = String(dto.createdBy ?? '');
+  // M-08: author.id must be the announcement author ID, not dto.createdBy
+  // (which is also the author ID but was misnamed — use it for colorFromId seed,
+  // but the Announcement.author.id should identify the author, not the record).
+  const authorId: string = String(dto.createdBy ?? '');
   return {
     id: String(dto.id),
     title: String(dto.title ?? ''),
     body: String(dto.body ?? ''),
     tags: (dto.tags ?? []) as AnnouncementTag[],
     author: {
-      id,
+      id: authorId,
       name: String(dto.authorUsername ?? 'Staff'),
       role: 'Coordinator',
-      avatarInitial: String(String(dto.authorUsername ?? '')[0] ?? id[0] ?? 'S').toUpperCase(),
-      avatarColor: colorFromId(id),
+      avatarInitial: String(String(dto.authorUsername ?? '')[0] ?? authorId[0] ?? 'S').toUpperCase(),
+      avatarColor: colorFromId(authorId),
     },
     createdAt: typeof dto.createdAt === 'string' ? dto.createdAt : new Date(String(dto.createdAt)).toISOString(),
   };

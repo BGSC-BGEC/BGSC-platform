@@ -173,7 +173,9 @@ export const ChallengeRepository = {
   },
 
   /** Challenges the viewing user is working on (points spec §9.3). */
-  async getActiveChallenges(): Promise<Challenge[]> {
+  // M-16: accept userId so when Phase 2 lands the backend call can be
+  // parameterised; today the mock ignores it.
+  async getActiveChallenges(_userId?: string): Promise<Challenge[]> {
     return MOCK_CHALLENGES.filter(
       (c) => c.userState === 'accepted' || c.userState === 'submitted',
     );

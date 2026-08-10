@@ -327,7 +327,14 @@ function HistoryList<T>({
   if (loading && items.length === 0) return <HistorySkeletons />;
   if (error && items.length === 0) return <SectionError onRetry={onRetry} />;
   if (items.length === 0) return <EmptyState message={emptyMessage} />;
-  return <View style={styles.list}>{items.map((item, i) => <View key={i}>{renderItem(item)}</View>)}</View>;
+  return <View style={styles.list}>{items.map((item, i) => {
+    // H-27: use a stable item-identity key rather than the array index so React
+    // can reconcile correctly when items reorder. Fall back to index only when
+    // no id-like field is present (renderItem().key is set by the caller).
+    const rendered = renderItem(item);
+    const stableKey = rendered.key ?? (typeof (item as Record<string, unknown>).id === 'string' ? (item as Record<string, unknown>).id as string : String(i));
+    return <View key={stableKey}>{rendered}</View>;
+  })}</View>;
 }
 
 function HistorySkeletons() {

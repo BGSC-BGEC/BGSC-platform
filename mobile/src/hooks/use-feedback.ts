@@ -24,6 +24,8 @@ export function useCoordinators() {
   return useQuery({
     queryKey: ['feedback', 'coordinators'],
     queryFn: () => FeedbackRepository.listCoordinators(),
+    // M-15: add staleTime so this doesn't refetch on every mount.
+    staleTime: 5 * 60 * 1000, // 5 min — roster changes rarely during a session
   });
 }
 
@@ -32,5 +34,6 @@ export function useLegacyAdmins() {
   return useQuery({
     queryKey: ['feedback', 'legacy-admins'],
     queryFn: () => FeedbackRepository.listLegacyAdmins(),
+    staleTime: 5 * 60 * 1000,
   });
 }

@@ -97,6 +97,7 @@ function PointsTab() {
   const [filter, setFilter] = useState<TransactionFilter>('all');
   const listRef = useRef<FlatList<PointTransaction> | null>(null);
   const earnY = useRef(0);
+  const onTransactionPress = useTransactionPress();
 
   const balance = usePointsBalance(userId);
   const transactions = usePointTransactions(userId, filter);
@@ -201,23 +202,27 @@ function PointsTab() {
   );
 }
 
-/** Row tap → related entity (points spec §4.4). */
-function onTransactionPress(source: string, referenceId?: string | null) {
-  if (source === 'challenge' && referenceId) {
-    router.push(`/challenge/${referenceId}`);
-    return;
-  }
-  if (source === 'event' && referenceId) {
-    router.push(`/event/${referenceId}`);
-    return;
-  }
-  if (source === 'store') {
-    router.push('/(drawer)/store');
-    return;
-  }
-  if (source === 'leaderboard') {
-    router.push('/(drawer)/leaderboards');
-  }
+/** Row tap → related entity (points spec §4.4).
+ * H-38: must be inside the component so router is accessed in a valid React
+ * context; module-scope functions can't call expo-router hooks safely. */
+function useTransactionPress() {
+  return (source: string, referenceId?: string | null) => {
+    if (source === 'challenge' && referenceId) {
+      router.push(`/challenge/${referenceId}`);
+      return;
+    }
+    if (source === 'event' && referenceId) {
+      router.push(`/event/${referenceId}`);
+      return;
+    }
+    if (source === 'store') {
+      router.push('/(drawer)/store');
+      return;
+    }
+    if (source === 'leaderboard') {
+      router.push('/(drawer)/leaderboards');
+    }
+  };
 }
 
 // ─── Tab 1 — Challenge Browser ────────────────────────────────────────────────

@@ -406,7 +406,7 @@ function UserQuickSheet({ user, onClose, onChangeRole }: { user: UserDto | null;
         <Text style={[styles.sheetValue, { color: colors.text }]}>{user.email}</Text>
       </View>
       <View style={styles.sheetActions}>
-        <PillButton label="View Full Profile" variant="ghost" onPress={() => { onClose(); router.push('/(drawer)/profile'); }} accessibilityLabel="View full profile" />
+        <PillButton label="View Full Profile" variant="ghost" onPress={() => { onClose(); router.push(`/(drawer)/profile?userId=${user.id}`); }} accessibilityLabel="View full profile" />
         <PillButton label="Change Role" variant="ghost" onPress={() => onChangeRole(user)} accessibilityLabel="Change role" />
         <PillButton label="Disable Account" variant="destructive" loading={disableAccount.isPending} onPress={onDisable} accessibilityLabel="Disable account" />
       </View>

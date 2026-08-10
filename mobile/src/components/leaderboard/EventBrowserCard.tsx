@@ -97,15 +97,15 @@ export function EventBrowserCard({
         ) : (
           <Text style={[styles.yourRank, { color: colors.textMuted }]}>Live standings</Text>
         )}
-        <Pressable
-          onPress={onPress}
-          accessibilityRole="button"
-          accessibilityLabel={`View standings for ${event.title}`}
-          hitSlop={8}
-          style={styles.viewButton}
+        {/* M-26: inner Pressable on View → duplicated navigation. Removed the
+            redundant Pressable; the GlassCard onPress above handles the tap. */}
+        <Text
+          style={[styles.viewText, { color: colors.text }]}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
         >
-          <Text style={[styles.viewText, { color: colors.text }]}>View →</Text>
-        </Pressable>
+          View →
+        </Text>
       </View>
     </GlassCard>
   );

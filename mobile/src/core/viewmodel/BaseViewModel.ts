@@ -38,6 +38,8 @@ export abstract class BaseViewModel<S extends object> {
   /**
    * Run an async task, writing its lifecycle into `state[key]` as AsyncState.
    * Returns the resolved data (or undefined on error) for optional chaining.
+   *
+   * L-04: also preserves the original error so callers can distinguish 403 vs 500.
    */
   protected async runAsync<T>(key: keyof S, task: () => Promise<T>): Promise<T | undefined> {
     this.setState({ [key]: { status: 'loading' } } as Partial<S>);
@@ -47,7 +49,7 @@ export abstract class BaseViewModel<S extends object> {
       return data;
     } catch (err) {
       const error = err instanceof Error ? err.message : 'Something went wrong';
-      this.setState({ [key]: { status: 'error', error } } as Partial<S>);
+      this.setState({ [key]: { status: 'error', error, _cause: err } } as Partial<S>);
       return undefined;
     }
   }

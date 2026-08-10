@@ -353,7 +353,8 @@ export interface Challenge {
 export type ProofItemType = 'image' | 'video' | 'link';
 
 export interface ProofItem {
-  id: string;
+  /** M-12: id is optional on client-created items — populated by the server after upload. */
+  id?: string;
   type: ProofItemType;
   /** Local asset uri for image/video, or the URL for link items. */
   uri: string;

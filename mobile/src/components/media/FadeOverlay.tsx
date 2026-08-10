@@ -23,8 +23,9 @@ export function FadeOverlay({ fraction = 0.4, style }: FadeOverlayProps) {
     <View pointerEvents="none" style={[StyleSheet.absoluteFill, style]}>
       <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: `${fraction * 100}%` }}>
         {[0.12, 0.2, 0.3, 0.42].map((opacity, i) => (
+          // L-19: use stable key that doesn't change across renders.
           <View
-            key={i}
+            key={opacity}
             style={{
               position: 'absolute',
               left: 0,
