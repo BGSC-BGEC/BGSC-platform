@@ -47,21 +47,15 @@ export function useEventLeaderboard(id: string) {
 
 /**
  * Own registration for an event. `GET /events/:id/my-registration` is NOT in
- * event-service.md (Phase 1) — the repo still hits it; any failure (404/401)
- * resolves to `null` = "not registered". TODO(events): drop the catch once the
- * endpoint lands; until then the registered state is driven by the register
- * mutation's own response.
+ * event-service.md (Phase 1) — the repo still hits it; 404 is handled at the
+ * repository layer (returns null = "not registered"). Other errors propagate
+ * so TanStack Query marks the query as errored rather than hiding failures.
+ * TODO(events): drop the enabled guard once the endpoint lands in Phase 1.
  */
 export function useMyRegistration(id: string, enabled: boolean) {
   return useQuery({
     queryKey: ['events', 'registration', id],
-    queryFn: async () => {
-      try {
-        return await EventRepository.getMyRegistration(id);
-      } catch {
-        return null;
-      }
-    },
+    queryFn: () => EventRepository.getMyRegistration(id),
     enabled: enabled && !!id,
     staleTime: 30_000,
   });
@@ -81,11 +75,12 @@ export function useRegisterEvent(eventId: string) {
 export function useWithdrawRegistration(eventId: string) {
   const qc = useQueryClient();
   return useMutation({
+    // M-18: registrationId param was silently dropped — pass it through.
     // TODO(events): event-service.md has no unregister endpoint (Phase 1);
     // the repo's DELETE /events/:id/registrations/:registrationId is assumed
     // from the master doc. Verify against the gateway when it ships.
-    mutationFn: (_registrationId?: string) =>
-      EventRepository.withdrawRegistration(eventId),
+    mutationFn: (registrationId?: string) =>
+      EventRepository.withdrawRegistration(eventId, registrationId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['events', 'detail', eventId] });
       qc.invalidateQueries({ queryKey: ['events', 'registration', eventId] });

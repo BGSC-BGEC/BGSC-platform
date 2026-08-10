@@ -79,7 +79,15 @@ export function InvestPointsSheet({
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Invest Points">
+    <BottomSheet
+      visible={visible}
+      onClose={() => {
+        // H-23: reset input so stale value doesn't appear on reopen.
+        setAmountText('');
+        onClose();
+      }}
+      title="Invest Points"
+    >
       <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Text style={[styles.subtitle, { color: colors.textMuted }]}>
           Boost your standing in this event.

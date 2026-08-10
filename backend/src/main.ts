@@ -15,6 +15,8 @@ import {
   isPointsServiceRoute,
   isSponsorServiceRoute,
   isUserServiceRoute,
+  isSocialServiceRoute,
+  isChallengeServiceRoute,
 } from './gateway/routing';
 
 async function bootstrap() {
@@ -36,6 +38,8 @@ async function bootstrap() {
   const pointsTarget = config.get<string>('gateway.services.points')!;
   const notificationTarget = config.get<string>('gateway.services.notification')!;
   const announcementTarget = config.get<string>('gateway.services.announcement')!;
+  const socialTarget = config.get<string>('gateway.services.social')!;
+  const challengeTarget = config.get<string>('gateway.services.challenge')!;
   const proxyTimeoutMs = config.get<number>('gateway.proxyTimeoutMs', 30000);
   const rateLimit = {
     general: config.get<{ max: number; windowMs: number }>(
@@ -124,6 +128,20 @@ async function bootstrap() {
     createServiceProxy({
       target: announcementTarget,
       pathFilter: (path) => isAnnouncementServiceRoute(path),
+      timeoutMs: proxyTimeoutMs,
+    }),
+  );
+  app.use(
+    createServiceProxy({
+      target: socialTarget,
+      pathFilter: (path) => isSocialServiceRoute(path),
+      timeoutMs: proxyTimeoutMs,
+    }),
+  );
+  app.use(
+    createServiceProxy({
+      target: challengeTarget,
+      pathFilter: (path) => isChallengeServiceRoute(path),
       timeoutMs: proxyTimeoutMs,
     }),
   );

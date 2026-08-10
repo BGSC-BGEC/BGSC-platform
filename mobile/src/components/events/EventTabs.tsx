@@ -2,7 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { BlurView } from 'expo-blur';
 import { useEffect, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 
 import type { EventStatus } from '@/core/types';
 import { FONTS } from '@/core/theme/fonts';
@@ -39,21 +40,37 @@ export function EventTabs({
   const blurTint: 'light' | 'dark' =
     (preference === 'system' ? system : preference) === 'light' ? 'light' : 'dark';
 
+  const reducedMotion = useReducedMotion();
+  const { width: screenWidth } = useWindowDimensions();
+  const tabWidth = screenWidth / TABS.length; // approximate; actual layout may differ
+
   const activeIndex = Math.max(0, TABS.findIndex((t) => t.key === value));
   const [glide] = useState(() => new Animated.Value(activeIndex));
 
   useEffect(() => {
-    Animated.spring(glide, {
-      toValue: activeIndex,
-      damping: 18,
-      stiffness: 150,
-      useNativeDriver: true,
-    }).start();
-  }, [activeIndex, glide]);
+    // H-12: useNativeDriver:true is incompatible with string-valued outputRange
+    // ('0%', '25%'…). Switch to pixel-based translation driven by the measured
+    // container width, then the native driver is safe to use.
+    // H-18/H-19 pattern: honour Reduce Motion — snap instead of spring when set.
+    if (reducedMotion) {
+      glide.setValue(activeIndex);
+    } else {
+      Animated.spring(glide, {
+        toValue: activeIndex,
+        damping: 18,
+        stiffness: 150,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [activeIndex, glide, reducedMotion]);
 
+  // H-12: translateX must be numeric (pixels) to be compatible with useNativeDriver.
+  // Drive it from segmentWidth derived from screenWidth.
+  const containerWidth = screenWidth - 32; // 16 px screen padding each side
+  const segmentWidth = containerWidth / TABS.length;
   const underlineX = glide.interpolate({
     inputRange: [0, 1, 2, 3],
-    outputRange: ['0%', '25%', '50%', '75%'],
+    outputRange: [0, segmentWidth, segmentWidth * 2, segmentWidth * 3],
   });
 
   return (

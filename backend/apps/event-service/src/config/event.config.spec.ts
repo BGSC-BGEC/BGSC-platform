@@ -50,6 +50,7 @@ describe('eventConfig', () => {
       env: 'production',
       db: { url: 'postgresql://bgsc:bgsc_pass@db.internal:5432/bgsc_prod' },
       jwt: { accessSecret: 'live-access-secret', issuer: 'bgsc-auth-service' },
+      sponsorServiceUrl: 'http://localhost:3003',
     });
   });
 

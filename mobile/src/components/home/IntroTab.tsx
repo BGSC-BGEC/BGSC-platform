@@ -62,7 +62,7 @@ export function IntroTab({ onSwitchTab }: IntroTabProps) {
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
       onScroll={(e) => setScrollY(e.nativeEvent.contentOffset.y)}
-      scrollEventThrottle={64}
+      scrollEventThrottle={16} // M-23: 64 ms was too coarse for the 32 px cue-hide threshold
       refreshControl={
         <RefreshControl
           refreshing={isRefetching || feed.isRefetching}

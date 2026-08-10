@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 
 import { FONTS } from '@/core/theme/fonts';
 import { useColors } from '@/hooks/use-colors';
@@ -14,15 +15,21 @@ const ECOSYSTEM_CHIPS = ['BGEC', 'FitSoc'];
  */
 export function HomeHero({ cueVisible = true }: { cueVisible?: boolean }) {
   const colors = useColors();
+  const reducedMotion = useReducedMotion();
   const [cueOpacity] = useState(() => new Animated.Value(1));
 
   useEffect(() => {
-    Animated.timing(cueOpacity, {
-      toValue: cueVisible ? 1 : 0,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-  }, [cueVisible, cueOpacity]);
+    // H-18: honour OS Reduce Motion — skip animation entirely when set.
+    if (reducedMotion) {
+      cueOpacity.setValue(cueVisible ? 1 : 0);
+    } else {
+      Animated.timing(cueOpacity, {
+        toValue: cueVisible ? 1 : 0,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [cueVisible, cueOpacity, reducedMotion]);
 
   return (
     <View style={[styles.hero, { backgroundColor: colors.backgroundMid, borderColor: colors.border }]}>
@@ -58,7 +65,12 @@ export function HomeHero({ cueVisible = true }: { cueVisible?: boolean }) {
         ))}
       </View>
 
-      <Animated.View style={[styles.cue, { opacity: cueOpacity }]}>
+      {/* H-22 (M): cue icon is decorative — hide from accessibility tree. */}
+      <Animated.View
+        style={[styles.cue, { opacity: cueOpacity }]}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
+      >
         <Ionicons name="chevron-down" size={20} color={colors.textMuted} />
       </Animated.View>
     </View>

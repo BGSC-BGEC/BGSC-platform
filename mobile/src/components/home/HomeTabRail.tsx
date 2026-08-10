@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { useEffect, useState } from 'react';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 
 import { FONTS } from '@/core/theme/fonts';
 import { useColors } from '@/hooks/use-colors';
@@ -26,25 +27,33 @@ export interface HomeTabRailProps {
  */
 export function HomeTabRail({ active, onChange }: HomeTabRailProps) {
   const colors = useColors();
+  const reducedMotion = useReducedMotion();
   const [trackWidth, setTrackWidth] = useState(0);
   const [underline] = useState(() => new Animated.Value(0));
 
   const segment = trackWidth / TABS.length;
 
   useEffect(() => {
-    Animated.spring(underline, {
-      toValue: active * segment,
-      damping: 18,
-      stiffness: 150,
-      useNativeDriver: true,
-    }).start();
-  }, [active, segment, underline]);
+    // H-19: honour OS Reduce Motion — snap instead of spring when set.
+    if (reducedMotion) {
+      underline.setValue(active * segment);
+    } else {
+      Animated.spring(underline, {
+        toValue: active * segment,
+        damping: 18,
+        stiffness: 150,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [active, segment, underline, reducedMotion]);
 
   return (
     <View style={styles.railInset}>
+      {/* H-21 (M): wrap in a tablist container for accessibility. */}
       <View
         onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
         style={[styles.track, { borderColor: colors.border }]}
+        accessibilityRole="tablist"
       >
         <BlurView intensity={55} tint="dark" style={StyleSheet.absoluteFill} />
         <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: colors.surface }]} />

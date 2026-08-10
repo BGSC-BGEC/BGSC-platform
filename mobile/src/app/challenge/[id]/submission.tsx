@@ -117,6 +117,12 @@ export default function SubmissionScreen() {
   };
 
   const onCamera = async () => {
+    // H-15: request camera permission before launching — crashes on iOS first launch otherwise.
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      toast.show('Camera access is required. Please enable it in Settings.');
+      return;
+    }
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ['images', 'videos'],
       quality: 0.85,
@@ -125,6 +131,12 @@ export default function SubmissionScreen() {
   };
 
   const onGallery = async () => {
+    // H-15: request media library permission before launching.
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      toast.show('Photo library access is required. Please enable it in Settings.');
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       allowsMultipleSelection: true,
       mediaTypes: ['images', 'videos'],
@@ -144,7 +156,8 @@ export default function SubmissionScreen() {
   };
 
   const confirmSubmit = () => {
-    if (proofItems.length === 0) return;
+    // H-33: guard against double-tap by checking isPending before showing the dialog.
+    if (proofItems.length === 0 || submit.isPending) return;
     Alert.alert(
       'Submit proof',
       `Submit proof for ${challenge?.title ?? 'this challenge'}? You can update your submission until an admin reviews it.`,
@@ -153,6 +166,9 @@ export default function SubmissionScreen() {
         {
           text: 'Submit',
           onPress: () => {
+            // isPending is also checked in the disabled prop of PillButton, but
+            // Alert stays open between taps so this is the real guard.
+            if (submit.isPending) return;
             submit.mutate(
               { proofItems, notes: notes.trim() },
               {

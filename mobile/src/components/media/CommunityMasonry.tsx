@@ -89,6 +89,8 @@ function MasonryItem({ item, width, onPress, onLongPress }: MasonryItemProps) {
 }
 
 function clampHeight(item: MediaItem, colWidth: number): number {
+  // H-21: guard against division by zero when item.width is 0 or missing.
+  if (!item.width) return MIN_ITEM_HEIGHT;
   const natural = (item.height / item.width) * colWidth;
   return Math.min(MAX_ITEM_HEIGHT, Math.max(MIN_ITEM_HEIGHT, natural));
 }

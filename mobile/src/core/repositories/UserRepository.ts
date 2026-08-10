@@ -19,7 +19,8 @@ export const UserRepository = {
     return apiClient.get<User>('/users/me');
   },
 
-  updateMe(patch: Partial<User>): Promise<User> {
+  updateMe(patch: Omit<Partial<User>, 'id' | 'role'>): Promise<User> {
+    // M-09: strip privileged fields that clients must never be able to set.
     return apiClient.patch<User>('/users/me', patch);
   },
 
@@ -140,8 +141,9 @@ export const UserRepository = {
     };
   }> {
     const q = new URLSearchParams();
-    if (params.page) q.set('page', String(params.page));
-    if (params.limit) q.set('limit', String(params.limit));
+    // M-05: use `!= null` instead of truthy check so page=0 is not dropped.
+    if (params.page != null) q.set('page', String(params.page));
+    if (params.limit != null) q.set('limit', String(params.limit));
     if (params.role) q.set('role', params.role);
     if (params.status) q.set('status', params.status);
     if (params.search) q.set('search', params.search);

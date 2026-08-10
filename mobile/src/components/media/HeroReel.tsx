@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
-import { useEffect, useState } from 'react';
-import { Animated, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, AppState, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { useReducedMotion } from 'react-native-reanimated';
 
 import { FadeOverlay } from '@/components/media/FadeOverlay';
 import { FONTS } from '@/core/theme/fonts';
@@ -92,18 +93,44 @@ export function HeroReel({ reels, onOpen }: HeroReelProps) {
 
 /** Slow zoom loop (scale 1 → 1.08 → 1, ~18 s) standing in for video motion. */
 function KenBurnsImage({ uri }: { uri: string }) {
+  const reducedMotion = useReducedMotion();
   const [scale] = useState(() => new Animated.Value(1));
+  const appState = useRef(AppState.currentState);
+  const loopRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(scale, { toValue: 1.08, duration: 9000, useNativeDriver: true }),
-        Animated.timing(scale, { toValue: 1, duration: 9000, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [scale]);
+    // H-20: stop the animation when the app is backgrounded to avoid battery
+    // drain from a continuously running loop. Also respect Reduce Motion.
+    if (reducedMotion) return;
+
+    const startLoop = () => {
+      loopRef.current?.stop();
+      loopRef.current = Animated.loop(
+        Animated.sequence([
+          Animated.timing(scale, { toValue: 1.08, duration: 9000, useNativeDriver: true }),
+          Animated.timing(scale, { toValue: 1, duration: 9000, useNativeDriver: true }),
+        ]),
+      );
+      loopRef.current.start();
+    };
+
+    startLoop();
+
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && appState.current !== 'active') {
+        startLoop();
+      } else if (nextState !== 'active') {
+        loopRef.current?.stop();
+        scale.setValue(1);
+      }
+      appState.current = nextState;
+    });
+
+    return () => {
+      loopRef.current?.stop();
+      sub.remove();
+    };
+  }, [scale, reducedMotion]);
 
   return (
     <Animated.View style={[StyleSheet.absoluteFill, { transform: [{ scale }] }]}>

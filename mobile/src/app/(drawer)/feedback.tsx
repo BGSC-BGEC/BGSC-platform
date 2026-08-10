@@ -76,7 +76,10 @@ export default function FeedbackScreen() {
     setForm((f) => ({ ...f, description: prefill }));
     setTab(0);
     pagerRef.current?.scrollTo({ x: 0, animated: true });
-  }, [pagerRef]);
+  // H-31: pagerRef is a stable ref object — including it in deps causes a new
+  // callback on every render without benefit. The real deps are only the setters.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const reportIssue = useCallback((coordinatorName: string) => {
     setForm((f) => ({
@@ -86,7 +89,9 @@ export default function FeedbackScreen() {
     }));
     setTab(0);
     pagerRef.current?.scrollTo({ x: 0, animated: true });
-  }, [pagerRef]);
+  // H-31: same as switchToTicket — pagerRef is a stable ref, not a real dep.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const resetForm = useCallback(() => {
     setForm(initialFeedbackForm);

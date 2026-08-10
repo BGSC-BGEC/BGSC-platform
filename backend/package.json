@@ -31,7 +31,13 @@
     "start:points-service:dev": "nest start points-service --watch",
     "seed": "ts-node src/seed.ts",
     "start:auth-service": "nest start auth-service",
-    "start:auth-service:dev": "nest start auth-service --watch"
+    "start:auth-service:dev": "nest start auth-service --watch",
+    "start:notification-service": "nest start notification-service",
+    "start:notification-service:dev": "nest start notification-service --watch",
+    "start:announcement-service": "nest start announcement-service",
+    "start:announcement-service:dev": "nest start announcement-service --watch",
+    "test:e2e:notification": "jest --config ./apps/notification-service/test/jest-e2e.json",
+    "test:e2e:announcement": "jest --config ./apps/announcement-service/test/jest-e2e.json"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",
@@ -44,7 +50,7 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/swagger": "^11.4.4",
     "@nestjs/typeorm": "^11.0.1",
-    "axios": "^1.18.1",
+    "axios": "^1.19.0",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",

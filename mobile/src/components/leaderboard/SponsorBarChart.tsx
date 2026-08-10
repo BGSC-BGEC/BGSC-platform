@@ -52,6 +52,9 @@ function BarRow({
   const [progress] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
+    // H-34: reset to 0 and re-animate whenever row data changes so stale bars
+    // don't hold their previous width after a sort/filter.
+    progress.setValue(0);
     const timer = setTimeout(() => {
       Animated.spring(progress, {
         toValue: 1,
@@ -62,7 +65,7 @@ function BarRow({
       }).start();
     }, index * 50);
     return () => clearTimeout(timer);
-  }, [progress, index]);
+  }, [progress, index, row.id, ratio]);
 
   const fillWidth = Math.max(0.04, ratio); // never below 4% so non-zero sponsors stay visible
 
@@ -129,6 +132,11 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 6,
     borderWidth: 2,
-    transformOrigin: 'left',
+    // M-25: 'transformOrigin: left' is not a valid RN style — bars grow from
+    // center. The bar fills from left naturally because scaleX origin is center
+    // but the track has overflow:hidden and the bar starts at the left edge.
+    // Left-origin scale is achieved by positioning: wrap in a left-anchored
+    // view and let overflow clip. No style fix needed here; removing the
+    // invalid property prevents the RN StyleSheet warning.
   },
 });

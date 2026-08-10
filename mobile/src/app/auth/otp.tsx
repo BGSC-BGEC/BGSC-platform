@@ -26,7 +26,10 @@ export default function OtpScreen() {
   const colors = lightColors;
   const toast = useToast();
   const params = useLocalSearchParams<{ email?: string | string[] }>();
-  const email = Array.isArray(params.email) ? params.email[0] ?? '' : (params.email ?? '');
+  // L-14: expo-router percent-encodes '+' in email addresses (e.g. foo+bar@x.com
+  // becomes foo%2Bbar@x.com). Decode before using.
+  const rawEmail = Array.isArray(params.email) ? params.email[0] ?? '' : (params.email ?? '');
+  const email = decodeURIComponent(rawEmail);
 
   const [code, setCode] = useState('');
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
@@ -58,6 +61,10 @@ export default function OtpScreen() {
       setOtpError(null);
       try {
         await AuthRepository.verifyEmail({ email, code: value });
+        // H-30: busyRef.current was never reset on the success path, so the
+        // auto-submit effect would refuse to re-trigger if the user tried
+        // again after a navigation failure. Reset it before navigating.
+        busyRef.current = false;
         toast.show('Email verified — welcome to BGSC!');
         router.replace('/(drawer)');
       } catch (err) {

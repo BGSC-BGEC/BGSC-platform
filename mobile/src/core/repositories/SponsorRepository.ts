@@ -17,6 +17,7 @@
 
 import { HallOfFameRepository } from './HallOfFameRepository';
 import { apiClient } from '../api/ApiClient';
+import { ApiError } from '../api/ApiError';
 import type { SponsorStats } from '../types';
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -121,8 +122,13 @@ export const SponsorRepository = {
   async getMyAffiliation(): Promise<SponsorStats | null> {
     try {
       return await apiClient.get<SponsorStats>('/users/me/sponsor-stats');
-    } catch {
-      return null;
+    } catch (err) {
+      // M-10: only treat 401/404 as "no affiliation" — 500s should propagate
+      // so callers can distinguish a data absence from a server failure.
+      if (err instanceof ApiError && (err.status === 401 || err.status === 404)) {
+        return null;
+      }
+      throw err;
     }
   },
 
@@ -149,9 +155,13 @@ export const SponsorRepository = {
   async getNewsletterSubscriptions(): Promise<NewsletterCategory[]> {
     try {
       return await apiClient.get<NewsletterCategory[]>('/users/me/newsletter-subscriptions');
-    } catch {
-      await delay(200);
-      return ['Gaming News', 'Game Dev'];
+    } catch (err) {
+      // L-08: only fabricate defaults for 404 (no subscription record yet).
+      // Other errors (5xx, network) should propagate so the UI can show an error state.
+      if (err instanceof ApiError && err.status === 404) {
+        return [];
+      }
+      throw err;
     }
   },
 

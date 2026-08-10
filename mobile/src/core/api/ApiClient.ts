@@ -5,7 +5,11 @@ interface RequestOptions {
   /** Skip Authorization header + the 401→refresh→retry dance (used by auth endpoints). */
   skipAuth?: boolean;
   signal?: AbortSignal;
+  /** Override the default 15 s request timeout. Pass 0 to disable. */
+  timeoutMs?: number;
 }
+
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 interface AuthHooks {
   /** Returns the current access token, or null when logged out. */
@@ -50,6 +54,10 @@ class ApiClient {
     return this.request<T>('POST', path, body, opts);
   }
 
+  put<T>(path: string, body?: unknown, opts?: RequestOptions): Promise<T> {
+    return this.request<T>('PUT', path, body, opts);
+  }
+
   patch<T>(path: string, body?: unknown, opts?: RequestOptions): Promise<T> {
     return this.request<T>('PATCH', path, body, opts);
   }
@@ -73,23 +81,40 @@ class ApiClient {
       if (token) headers['Authorization'] = `Bearer ${token}`;
     }
 
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers,
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-      credentials: 'include',
-      signal: opts.signal,
-    });
+    // Merge caller signal with a per-request timeout so stalled connections
+    // don't hang the UI indefinitely (H-01).
+    const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timeoutController = timeoutMs > 0 ? new AbortController() : null;
+    const timeoutId: ReturnType<typeof setTimeout> | null = timeoutController
+      ? setTimeout(() => timeoutController.abort(new Error(`Request timed out after ${timeoutMs} ms`)), timeoutMs)
+      : null;
 
-    // Transparent refresh-and-retry, exactly once, for authed requests.
-    if (res.status === 401 && !opts.skipAuth && !isRetry) {
-      const newToken = await this.auth.refresh();
-      if (newToken) {
-        return this.request<T>(method, path, body, opts, true);
+    const signal =
+      opts.signal && timeoutController
+        ? anySignal([opts.signal, timeoutController.signal])
+        : (timeoutController?.signal ?? opts.signal);
+
+    try {
+      const res = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        credentials: 'include',
+        signal,
+      });
+
+      // Transparent refresh-and-retry, exactly once, for authed requests.
+      if (res.status === 401 && !opts.skipAuth && !isRetry) {
+        const newToken = await this.auth.refresh();
+        if (newToken) {
+          return this.request<T>(method, path, body, opts, true);
+        }
       }
-    }
 
-    return this.parse<T>(res);
+      return this.parse<T>(res);
+    } finally {
+      if (timeoutId !== null) clearTimeout(timeoutId);
+    }
   }
 
   private async parse<T>(res: Response): Promise<T> {
@@ -117,6 +142,22 @@ function safeJson(text: string): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Returns an AbortSignal that fires when the first of the given signals aborts.
+ * Used to combine a caller-provided signal with the per-request timeout signal.
+ */
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  for (const signal of signals) {
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      return controller.signal;
+    }
+    signal.addEventListener('abort', () => controller.abort(signal.reason), { once: true });
+  }
+  return controller.signal;
 }
 
 /** App-wide singleton. Repositories import this. */

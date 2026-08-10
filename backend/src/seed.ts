@@ -71,6 +71,14 @@ type SeedTransaction = {
   referenceId: string | null;
 };
 
+type SeedAnnouncement = {
+  title: string;
+  body: string;
+  type: string;
+  tags: string[];
+  createdByUsername: string;
+};
+
 // ── Seed data ─────────────────────────────────────────────────────────────────
 
 const users: SeedUser[] = [
@@ -381,6 +389,37 @@ const transactions: SeedTransaction[] = [
   { username: 'member01', amount: 10, type: 'earn', source: 'event', referenceId: EVENT_ID.valorantOpen },
 ];
 
+const announcements: SeedAnnouncement[] = [
+  {
+    title: 'Offside Football League — Registration Open!',
+    body: 'Solo registrations for the Offside Football League 2026 are now live. Head to the Events page to sign up before the July 1st deadline. Spots are limited — first come, first served.',
+    type: 'OFFSIDE',
+    tags: ['offside', 'football', 'registration'],
+    createdByUsername: 'coordinator01',
+  },
+  {
+    title: 'BGEC Valorant Cup — Ongoing',
+    body: 'The BGEC Valorant Cup is underway! Live scores and brackets are available on the Events page. Come cheer your favourite teams at the Esports Arena.',
+    type: 'BGEC',
+    tags: ['bgec', 'valorant', 'esports'],
+    createdByUsername: 'coordinator01',
+  },
+  {
+    title: 'FitSoc Chess Night — Results',
+    body: 'Chess Night is a wrap! Congratulations to all participants. Final standings have been posted. Check your points balance for participation credits.',
+    type: 'FITSOC',
+    tags: ['fitsoc', 'chess'],
+    createdByUsername: 'coordinator01',
+  },
+  {
+    title: 'Welcome to BGSC Platform!',
+    body: 'The BGSC Platform is officially live. Complete your profile, pick a sponsor, and start tracking your sports journey. More events dropping every week — stay tuned.',
+    type: 'BGEC',
+    tags: ['announcement', 'welcome'],
+    createdByUsername: 'founder01',
+  },
+];
+
 // ── Seed runner ───────────────────────────────────────────────────────────────
 
 async function seed() {
@@ -625,6 +664,41 @@ async function seed() {
     insertedTxns++;
   }
 
+  // ── Announcements ─────────────────────────────────────────────────────────
+  // Idempotent: skip if an announcement with the same title already exists
+  console.log('\n── Announcements ──');
+  let insertedAnnouncements = 0;
+  let skippedAnnouncements = 0;
+
+  for (const a of announcements) {
+    const createdBy = userIds.get(a.createdByUsername);
+    if (!createdBy) {
+      console.log(`  SKIP  announcement "${a.title}" (user not found)`);
+      continue;
+    }
+
+    const existing = await ds.query<Array<{ id: string }>>(
+      `SELECT id FROM announcements WHERE title = $1 LIMIT 1`,
+      [a.title],
+    );
+
+    if (existing.length > 0) {
+      skippedAnnouncements++;
+      continue;
+    }
+
+    // 120 days ≈ 4 months retention
+    const expiresAt = new Date(Date.now() + 120 * 24 * 60 * 60 * 1000);
+    await ds.query(
+      `INSERT INTO announcements (title, body, type, tags, created_by, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [a.title, a.body, a.type, a.tags, createdBy, expiresAt],
+    );
+
+    console.log(`  INSERT  "${a.title}"`);
+    insertedAnnouncements++;
+  }
+
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log(`
 ── Done ──────────────────────────────────────
@@ -635,6 +709,7 @@ async function seed() {
   registrations: ${insertedRegs} inserted, ${skippedRegs} skipped
   scores:        ${insertedScores} upserted, ${skippedScores} skipped
   transactions:  ${insertedTxns} inserted, ${skippedTxns} skipped
+  announcements: ${insertedAnnouncements} inserted, ${skippedAnnouncements} skipped
 ──────────────────────────────────────────────`);
 
   await ds.destroy();

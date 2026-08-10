@@ -35,9 +35,13 @@ export function useMediaAlbums() {
 
 export function useMediaCommunity() {
   const user = useAuthStore((s) => s.user);
+  const isAuthed = Boolean(user);
   return useQuery({
-    queryKey: ['media', 'community'],
-    queryFn: () => MediaRepository.getCommunity(Boolean(user)),
+    // H-10: auth state must be in the query key — getCommunity returns different
+    // data for guests vs. authenticated users. Without it, the cached authed
+    // result is served to a guest after logout (and vice versa).
+    queryKey: ['media', 'community', isAuthed],
+    queryFn: () => MediaRepository.getCommunity(isAuthed),
     staleTime: 60_000,
   });
 }

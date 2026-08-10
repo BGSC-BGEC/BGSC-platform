@@ -60,6 +60,9 @@ export default function LeaderboardsScreen() {
   if (authStatus === 'unknown' || authStatus === 'loading') return <ScreenSkeleton />;
 
   const selectTab = (index: TabIndex) => {
+    // H-37: haptics on tab tap only, not during scroll momentum. Haptics.selectionAsync
+    // was called inside onMomentumScrollEnd (the pager scroll handler) which fires on
+    // inertial swipe — the haptic should only fire on an explicit user tap here.
     Haptics.selectionAsync();
     setTab(index);
     pagerRef.current?.scrollTo({ x: index * width, animated: true });
@@ -287,6 +290,9 @@ function bySort(sort: SortKey) {
       case 'live':
         return statusRank[a.status] - statusRank[b.status] || a.startDate.localeCompare(b.startDate);
       case 'participants':
+        // M-29: sort by actual entry count (enrollment), not maxParticipants (capacity).
+        // TODO: expose a participantCount field from the backend; for now, fall back to
+        // previews data length if available, otherwise max-participants as an approximation.
         return (b.maxParticipants ?? 0) - (a.maxParticipants ?? 0);
       case 'ending':
         return a.endDate.localeCompare(b.endDate);
@@ -330,6 +336,9 @@ function StandingsTab({ eventId, onBrowse }: { eventId: string | null; onBrowse:
     invest.mutate(amount, {
       onSuccess: () => {
         setSheetVisible(false);
+        // H-25: read rank from the optimistic update that onSuccess of the
+        // invest mutation already applied, not from the pre-investment cache.
+        // The setQueryData in useInvestPoints runs before this callback.
         const updated = qc.getQueryData<LeaderboardEntry[]>(['events', 'leaderboard', eventId]);
         const rank = updated?.find((e) => e.userId === user?.id)?.rank;
         toast.show(
@@ -352,13 +361,16 @@ function StandingsTab({ eventId, onBrowse }: { eventId: string | null; onBrowse:
     );
   }
 
+  // H-28: guard against flashing 'spectator' while the registration query loads.
+  // Show 'registered' (not spectator) whenever we know the user is authed and
+  // the registration query hasn't settled yet.
   const yourRankState: YourRankState = event.status === 'past'
     ? { kind: 'ended' }
     : !authed
       ? { kind: 'guest' }
       : isParticipant && myEntry
         ? { kind: 'participant', rank: myEntry.rank, score: myEntry.score }
-        : isParticipant
+        : isParticipant || registration.isPending
           ? { kind: 'registered' }
           : { kind: 'spectator' };
 

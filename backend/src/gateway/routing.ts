@@ -18,6 +18,8 @@ export const EVENT_SERVICE_PREFIXES = ['/events', '/hall-of-fame'];
 export const POINTS_SERVICE_PREFIXES = ['/points'];
 export const NOTIFICATION_SERVICE_PREFIXES = ['/notifications'];
 export const ANNOUNCEMENT_SERVICE_PREFIXES = ['/announcements'];
+export const SOCIAL_SERVICE_PREFIXES = ['/social'];
+export const CHALLENGE_SERVICE_PREFIXES = ['/challenges'];
 
 /** Auth "attempt" endpoints that get the stricter rate limit (5 / 15 min). */
 const AUTH_ATTEMPT_PATHS = ['/auth/login', '/auth/register'];
@@ -94,4 +96,12 @@ export function isNotificationServiceRoute(url: string): boolean {
 
 export function isAnnouncementServiceRoute(url: string): boolean {
   return startsWithAny(pathOf(url), ANNOUNCEMENT_SERVICE_PREFIXES);
+}
+
+export function isSocialServiceRoute(url: string): boolean {
+  return startsWithAny(pathOf(url), SOCIAL_SERVICE_PREFIXES);
+}
+
+export function isChallengeServiceRoute(url: string): boolean {
+  return startsWithAny(pathOf(url), CHALLENGE_SERVICE_PREFIXES);
 }

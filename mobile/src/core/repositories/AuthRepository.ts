@@ -27,7 +27,9 @@ export const AuthRepository = {
   },
 
   logout(): Promise<void> {
-    return apiClient.post<void>('/auth/logout');
+    // H-05: skipAuth so an expired access token doesn't block the logout call
+    // with a 401. The refresh cookie is cleared server-side regardless.
+    return apiClient.post<void>('/auth/logout', undefined, { skipAuth: true });
   },
 
   /** Full URL to kick off the Google OAuth2 redirect flow. */

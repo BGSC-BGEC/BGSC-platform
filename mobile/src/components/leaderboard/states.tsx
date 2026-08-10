@@ -42,7 +42,10 @@ export function SectionEmpty({
 export function SectionError({ message, onRetry }: { message: string; onRetry: () => void }) {
   const colors = useColors();
   return (
-    <GlassCard accessibilityLabel="Section error">
+    <GlassCard
+      // L-20: accessibility label was generic — include the specific error message.
+      accessibilityLabel={`Section error: ${message}`}
+    >
       <View style={styles.errorRow}>
         <Ionicons name="cloud-offline-outline" size={22} color={colors.danger} />
         <Text style={[styles.errorText, { color: colors.textMuted }]}>{message}</Text>

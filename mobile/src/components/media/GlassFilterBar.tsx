@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
-import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ChipFilter, type ChipOption } from '@/components/ChipFilter';
 import { FONTS } from '@/core/theme/fonts';
@@ -50,7 +50,16 @@ export function GlassFilterBar({ query, onChangeQuery, category, onChangeCategor
           style={[styles.input, { color: colors.text }]}
         />
         {query.length > 0 ? (
-          <Ionicons name="close-circle" size={16} color={colors.textMuted} onPress={() => onChangeQuery('')} />
+          // H-22: Ionicons onPress gives a 16×16 dp touch target — below the 44 dp
+          // minimum. Wrap in a Pressable with hitSlop to meet the guideline.
+          <Pressable
+            onPress={() => onChangeQuery('')}
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+            hitSlop={14}
+          >
+            <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+          </Pressable>
         ) : null}
       </View>
 

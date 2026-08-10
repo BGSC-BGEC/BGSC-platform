@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { MoreThan, Repository } from 'typeorm';
+import { ArrayContains, MoreThan, Repository } from 'typeorm';
 import { AnnouncementResponseDto } from './dto/announcement-response.dto';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
+import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
 import { Announcement } from './entities/announcement.entity';
 
 @Injectable()
@@ -33,12 +34,30 @@ export class AnnouncementsService {
     return this.repo.find({
       where: {
         ...(query.type ? { type: query.type } : {}),
+        ...(query.tag ? { tags: ArrayContains([query.tag]) } : {}),
         expiresAt: MoreThan(new Date()),
       },
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
+  }
+
+  async findOne(id: string): Promise<AnnouncementResponseDto> {
+    const announcement = await this.repo.findOne({ where: { id } });
+    if (!announcement) {
+      throw new NotFoundException(`Announcement ${id} not found`);
+    }
+    return announcement;
+  }
+
+  async update(id: string, dto: UpdateAnnouncementDto): Promise<AnnouncementResponseDto> {
+    const announcement = await this.repo.findOne({ where: { id } });
+    if (!announcement) {
+      throw new NotFoundException(`Announcement ${id} not found`);
+    }
+    Object.assign(announcement, dto);
+    return this.repo.save(announcement);
   }
 
   async remove(id: string): Promise<AnnouncementResponseDto> {

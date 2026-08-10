@@ -1,4 +1,5 @@
 import { apiClient } from '../api/ApiClient';
+import { ApiError } from '../api/ApiError';
 import type {
   EventCategory,
   EventType,
@@ -60,8 +61,13 @@ export const EventRepository = {
     return apiClient.post<Registration>(`/events/${eventId}/register`, payload);
   },
 
-  async withdrawRegistration(eventId: string): Promise<void> {
-    return apiClient.delete(`/events/${eventId}/register`);
+  async withdrawRegistration(eventId: string, registrationId?: string): Promise<void> {
+    // M-18: registrationId now threaded through. When the endpoint lands,
+    // switch to DELETE /events/:eventId/registrations/:registrationId.
+    const path = registrationId
+      ? `/events/${eventId}/registrations/${registrationId}`
+      : `/events/${eventId}/register`;
+    return apiClient.delete(path);
   },
 
   async applyForCaptain(eventId: string): Promise<{ status: 'pending' }> {
@@ -73,6 +79,13 @@ export const EventRepository = {
   },
 
   async getMyRegistration(eventId: string): Promise<Registration | null> {
-    return apiClient.get<Registration | null>(`/events/${eventId}/my-registration`);
+    try {
+      return await apiClient.get<Registration | null>(`/events/${eventId}/my-registration`);
+    } catch (err) {
+      // H-06: 404 is the common path (user simply hasn't registered). Return null
+      // rather than throwing so callers don't need a catch for the expected case.
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
   },
 };

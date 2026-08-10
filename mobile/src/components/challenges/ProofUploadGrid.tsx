@@ -3,6 +3,7 @@ import { Image } from 'expo-image';
 import { useState } from 'react';
 import {
   Alert,
+  Linking,
   Modal,
   Pressable,
   StyleSheet,
@@ -30,7 +31,7 @@ export function ProofUploadGrid({ items, onChange, readOnly = false, onAdd }: Pr
   const colors = useColors();
   const [preview, setPreview] = useState<ProofItem | null>(null);
 
-  const remove = (id: string) => {
+  const remove = (id: string | undefined) => {
     Alert.alert('Remove proof?', 'This item will be removed from your submission.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Remove', style: 'destructive', onPress: () => onChange(items.filter((i) => i.id !== id)) },
@@ -39,7 +40,8 @@ export function ProofUploadGrid({ items, onChange, readOnly = false, onAdd }: Pr
 
   const openItem = (item: ProofItem) => {
     if (item.type === 'link') {
-      // Links are URLs — open them rather than previewing.
+      // H-13: link items are URLs — open them in the system browser.
+      void Linking.openURL(item.uri).catch(() => {});
       return;
     }
     setPreview(item);
@@ -114,7 +116,22 @@ export function ProofUploadGrid({ items, onChange, readOnly = false, onAdd }: Pr
             <Ionicons name="close" size={28} color={colors.accentText} />
           </Pressable>
           {preview ? (
-            <Image source={{ uri: preview.uri }} style={styles.previewImage} contentFit="contain" />
+            // H-14: video proof rendered in Image was broken. expo-av is not
+            // installed; show a placeholder with a "Open" link until it ships.
+            preview.type === 'video' ? (
+              <View style={styles.videoPlaceholder}>
+                <Ionicons name="videocam-outline" size={40} color="#fff" />
+                <Text
+                  style={styles.videoOpen}
+                  onPress={() => void Linking.openURL(preview.uri).catch(() => {})}
+                  accessibilityRole="link"
+                >
+                  Open video
+                </Text>
+              </View>
+            ) : (
+              <Image source={{ uri: preview.uri }} style={styles.previewImage} contentFit="contain" />
+            )
           ) : null}
         </View>
       </Modal>
@@ -193,5 +210,17 @@ const styles = StyleSheet.create({
   previewImage: {
     width: '100%',
     height: '100%',
+  },
+  videoPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  videoOpen: {
+    color: '#fff',
+    fontFamily: FONTS.semibold,
+    fontSize: 14,
+    textDecorationLine: 'underline',
   },
 });

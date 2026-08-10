@@ -8,6 +8,10 @@ export class ListAnnouncementsQueryDto {
 
   @IsOptional()
   @IsString()
+  tag?: string;
+
+  @IsOptional()
+  @IsString()
   page?: string;
 
   @IsOptional()

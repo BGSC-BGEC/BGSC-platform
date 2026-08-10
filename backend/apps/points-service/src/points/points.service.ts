@@ -75,14 +75,30 @@ export class PointsService {
     userId: string,
     page: number,
     limit: number,
+    source?: string,
+    type?: string,
   ): Promise<TransactionResponseDto[]> {
     const transactions = await this.transactionsRepository.find({
-      where: { userId },
+      where: {
+        userId,
+        ...(source ? { source: source as PointsSource } : {}),
+        ...(type ? { type: type as TransactionType } : {}),
+      },
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
       take: limit,
     });
     return transactions.map((t) => this.toResponse(t));
+  }
+
+  async getTransactionsForUser(
+    userId: string,
+    page: number,
+    limit: number,
+    source?: string,
+    type?: string,
+  ): Promise<TransactionResponseDto[]> {
+    return this.getMyTransactions(userId, page, limit, source, type);
   }
 
   private toResponse(t: PointTransaction): TransactionResponseDto {

@@ -70,6 +70,24 @@
       "compilerOptions": {
         "tsConfigPath": "apps/announcement-service/tsconfig.app.json"
       }
+    },
+    "social-service": {
+      "type": "application",
+      "root": "apps/social-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/social-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/social-service/tsconfig.app.json"
+      }
+    },
+    "challenge-service": {
+      "type": "application",
+      "root": "apps/challenge-service",
+      "entryFile": "main",
+      "sourceRoot": "apps/challenge-service/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/challenge-service/tsconfig.app.json"
+      }
     }
   }
 }

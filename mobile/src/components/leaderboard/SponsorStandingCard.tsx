@@ -100,8 +100,12 @@ export function SponsorStandingCard({
 }
 
 function initials(name: string): string {
+  // M-28: guard against empty string — w[0] on an empty split segment returns
+  // undefined which stringifies to 'undefined'. Filter empty segments first.
+  if (!name.trim()) return '?';
   return name
     .split(/\s+/)
+    .filter(Boolean)
     .map((w) => w[0])
     .join('')
     .slice(0, 2)

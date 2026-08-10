@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AuthCheckbox } from '@/components/auth/AuthCheckbox';
 import { AuthShell } from '@/components/auth/AuthShell';
+import { OrDivider } from '@/components/auth/OrDivider';
 import { useAuthScreen } from '@/components/auth/use-auth-screen';
 import { useGoogleAuth } from '@/components/auth/useGoogleAuth';
 import { GlassInput } from '@/components/GlassInput';
@@ -220,17 +221,8 @@ export default function RegisterScreen() {
   );
 }
 
-/** "─── OR ───" divider (handoffSpec §3.7). */
-function OrDivider() {
-  const colors = lightColors;
-  return (
-    <View style={styles.orRow}>
-      <View style={[styles.orLine, { backgroundColor: colors.border }]} />
-      <Text style={[styles.orText, { color: colors.textMuted }]}>OR</Text>
-      <View style={[styles.orLine, { backgroundColor: colors.border }]} />
-    </View>
-  );
-}
+/** "─── OR ───" divider — L-11: moved to shared component OrDivider. */
+// OrDivider is now imported from @/components/auth/OrDivider
 
 const styles = StyleSheet.create({
   caption: {

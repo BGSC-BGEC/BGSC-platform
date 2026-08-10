@@ -52,7 +52,9 @@ export function useSponsorStandings(time: SponsorTimeFilter) {
 export function useMySponsorStats() {
   const enabled = useAuthStore((s) => s.status === 'authenticated');
   return useQuery({
-    queryKey: ['sponsors', 'mine'],
+    // H-07: key was ['sponsors','mine'] which collided with useMyAffiliation in
+    // use-sponsors.ts (different API, same cache slot). Distinguish with 'stats'.
+    queryKey: ['sponsors', 'stats', 'mine'],
     queryFn: () => UserRepository.getSponsorStats(),
     enabled,
   });
