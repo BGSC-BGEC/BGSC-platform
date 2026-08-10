@@ -53,4 +53,15 @@ export class NotificationsService {
     notification.isRead = true;
     return this.repo.save(notification);
   }
+
+  async markAllRead(userId: string): Promise<{ updated: number }> {
+    const result = await this.repo
+      .createQueryBuilder()
+      .update(Notification)
+      .set({ isRead: true })
+      .where('user_id = :userId AND is_read = false', { userId })
+      .execute();
+
+    return { updated: result.affected ?? 0 };
+  }
 }

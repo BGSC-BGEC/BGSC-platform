@@ -62,15 +62,22 @@ describe('EventsService', () => {
       save: jest.fn(),
     };
     eventBus = { emit: jest.fn() };
-    // Simulate transaction: run the callback with a minimal manager mock
+    // Simulate transaction: run the callback with a minimal manager mock.
+    // register() uses manager.getRepository(), submitScores() uses manager.delete/create/save directly.
     dataSource = {
       transaction: jest.fn().mockImplementation(async (cb: (em: Partial<EntityManager>) => Promise<void>) => {
         const manager: Partial<EntityManager> = {
           delete: jest.fn().mockResolvedValue({ affected: 0, raw: [] }),
-          create: jest.fn((_entity, data) => data),
-          save: jest.fn().mockImplementation((_entity, items) => Promise.resolve(items)),
+          create: jest.fn((_entity: unknown, data: unknown) => data),
+          save: jest.fn().mockImplementation((_entity: unknown, items: unknown) => Promise.resolve(items)),
+          getRepository: jest.fn().mockImplementation((entity: unknown) => {
+            if (entity === Event) return { ...eventsRepository, findOne: eventsRepository.findOneBy };
+            if (entity === Registration) return registrationsRepository;
+            if (entity === EventScore) return scoresRepository;
+            return {};
+          }),
         };
-        await cb(manager);
+        return cb(manager);
       }),
     };
 
@@ -80,6 +87,8 @@ describe('EventsService', () => {
       scoresRepository as unknown as Repository<EventScore>,
       eventBus as unknown as EventBusService,
       dataSource as unknown as DataSource,
+      { get: jest.fn().mockReturnValue(undefined) } as unknown as import('@nestjs/axios').HttpService,
+      { get: jest.fn().mockReturnValue('http://localhost:3003') } as unknown as import('@nestjs/config').ConfigService,
     );
   });
 

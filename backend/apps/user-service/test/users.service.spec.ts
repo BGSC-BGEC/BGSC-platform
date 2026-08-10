@@ -53,6 +53,8 @@ describe('UsersService', () => {
       repository as unknown as Repository<User>,
       sponsorsRepository as unknown as Repository<Sponsor>,
       affiliationsRepository as unknown as Repository<UserSponsorAffiliation>,
+      { get: jest.fn().mockReturnValue(undefined) } as unknown as import('@nestjs/axios').HttpService,
+      { get: jest.fn().mockReturnValue('http://localhost:3004') } as unknown as import('@nestjs/config').ConfigService,
     );
   });
 
@@ -90,6 +92,8 @@ describe('UsersService', () => {
     expect(repository.find).toHaveBeenCalledWith({
       order: { createdAt: 'DESC' },
       where: { role: UserRole.MEMBER, status: UserStatus.ACTIVE },
+      skip: 0,
+      take: 50,
     });
   });
 

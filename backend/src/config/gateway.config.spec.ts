@@ -23,6 +23,10 @@ describe('gatewayConfig', () => {
       SPONSOR_SERVICE_URL: 'http://sponsor-service:3003',
       EVENT_SERVICE_URL: 'http://event-service:3004',
       POINTS_SERVICE_URL: 'http://points-service:3005',
+      NOTIFICATION_SERVICE_URL: 'http://notification-service:3006',
+      ANNOUNCEMENT_SERVICE_URL: 'http://announcement-service:3007',
+      SOCIAL_SERVICE_URL: 'http://social-service:3008',
+      CHALLENGE_SERVICE_URL: 'http://challenge-service:3009',
     });
 
     expect(error).toBeUndefined();
@@ -82,6 +86,10 @@ describe('gatewayConfig', () => {
         sponsor: 'http://sponsor.internal:3003',
         event: 'http://event.internal:3004',
         points: 'http://points.internal:3005',
+        notification: undefined,
+        announcement: undefined,
+        social: undefined,
+        challenge: undefined,
       },
       cors: {
         origins: ['https://app.example.com', 'https://admin.example.com'],
@@ -118,6 +126,10 @@ describe('gatewayConfig', () => {
       sponsor: undefined,
       event: undefined,
       points: undefined,
+      notification: undefined,
+      announcement: undefined,
+      social: undefined,
+      challenge: undefined,
     });
   });
 });

@@ -56,4 +56,11 @@ export class NotificationsController {
   ): Promise<NotificationResponseDto> {
     return this.notificationsService.markRead(id, req.user.id);
   }
+
+  @Patch('read-all')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Mark all notifications as read for the authenticated user' })
+  markAllRead(@Req() req: AuthRequest): Promise<{ updated: number }> {
+    return this.notificationsService.markAllRead(req.user.id);
+  }
 }

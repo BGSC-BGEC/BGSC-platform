@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -19,6 +20,7 @@ import { AnnouncementsService } from './announcements.service';
 import { AnnouncementResponseDto } from './dto/announcement-response.dto';
 import { CreateAnnouncementDto } from './dto/create-announcement.dto';
 import { ListAnnouncementsQueryDto } from './dto/list-announcements-query.dto';
+import { UpdateAnnouncementDto } from './dto/update-announcement.dto';
 
 type AuthRequest = Request & { user: { id: string; role: string } };
 
@@ -28,9 +30,15 @@ export class AnnouncementsController {
   constructor(private readonly announcementsService: AnnouncementsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List non-expired announcements' })
+  @ApiOperation({ summary: 'List non-expired announcements (paginated, filterable by type and tag)' })
   findAll(@Query() query: ListAnnouncementsQueryDto): Promise<AnnouncementResponseDto[]> {
     return this.announcementsService.findAll(query);
+  }
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Get a single announcement by ID' })
+  findOne(@Param('id') id: string): Promise<AnnouncementResponseDto> {
+    return this.announcementsService.findOne(id);
   }
 
   @Post()
@@ -43,6 +51,18 @@ export class AnnouncementsController {
     @Req() req: AuthRequest,
   ): Promise<AnnouncementResponseDto> {
     return this.announcementsService.create(dto, req.user.id);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.COORDINATOR, UserRole.FOUNDER, UserRole.CORE)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Update an announcement' })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateAnnouncementDto,
+  ): Promise<AnnouncementResponseDto> {
+    return this.announcementsService.update(id, dto);
   }
 
   @Delete(':id')

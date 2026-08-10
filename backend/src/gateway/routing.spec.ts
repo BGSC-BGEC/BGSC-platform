@@ -1,7 +1,9 @@
 import {
   isAuthAttempt,
   isAuthServiceRoute,
+  isChallengeServiceRoute,
   isProtectedRoute,
+  isSocialServiceRoute,
   isSponsorServiceRoute,
   isUserServiceRoute,
 } from './routing';
@@ -75,6 +77,19 @@ describe('routing', () => {
       expect(isSponsorServiceRoute('/sponsors')).toBe(true);
       expect(isSponsorServiceRoute('/sponsors/active')).toBe(true);
       expect(isSponsorServiceRoute('/users/me')).toBe(false);
+    });
+
+    it('routes social to the social service', () => {
+      expect(isSocialServiceRoute('/social/friends')).toBe(true);
+      expect(isSocialServiceRoute('/social/posts')).toBe(true);
+      expect(isSocialServiceRoute('/social/feed')).toBe(true);
+      expect(isSocialServiceRoute('/users/me')).toBe(false);
+    });
+
+    it('routes challenges to the challenge service', () => {
+      expect(isChallengeServiceRoute('/challenges')).toBe(true);
+      expect(isChallengeServiceRoute('/challenges/123/accept')).toBe(true);
+      expect(isChallengeServiceRoute('/users/me')).toBe(false);
     });
   });
 });

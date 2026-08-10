@@ -60,6 +60,7 @@ describe('userConfig', () => {
         accessSecret: 'live-access-secret',
         issuer: 'bgsc-auth-service',
       },
+      eventServiceUrl: 'http://localhost:3003',
     });
   });
 
