@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
+import { HttpModule } from '@nestjs/axios';
 import Redis from 'ioredis';
 
 import { authConfig, authConfigValidationSchema } from './config/auth.config';
@@ -11,8 +12,10 @@ import { LoginAuditLog } from './entities/login-audit-log.entity';
 import { AuthController } from './controllers/auth.controller';
 import { AccountController } from './controllers/account.controller';
 import { SessionController } from './controllers/session.controller';
+import { StravaController } from './controllers/strava.controller';
 
 import { AuthService } from './services/auth.service';
+import { StravaService } from './services/strava.service';
 import { PasswordService } from './services/password.service';
 import { TokenService } from './services/token.service';
 import { SessionService } from './services/session.service';
@@ -53,15 +56,18 @@ import { AddTotpAndAccountLifecycleAndAuditLog1718520000000 } from './migrations
     }),
     TypeOrmModule.forFeature([UserCredential, LoginAuditLog]),
     JwtModule.register({}),
+    HttpModule,
   ],
   controllers: [
     AuthController,
     TotpController,
     AccountController,
     SessionController,
+    StravaController,
   ],
   providers: [
     AuthService,
+    StravaService,
     PasswordService,
     TokenService,
     SessionService,

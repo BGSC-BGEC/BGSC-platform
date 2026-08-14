@@ -8,6 +8,7 @@ export class UserResponseDto {
   contact?: string | null;
   role!: UserRole;
   avatarUrl?: string | null;
+  bio?: string | null;
   interests!: string[];
   socials!: Record<string, string>;
   stravaId?: string | null;
@@ -18,6 +19,7 @@ export class UserResponseDto {
   newsletterSubscriptions!: string[];
   activeSponsorId?: string | null;
   lastActive?: Date | null;
+  lastSponsorChange?: Date | null;
   createdAt!: Date;
   updatedAt!: Date;
 }

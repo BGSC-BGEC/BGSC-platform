@@ -301,6 +301,9 @@ describe('AuthService', () => {
 
       const result = await service.login(mockUser, '127.0.0.1', 'ua');
       expect(result.requiresTOTP).toBe(true);
+      if (!result.requiresTOTP) {
+        throw new Error('Expected TOTP login result');
+      }
       expect(result.tempToken).toBe('temp_jwt_token');
     });
 
@@ -312,6 +315,9 @@ describe('AuthService', () => {
 
       const result = await service.login(mockUser, '127.0.0.1', 'ua');
       expect(result.requiresTOTP).toBe(false);
+      if (result.requiresTOTP) {
+        throw new Error('Expected token login result');
+      }
       expect(result.accessToken).toBe('access_jwt_token');
       expect(result.refreshToken).toBe(
         '11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333',

@@ -1,0 +1,11 @@
+export enum AnnouncementType {
+  BGEC = 'BGEC',
+  FITSOC = 'FITSOC',
+  AIRBALL = 'AIRBALL',
+  OFFSIDE = 'OFFSIDE',
+  POWERPLAY = 'POWERPLAY',
+  AROUND_THE_NET = 'AROUND_THE_NET',
+  DEUCE = 'DEUCE',
+  HIGHLIGHT = 'HIGHLIGHT',
+  TEAMS = 'TEAMS',
+}

@@ -7,7 +7,7 @@ RUN npm ci
 
 COPY apps/user-service ./apps/user-service
 
-RUN npm run build
+RUN npm run build user-service
 
 RUN npm prune --omit=dev
 
@@ -15,9 +15,14 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
+# H2: Run as non-root user
+RUN addgroup -S app && adduser -S app -G app
+
+COPY --from=builder --chown=app:app /app/node_modules ./node_modules
+COPY --from=builder --chown=app:app /app/dist ./dist
+
+USER app
 
 EXPOSE 3002
 
-CMD ["node", "dist/apps/user-service/main"]
+CMD ["node", "dist/apps/user-service/main.js"]

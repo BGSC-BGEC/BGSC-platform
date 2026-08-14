@@ -19,9 +19,10 @@ out/
 .nuxt/
 
 # NestJS / TypeScript
-*.js.map
-*.d.ts
-tsconfig.tsbuildinfo
+# Compiled JS/maps/declarations live under dist/ (already ignored above).
+# Do NOT ignore *.d.ts / *.js.map globally — that swallows hand-written
+# source declarations like mobile/global.d.ts and web/src/vite-env.d.ts.
+*.tsbuildinfo
 
 # React Native / Expo
 .expo/
@@ -35,7 +36,7 @@ ios/
 *.local
 
 # Docker
-*.dockerignore
+# (.dockerignore files are intentionally committed — do not ignore them.)
 
 # Logs
 logs/

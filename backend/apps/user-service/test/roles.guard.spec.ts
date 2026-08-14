@@ -18,7 +18,11 @@ describe('RolesGuard', () => {
     const guard = new RolesGuard(reflector as unknown as Reflector);
 
     expect(guard.canActivate(makeContext({ user: undefined }))).toBe(true);
-    expect(guard.canActivate(makeContext({ user: { id: 'u1', role: UserRole.USER } }))).toBe(true);
+    expect(
+      guard.canActivate(
+        makeContext({ user: { id: 'u1', role: UserRole.USER } }),
+      ),
+    ).toBe(true);
   });
 
   it('allows a user whose role matches the required roles', () => {
@@ -34,7 +38,9 @@ describe('RolesGuard', () => {
     const guard = new RolesGuard(reflector as unknown as Reflector);
 
     expect(() =>
-      guard.canActivate(makeContext({ user: { id: 'u1', role: UserRole.COORDINATOR } })),
+      guard.canActivate(
+        makeContext({ user: { id: 'u1', role: UserRole.COORDINATOR } }),
+      ),
     ).toThrow(ForbiddenException);
   });
 
@@ -42,9 +48,9 @@ describe('RolesGuard', () => {
     reflector.getAllAndOverride.mockReturnValue([UserRole.USER]);
     const guard = new RolesGuard(reflector as unknown as Reflector);
 
-    expect(() =>
-      guard.canActivate(makeContext({ user: undefined })),
-    ).toThrow(UnauthorizedException);
+    expect(() => guard.canActivate(makeContext({ user: undefined }))).toThrow(
+      UnauthorizedException,
+    );
   });
 });
 
