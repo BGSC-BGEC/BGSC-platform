@@ -8,27 +8,13 @@
         "type": "tabs",
         "children": [
           {
-            "id": "886d7c6cffeafee2",
+            "id": "28209c252444f90d",
             "type": "leaf",
             "state": {
               "type": "empty",
               "state": {},
               "icon": "lucide-file",
               "title": "New tab"
-            }
-          },
-          {
-            "id": "28209c252444f90d",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "SystemDesignDocs/BGSC Platform – Development Plan & Tasks (Beginner-Friendly).md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "BGSC Platform – Development Plan & Tasks (Beginner-Friendly)"
             }
           },
           {
@@ -209,8 +195,25 @@
       "bases:Create new base": false
     }
   },
-  "active": "886d7c6cffeafee2",
+  "active": "28209c252444f90d",
   "lastOpenFiles": [
+    "ONBOARDING.md",
+    "Frontend/UI-UX-Master-Doc.md",
+    "OnboaringDocs.zip",
+    "SystemDesignDocs/System Architecture Guide.pdf",
+    "SystemDesignDocs/The Ultimate Guide to UI Architectures; MVC, MVP, MVVM.pdf",
+    "SystemDesignDocs/BGSC-platform.pdf",
+    "SystemDesignDocs/BGSC Platform — Complete Feature Specification & Architecture.md",
+    "SystemDesignDocs/BGSC Platform – Development Plan & Tasks (Beginner-Friendly)(1).md",
+    "api-gateway.md",
+    "manual-testing-gateway.md",
+    "mobile.md",
+    "web.md",
+    "variables.md",
+    "screens.md",
+    "ONBOARDING.md.tmp.818635.a674b1f5a2c4",
+    "ONBOARDING.md.tmp.818635.6b04946de387",
+    "ONBOARDING.md.tmp.693956.844b7a77b4e8",
     "Frontend/Events/events-page1.md",
     "design-system.md",
     "FrontendGuide/Screens Master Doc/assets/modals-onboarding.png",
@@ -234,28 +237,11 @@
     "FrontendGuide/Screens Master Doc",
     "FrontendGuide/Feedback and contact us screen/svg logos/whatsapp-logo-variant.svg",
     "FrontendGuide/Feedback and contact us screen/fonts/Mograph.ttf",
-    "FrontendGuide/Feedback and contact us screen/svg logos",
-    "FrontendGuide/Feedback and contact us screen/fonts",
     "FrontendGuide/Feedback and contact us screen/feedback-contact-page.md",
-    "FrontendGuide/Feedback and contact us screen",
-    "FrontendGuide/Events/Charsenz Font/Charsenz.woff",
-    "FrontendGuide/Events/Charsenz Font/Charsenz.ttf",
-    "FrontendGuide/Events/Charsenz Font/Charsenz.otf",
-    "FrontendGuide/Events/events-page1.md",
     "FrontendGuide/Events/colorscheme.png",
-    "FrontendGuide/Events/Charsenz Font",
     "FrontendGuide/Auth/onboard.png",
-    "FrontendGuide/Auth/handoffSpec.md",
     "FrontendGuide/Auth/colorscheme.png",
-    "BGSC Platform — Complete Feature Specification & Architecture.md",
     "FrontendGuide/Auth/cat.gif",
-    "FrontendGuide/Auth/auth.png",
-    "Frontend/users/users-page.md",
-    "Frontend/Screens Master Doc/media-page-design.md",
-    "Frontend/feedback/feedback-contact-page.md",
-    "Frontend/user-profile/user-profile.md",
-    "Frontend/union/union-page.md",
-    "Frontend/store/store-page.md",
-    "Frontend/sponsors/sponsors-page.md"
+    "FrontendGuide/Auth/auth.png"
   ]
 }

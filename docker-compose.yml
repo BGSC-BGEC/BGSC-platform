@@ -2,11 +2,13 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: bgsc-postgres
-    ports:
-      - '5432:5432'
+    # C1+H3: No host port binding — reachable only within bgsc-network.
+    # To access from host during dev, use: docker exec -it bgsc-postgres psql -U bgsc
+    expose:
+      - '5432'
     environment:
       POSTGRES_USER: bgsc
-      POSTGRES_PASSWORD: bgsc_pass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: bgsc_dev
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -21,12 +23,14 @@ services:
   redis:
     image: redis:7-alpine
     container_name: bgsc-redis
-    ports:
-      - '6379:6379'
+    # C1+H3: No host port binding + password required.
+    expose:
+      - '6379'
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -60,8 +64,8 @@ services:
     environment:
       PORT: 3000
       NODE_ENV: development
-      REDIS_URL: redis://redis:6379
-      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_ISSUER: bgsc-auth-service
       AUTH_SERVICE_URL: http://auth-service:3001
       USER_SERVICE_URL: http://user-service:3002
@@ -70,7 +74,10 @@ services:
       POINTS_SERVICE_URL: http://points-service:3005
       NOTIFICATION_SERVICE_URL: http://notification-service:3006
       ANNOUNCEMENT_SERVICE_URL: http://announcement-service:3007
-      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+      # social and challenge not yet in compose — gateway will 502 on those routes
+      SOCIAL_SERVICE_URL: http://social-service:3008
+      CHALLENGE_SERVICE_URL: http://challenge-service:3009
+      CORS_ORIGINS: ${CORS_ORIGINS}
     networks:
       - bgsc-network
 
@@ -79,8 +86,6 @@ services:
       context: ./backend
       dockerfile: apps/user-service/Dockerfile
     container_name: bgsc-user-service
-    # Internal only — reachable by the gateway via the bgsc-network, not the
-    # host. docker-compose.override.yml republishes this for local dev.
     expose:
       - '3002'
     depends_on:
@@ -89,9 +94,15 @@ services:
     environment:
       PORT: 3002
       NODE_ENV: development
-      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
-      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      DATABASE_URL: postgresql://bgsc:${POSTGRES_PASSWORD}@postgres:5432/bgsc_dev
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_ISSUER: bgsc-auth-service
+      EVENT_SERVICE_URL: http://event-service:3004
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
+      STRAVA_WEBHOOK_VERIFY_TOKEN: ${STRAVA_WEBHOOK_VERIFY_TOKEN}
+      STRAVA_TOKEN_ENCRYPTION_KEY: ${STRAVA_TOKEN_ENCRYPTION_KEY}
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY}
     networks:
       - bgsc-network
 
@@ -100,8 +111,6 @@ services:
       context: ./backend
       dockerfile: apps/auth-service/Dockerfile
     container_name: bgsc-auth-service
-    # Internal only — reachable by the gateway via the bgsc-network, not the
-    # host. docker-compose.override.yml republishes this for local dev.
     expose:
       - '3001'
     depends_on:
@@ -112,22 +121,28 @@ services:
     environment:
       PORT: 3001
       NODE_ENV: development
-      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
-      REDIS_URL: redis://redis:6379
-      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
-      JWT_REFRESH_SECRET: dev_refresh_secret_change_in_prod_1234567890abcdef
+      DATABASE_URL: postgresql://bgsc:${POSTGRES_PASSWORD}@postgres:5432/bgsc_dev
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_ISSUER: bgsc-auth-service
-      GOOGLE_CLIENT_ID: dummy_google_client_id
-      GOOGLE_CLIENT_SECRET: dummy_google_client_secret
-      GOOGLE_CALLBACK_URL: http://localhost:3001/auth/google/callback
-      AUTH_TOTP_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-      SMTP_HOST: smtp.mailtrap.io
-      SMTP_PORT: 2525
-      SMTP_USER: dummy_smtp_user
-      SMTP_PASSWORD: dummy_smtp_password
-      SMTP_FROM: noreply@bgsc-platform.in
-      CORS_ORIGINS: http://localhost:3000,http://localhost:3001,http://localhost:3002
-      BCRYPT_SALT_ROUNDS: 12
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL}
+      OAUTH_FRONTEND_CALLBACK_URL: ${OAUTH_FRONTEND_CALLBACK_URL}
+      AUTH_TOTP_ENCRYPTION_KEY: ${AUTH_TOTP_ENCRYPTION_KEY}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_FROM: ${SMTP_FROM}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      BCRYPT_SALT_ROUNDS: ${BCRYPT_SALT_ROUNDS:-12}
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET}
+      STRAVA_CALLBACK_URL: ${STRAVA_CALLBACK_URL}
+      USER_SERVICE_URL: http://user-service:3002
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY}
     networks:
       - bgsc-network
 
@@ -144,8 +159,8 @@ services:
     environment:
       PORT: 3003
       NODE_ENV: development
-      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
-      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      DATABASE_URL: postgresql://bgsc:${POSTGRES_PASSWORD}@postgres:5432/bgsc_dev
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_ISSUER: bgsc-auth-service
     networks:
       - bgsc-network
@@ -165,10 +180,11 @@ services:
     environment:
       PORT: 3004
       NODE_ENV: development
-      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
-      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      DATABASE_URL: postgresql://bgsc:${POSTGRES_PASSWORD}@postgres:5432/bgsc_dev
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_ISSUER: bgsc-auth-service
       SPONSOR_SERVICE_URL: http://sponsor-service:3003
+      INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY}
     networks:
       - bgsc-network
 
@@ -185,8 +201,8 @@ services:
     environment:
       PORT: 3005
       NODE_ENV: development
-      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
-      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      DATABASE_URL: postgresql://bgsc:${POSTGRES_PASSWORD}@postgres:5432/bgsc_dev
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_ISSUER: bgsc-auth-service
     networks:
       - bgsc-network
@@ -204,8 +220,8 @@ services:
     environment:
       PORT: 3006
       NODE_ENV: development
-      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
-      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      DATABASE_URL: postgresql://bgsc:${POSTGRES_PASSWORD}@postgres:5432/bgsc_dev
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_ISSUER: bgsc-auth-service
     networks:
       - bgsc-network
@@ -223,8 +239,8 @@ services:
     environment:
       PORT: 3007
       NODE_ENV: development
-      DATABASE_URL: postgresql://bgsc:bgsc_pass@postgres:5432/bgsc_dev
-      JWT_ACCESS_SECRET: dev_access_secret_change_in_prod_1234567890abcdef
+      DATABASE_URL: postgresql://bgsc:${POSTGRES_PASSWORD}@postgres:5432/bgsc_dev
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
       JWT_ISSUER: bgsc-auth-service
     networks:
       - bgsc-network

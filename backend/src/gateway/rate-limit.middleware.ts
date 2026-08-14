@@ -13,19 +13,43 @@ export interface RateLimitOptions {
   auth: RateLimitBucket;
 }
 
+/** In-memory fallback for auth bucket when Redis is unavailable (H6). */
+const authFallback = new Map<string, { count: number; resetAt: number }>();
+
+/**
+ * C2: Use req.ip (set by Express trust-proxy) instead of raw
+ * X-Forwarded-For, which is client-controlled and bypassable.
+ * main.ts must call app.set('trust proxy', 1) for this to work correctly.
+ */
 function clientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  const raw = Array.isArray(forwarded)
-    ? forwarded[0]
-    : String(forwarded || req.socket?.remoteAddress || req.ip || 'unknown');
-  return raw.split(',')[0].trim() || 'unknown';
+  return (req.ip ?? req.socket?.remoteAddress ?? 'unknown')
+    .replace(/^::ffff:/, '') // normalise IPv4-mapped IPv6
+    .replace(/[^0-9a-fA-F.:]/g, '') // sanitise for log safety
+    || 'unknown';
+}
+
+function applyAuthFallback(ip: string, bucket: RateLimitBucket): boolean {
+  const now = Date.now();
+  const entry = authFallback.get(ip);
+
+  if (!entry || now >= entry.resetAt) {
+    authFallback.set(ip, { count: 1, resetAt: now + bucket.windowMs });
+    return false; // not rate-limited
+  }
+
+  entry.count++;
+  if (entry.count > bucket.max) {
+    return true; // rate-limited
+  }
+  return false;
 }
 
 /**
- * Redis-backed sliding-window rate limiter, mirroring the algorithm used by the
- * auth-service guard. Meters per client IP at the edge. Auth login/register get
- * the strict bucket (5 / 15 min); everything else gets the general bucket
- * (100 / min).
+ * Redis-backed sliding-window rate limiter.
+ *
+ * H6: On Redis failure the auth bucket falls back to an in-memory counter
+ * so login/register remain protected even during a Redis outage. The general
+ * bucket still fails open (non-auth traffic should not be blocked by infra).
  */
 export function createRateLimitMiddleware(
   redis: Redis,
@@ -39,7 +63,8 @@ export function createRateLimitMiddleware(
     const isAuth = isAuthAttempt(req.method, req.originalUrl);
     const bucket = isAuth ? options.auth : options.general;
     const prefix = isAuth ? 'auth' : 'general';
-    const key = `gateway:rate:${prefix}:${clientIp(req)}`;
+    const ip = clientIp(req);
+    const key = `gateway:rate:${prefix}:${ip}`;
 
     const now = Date.now();
     const windowStart = now - bucket.windowMs;
@@ -55,7 +80,15 @@ export function createRateLimitMiddleware(
       .exec()
       .then(async (results) => {
         if (!results) {
-          // Redis hiccup: fail open rather than block all traffic.
+          // H6: Redis hiccup — auth bucket uses in-memory fallback; general fails open.
+          if (isAuth && applyAuthFallback(ip, bucket)) {
+            res.status(429).json({
+              statusCode: 429,
+              error: 'Too Many Requests',
+              message: 'Rate limit exceeded. Please try again later.',
+            });
+            return;
+          }
           next();
           return;
         }
@@ -88,7 +121,15 @@ export function createRateLimitMiddleware(
         next();
       })
       .catch(() => {
-        // Never let a limiter error take down the gateway.
+        // H6: Redis error — auth bucket falls back to in-memory; general passes through.
+        if (isAuth && applyAuthFallback(ip, bucket)) {
+          res.status(429).json({
+            statusCode: 429,
+            error: 'Too Many Requests',
+            message: 'Rate limit exceeded. Please try again later.',
+          });
+          return;
+        }
         next();
       });
   };

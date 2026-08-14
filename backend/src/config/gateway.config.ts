@@ -18,7 +18,11 @@ export const gatewayConfigValidationSchema = Joi.object({
   ANNOUNCEMENT_SERVICE_URL: Joi.string().uri().required(),
   SOCIAL_SERVICE_URL: Joi.string().uri().required(),
   CHALLENGE_SERVICE_URL: Joi.string().uri().required(),
-  CORS_ORIGINS: Joi.string().default(''),
+  CORS_ORIGINS: Joi.string().when('NODE_ENV', {
+    is: 'production',
+    then: Joi.required(),
+    otherwise: Joi.string().default(''),
+  }),
   RATE_LIMIT_GENERAL_MAX: Joi.number().integer().min(1).default(100),
   RATE_LIMIT_GENERAL_WINDOW_MS: Joi.number()
     .integer()

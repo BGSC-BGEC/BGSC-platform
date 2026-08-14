@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import Redis from 'ioredis';
+import type { Request, Response, NextFunction } from 'express';
 import { AppModule } from './app.module';
 import { createRateLimitMiddleware } from './gateway/rate-limit.middleware';
 import { createJwtAuthMiddleware } from './gateway/jwt-auth.middleware';
@@ -50,8 +51,11 @@ async function bootstrap() {
     )!,
   };
 
+  // C2: trust proxy=1 so req.ip is derived from the rightmost trusted hop,
+  // not from the client-controlled X-Forwarded-For leftmost value.
+  app.set('trust proxy', 1);
+
   const redis = new Redis(redisUrl, { maxRetriesPerRequest: 1 });
-  // Keep the process alive if Redis is unreachable; the limiter fails open.
   redis.on('error', (err) => {
     console.error(`[api-gateway] Redis error: ${err.message}`);
   });
@@ -60,28 +64,59 @@ async function bootstrap() {
   // Security + CORS at the edge.
   app.use(helmet());
   app.enableCors({
-    origin: corsOrigins.length > 0 ? corsOrigins : true,
+    // H4: never reflect origin back as wildcard-with-credentials.
+    // In dev with no CORS_ORIGINS set, default to [] (no cross-origin access).
+    origin: corsOrigins.length > 0 ? corsOrigins : [],
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     allowedHeaders: ['Content-Type', 'Authorization'],
     exposedHeaders: ['X-RateLimit-Remaining', 'Retry-After'],
   });
 
-  // Block POST /notifications at the edge — internal-only endpoint, services
-  // must call notification-service directly on the internal network.
-  app.use('/notifications', (req, res, next) => {
-    if (req.method === 'POST') {
-      res.status(403).json({ message: 'Forbidden: internal endpoint' });
+  // H12: Reject oversized payloads before they reach the proxy.
+  // 10 MB is generous for this API; adjust per endpoint type if needed.
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const contentLength = parseInt(req.headers['content-length'] ?? '0', 10);
+    if (contentLength > 10 * 1024 * 1024) {
+      res.status(413).json({
+        statusCode: 413,
+        error: 'Payload Too Large',
+        message: 'Request body exceeds the 10 MB limit.',
+      });
       return;
     }
     next();
   });
 
-  // Edge pipeline: rate limit -> JWT verification -> reverse proxy.
-  // Proxies use a pathFilter, so unmatched paths (e.g. /health) fall through
-  // to the Nest controllers.
+  // C3: Strip all identity headers unconditionally before the pipeline.
+  // They are only re-injected by the JWT middleware after verification.
+  // This prevents privilege escalation via forged headers on public routes.
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    delete req.headers['x-user-id'];
+    delete req.headers['x-user-role'];
+    delete req.headers['x-user-email'];
+    delete req.headers['x-username'];
+    next();
+  });
+
+  // Block POST /notifications at the edge — internal-only endpoint.
+  app.use('/notifications', (req: Request, res: Response, next: NextFunction) => {
+    if (req.method === 'POST') {
+      res.status(403).json({ statusCode: 403, message: 'Forbidden: internal endpoint' });
+      return;
+    }
+    next();
+  });
+
+  // Block /strava/internal/* at the edge — service-to-service only.
+  app.use('/strava/internal', (_req: Request, res: Response) => {
+    res.status(403).json({ statusCode: 403, message: 'Forbidden: internal endpoint' });
+  });
+
+  // Edge pipeline: rate limit -> JWT verification (with jti blacklist) -> proxy.
   app.use(createRateLimitMiddleware(redis, rateLimit));
-  app.use(createJwtAuthMiddleware({ secret: jwtSecret, issuer: jwtIssuer }));
+  app.use(createJwtAuthMiddleware({ secret: jwtSecret, issuer: jwtIssuer, redis }));
+
   app.use(
     createServiceProxy({
       target: authTarget,

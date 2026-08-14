@@ -1,11 +1,14 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import { JwtService } from '@nestjs/jwt';
+import type Redis from 'ioredis';
 import { isProtectedRoute } from './routing';
 import type { JwtPayload } from '../interfaces/jwt-payload.interface';
 
 export interface JwtAuthOptions {
   secret: string;
   issuer: string;
+  /** Redis client for jti blacklist check (C4). */
+  redis: Redis;
 }
 
 function extractBearer(req: Request): string | null {
@@ -29,13 +32,16 @@ function unauthorized(res: Response, message: string): void {
 }
 
 /**
- * Edge JWT verification. Protected routes (see routing.ts) must carry a valid
- * access token; the verified claims are forwarded to downstream services as
- * `x-user-*` headers (in addition to the original Authorization header, which
- * downstream services still verify independently as defense-in-depth).
+ * Edge JWT verification.
  *
- * Public routes (login, register, refresh, OAuth, password reset, TOTP login)
- * pass straight through.
+ * Security properties:
+ *  - C3: x-user-* headers are stripped unconditionally before this runs
+ *        (handled in main.ts before the pipeline). This middleware only
+ *        re-injects them after successful verification.
+ *  - C4: jti blacklist is checked in Redis so logout actually revokes tokens.
+ *  - M13: algorithm is pinned to HS256 — rejects alg:none or RS256 misconfig.
+ *
+ * Public routes pass straight through (headers already stripped by main.ts).
  */
 export function createJwtAuthMiddleware(
   options: JwtAuthOptions,
@@ -62,18 +68,36 @@ export function createJwtAuthMiddleware(
       payload = jwtService.verify<JwtPayload>(token, {
         secret: options.secret,
         issuer: options.issuer,
+        algorithms: ['HS256'], // M13: pin algorithm
       });
     } catch {
       unauthorized(res, 'Invalid or expired access token');
       return;
     }
 
-    // Forward verified identity to downstream services.
-    req.headers['x-user-id'] = payload.sub;
-    req.headers['x-user-role'] = payload.role;
-    req.headers['x-user-email'] = payload.email;
-    req.headers['x-username'] = payload.username;
+    // C4: Check jti blacklist — catches revoked tokens post-logout.
+    // Key format mirrors auth-service SessionService.blacklistJti().
+    options.redis
+      .exists(`auth:blacklist:${payload.jti}`)
+      .then((revoked) => {
+        if (revoked) {
+          unauthorized(res, 'Token has been revoked');
+          return;
+        }
 
-    next();
+        // Re-inject verified identity for downstream services.
+        req.headers['x-user-id'] = payload.sub;
+        req.headers['x-user-role'] = payload.role;
+        req.headers['x-user-email'] = payload.email;
+        req.headers['x-username'] = payload.username;
+
+        next();
+      })
+      .catch(() => {
+        // Redis unavailable: fail closed for protected routes.
+        // A brief outage means users must re-authenticate; this is
+        // preferable to forwarding potentially revoked tokens.
+        unauthorized(res, 'Authentication service temporarily unavailable');
+      });
   };
 }

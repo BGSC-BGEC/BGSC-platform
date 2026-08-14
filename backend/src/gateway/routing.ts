@@ -4,7 +4,7 @@
  * The gateway proxies the same path prefixes the downstream services expose,
  * so no path rewriting is needed:
  *   - auth-service: /auth/**, /account/**
- *   - user-service: /users/**
+ *   - user-service: /users/**, /strava/**
  *   - sponsor-service: /sponsors/**
  *   - event-service: /events/**, /hall-of-fame/**
  *   - points-service: /points/**
@@ -12,7 +12,7 @@
  */
 
 export const AUTH_SERVICE_PREFIXES = ['/auth', '/account'];
-export const USER_SERVICE_PREFIXES = ['/users'];
+export const USER_SERVICE_PREFIXES = ['/users', '/strava'];
 export const SPONSOR_SERVICE_PREFIXES = ['/sponsors'];
 export const EVENT_SERVICE_PREFIXES = ['/events', '/hall-of-fame'];
 export const POINTS_SERVICE_PREFIXES = ['/points'];
@@ -21,8 +21,19 @@ export const ANNOUNCEMENT_SERVICE_PREFIXES = ['/announcements'];
 export const SOCIAL_SERVICE_PREFIXES = ['/social'];
 export const CHALLENGE_SERVICE_PREFIXES = ['/challenges'];
 
-/** Auth "attempt" endpoints that get the stricter rate limit (5 / 15 min). */
-const AUTH_ATTEMPT_PATHS = ['/auth/login', '/auth/register'];
+/**
+ * Auth "attempt" endpoints that get the stricter rate limit (5 / 15 min).
+ * H5: TOTP, forgot-password, and reset-password are included — all are
+ * brute-forceable if left in the general 100 req/min bucket.
+ */
+const AUTH_ATTEMPT_PATHS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/totp/verify',
+  '/auth/totp/verify-backup',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+];
 
 /**
  * Routes that require a valid access token at the edge. These all use the
@@ -42,6 +53,9 @@ const PROTECTED_PREFIXES = [
   '/auth/logout-all',
   '/auth/change-password',
   '/auth/sessions',
+  '/auth/strava/connect',
+  '/auth/strava/disconnect',
+  '/strava/me',
 ];
 
 function pathOf(url: string): string {

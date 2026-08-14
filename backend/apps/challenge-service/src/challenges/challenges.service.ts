@@ -23,6 +23,7 @@ import { ChallengeStatus, SubmissionStatus } from './enums/challenge.enum';
 export class ChallengesService {
   private readonly logger = new Logger(ChallengesService.name);
   private readonly pointsServiceUrl: string;
+  private readonly internalServiceKey: string;
 
   constructor(
     @InjectRepository(Challenge)
@@ -36,6 +37,8 @@ export class ChallengesService {
   ) {
     this.pointsServiceUrl =
       this.configService.get<string>('challenge.pointsServiceUrl') ?? 'http://localhost:3005';
+    this.internalServiceKey =
+      this.configService.get<string>('challenge.internalServiceKey') ?? '';
   }
 
   async create(dto: CreateChallengeDto, createdBy: string): Promise<ChallengeResponseDto> {
@@ -179,7 +182,10 @@ export class ChallengesService {
           amount,
           source: 'challenge',
           referenceId: challengeId,
-        }),
+        },
+        // H10: attach internal service key so points-service guard accepts the call
+        { headers: { 'x-internal-key': this.internalServiceKey } },
+        ),
       );
     } catch (err) {
       this.logger.error(

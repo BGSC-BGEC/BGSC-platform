@@ -8,6 +8,7 @@ export const challengeConfigValidationSchema = Joi.object({
   JWT_ACCESS_SECRET: Joi.string().required(),
   JWT_ISSUER: Joi.string().required(),
   POINTS_SERVICE_URL: Joi.string().uri().default('http://localhost:3005'),
+  INTERNAL_SERVICE_KEY: Joi.string().min(32).required(),
 });
 
 export const challengeConfig = registerAs('challenge', () => ({
@@ -19,4 +20,5 @@ export const challengeConfig = registerAs('challenge', () => ({
     issuer: process.env.JWT_ISSUER,
   },
   pointsServiceUrl: process.env.POINTS_SERVICE_URL ?? 'http://localhost:3005',
+  internalServiceKey: process.env.INTERNAL_SERVICE_KEY,
 }));

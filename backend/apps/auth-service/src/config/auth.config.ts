@@ -32,6 +32,11 @@ export const authConfigValidationSchema = Joi.object({
   SMTP_FROM: Joi.string().email().required(),
   CORS_ORIGINS: Joi.string().required(),
   BCRYPT_SALT_ROUNDS: Joi.number().integer().min(10).max(15).default(12),
+  STRAVA_CLIENT_ID: Joi.string().required(),
+  STRAVA_CLIENT_SECRET: Joi.string().required(),
+  STRAVA_CALLBACK_URL: Joi.string().uri().required(),
+  USER_SERVICE_URL: Joi.string().uri().required(),
+  INTERNAL_SERVICE_KEY: Joi.string().min(32).required(),
 });
 
 export const authConfig = registerAs('auth', () => ({
@@ -77,4 +82,11 @@ export const authConfig = registerAs('auth', () => ({
   bcrypt: {
     saltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS || '12', 10),
   },
+  strava: {
+    clientId: process.env.STRAVA_CLIENT_ID,
+    clientSecret: process.env.STRAVA_CLIENT_SECRET,
+    callbackUrl: process.env.STRAVA_CALLBACK_URL,
+  },
+  userServiceUrl: process.env.USER_SERVICE_URL,
+  internalServiceKey: process.env.INTERNAL_SERVICE_KEY,
 }));

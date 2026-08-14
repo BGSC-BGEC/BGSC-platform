@@ -35,6 +35,7 @@ import { EventBusService } from './event-bus.service';
 export class EventsService {
   private readonly logger = new Logger(EventsService.name);
   private readonly sponsorServiceUrl: string;
+  private readonly internalServiceKey: string;
 
   constructor(
     @InjectRepository(Event)
@@ -50,6 +51,8 @@ export class EventsService {
   ) {
     this.sponsorServiceUrl =
       this.configService.get<string>('event.sponsorServiceUrl') ?? 'http://localhost:3003';
+    this.internalServiceKey =
+      this.configService.get<string>('event.internalServiceKey') ?? '';
   }
 
   async create(dto: CreateEventDto, createdBy: string): Promise<EventResponseDto> {
@@ -349,6 +352,8 @@ export class EventsService {
           this.httpService.post(
             `${this.sponsorServiceUrl}/sponsors/${winner.sponsorId}/fans`,
             { userId: winner.userId, eventId, amount: winner.fanAmount, reason: 'event_win' },
+            // H10: attach internal service key so sponsor-service guard accepts the call
+            { headers: { 'x-internal-key': this.internalServiceKey } },
           ),
         );
       } catch (err) {

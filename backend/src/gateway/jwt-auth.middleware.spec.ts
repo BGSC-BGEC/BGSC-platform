@@ -6,6 +6,15 @@ import type { JwtPayload } from '../interfaces/jwt-payload.interface';
 const SECRET = 'test_access_secret_1234567890abcdef';
 const ISSUER = 'bgsc-auth-service';
 
+/** Minimal Redis stub: no keys are blacklisted by default. */
+function mockRedis(blacklisted: string[] = []) {
+  return {
+    exists: jest.fn(async (key: string) =>
+      blacklisted.some((jti) => key.endsWith(jti)) ? 1 : 0,
+    ),
+  } as unknown as import('ioredis').default;
+}
+
 function mockRes() {
   const res = {
     statusCode: 200,
@@ -34,8 +43,9 @@ function mockReq(url: string, headers: Record<string, string> = {}) {
 
 describe('createJwtAuthMiddleware', () => {
   const jwtService = new JwtService();
+  const redis = mockRedis();
   const middleware = createJwtAuthMiddleware(
-    { secret: SECRET, issuer: ISSUER },
+    { secret: SECRET, issuer: ISSUER, redis },
     jwtService,
   );
 
@@ -90,7 +100,7 @@ describe('createJwtAuthMiddleware', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('accepts a valid token and forwards identity headers', () => {
+  it('accepts a valid token and forwards identity headers', async () => {
     const token = sign({
       sub: 'user-1',
       username: 'alice',
@@ -104,10 +114,38 @@ describe('createJwtAuthMiddleware', () => {
 
     middleware(req, res, next);
 
+    // C4: blacklist check is async — wait for the promise to resolve.
+    await new Promise((r) => setTimeout(r, 10));
+
     expect(next).toHaveBeenCalledTimes(1);
     expect(req.headers['x-user-id']).toBe('user-1');
     expect(req.headers['x-user-role']).toBe('coordinator');
     expect(req.headers['x-user-email']).toBe('alice@bgsc.in');
     expect(req.headers['x-username']).toBe('alice');
+  });
+
+  it('rejects a blacklisted jti (C4 — logout revocation)', async () => {
+    const blacklistedRedis = mockRedis(['revoked-jti']);
+    const guardWithRevocation = createJwtAuthMiddleware(
+      { secret: SECRET, issuer: ISSUER, redis: blacklistedRedis },
+      jwtService,
+    );
+
+    const token = sign({
+      sub: 'user-2',
+      username: 'bob',
+      email: 'bob@bgsc.in',
+      role: 'user',
+      jti: 'revoked-jti',
+    });
+    const req = mockReq('/users/me', { authorization: `Bearer ${token}` });
+    const res = mockRes();
+    const next = jest.fn();
+
+    guardWithRevocation(req, res, next);
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(401);
   });
 });
