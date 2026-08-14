@@ -37,7 +37,11 @@
     "start:announcement-service": "nest start announcement-service",
     "start:announcement-service:dev": "nest start announcement-service --watch",
     "test:e2e:notification": "jest --config ./apps/notification-service/test/jest-e2e.json",
-    "test:e2e:announcement": "jest --config ./apps/announcement-service/test/jest-e2e.json"
+    "test:e2e:announcement": "jest --config ./apps/announcement-service/test/jest-e2e.json",
+    "start:social-service": "nest start social-service",
+    "start:social-service:dev": "nest start social-service --watch",
+    "start:challenge-service": "nest start challenge-service",
+    "start:challenge-service:dev": "nest start challenge-service --watch"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",
@@ -104,6 +108,9 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.20.0"
+  },
+  "overrides": {
+    "js-yaml": "^5.3.0"
   },
   "jest": {
     "moduleFileExtensions": [
