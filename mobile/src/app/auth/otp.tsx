@@ -110,7 +110,7 @@ export default function OtpScreen() {
   return (
     <AuthShell
       compact
-      onBack={() => router.back()}
+      onBack={() => { if (router.canGoBack()) router.back(); else router.replace('/login'); }}
       heading="Verification Code"
       subtitle="We have sent the verification code to your email address."
     >
@@ -120,7 +120,7 @@ export default function OtpScreen() {
             Missing your email — please go back and sign up again.
           </Text>
           <Pressable
-            onPress={() => router.replace('/register')}
+            onPress={() => router.replace({ pathname: '/login', params: { tab: 'register' } })}
             accessibilityRole="link"
             accessibilityLabel="Back to sign up"
             hitSlop={8}

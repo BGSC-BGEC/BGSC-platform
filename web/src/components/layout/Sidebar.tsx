@@ -12,16 +12,16 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Shield,
   Lock,
   Clock,
   Command,
+  Megaphone,
 } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAdmin } from '../../context/AdminContext';
-import { NavigationTab } from '../../types/admin';
 
 interface NavItem {
-  id: NavigationTab;
+  path: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   isLive?: boolean;
@@ -37,8 +37,6 @@ interface NavGroup {
 
 export const Sidebar: React.FC = () => {
   const {
-    currentTab,
-    setCurrentTab,
     sidebarCollapsed,
     toggleSidebar,
     sessionDuration,
@@ -47,51 +45,56 @@ export const Sidebar: React.FC = () => {
     userRole,
   } = useAdmin();
 
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+
   const openTicketsCount = tickets.filter((t) => t.status === 'Submitted' || t.status === 'Under Review').length;
   const pendingModerationCount = moderationItems.filter((m) => m.status === 'pending').length;
 
   const navGroups: NavGroup[] = [
     {
-      title: 'SYSTEM OVERVIEW',
+      title: 'PLATFORM',
       items: [
-        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { path: '/events', label: 'Events', icon: LayoutDashboard },
+        { path: '/announcements', label: 'Announcements', icon: Megaphone },
+        { path: '/users', label: 'Users', icon: Users },
       ],
     },
     {
       title: 'COMPETITIONS & LEAGUES',
       items: [
-        { id: 'tournaments', label: 'Tournaments & Brackets', icon: Trophy },
-        { id: 'captains', label: 'Captain Requests', icon: Users },
-        { id: 'auctions', label: 'Auction Controllers', icon: Gavel, isLive: true },
+        { path: '/bracket', label: 'Tournaments & Brackets', icon: Trophy },
+        { path: '/captains', label: 'Captain Requests', icon: Users },
+        { path: '/auctions', label: 'Auction Controllers', icon: Gavel, isLive: true },
       ],
     },
     {
       title: 'ECONOMY & SCORING',
       items: [
-        { id: 'scoring', label: 'Scoring Engine', icon: Sliders },
-        { id: 'investments', label: 'Points & Investments', icon: TrendingUp },
+        { path: '/scoring', label: 'Scoring Engine', icon: Sliders },
+        { path: '/investments', label: 'Points & Investments', icon: TrendingUp },
       ],
     },
     {
       title: 'COMMUNITY & GOVERNANCE',
       items: [
         {
-          id: 'tickets',
+          path: '/tickets',
           label: 'Feedback Tickets',
           icon: TicketCheck,
           badge: openTicketsCount > 0 ? openTicketsCount : undefined,
           badgeColor: 'bg-teal-600 text-teal-100',
         },
         {
-          id: 'moderation',
+          path: '/moderation',
           label: 'Moderation Queue',
           icon: ShieldAlert,
           badge: pendingModerationCount > 0 ? pendingModerationCount : undefined,
           badgeColor: 'bg-amber-500/30 text-amber-300 border border-amber-500/40',
         },
-        { id: 'broadcasts', label: 'Broadcast Engine', icon: Radio },
+        { path: '/broadcasts', label: 'Broadcast Engine', icon: Radio },
         {
-          id: 'settings',
+          path: '/settings',
           label: 'System Settings',
           icon: Settings,
           isGated: userRole === 'Core',
@@ -106,7 +109,6 @@ export const Sidebar: React.FC = () => {
         sidebarCollapsed ? 'w-16' : 'w-60'
       }`}
     >
-      {/* Sidebar Header */}
       <div
         className={`h-16 flex items-center border-b border-slate-700 px-3 ${
           sidebarCollapsed ? 'justify-center' : 'justify-between'
@@ -114,7 +116,7 @@ export const Sidebar: React.FC = () => {
       >
         {!sidebarCollapsed && (
           <div
-            onClick={() => setCurrentTab('dashboard')}
+            onClick={() => navigate('/events')}
             className="flex flex-col min-w-0 cursor-pointer overflow-hidden group select-none"
           >
             <span className="font-bold text-slate-100 text-sm tracking-tight truncate group-hover:text-teal-300 transition-colors">
@@ -125,8 +127,6 @@ export const Sidebar: React.FC = () => {
             </span>
           </div>
         )}
-
-        {/* Collapse Toggle */}
         <button
           onClick={toggleSidebar}
           title={sidebarCollapsed ? 'Expand Sidebar (⌘B)' : 'Collapse Sidebar (⌘B)'}
@@ -136,7 +136,6 @@ export const Sidebar: React.FC = () => {
         </button>
       </div>
 
-      {/* Navigation Group Items */}
       <div className="flex-1 overflow-y-auto py-3 px-2 space-y-4">
         {navGroups.map((group, gIdx) => (
           <div key={gIdx} className="space-y-1">
@@ -147,13 +146,12 @@ export const Sidebar: React.FC = () => {
             )}
             {group.items.map((item) => {
               const Icon = item.icon;
-              const isActive =
-                currentTab === item.id || (item.id === 'tournaments' && currentTab === 'bracket');
+              const isActive = pathname === item.path || pathname.startsWith(item.path + '/');
 
               return (
                 <button
-                  key={item.id}
-                  onClick={() => setCurrentTab(item.id)}
+                  key={item.path}
+                  onClick={() => navigate(item.path)}
                   title={sidebarCollapsed ? item.label : undefined}
                   className={`w-full flex items-center gap-3 px-2.5 py-2 rounded-lg text-xs font-medium transition-all duration-150 relative group ${
                     isActive
@@ -166,7 +164,6 @@ export const Sidebar: React.FC = () => {
                       isActive ? 'text-white' : 'text-slate-400 group-hover:text-slate-200'
                     }`}
                   />
-
                   {!sidebarCollapsed && (
                     <div className="flex-1 flex items-center justify-between min-w-0 text-left">
                       <span className="truncate">{item.label}</span>
@@ -178,9 +175,7 @@ export const Sidebar: React.FC = () => {
                           </span>
                         )}
                         {item.badge !== undefined && (
-                          <span
-                            className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${item.badgeColor}`}
-                          >
+                          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${item.badgeColor}`}>
                             {item.badge}
                           </span>
                         )}
@@ -192,7 +187,6 @@ export const Sidebar: React.FC = () => {
                       </div>
                     </div>
                   )}
-
                   {sidebarCollapsed && item.badge !== undefined && (
                     <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-slate-800" />
                   )}
@@ -203,7 +197,6 @@ export const Sidebar: React.FC = () => {
         ))}
       </div>
 
-      {/* Sidebar Footer */}
       <div className="p-3 border-t border-slate-700 bg-slate-800/80">
         {!sidebarCollapsed ? (
           <div className="space-y-2 text-xs">
@@ -229,3 +222,4 @@ export const Sidebar: React.FC = () => {
     </aside>
   );
 };
+

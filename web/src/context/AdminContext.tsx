@@ -36,6 +36,7 @@ import {
   INITIAL_NOTIFICATIONS,
 } from '../data/initialData';
 import { soundFx } from '../utils/audio';
+import { useAuthStore } from '../core/stores/authStore';
 
 interface AdminContextType {
   // Navigation & Shell
@@ -141,7 +142,11 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Navigation & Shell
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const [userRole, setUserRole] = useState<UserRole>('Core');
+  const authUser = useAuthStore((s) => s.user);
+  const jwtRole = authUser?.role;
+  const mappedRole: UserRole = jwtRole === 'founder' ? 'Founder' : jwtRole === 'coordinator' ? 'Coordinator' : 'Core';
+  const [userRole, setUserRole] = useState<UserRole>(mappedRole);
+  useEffect(() => { setUserRole(mappedRole); }, [mappedRole]);
   const [sessionSeconds, setSessionSeconds] = useState<number>(864); // ~14 mins initial session
 
   // Drawers
@@ -908,9 +913,9 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       // ⌘S / Ctrl+S: Save current state
       if (isCmdOrCtrl && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        if (currentTab === 'bracket') {
+        if (window.location.pathname === '/bracket') {
           saveBracketState();
-        } else if (currentTab === 'scoring') {
+        } else if (window.location.pathname === '/scoring') {
           saveScoringRules();
         } else {
           addToast({ title: 'Workspace Autosaved', type: 'info' });
@@ -927,7 +932,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
 
       // Auction keyboard shortcuts when on auction console tab
-      if (currentTab === 'auctions') {
+      if (window.location.pathname === '/auctions') {
         if (e.code === 'Space' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) {
           e.preventDefault();
           toggleAuctionPause();

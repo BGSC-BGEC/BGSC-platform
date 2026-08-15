@@ -1,4 +1,5 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Trophy,
   Users,
@@ -20,7 +21,6 @@ import { CaptainApplication, Ticket, ModerationItem, InvestmentEvent, AuditLogEn
 
 export const DashboardPage: React.FC = () => {
   const {
-    setCurrentTab,
     captains,
     tickets,
     moderationItems,
@@ -33,6 +33,8 @@ export const DashboardPage: React.FC = () => {
     setSelectedCaptainId,
     setSelectedTicketId,
   } = useAdmin();
+
+  const navigate = useNavigate();
 
   const activeAuctionPlayer = auctionPlayers[activePlayerIndex];
   const pendingCaptains = captains.filter((c: CaptainApplication) => c.status === 'Pending');
@@ -63,7 +65,7 @@ export const DashboardPage: React.FC = () => {
 
         {/* Live Auction Quick Card */}
         <div
-          onClick={() => setCurrentTab('auctions')}
+          onClick={() => navigate('/auctions')}
           className="z-10 flex items-center gap-4 p-3.5 rounded-xl bg-slate-900/80 border border-teal-500/40 shadow-lg hover:border-teal-400 transition-all cursor-pointer group shrink-0"
         >
           <div className="w-12 h-12 rounded-lg bg-teal-600/20 border border-teal-500/40 flex items-center justify-center text-teal-400 group-hover:scale-105 transition-transform">
@@ -90,7 +92,7 @@ export const DashboardPage: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         {/* Stat 1: Tournaments */}
         <div
-          onClick={() => setCurrentTab('bracket')}
+          onClick={() => navigate('/bracket')}
           className="p-4 rounded-xl bg-slate-800 border border-slate-700 hover:border-teal-500/50 transition-all cursor-pointer group shadow-sm"
         >
           <div className="flex items-center justify-between text-slate-400">
@@ -106,7 +108,7 @@ export const DashboardPage: React.FC = () => {
 
         {/* Stat 2: Captains */}
         <div
-          onClick={() => setCurrentTab('captains')}
+          onClick={() => navigate('/captains')}
           className="p-4 rounded-xl bg-slate-800 border border-slate-700 hover:border-teal-500/50 transition-all cursor-pointer group shadow-sm"
         >
           <div className="flex items-center justify-between text-slate-400">
@@ -122,7 +124,7 @@ export const DashboardPage: React.FC = () => {
 
         {/* Stat 3: Live Auction */}
         <div
-          onClick={() => setCurrentTab('auctions')}
+          onClick={() => navigate('/auctions')}
           className="p-4 rounded-xl bg-slate-800 border border-slate-700 hover:border-teal-500/50 transition-all cursor-pointer group shadow-sm"
         >
           <div className="flex items-center justify-between text-slate-400">
@@ -138,7 +140,7 @@ export const DashboardPage: React.FC = () => {
 
         {/* Stat 4: Tickets */}
         <div
-          onClick={() => setCurrentTab('tickets')}
+          onClick={() => navigate('/tickets')}
           className="p-4 rounded-xl bg-slate-800 border border-slate-700 hover:border-teal-500/50 transition-all cursor-pointer group shadow-sm"
         >
           <div className="flex items-center justify-between text-slate-400">
@@ -154,7 +156,7 @@ export const DashboardPage: React.FC = () => {
 
         {/* Stat 5: Moderation */}
         <div
-          onClick={() => setCurrentTab('moderation')}
+          onClick={() => navigate('/moderation')}
           className="p-4 rounded-xl bg-slate-800 border border-slate-700 hover:border-teal-500/50 transition-all cursor-pointer group shadow-sm"
         >
           <div className="flex items-center justify-between text-slate-400">
@@ -170,7 +172,7 @@ export const DashboardPage: React.FC = () => {
 
         {/* Stat 6: Investment Pool */}
         <div
-          onClick={() => setCurrentTab('investments')}
+          onClick={() => navigate('/investments')}
           className="p-4 rounded-xl bg-slate-800 border border-slate-700 hover:border-teal-500/50 transition-all cursor-pointer group shadow-sm"
         >
           <div className="flex items-center justify-between text-slate-400">
@@ -222,7 +224,7 @@ export const DashboardPage: React.FC = () => {
 
               <button
                 onClick={() => {
-                  setCurrentTab('tickets');
+                  navigate('/tickets');
                   setSelectedTicketId('#TICK-10492');
                 }}
                 className="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold shrink-0 transition-colors"
@@ -255,7 +257,7 @@ export const DashboardPage: React.FC = () => {
 
               <button
                 onClick={() => {
-                  setCurrentTab('captains');
+                  navigate('/captains');
                   setSelectedCaptainId('CAP-003');
                 }}
                 className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-semibold shrink-0 transition-colors"
@@ -287,7 +289,7 @@ export const DashboardPage: React.FC = () => {
               </div>
 
               <button
-                onClick={() => setCurrentTab('bracket')}
+                onClick={() => navigate('/bracket')}
                 className="px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold shrink-0 transition-colors"
               >
                 Manage Bracket
@@ -336,7 +338,7 @@ export const DashboardPage: React.FC = () => {
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <button
-            onClick={() => setCurrentTab('bracket')}
+            onClick={() => navigate('/bracket')}
             className="p-4 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-teal-500/40 text-left transition-all group"
           >
             <Trophy className="w-5 h-5 text-teal-400 mb-2 group-hover:scale-110 transition-transform" />
@@ -345,7 +347,7 @@ export const DashboardPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setCurrentTab('auctions')}
+            onClick={() => navigate('/auctions')}
             className="p-4 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-teal-500/40 text-left transition-all group"
           >
             <Gavel className="w-5 h-5 text-emerald-400 mb-2 group-hover:scale-110 transition-transform" />
@@ -354,7 +356,7 @@ export const DashboardPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setCurrentTab('scoring')}
+            onClick={() => navigate('/scoring')}
             className="p-4 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-teal-500/40 text-left transition-all group"
           >
             <Sliders className="w-5 h-5 text-amber-400 mb-2 group-hover:scale-110 transition-transform" />
@@ -363,7 +365,7 @@ export const DashboardPage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setCurrentTab('broadcasts')}
+            onClick={() => navigate('/broadcasts')}
             className="p-4 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-teal-500/40 text-left transition-all group"
           >
             <Radio className="w-5 h-5 text-sky-400 mb-2 group-hover:scale-110 transition-transform" />
