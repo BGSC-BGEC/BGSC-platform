@@ -26,9 +26,11 @@ export function useAuthScreen({ redirectIfAuthed = false }: UseAuthScreenOptions
     return () => useThemeStore.setState({ theme: saved });
   }, []);
 
+  const status = useAuthStore((s) => s.status);
+
   useEffect(() => {
-    if (redirectIfAuthed && useAuthStore.getState().status === 'authenticated') {
+    if (redirectIfAuthed && status === 'authenticated') {
       router.replace('/(drawer)');
     }
-  }, [redirectIfAuthed]);
+  }, [redirectIfAuthed, status]);
 }

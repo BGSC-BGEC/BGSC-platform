@@ -36,7 +36,7 @@ export function Login() {
       } else {
         await register({ username, email, password, acceptedTos })
       }
-      navigate('/events', { replace: true })
+      navigate('/', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {

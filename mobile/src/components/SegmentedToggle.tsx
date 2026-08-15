@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { FONTS } from '@/core/theme/fonts';
 import { useColors } from '@/hooks/use-colors';
@@ -11,44 +11,44 @@ export interface SegmentedToggleProps {
   accessibilityLabel?: string;
 }
 
-/**
- * Segmented toggle (master doc §7.6): pill track (`surfaceMuted`), equal
- * segments, active = elevated light pill with subtle shadow, Inter 600 label.
- * Indicator slides via transform (150 ms, useNativeDriver) — width and travel
- * scale with the option count.
- */
 export function SegmentedToggle({ options, value, onChange, accessibilityLabel }: SegmentedToggleProps) {
   const colors = useColors();
   const count = Math.max(1, options.length);
-  const segWidth = 100 / count;
   const index = Math.max(0, options.indexOf(value));
+
+  const [trackWidth, setTrackWidth] = useState(0);
+  const segWidthPx = trackWidth > 0 ? (trackWidth - 8) / count : 0;
   const [translateX] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
+    if (segWidthPx <= 0) return;
     Animated.timing(translateX, {
-      toValue: index * segWidth,
+      toValue: index * segWidthPx,
       duration: 150,
-      useNativeDriver: true,
+      useNativeDriver: Platform.OS !== 'web',
     }).start();
-  }, [index, segWidth, translateX]);
+  }, [index, segWidthPx, translateX]);
 
   return (
     <View
       accessibilityRole="tablist"
       accessibilityLabel={accessibilityLabel ?? 'Segmented control'}
       style={[styles.track, { backgroundColor: colors.surfaceMuted }]}
+      onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}
     >
-      <Animated.View
-        style={[
-          styles.indicator,
-          {
-            backgroundColor: colors.surfaceSolid,
-            shadowColor: '#000',
-            width: `${segWidth}%`,
-            transform: [{ translateX }],
-          },
-        ]}
-      />
+      {segWidthPx > 0 && (
+        <Animated.View
+          style={[
+            styles.indicator,
+            {
+              backgroundColor: colors.surfaceSolid,
+              shadowColor: '#000',
+              width: segWidthPx,
+              transform: [{ translateX }],
+            },
+          ]}
+        />
+      )}
       {options.map((opt) => {
         const active = opt === value;
         return (
@@ -60,12 +60,7 @@ export function SegmentedToggle({ options, value, onChange, accessibilityLabel }
             accessibilityState={{ selected: active }}
             style={styles.segment}
           >
-            <Text
-              style={[
-                styles.label,
-                { color: active ? colors.text : colors.textMuted },
-              ]}
-            >
+            <Text style={[styles.label, { color: active ? colors.text : colors.textMuted }]}>
               {opt}
             </Text>
           </Pressable>

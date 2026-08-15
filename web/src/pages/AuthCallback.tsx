@@ -30,7 +30,7 @@ export function AuthCallback() {
 
     adoptToken(token)
       .then(() => {
-        navigate(isNewUser ? '/events?welcome=1' : '/events', { replace: true })
+        navigate('/', { replace: true })
       })
       .catch((err) =>
         setError(err instanceof Error ? err.message : 'Sign-in failed.'),
