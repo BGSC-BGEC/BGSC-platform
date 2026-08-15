@@ -11,8 +11,8 @@ import {
 } from '@expo-google-fonts/inter';
 import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
 import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { useFonts } from 'expo-font';
-import * as Notifications from 'expo-notifications';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -90,7 +90,15 @@ export default function RootLayout() {
 function PointsUpdateListener() {
   const qc = useQueryClient();
   useEffect(() => {
-    const sub = Notifications.addNotificationReceivedListener((notif) => {
+    // Push notifications aren't available in Expo Go (removed in SDK 53+).
+    // Only set up the listener in development builds or standalone apps.
+    if (Constants.executionEnvironment === ExecutionEnvironment.StoreClient) {
+      return;
+    }
+
+    // Lazy require to avoid crashing when module initializes in Expo Go
+    const Notifications = require('expo-notifications');
+    const sub = Notifications.addNotificationReceivedListener((notif: any) => {
       if (notif.request.content.data?.type === 'POINTS_UPDATED') {
         qc.invalidateQueries({ queryKey: ['points', 'balance'] });
         qc.invalidateQueries({ queryKey: ['points', 'transactions'] });
