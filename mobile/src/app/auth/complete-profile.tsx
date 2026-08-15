@@ -75,7 +75,9 @@ export default function CompleteProfileScreen() {
   const onBack = () => {
     Alert.alert('Discard changes?', 'Your progress will be lost. Go back?', [
       { text: 'Stay', style: 'cancel' },
-      { text: 'Go back', style: 'destructive', onPress: () => router.back() },
+      { text: 'Go back', style: 'destructive', onPress: () => {
+        if (router.canGoBack()) router.back(); else router.replace('/login');
+      }},
     ]);
   };
 

@@ -14,6 +14,7 @@ import {
   User,
   Ticket as TicketIcon,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAdmin } from '../../context/AdminContext';
 import { NavigationTab } from '../../types/admin';
 
@@ -21,7 +22,6 @@ export const CommandPalette: React.FC = () => {
   const {
     commandPaletteOpen,
     setCommandPaletteOpen,
-    setCurrentTab,
     matches,
     captains,
     tickets,
@@ -33,6 +33,8 @@ export const CommandPalette: React.FC = () => {
     saveScoringRules,
     toggleAuctionPause,
   } = useAdmin();
+
+  const navigate = useNavigate();
 
   const [query, setQuery] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -184,7 +186,7 @@ export const CommandPalette: React.FC = () => {
                     <button
                       key={page.id}
                       onClick={() => {
-                        setCurrentTab(page.id);
+                        navigate('/' + page.id);
                         setCommandPaletteOpen(false);
                       }}
                       className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-200 hover:bg-slate-800 hover:text-teal-300 transition-colors group"
@@ -212,7 +214,7 @@ export const CommandPalette: React.FC = () => {
                   <button
                     key={ticket.id}
                     onClick={() => {
-                      setCurrentTab('tickets');
+                      navigate('/tickets');
                       setSelectedTicketId(ticket.id);
                       setCommandPaletteOpen(false);
                     }}
@@ -243,7 +245,7 @@ export const CommandPalette: React.FC = () => {
                   <button
                     key={captain.id}
                     onClick={() => {
-                      setCurrentTab('captains');
+                      navigate('/captains');
                       setSelectedCaptainId(captain.id);
                       setCommandPaletteOpen(false);
                     }}
@@ -272,7 +274,7 @@ export const CommandPalette: React.FC = () => {
                   <button
                     key={m.id}
                     onClick={() => {
-                      setCurrentTab('bracket');
+                      navigate('/bracket');
                       setCommandPaletteOpen(false);
                     }}
                     className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-200 hover:bg-slate-800 transition-colors"
@@ -303,7 +305,7 @@ export const CommandPalette: React.FC = () => {
                   <button
                     key={p.id}
                     onClick={() => {
-                      setCurrentTab('auctions');
+                      navigate('/auctions');
                       setCommandPaletteOpen(false);
                     }}
                     className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-200 hover:bg-slate-800 transition-colors"

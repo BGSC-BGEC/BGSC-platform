@@ -43,7 +43,7 @@ const AppContent: React.FC = () => {
     }
   };
 
-  return <AdminLayout>{renderActivePage()}</AdminLayout>;
+  return <AdminLayout />;
 };
 
 export const App: React.FC = () => {

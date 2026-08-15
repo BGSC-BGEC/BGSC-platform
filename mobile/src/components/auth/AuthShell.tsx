@@ -24,30 +24,20 @@ export interface AuthTabs {
 
 export interface AuthShellProps {
   children: ReactNode;
-  /** Smaller hero band (OTP / Complete Profile — handoffSpec §6.1, §7.1). */
   compact?: boolean;
-  /** Login/Sign-Up segmented toggle below the wordmark (handoffSpec §3.3). */
   tabs?: AuthTabs;
-  /** Circular back button + heading mode (no wordmark/tabs). */
   onBack?: () => void;
+  /** Show a back button alongside tabs (when accessed from inside the app). */
+  showBack?: boolean;
   heading?: string;
   subtitle?: string;
 }
 
-/**
- * Shared auth shell (auth specs §2): light canvas (`#FAF7F2`), full-bleed
- * hero band fading into the page, BGSC wordmark, then either the Login/Sign
- * Up segmented toggle or a back button + heading. Content is scrollable and
- * keyboard-aware. Auth screens are the light-mode exception to the dark
- * glass canvas — flat light surfaces, per handoffSpec §2.
- *
- * TODO(auth): hero band is a placeholder block — drop in the final pixel-art
- * hero (cat.gif) when the asset ships; it should harmonize with the teal
- * palette (handoffSpec §14).
- */
-export function AuthShell({ children, compact = false, tabs, onBack, heading, subtitle }: AuthShellProps) {
+export function AuthShell({ children, compact = false, tabs, onBack, showBack, heading, subtitle }: AuthShellProps) {
   const colors = lightColors;
   const insets = useSafeAreaInsets();
+
+  const heroHeight = compact ? 130 : 200;
 
   return (
     <KeyboardAvoidingView
@@ -59,15 +49,36 @@ export function AuthShell({ children, compact = false, tabs, onBack, heading, su
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View
-          style={[
-            styles.hero,
-            compact ? styles.heroCompact : null,
-            { backgroundColor: colors.backgroundMid, borderBottomColor: colors.border },
-          ]}
-        />
-        <View style={[styles.body, { paddingTop: insets.top + 20 }]}>
-          {onBack ? (
+        {/* Hero band: teal gradient using stacked Views */}
+        <View style={[styles.hero, { height: heroHeight + insets.top }]}>
+          <View style={[StyleSheet.absoluteFill, styles.heroGradientTop]} />
+          <View style={[StyleSheet.absoluteFill, styles.heroGradientBottom]} />
+          {/* Subtle pattern dots */}
+          <View style={[StyleSheet.absoluteFill, styles.heroNoise]} />
+        </View>
+
+        <View style={styles.body}>
+          {/* Back button when accessed from within the app alongside tabs */}
+          {showBack && tabs ? (
+            <View style={styles.backRow}>
+              <Pressable
+                onPress={onBack}
+                accessibilityRole="button"
+                accessibilityLabel="Go back"
+                hitSlop={8}
+                style={({ pressed }) => [
+                  styles.back,
+                  {
+                    backgroundColor: colors.surfaceSolid,
+                    borderColor: colors.border,
+                    opacity: pressed ? 0.85 : 1,
+                  },
+                ]}
+              >
+                <Ionicons name="arrow-back" size={18} color={colors.text} />
+              </Pressable>
+            </View>
+          ) : onBack ? (
             <Pressable
               onPress={onBack}
               accessibilityRole="button"
@@ -82,7 +93,7 @@ export function AuthShell({ children, compact = false, tabs, onBack, heading, su
                 },
               ]}
             >
-              <Ionicons name="arrow-back" size={20} color={colors.text} />
+              <Ionicons name="arrow-back" size={18} color={colors.text} />
             </Pressable>
           ) : (
             <View style={styles.wordmark}>
@@ -121,22 +132,36 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   hero: {
-    height: 180,
-    borderBottomWidth: 1,
+    overflow: 'hidden',
   },
-  heroCompact: {
-    height: 120,
+  heroGradientTop: {
+    backgroundColor: '#0B3D45',
+    bottom: '40%',
+  },
+  heroGradientBottom: {
+    top: '60%',
+    backgroundColor: '#FAF7F2',
+  },
+  heroNoise: {
+    backgroundColor: 'transparent',
+    opacity: 0.08,
   },
   body: {
     paddingHorizontal: 24,
+    paddingTop: 24,
     paddingBottom: 40,
+  },
+  backRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   wordmark: {
     alignItems: 'center',
-    marginTop: 20,
+    marginBottom: 4,
   },
   tabs: {
-    marginTop: 24,
+    marginTop: 20,
     alignSelf: 'center',
     width: 280,
     maxWidth: '100%',
@@ -158,6 +183,7 @@ const styles = StyleSheet.create({
   heading: {
     fontFamily: FONTS.heading,
     fontSize: 28,
+    marginTop: 8,
   },
   subtitle: {
     fontFamily: FONTS.body,

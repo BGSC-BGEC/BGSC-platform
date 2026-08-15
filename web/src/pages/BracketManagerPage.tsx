@@ -10,6 +10,7 @@ import {
   Shield,
   FileEdit,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAdmin } from '../context/AdminContext';
 import { SlideOverDrawer } from '../components/common/SlideOverDrawer';
 import { BracketFormat, BracketRules, MatchNode } from '../types/admin';
@@ -21,9 +22,10 @@ export const BracketManagerPage: React.FC = () => {
     bracketRules,
     setBracketRules,
     saveBracketState,
-    setCurrentTab,
     autosaveStatus,
   } = useAdmin();
+
+  const navigate = useNavigate();
 
   const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [rulesDrawerOpen, setRulesDrawerOpen] = useState<boolean>(false);
@@ -159,7 +161,7 @@ export const BracketManagerPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-xl bg-slate-800 border border-slate-700 shadow-md">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setCurrentTab('dashboard')}
+            onClick={() => navigate('/events')}
             className="p-2 rounded-lg bg-slate-700/80 hover:bg-slate-700 text-slate-300 hover:text-slate-100 transition-colors"
           >
             <ArrowLeft className="w-4 h-4" />

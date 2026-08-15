@@ -1,5 +1,6 @@
 import React from 'react';
 import { SlideOverDrawer } from './SlideOverDrawer';
+import { useNavigate } from 'react-router-dom';
 import { useAdmin } from '../../context/AdminContext';
 import { Bell, CheckCheck, AlertTriangle, AlertCircle, Info } from 'lucide-react';
 
@@ -10,8 +11,9 @@ export const NotificationDrawer: React.FC = () => {
     notifications,
     markAllNotificationsRead,
     markNotificationRead,
-    setCurrentTab,
   } = useAdmin();
+
+  const navigate = useNavigate();
 
   const unreadCount = notifications.filter((n) => n.unread).length;
 
@@ -75,7 +77,7 @@ export const NotificationDrawer: React.FC = () => {
                 onClick={() => {
                   markNotificationRead(notif.id);
                   if (notif.linkTab) {
-                    setCurrentTab(notif.linkTab);
+                    navigate('/' + notif.linkTab);
                     setNotificationDrawerOpen(false);
                   }
                 }}
