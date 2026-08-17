@@ -37,8 +37,12 @@ async function bootstrap() {
   const sponsorTarget = config.get<string>('gateway.services.sponsor')!;
   const eventTarget = config.get<string>('gateway.services.event')!;
   const pointsTarget = config.get<string>('gateway.services.points')!;
-  const notificationTarget = config.get<string>('gateway.services.notification')!;
-  const announcementTarget = config.get<string>('gateway.services.announcement')!;
+  const notificationTarget = config.get<string>(
+    'gateway.services.notification',
+  )!;
+  const announcementTarget = config.get<string>(
+    'gateway.services.announcement',
+  )!;
   const socialTarget = config.get<string>('gateway.services.social')!;
   const challengeTarget = config.get<string>('gateway.services.challenge')!;
   const proxyTimeoutMs = config.get<number>('gateway.proxyTimeoutMs', 30000);
@@ -100,22 +104,36 @@ async function bootstrap() {
   });
 
   // Block POST /notifications at the edge — internal-only endpoint.
-  app.use('/notifications', (req: Request, res: Response, next: NextFunction) => {
-    if (req.method === 'POST') {
-      res.status(403).json({ statusCode: 403, message: 'Forbidden: internal endpoint' });
-      return;
-    }
-    next();
-  });
+  app.use(
+    '/notifications',
+    (req: Request, res: Response, next: NextFunction) => {
+      if (req.method === 'POST') {
+        res
+          .status(403)
+          .json({ statusCode: 403, message: 'Forbidden: internal endpoint' });
+        return;
+      }
+      next();
+    },
+  );
 
   // Block /strava/internal/* at the edge — service-to-service only.
   app.use('/strava/internal', (_req: Request, res: Response) => {
-    res.status(403).json({ statusCode: 403, message: 'Forbidden: internal endpoint' });
+    res
+      .status(403)
+      .json({ statusCode: 403, message: 'Forbidden: internal endpoint' });
+  });
+  app.use('/points/internal', (_req: Request, res: Response) => {
+    res
+      .status(403)
+      .json({ statusCode: 403, message: 'Forbidden: internal endpoint' });
   });
 
   // Edge pipeline: rate limit -> JWT verification (with jti blacklist) -> proxy.
   app.use(createRateLimitMiddleware(redis, rateLimit));
-  app.use(createJwtAuthMiddleware({ secret: jwtSecret, issuer: jwtIssuer, redis }));
+  app.use(
+    createJwtAuthMiddleware({ secret: jwtSecret, issuer: jwtIssuer, redis }),
+  );
 
   app.use(
     createServiceProxy({

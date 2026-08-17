@@ -10,7 +10,10 @@ import { EventsController } from './events.controller';
 import { EventsService } from './events.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Event, Registration, EventScore]), HttpModule],
+  imports: [
+    TypeOrmModule.forFeature([Event, Registration, EventScore]),
+    HttpModule.register({ timeout: 5000 }),
+  ],
   controllers: [EventsController],
   providers: [EventsService, RolesGuard, EventBusService],
 })

@@ -29,6 +29,8 @@ export const CHALLENGE_SERVICE_PREFIXES = ['/challenges'];
 const AUTH_ATTEMPT_PATHS = [
   '/auth/login',
   '/auth/register',
+  '/auth/verify-email',
+  '/auth/resend-otp',
   '/auth/totp/verify',
   '/auth/totp/verify-backup',
   '/auth/forgot-password',

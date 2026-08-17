@@ -1,16 +1,24 @@
 import { apiClient } from '../api/ApiClient'
 import { API_BASE_URL } from '../env'
-import type { AuthResponse, LoginInput, RegisterInput } from '../types'
+import type { AuthResponse, LoginInput, RegisterInput, RegistrationPending } from '../types'
 
 /**
  * Model-layer gateway to the auth-service (via the API gateway).
  * Auth endpoints are public, so they bypass the access-token injection.
  */
 export const AuthRepository = {
-  register(input: RegisterInput): Promise<AuthResponse> {
-    return apiClient.post<AuthResponse>('/auth/register', input, {
+  register(input: RegisterInput): Promise<RegistrationPending> {
+    return apiClient.post<RegistrationPending>('/auth/register', input, {
       skipAuth: true,
     })
+  },
+
+  verifyEmail(input: { verificationToken: string; code: string }): Promise<AuthResponse> {
+    return apiClient.post<AuthResponse>('/auth/verify-email', input, { skipAuth: true })
+  },
+
+  resendOtp(input: { verificationToken: string }): Promise<void> {
+    return apiClient.post<void>('/auth/resend-otp', input, { skipAuth: true })
   },
 
   login(input: LoginInput): Promise<AuthResponse> {

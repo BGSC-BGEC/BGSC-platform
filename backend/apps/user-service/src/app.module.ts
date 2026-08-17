@@ -11,6 +11,7 @@ import { AddBioColumn1769000000000 } from './migrations/1769000000000-AddBioColu
 import { AddDisplayNameCustomTagsLogoUrl1770000000000 } from './migrations/1770000000000-AddDisplayNameCustomTagsLogoUrl';
 import { AddStravaCredentials1780000000001 } from './migrations/1780000000001-AddStravaCredentials';
 import { AddStravaActivities1780000000002 } from './migrations/1780000000002-AddStravaActivities';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { AddStravaActivities1780000000002 } from './migrations/1780000000002-Add
     AuthModule,
     UsersModule,
     StravaModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

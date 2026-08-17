@@ -17,10 +17,13 @@ export class AwardPointsDto {
   referenceId?: string;
 }
 
-export class AwardParticipationDto {
+export class AwardAttendanceDto {
   @IsUUID('4')
   userId!: string;
 
   @IsUUID('4')
   eventId!: string;
+
+  @IsUUID('4')
+  registrationId!: string;
 }

@@ -3,17 +3,25 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Headers,
   Param,
   Post,
   Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
+import { timingSafeEqual } from 'crypto';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../rbac/roles.decorator';
 import { RolesGuard } from '../rbac/roles.guard';
-import { AwardParticipationDto, AwardPointsDto } from './dto/award-points.dto';
+import { AwardAttendanceDto, AwardPointsDto } from './dto/award-points.dto';
 import { PointsBalanceResponseDto } from './dto/points-balance-response.dto';
 import { TransactionResponseDto } from './dto/transaction-response.dto';
 import { UserRole } from './enums/user-role.enum';
@@ -21,12 +29,19 @@ import { PointsService } from './points.service';
 
 type AuthRequest = Request & { user: { id: string; role: UserRole } };
 
-const ADMIN_ROLES: UserRole[] = [UserRole.COORDINATOR, UserRole.FOUNDER, UserRole.CORE];
+const ADMIN_ROLES: UserRole[] = [
+  UserRole.COORDINATOR,
+  UserRole.FOUNDER,
+  UserRole.CORE,
+];
 
 @ApiTags('points')
 @Controller('points')
 export class PointsController {
-  constructor(private readonly pointsService: PointsService) {}
+  constructor(
+    private readonly pointsService: PointsService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Get('me/balance')
   @ApiBearerAuth()
@@ -40,8 +55,16 @@ export class PointsController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: "Get authenticated user's transaction history" })
-  @ApiQuery({ name: 'source', required: false, enum: ['event', 'challenge', 'store', 'leaderboard'] })
-  @ApiQuery({ name: 'type', required: false, enum: ['earn', 'spend', 'refund'] })
+  @ApiQuery({
+    name: 'source',
+    required: false,
+    enum: ['event', 'challenge', 'store', 'leaderboard'],
+  })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    enum: ['earn', 'spend', 'refund'],
+  })
   getMyTransactions(
     @Request() req: AuthRequest,
     @Query('page') page = '1',
@@ -67,7 +90,7 @@ export class PointsController {
     @Request() req: AuthRequest,
   ): Promise<PointsBalanceResponseDto> {
     if (req.user.id !== userId && !ADMIN_ROLES.includes(req.user.role)) {
-      throw new ForbiddenException('Cannot view another user\'s balance');
+      throw new ForbiddenException("Cannot view another user's balance");
     }
     return this.pointsService.getBalance(userId);
   }
@@ -77,8 +100,16 @@ export class PointsController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(UserRole.CORE, UserRole.COORDINATOR, UserRole.FOUNDER)
   @ApiOperation({ summary: "Get any user's transaction history (admin only)" })
-  @ApiQuery({ name: 'source', required: false, enum: ['event', 'challenge', 'store', 'leaderboard'] })
-  @ApiQuery({ name: 'type', required: false, enum: ['earn', 'spend', 'refund'] })
+  @ApiQuery({
+    name: 'source',
+    required: false,
+    enum: ['event', 'challenge', 'store', 'leaderboard'],
+  })
+  @ApiQuery({
+    name: 'type',
+    required: false,
+    enum: ['earn', 'spend', 'refund'],
+  })
   getTransactionsForUser(
     @Param('userId') userId: string,
     @Query('page') page = '1',
@@ -104,14 +135,28 @@ export class PointsController {
     return this.pointsService.award(dto);
   }
 
-  @Post('participation')
-  @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles(UserRole.COORDINATOR, UserRole.FOUNDER)
-  @ApiOperation({ summary: 'Award 10-point participation credit for an event registration' })
-  awardParticipation(
-    @Body() dto: AwardParticipationDto,
+  @Post('internal/attendance')
+  awardAttendance(
+    @Headers('x-internal-key') key: string | undefined,
+    @Body() dto: AwardAttendanceDto,
   ): Promise<TransactionResponseDto> {
-    return this.pointsService.awardParticipation(dto.userId, dto.eventId);
+    const expected = this.configService.get<string>(
+      'points.internalServiceKey',
+      '',
+    );
+    const providedBuffer = Buffer.from(key ?? '');
+    const expectedBuffer = Buffer.from(expected);
+    if (
+      expectedBuffer.length === 0 ||
+      providedBuffer.length !== expectedBuffer.length ||
+      !timingSafeEqual(providedBuffer, expectedBuffer)
+    ) {
+      throw new ForbiddenException('Invalid internal service key');
+    }
+    return this.pointsService.awardAttendance(
+      dto.registrationId,
+      dto.userId,
+      dto.eventId,
+    );
   }
 }

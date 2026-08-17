@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { DataSource, EntityManager, Repository } from 'typeorm';
+import { of, throwError } from 'rxjs';
 import { CreateEventDto } from '../src/events/dto/create-event.dto';
 import { SubmitScoresDto } from '../src/events/dto/submit-scores.dto';
 import { CompleteEventDto } from '../src/events/dto/complete-event.dto';
@@ -23,7 +24,7 @@ type EventsRepositoryMock = Pick<
 
 type RegistrationsRepositoryMock = Pick<
   jest.Mocked<Repository<Registration>>,
-  'count' | 'create' | 'find' | 'findOne' | 'save'
+  'count' | 'create' | 'find' | 'findOne' | 'save' | 'update'
 >;
 
 type ScoresRepositoryMock = Pick<
@@ -32,12 +33,17 @@ type ScoresRepositoryMock = Pick<
 >;
 
 type EventBusMock = Pick<jest.Mocked<EventBusService>, 'emit'>;
+type HttpServiceMock = Pick<
+  jest.Mocked<import('@nestjs/axios').HttpService>,
+  'post'
+>;
 
 describe('EventsService', () => {
   let eventsRepository: EventsRepositoryMock;
   let registrationsRepository: RegistrationsRepositoryMock;
   let scoresRepository: ScoresRepositoryMock;
   let eventBus: EventBusMock;
+  let httpService: HttpServiceMock;
   let dataSource: jest.Mocked<Pick<DataSource, 'transaction'>>;
   let service: EventsService;
 
@@ -54,6 +60,9 @@ describe('EventsService', () => {
       find: jest.fn(),
       findOne: jest.fn(),
       save: jest.fn(),
+      update: jest
+        .fn()
+        .mockResolvedValue({ affected: 1, raw: [], generatedMaps: [] }),
     };
     scoresRepository = {
       create: jest.fn(),
@@ -62,23 +71,36 @@ describe('EventsService', () => {
       save: jest.fn(),
     };
     eventBus = { emit: jest.fn() };
+    httpService = { post: jest.fn().mockReturnValue(of({ data: {} })) };
     // Simulate transaction: run the callback with a minimal manager mock.
     // register() uses manager.getRepository(), submitScores() uses manager.delete/create/save directly.
     dataSource = {
-      transaction: jest.fn().mockImplementation(async (cb: (em: Partial<EntityManager>) => Promise<void>) => {
-        const manager: Partial<EntityManager> = {
-          delete: jest.fn().mockResolvedValue({ affected: 0, raw: [] }),
-          create: jest.fn((_entity: unknown, data: unknown) => data),
-          save: jest.fn().mockImplementation((_entity: unknown, items: unknown) => Promise.resolve(items)),
-          getRepository: jest.fn().mockImplementation((entity: unknown) => {
-            if (entity === Event) return { ...eventsRepository, findOne: eventsRepository.findOneBy };
-            if (entity === Registration) return registrationsRepository;
-            if (entity === EventScore) return scoresRepository;
-            return {};
-          }),
-        };
-        return cb(manager);
-      }),
+      transaction: jest
+        .fn()
+        .mockImplementation(
+          async (cb: (em: Partial<EntityManager>) => Promise<void>) => {
+            const manager: Partial<EntityManager> = {
+              delete: jest.fn().mockResolvedValue({ affected: 0, raw: [] }),
+              create: jest.fn((_entity: unknown, data: unknown) => data),
+              save: jest
+                .fn()
+                .mockImplementation((_entity: unknown, items: unknown) =>
+                  Promise.resolve(items),
+                ),
+              getRepository: jest.fn().mockImplementation((entity: unknown) => {
+                if (entity === Event)
+                  return {
+                    ...eventsRepository,
+                    findOne: eventsRepository.findOneBy,
+                  };
+                if (entity === Registration) return registrationsRepository;
+                if (entity === EventScore) return scoresRepository;
+                return {};
+              }),
+            };
+            return cb(manager);
+          },
+        ),
     };
 
     service = new EventsService(
@@ -87,8 +109,18 @@ describe('EventsService', () => {
       scoresRepository as unknown as Repository<EventScore>,
       eventBus as unknown as EventBusService,
       dataSource as unknown as DataSource,
-      { get: jest.fn().mockReturnValue(undefined) } as unknown as import('@nestjs/axios').HttpService,
-      { get: jest.fn().mockReturnValue('http://localhost:3003') } as unknown as import('@nestjs/config').ConfigService,
+      httpService as unknown as import('@nestjs/axios').HttpService,
+      {
+        get: jest.fn(
+          (key: string) =>
+            ({
+              'event.sponsorServiceUrl': 'http://localhost:3003',
+              'event.pointsServiceUrl': 'http://localhost:3005',
+              'event.internalServiceKey':
+                'test-internal-service-key-32-characters',
+            })[key],
+        ),
+      } as unknown as import('@nestjs/config').ConfigService,
     );
   });
 
@@ -200,6 +232,7 @@ describe('EventsService', () => {
         'RegistrationCreated',
         expect.objectContaining({ eventId, userId }),
       );
+      expect(httpService.post).not.toHaveBeenCalled();
     });
 
     it('rejects registration past the deadline', async () => {
@@ -300,6 +333,88 @@ describe('EventsService', () => {
     });
   });
 
+  describe('checkIn', () => {
+    it('records attendance and emits AttendanceConfirmed', async () => {
+      const event = makeEvent({ status: EventStatus.ONGOING });
+      const registration = makeRegistration({
+        eventId: 'event-uuid',
+        userId: 'user-uuid',
+      });
+      eventsRepository.findOneBy.mockResolvedValue(event);
+      registrationsRepository.findOne.mockResolvedValue(registration);
+      registrationsRepository.save.mockImplementation(async (value) => value);
+
+      const result = await service.checkIn('event-uuid', 'user-uuid');
+
+      expect(result.attendedAt).toBeInstanceOf(Date);
+      expect(eventBus.emit).toHaveBeenCalledWith(
+        'AttendanceConfirmed',
+        expect.objectContaining({ eventId: 'event-uuid', userId: 'user-uuid' }),
+      );
+      expect(httpService.post).toHaveBeenCalledWith(
+        'http://localhost:3005/points/internal/attendance',
+        {
+          registrationId: registration.id,
+          eventId: 'event-uuid',
+          userId: 'user-uuid',
+        },
+        {
+          headers: {
+            'x-internal-key': 'test-internal-service-key-32-characters',
+          },
+        },
+      );
+      expect(registrationsRepository.update).toHaveBeenCalledWith(
+        expect.objectContaining({ id: registration.id }),
+        expect.objectContaining({ pointsAwardedAt: expect.any(Date) }),
+      );
+    });
+
+    it('keeps attendance pending when points delivery fails', async () => {
+      const event = makeEvent({ status: EventStatus.ONGOING });
+      const registration = makeRegistration();
+      eventsRepository.findOneBy.mockResolvedValue(event);
+      registrationsRepository.findOne.mockResolvedValue(registration);
+      registrationsRepository.save.mockImplementation(async (value) => value);
+      httpService.post.mockReturnValueOnce(
+        throwError(() => new Error('points service unavailable')),
+      );
+
+      await expect(
+        service.checkIn(registration.eventId, registration.userId),
+      ).resolves.toMatchObject({ attendedAt: expect.any(Date) });
+      expect(registrationsRepository.update).not.toHaveBeenCalled();
+    });
+
+    it('retries pending attendance awards on startup', async () => {
+      const registration = makeRegistration({ attendedAt: new Date() });
+      registrationsRepository.find.mockResolvedValue([registration]);
+
+      service.onModuleInit();
+      await new Promise((resolve) => setImmediate(resolve));
+      service.onModuleDestroy();
+
+      expect(httpService.post).toHaveBeenCalledWith(
+        'http://localhost:3005/points/internal/attendance',
+        expect.objectContaining({ registrationId: registration.id }),
+        expect.any(Object),
+      );
+      expect(registrationsRepository.update).toHaveBeenCalled();
+    });
+
+    it('rejects a second check-in', async () => {
+      const event = makeEvent({ status: EventStatus.ONGOING });
+      eventsRepository.findOneBy.mockResolvedValue(event);
+      registrationsRepository.findOne.mockResolvedValue(
+        makeRegistration({ attendedAt: new Date() }),
+      );
+
+      await expect(
+        service.checkIn('event-uuid', 'user-uuid'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
   describe('getLeaderboard', () => {
     it('returns ranked scores for an existing event', async () => {
       const event = makeEvent();
@@ -334,9 +449,14 @@ describe('EventsService', () => {
     it('marks event as past and emits EventCompleted', async () => {
       const event = makeEvent({ status: EventStatus.ONGOING });
       eventsRepository.findOneBy.mockResolvedValue(event);
-      eventsRepository.save.mockResolvedValue({ ...event, status: EventStatus.PAST });
+      eventsRepository.save.mockResolvedValue({
+        ...event,
+        status: EventStatus.PAST,
+      });
 
-      await expect(service.complete(event.id, dto, 'admin-uuid')).resolves.toMatchObject({
+      await expect(
+        service.complete(event.id, dto, 'admin-uuid'),
+      ).resolves.toMatchObject({
         status: EventStatus.PAST,
       });
       expect(eventBus.emit).toHaveBeenCalledWith(
@@ -354,6 +474,37 @@ describe('EventsService', () => {
 
       await expect(
         service.complete(event.id, dto, 'admin-uuid'),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('cancel', () => {
+    it('cancels a non-completed event and emits EventCancelled', async () => {
+      const event = makeEvent();
+      eventsRepository.findOneBy.mockResolvedValue(event);
+      eventsRepository.save.mockImplementation(async (value) => value);
+
+      await expect(
+        service.cancel(event.id, 'admin-uuid'),
+      ).resolves.toMatchObject({
+        status: EventStatus.CANCELLED,
+      });
+      expect(eventBus.emit).toHaveBeenCalledWith(
+        'EventCancelled',
+        expect.objectContaining({
+          eventId: event.id,
+          cancelledBy: 'admin-uuid',
+        }),
+      );
+    });
+
+    it('does not cancel an event twice', async () => {
+      eventsRepository.findOneBy.mockResolvedValue(
+        makeEvent({ status: EventStatus.CANCELLED }),
+      );
+
+      await expect(
+        service.cancel('event-uuid', 'admin-uuid'),
       ).rejects.toBeInstanceOf(ConflictException);
     });
   });

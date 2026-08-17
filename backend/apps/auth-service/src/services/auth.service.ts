@@ -4,11 +4,13 @@ import {
   Inject,
   Injectable,
   Logger,
+  ServiceUnavailableException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import Redis from 'ioredis';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'crypto';
 import { UserCredential } from '../entities/user-credential.entity';
 import { LoginAuditLog } from '../entities/login-audit-log.entity';
 import { PasswordService } from './password.service';
@@ -43,6 +45,11 @@ export interface AuthUserResponse {
 }
 
 export interface RegisterResult {
+  verificationToken: string;
+  expiresIn: number;
+}
+
+export interface VerifiedRegistrationResult {
   user: AuthUserResponse;
   accessToken: string;
   refreshToken: string;
@@ -79,11 +86,7 @@ export class AuthService {
     @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
-  async register(
-    dto: RegisterDto,
-    ip: string,
-    userAgent: string,
-  ): Promise<RegisterResult> {
+  async register(dto: RegisterDto): Promise<RegisterResult> {
     const normalizedEmail = dto.email.toLowerCase().trim();
     const normalizedUsername = dto.username.toLowerCase().trim();
 
@@ -103,15 +106,96 @@ export class AuthService {
 
     const passwordHash = await this.passwordService.hashPassword(dto.password);
 
-    const user = this.userRepository.create({
+    const verificationToken = randomBytes(32).toString('hex');
+    const code = randomInt(100000, 1000000).toString();
+    const key = this.registrationKey(verificationToken);
+    await this.redis.hset(key, {
       username: normalizedUsername,
       email: normalizedEmail,
       passwordHash,
-      role: UserRole.USER,
-      status: UserStatus.ACTIVE,
+      codeHash: this.registrationCodeHash(verificationToken, code),
+      attempts: '0',
     });
-    await this.userRepository.save(user);
+    await this.redis.expire(key, 10 * 60);
+    try {
+      await this.emailService.sendRegistrationCode(normalizedEmail, code);
+    } catch (error) {
+      await this.redis.del(key);
+      this.logger.error(
+        'Registration verification email failed',
+        error instanceof Error ? error.stack : undefined,
+      );
+      throw new ServiceUnavailableException(
+        'Unable to send verification email',
+      );
+    }
+    return { verificationToken, expiresIn: 10 * 60 };
+  }
 
+  async verifyRegistration(
+    verificationToken: string,
+    code: string,
+    ip: string,
+    userAgent: string,
+  ): Promise<VerifiedRegistrationResult> {
+    const key = this.registrationKey(verificationToken);
+    const pending = await this.redis.hgetall(key);
+    if (
+      !pending?.email ||
+      !pending.username ||
+      !pending.passwordHash ||
+      !pending.codeHash
+    ) {
+      throw new UnauthorizedException('Invalid or expired verification code');
+    }
+    const attempts = Number(pending.attempts || 0);
+    if (attempts >= 5) {
+      await this.redis.del(key);
+      throw new UnauthorizedException('Too many invalid verification attempts');
+    }
+    const expected = Buffer.from(pending.codeHash, 'hex');
+    const actual = Buffer.from(
+      this.registrationCodeHash(verificationToken, code),
+      'hex',
+    );
+    if (
+      expected.length !== actual.length ||
+      !timingSafeEqual(expected, actual)
+    ) {
+      const nextAttempts = await this.redis.hincrby(key, 'attempts', 1);
+      if (nextAttempts >= 5) await this.redis.del(key);
+      throw new UnauthorizedException('Invalid verification code');
+    }
+
+    const existing = await this.userRepository.findOne({
+      where: [{ username: pending.username }, { email: pending.email }],
+    });
+    if (existing) {
+      await this.redis.del(key);
+      throw new ConflictException('Username or email already exists');
+    }
+    let user: UserCredential;
+    try {
+      user = await this.userRepository.save(
+        this.userRepository.create({
+          username: pending.username,
+          email: pending.email,
+          passwordHash: pending.passwordHash,
+          role: UserRole.USER,
+          status: UserStatus.ACTIVE,
+        }),
+      );
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        (error.driverError as { code?: string }).code === '23505'
+      ) {
+        await this.redis.del(key);
+        throw new ConflictException('Username or email already exists');
+      }
+      throw error;
+    }
+    await this.redis.del(key);
     const {
       raw: refreshToken,
       hash: tokenHash,
@@ -125,16 +209,13 @@ export class AuthService {
       userAgent,
       true,
     );
-
     const accessToken = this.tokenService.signAccessToken(user);
-
     this.eventBusService.emit('UserRegistered', {
       userId: user.id,
       email: user.email,
       username: user.username,
       timestamp: new Date().toISOString(),
     });
-
     return {
       user: {
         id: user.id,
@@ -146,6 +227,20 @@ export class AuthService {
       refreshToken,
       isNewUser: true,
     };
+  }
+
+  async resendRegistrationCode(verificationToken: string): Promise<void> {
+    const key = this.registrationKey(verificationToken);
+    const pending = await this.redis.hgetall(key);
+    if (!pending?.email)
+      throw new UnauthorizedException('Invalid or expired verification code');
+    const code = randomInt(100000, 1000000).toString();
+    await this.redis.hset(key, {
+      codeHash: this.registrationCodeHash(verificationToken, code),
+      attempts: '0',
+    });
+    await this.redis.expire(key, 10 * 60);
+    await this.emailService.sendRegistrationCode(pending.email, code);
   }
 
   async validateAndLogUser(
@@ -172,17 +267,22 @@ export class AuthService {
       throw new InvalidCredentialsException();
     }
 
-    if (user.status === UserStatus.DISABLED) {
+    if (
+      user.status === UserStatus.DISABLED ||
+      user.status === UserStatus.DELETED
+    ) {
       await this.logLoginAttempt(
         user.id,
         ip,
         userAgent,
         'local',
         false,
-        'account_disabled',
+        user.status === UserStatus.DISABLED
+          ? 'account_disabled'
+          : 'account_deleted',
       );
       throw new AccountDisabledException(
-        'Account is disabled. Contact support.',
+        'Account is unavailable. Contact support.',
       );
     }
 
@@ -229,10 +329,7 @@ export class AuthService {
         user.id,
         'totp_verification',
       );
-      return {
-        requiresTOTP: true,
-        tempToken,
-      };
+      return { requiresTOTP: true, tempToken };
     }
 
     const {
@@ -248,9 +345,7 @@ export class AuthService {
       userAgent,
       !!keepMeLoggedIn,
     );
-
     const accessToken = this.tokenService.signAccessToken(user);
-
     this.eventBusService.emit('UserLoggedIn', {
       userId: user.id,
       device: userAgent,
@@ -258,7 +353,6 @@ export class AuthService {
       method: 'local',
       timestamp: new Date().toISOString(),
     });
-
     return {
       requiresTOTP: false,
       user: {
@@ -335,17 +429,22 @@ export class AuthService {
     refreshToken: string;
     isNewUser: boolean;
   }> {
-    if (user.status === UserStatus.DISABLED) {
+    if (
+      user.status === UserStatus.DISABLED ||
+      user.status === UserStatus.DELETED
+    ) {
       await this.logLoginAttempt(
         user.id,
         ip,
         userAgent,
         'google',
         false,
-        'account_disabled',
+        user.status === UserStatus.DISABLED
+          ? 'account_disabled'
+          : 'account_deleted',
       );
       throw new AccountDisabledException(
-        'Account is disabled. Contact support.',
+        'Account is unavailable. Contact support.',
       );
     }
 
@@ -675,6 +774,19 @@ export class AuthService {
 
   private getPasswordResetKey(tokenHash: string): string {
     return `auth:password_reset:${tokenHash}`;
+  }
+
+  private registrationKey(verificationToken: string): string {
+    return `auth:registration:${verificationToken}`;
+  }
+
+  private registrationCodeHash(
+    verificationToken: string,
+    code: string,
+  ): string {
+    return createHash('sha256')
+      .update(`${verificationToken}:${code}`)
+      .digest('hex');
   }
 
   private async logLoginAttempt(

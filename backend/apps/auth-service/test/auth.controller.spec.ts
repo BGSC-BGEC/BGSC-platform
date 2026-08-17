@@ -21,6 +21,8 @@ interface MockRes {
 }
 interface MockAuthService {
   register: jest.Mock;
+  verifyRegistration: jest.Mock;
+  resendRegistrationCode: jest.Mock;
   login: jest.Mock;
   refreshTokens: jest.Mock;
   logout: jest.Mock;
@@ -76,6 +78,8 @@ describe('AuthController', () => {
   beforeEach(async () => {
     authService = {
       register: jest.fn(),
+      verifyRegistration: jest.fn(),
+      resendRegistrationCode: jest.fn(),
       login: jest.fn(),
       refreshTokens: jest.fn(),
       logout: jest.fn(),
@@ -237,8 +241,25 @@ describe('AuthController', () => {
   });
 
   describe('register', () => {
-    it('should register a user, set the refresh token cookie, and return data', async () => {
+    it('should return a pending verification without setting a cookie', async () => {
       const mockResult = {
+        verificationToken: 'a'.repeat(64),
+        expiresIn: 600,
+      };
+      authService.register.mockResolvedValue(mockResult);
+
+      const result = await controller.register({
+        username: 'testuser',
+        email: 'test@example.com',
+        password: 'Password1!',
+        acceptedTos: true,
+      });
+
+      expect(result).toEqual(mockResult);
+    });
+
+    it('sets the first session cookie only after email verification', async () => {
+      authService.verifyRegistration.mockResolvedValue({
         user: {
           id: '1',
           username: 'testuser',
@@ -248,24 +269,16 @@ describe('AuthController', () => {
         accessToken: 'access-token',
         refreshToken: '1.fam-1.random',
         isNewUser: true,
-      };
-      authService.register.mockResolvedValue(mockResult);
-
+      });
       const req = { headers: {}, socket: {} } as unknown as Request;
       const res = mockResponse();
 
-      const result = await controller.register(
-        {
-          username: 'testuser',
-          email: 'test@example.com',
-          password: 'Password1!',
-          acceptedTos: true,
-        },
+      const result = await controller.verifyEmail(
+        { verificationToken: 'a'.repeat(64), code: '123456' },
         req,
         res as unknown as Response,
       );
 
-      expect(result).toBeDefined();
       expect(result.accessToken).toBe('access-token');
       expect(res.cookie).toHaveBeenCalledWith(
         'bgsc_refresh_token',

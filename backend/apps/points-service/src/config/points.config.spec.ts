@@ -18,6 +18,7 @@ describe('pointsConfig', () => {
       DATABASE_URL: 'postgresql://bgsc:bgsc_pass@localhost:5432/bgsc_dev',
       JWT_ACCESS_SECRET: 'test-access-secret',
       JWT_ISSUER: 'bgsc-auth-service',
+      INTERNAL_SERVICE_KEY: 'test-internal-service-key-32-characters',
     });
 
     expect(error).toBeUndefined();
@@ -31,22 +32,31 @@ describe('pointsConfig', () => {
 
     expect(error).toBeDefined();
     expect(error?.details.map((d) => d.path.join('.'))).toEqual(
-      expect.arrayContaining(['DATABASE_URL', 'JWT_ACCESS_SECRET', 'JWT_ISSUER']),
+      expect.arrayContaining([
+        'DATABASE_URL',
+        'JWT_ACCESS_SECRET',
+        'JWT_ISSUER',
+        'INTERNAL_SERVICE_KEY',
+      ]),
     );
   });
 
   it('maps env vars into the points config namespace', () => {
     process.env.PORT = '3005';
     process.env.NODE_ENV = 'production';
-    process.env.DATABASE_URL = 'postgresql://bgsc:bgsc_pass@db.internal:5432/bgsc_prod';
+    process.env.DATABASE_URL =
+      'postgresql://bgsc:bgsc_pass@db.internal:5432/bgsc_prod';
     process.env.JWT_ACCESS_SECRET = 'live-access-secret';
     process.env.JWT_ISSUER = 'bgsc-auth-service';
+    process.env.INTERNAL_SERVICE_KEY =
+      'live-internal-service-key-32-characters';
 
     expect(pointsConfig()).toEqual({
       port: 3005,
       env: 'production',
       db: { url: 'postgresql://bgsc:bgsc_pass@db.internal:5432/bgsc_prod' },
       jwt: { accessSecret: 'live-access-secret', issuer: 'bgsc-auth-service' },
+      internalServiceKey: 'live-internal-service-key-32-characters',
     });
   });
 

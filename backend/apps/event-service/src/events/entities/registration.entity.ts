@@ -2,12 +2,14 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { RegistrationStatus } from '../enums/registration-status.enum';
 
 @Entity({ name: 'registrations' })
+@Index(['eventId', 'userId'], { unique: true })
 export class Registration {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -30,4 +32,10 @@ export class Registration {
 
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
   updatedAt!: Date;
+
+  @Column({ name: 'attended_at', type: 'timestamptz', nullable: true })
+  attendedAt?: Date | null;
+
+  @Column({ name: 'points_awarded_at', type: 'timestamptz', nullable: true })
+  pointsAwardedAt?: Date | null;
 }

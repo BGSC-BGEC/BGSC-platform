@@ -8,6 +8,7 @@ import {
 } from './config/notification.config';
 import { CreateNotifications1771000000000 } from './migrations/1771000000000-CreateNotifications';
 import { NotificationsModule } from './notifications/notifications.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     }),
     AuthModule,
     NotificationsModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

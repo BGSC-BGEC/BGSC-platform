@@ -17,6 +17,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../rbac/roles.decorator';
 import { RolesGuard } from '../rbac/roles.guard';
 import { CompleteEventDto } from './dto/complete-event.dto';
+import { CheckInDto } from './dto/check-in.dto';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventResponseDto } from './dto/event-response.dto';
 import { LeaderboardEntryDto } from './dto/leaderboard-entry.dto';
@@ -98,6 +99,17 @@ export class EventsController {
     return this.eventsService.register(id, req.user.id);
   }
 
+  @Post(':id/check-in')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.COORDINATOR, UserRole.FOUNDER)
+  checkIn(
+    @Param('id') id: string,
+    @Body() dto: CheckInDto,
+  ): Promise<RegistrationResponseDto> {
+    return this.eventsService.checkIn(id, dto.userId);
+  }
+
   @Post(':id/scores')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
@@ -127,6 +139,17 @@ export class EventsController {
     return this.eventsService.complete(id, dto, req.user.id);
   }
 
+  @Patch(':id/cancel')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.COORDINATOR, UserRole.FOUNDER)
+  cancel(
+    @Param('id') id: string,
+    @Request() req: AuthRequest,
+  ): Promise<EventResponseDto> {
+    return this.eventsService.cancel(id, req.user.id);
+  }
+
   @Get(':id/my-registration')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
@@ -146,7 +169,11 @@ export class EventsController {
     @Param('registrationId') registrationId: string,
     @Request() req: AuthRequest,
   ): Promise<void> {
-    return this.eventsService.withdrawRegistration(id, registrationId, req.user.id);
+    return this.eventsService.withdrawRegistration(
+      id,
+      registrationId,
+      req.user.id,
+    );
   }
 
   @Post(':id/captain-application')

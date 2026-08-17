@@ -19,6 +19,10 @@ import { LoginDto } from '../dto/login.dto';
 import { ForgotPasswordDto } from '../dto/forgot-password.dto';
 import { ResetPasswordDto } from '../dto/reset-password.dto';
 import { ChangePasswordDto } from '../dto/change-password.dto';
+import {
+  ResendRegistrationCodeDto,
+  VerifyRegistrationDto,
+} from '../dto/email-verification.dto';
 import { LocalAuthGuard } from '../guards/local-auth.guard';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { GoogleAuthGuard } from '../guards/google-auth.guard';
@@ -32,6 +36,7 @@ import {
   RefreshResponseDto,
   SuccessMessageDto,
   LoginPendingDeletionResponseDto,
+  RegistrationPendingResponseDto,
 } from '../dto/responses.dto';
 import {
   ApiTags,
@@ -129,13 +134,33 @@ export class AuthController {
   @ApiOperation({ summary: 'Register a new user' })
   @ApiResponse({
     status: 201,
-    description: 'User registered successfully',
-    type: AuthResponseDto,
+    description: 'Verification code sent',
+    type: RegistrationPendingResponseDto,
   })
   @ApiResponse({ status: 400, description: 'Validation failed' })
   @ApiResponse({ status: 409, description: 'Username or email already exists' })
-  async register(
-    @Body() dto: RegisterDto,
+  async register(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
+  }
+
+  @Public()
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @RateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    keyPrefix: 'registration_verify',
+  })
+  @ApiOperation({
+    summary: 'Verify local registration email and create session',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Email verified',
+    type: AuthResponseDto,
+  })
+  async verifyEmail(
+    @Body() dto: VerifyRegistrationDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
@@ -149,14 +174,32 @@ export class AuthController {
       : rawIp.split(',')[0].trim() || '127.0.0.1';
     const userAgent = req.headers['user-agent'] || 'unknown';
 
-    const result = await this.authService.register(dto, ip, userAgent);
+    const result = await this.authService.verifyRegistration(
+      dto.verificationToken,
+      dto.code,
+      ip,
+      userAgent,
+    );
     this.setCookie(res, result.refreshToken, true);
-
     return {
       user: result.user,
       accessToken: result.accessToken,
       isNewUser: result.isNewUser,
     };
+  }
+
+  @Public()
+  @Post('resend-otp')
+  @HttpCode(HttpStatus.OK)
+  @RateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 3,
+    keyPrefix: 'registration_resend',
+  })
+  @ApiOperation({ summary: 'Resend local registration email code' })
+  async resendRegistrationCode(@Body() dto: ResendRegistrationCodeDto) {
+    await this.authService.resendRegistrationCode(dto.verificationToken);
+    return { message: 'Verification code sent' };
   }
 
   @Public()
@@ -366,9 +409,8 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @RateLimit({
     windowMs: 60 * 60 * 1000,
-    max: 3,
-    keyPrefix: 'password_reset',
-    keyBy: 'email',
+    max: 10,
+    keyPrefix: 'password_reset_ip',
   })
   @ApiOperation({ summary: 'Request a password reset link' })
   @ApiResponse({

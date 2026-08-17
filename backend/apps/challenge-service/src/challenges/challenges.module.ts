@@ -10,8 +10,12 @@ import { ChallengesService } from './challenges.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Challenge, ChallengeAcceptance, ChallengeSubmission]),
-    HttpModule,
+    TypeOrmModule.forFeature([
+      Challenge,
+      ChallengeAcceptance,
+      ChallengeSubmission,
+    ]),
+    HttpModule.register({ timeout: 5000 }),
   ],
   controllers: [ChallengesController],
   providers: [ChallengesService, RolesGuard],

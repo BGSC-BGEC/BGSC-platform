@@ -15,8 +15,11 @@ interface AuthState {
   user: User | null;
   status: AuthStatus;
   error: string | null;
+  pendingRegistration: { verificationToken: string; email: string } | null;
   login: (input: LoginInput) => Promise<void>;
   register: (input: RegisterInput) => Promise<void>;
+  verifyEmail: (code: string) => Promise<void>;
+  resendRegistrationCode: () => Promise<void>;
   /** Adopt a token obtained out-of-band (e.g. the Google OAuth callback). */
   adoptToken: (token: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -29,6 +32,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   status: 'unknown',
   error: null,
+  pendingRegistration: null,
 
   login: async (input) => {
     set({ status: 'loading', error: null });
@@ -45,11 +49,36 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ status: 'loading', error: null });
     try {
       const res = await AuthRepository.register(input);
+      set({
+        pendingRegistration: { verificationToken: res.verificationToken, email: input.email.trim() },
+        status: 'unauthenticated',
+      });
+    } catch (err) {
+      set({ status: 'unauthenticated', error: messageOf(err) });
+      throw err;
+    }
+  },
+
+  verifyEmail: async (code) => {
+    const pending = useAuthStore.getState().pendingRegistration;
+    if (!pending) throw new Error('Registration verification expired. Please sign up again.');
+    set({ status: 'loading', error: null });
+    try {
+      const res = await AuthRepository.verifyEmail({
+        verificationToken: pending.verificationToken,
+        code,
+      });
       await applyAuth(set, res);
     } catch (err) {
       set({ status: 'unauthenticated', error: messageOf(err) });
       throw err;
     }
+  },
+
+  resendRegistrationCode: async () => {
+    const pending = useAuthStore.getState().pendingRegistration;
+    if (!pending) throw new Error('Registration verification expired. Please sign up again.');
+    await AuthRepository.resendOtp({ verificationToken: pending.verificationToken });
   },
 
   adoptToken: async (token) => {
@@ -109,7 +138,7 @@ async function applyAuth(
   res: AuthResponse,
 ): Promise<void> {
   await storage.setItem(TOKEN_KEY, res.accessToken);
-  set({ accessToken: res.accessToken, user: res.user, status: 'authenticated' });
+  set({ accessToken: res.accessToken, user: res.user, status: 'authenticated', pendingRegistration: null });
 }
 
 function messageOf(err: unknown): string {

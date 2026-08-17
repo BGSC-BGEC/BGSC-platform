@@ -9,7 +9,10 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import Redis from 'ioredis';
 import { In, Or, Repository } from 'typeorm';
-import { FriendshipResponseDto, FriendsListResponseDto } from './dto/friendship-response.dto';
+import {
+  FriendshipResponseDto,
+  FriendsListResponseDto,
+} from './dto/friendship-response.dto';
 import { SendFriendRequestDto } from './dto/friendship.dto';
 import { Friendship } from './entities/friendship.entity';
 import { FriendshipStatus } from './enums/friendship-status.enum';
@@ -32,7 +35,10 @@ export class FriendsService {
     });
   }
 
-  async sendRequest(requesterId: string, dto: SendFriendRequestDto): Promise<FriendshipResponseDto> {
+  async sendRequest(
+    requesterId: string,
+    dto: SendFriendRequestDto,
+  ): Promise<FriendshipResponseDto> {
     if (requesterId === dto.recipientId) {
       throw new BadRequestException('Cannot send friend request to yourself');
     }
@@ -50,8 +56,14 @@ export class FriendsService {
       recipientId: dto.recipientId,
       status: FriendshipStatus.PENDING,
     });
-    const saved = await this.friendshipRepo.save(friendship);
-    return this.toResponse(saved);
+    try {
+      return this.toResponse(await this.friendshipRepo.save(friendship));
+    } catch (error) {
+      if ((error as { code?: string }).code === '23505') {
+        throw new ConflictException('Friend relationship already exists');
+      }
+      throw error;
+    }
   }
 
   async getIncomingRequests(userId: string): Promise<FriendshipResponseDto[]> {
@@ -70,10 +82,17 @@ export class FriendsService {
     return rows.map((r) => this.toResponse(r));
   }
 
-  async acceptRequest(requestId: string, userId: string): Promise<FriendshipResponseDto> {
-    const friendship = await this.friendshipRepo.findOne({ where: { id: requestId } });
-    if (!friendship) throw new NotFoundException(`Friend request ${requestId} not found`);
-    if (friendship.recipientId !== userId) throw new ForbiddenException('Not your request to accept');
+  async acceptRequest(
+    requestId: string,
+    userId: string,
+  ): Promise<FriendshipResponseDto> {
+    const friendship = await this.friendshipRepo.findOne({
+      where: { id: requestId },
+    });
+    if (!friendship)
+      throw new NotFoundException(`Friend request ${requestId} not found`);
+    if (friendship.recipientId !== userId)
+      throw new ForbiddenException('Not your request to accept');
     if (friendship.status !== FriendshipStatus.PENDING) {
       throw new BadRequestException('Request is not in pending state');
     }
@@ -83,10 +102,17 @@ export class FriendsService {
     return this.toResponse(saved);
   }
 
-  async rejectRequest(requestId: string, userId: string): Promise<FriendshipResponseDto> {
-    const friendship = await this.friendshipRepo.findOne({ where: { id: requestId } });
-    if (!friendship) throw new NotFoundException(`Friend request ${requestId} not found`);
-    if (friendship.recipientId !== userId) throw new ForbiddenException('Not your request to reject');
+  async rejectRequest(
+    requestId: string,
+    userId: string,
+  ): Promise<FriendshipResponseDto> {
+    const friendship = await this.friendshipRepo.findOne({
+      where: { id: requestId },
+    });
+    if (!friendship)
+      throw new NotFoundException(`Friend request ${requestId} not found`);
+    if (friendship.recipientId !== userId)
+      throw new ForbiddenException('Not your request to reject');
     if (friendship.status !== FriendshipStatus.PENDING) {
       throw new BadRequestException('Request is not in pending state');
     }
@@ -96,8 +122,12 @@ export class FriendsService {
     return this.toResponse(saved);
   }
 
-  async blockUser(userId: string, targetUserId: string): Promise<FriendshipResponseDto> {
-    if (userId === targetUserId) throw new BadRequestException('Cannot block yourself');
+  async blockUser(
+    userId: string,
+    targetUserId: string,
+  ): Promise<FriendshipResponseDto> {
+    if (userId === targetUserId)
+      throw new BadRequestException('Cannot block yourself');
 
     const existing = await this.findBetween(userId, targetUserId);
     if (existing) {
@@ -117,7 +147,10 @@ export class FriendsService {
     return this.toResponse(saved);
   }
 
-  async removeFriend(userId: string, targetUserId: string): Promise<{ removed: boolean }> {
+  async removeFriend(
+    userId: string,
+    targetUserId: string,
+  ): Promise<{ removed: boolean }> {
     const friendship = await this.findBetween(userId, targetUserId);
     if (!friendship || friendship.status !== FriendshipStatus.ACCEPTED) {
       throw new NotFoundException('Friendship not found');
@@ -126,7 +159,11 @@ export class FriendsService {
     return { removed: true };
   }
 
-  async listFriends(userId: string, page: number, limit: number): Promise<FriendsListResponseDto> {
+  async listFriends(
+    userId: string,
+    page: number,
+    limit: number,
+  ): Promise<FriendsListResponseDto> {
     const [rows, total] = await this.friendshipRepo.findAndCount({
       where: [
         { requesterId: userId, status: FriendshipStatus.ACCEPTED },
@@ -139,7 +176,9 @@ export class FriendsService {
     return { friends: rows.map((r) => this.toResponse(r)), total };
   }
 
-  async getSuggestions(userId: string): Promise<{ userId: string; mutualCount: number }[]> {
+  async getSuggestions(
+    userId: string,
+  ): Promise<{ userId: string; mutualCount: number }[]> {
     const friendIds = await this.getFriendIds(userId);
     if (friendIds.length === 0) return [];
 
@@ -152,7 +191,9 @@ export class FriendsService {
 
     const mutualCounts: Record<string, number> = {};
     for (const f of secondDegree) {
-      const other = friendIds.includes(f.requesterId) ? f.recipientId : f.requesterId;
+      const other = friendIds.includes(f.requesterId)
+        ? f.recipientId
+        : f.requesterId;
       if (other === userId || friendIds.includes(other)) continue;
       mutualCounts[other] = (mutualCounts[other] ?? 0) + 1;
     }
@@ -171,7 +212,9 @@ export class FriendsService {
       ],
       select: ['requesterId', 'recipientId'],
     });
-    return rows.map((r) => (r.requesterId === userId ? r.recipientId : r.requesterId));
+    return rows.map((r) =>
+      r.requesterId === userId ? r.recipientId : r.requesterId,
+    );
   }
 
   async areFriends(userId1: string, userId2: string): Promise<boolean> {
@@ -183,7 +226,9 @@ export class FriendsService {
     await this.redis.set(`presence:${userId}`, '1', 'EX', PRESENCE_TTL_SECONDS);
   }
 
-  async getOnlineFriends(userId: string): Promise<{ userId: string; online: boolean }[]> {
+  async getOnlineFriends(
+    userId: string,
+  ): Promise<{ userId: string; online: boolean }[]> {
     const friendIds = await this.getFriendIds(userId);
     if (friendIds.length === 0) return [];
 

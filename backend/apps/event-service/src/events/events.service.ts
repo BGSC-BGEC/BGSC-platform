@@ -5,12 +5,16 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { firstValueFrom } from 'rxjs';
-import { DataSource, In, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 import { CompleteEventDto } from './dto/complete-event.dto';
+import { AttendanceConfirmedEvent } from './domain-events/attendance-confirmed.event';
+import { EventCancelledEvent } from './domain-events/event-cancelled.event';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventResponseDto } from './dto/event-response.dto';
 import { LeaderboardEntryDto } from './dto/leaderboard-entry.dto';
@@ -32,10 +36,13 @@ import { RegistrationStatus } from './enums/registration-status.enum';
 import { EventBusService } from './event-bus.service';
 
 @Injectable()
-export class EventsService {
+export class EventsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EventsService.name);
   private readonly sponsorServiceUrl: string;
+  private readonly pointsServiceUrl: string;
+  private readonly userServiceUrl: string;
   private readonly internalServiceKey: string;
+  private attendancePointsRetryTimer?: NodeJS.Timeout;
 
   constructor(
     @InjectRepository(Event)
@@ -50,12 +57,37 @@ export class EventsService {
     private readonly configService: ConfigService,
   ) {
     this.sponsorServiceUrl =
-      this.configService.get<string>('event.sponsorServiceUrl') ?? 'http://localhost:3003';
+      this.configService.get<string>('event.sponsorServiceUrl') ??
+      'http://localhost:3003';
+    this.pointsServiceUrl =
+      this.configService.get<string>('event.pointsServiceUrl') ??
+      'http://localhost:3005';
+    this.userServiceUrl =
+      this.configService.get<string>('event.userServiceUrl') ??
+      'http://localhost:3002';
     this.internalServiceKey =
       this.configService.get<string>('event.internalServiceKey') ?? '';
   }
 
-  async create(dto: CreateEventDto, createdBy: string): Promise<EventResponseDto> {
+  onModuleInit(): void {
+    void this.deliverPendingAttendancePoints();
+    this.attendancePointsRetryTimer = setInterval(
+      () => void this.deliverPendingAttendancePoints(),
+      60_000,
+    );
+    this.attendancePointsRetryTimer.unref();
+  }
+
+  onModuleDestroy(): void {
+    if (this.attendancePointsRetryTimer) {
+      clearInterval(this.attendancePointsRetryTimer);
+    }
+  }
+
+  async create(
+    dto: CreateEventDto,
+    createdBy: string,
+  ): Promise<EventResponseDto> {
     const event = this.eventsRepository.create({
       ...dto,
       startDate: new Date(dto.startDate),
@@ -99,11 +131,17 @@ export class EventsService {
         throw new BadRequestException('Registration deadline has passed');
       }
 
-      if (event.status !== EventStatus.UPCOMING && event.status !== EventStatus.ONGOING) {
+      if (
+        event.status !== EventStatus.UPCOMING &&
+        event.status !== EventStatus.ONGOING
+      ) {
         throw new BadRequestException('Event is not open for registration');
       }
 
-      if (event.maxParticipants !== null && event.maxParticipants !== undefined) {
+      if (
+        event.maxParticipants !== null &&
+        event.maxParticipants !== undefined
+      ) {
         const count = await regsRepo.count({
           where: { eventId, status: RegistrationStatus.CONFIRMED },
         });
@@ -146,10 +184,18 @@ export class EventsService {
     const event = await this.findEntity(eventId);
 
     if (event.type !== EventType.LE) {
-      throw new BadRequestException('Score submission only available for LE events');
+      throw new BadRequestException(
+        'Score submission only available for LE events',
+      );
     }
 
     await this.dataSource.transaction(async (manager) => {
+      const lockedEvent = await manager.getRepository(Event).findOne({
+        where: { id: eventId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!lockedEvent) throw new NotFoundException('Event not found');
+
       await manager.delete(EventScore, { eventId });
 
       const registeredUserIds = new Set(
@@ -184,6 +230,46 @@ export class EventsService {
     return this.buildLeaderboard(eventId);
   }
 
+  async checkIn(
+    eventId: string,
+    userId: string,
+  ): Promise<RegistrationResponseDto> {
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const event = await manager.getRepository(Event).findOne({
+        where: { id: eventId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!event) throw new NotFoundException('Event not found');
+      if (event.status !== EventStatus.ONGOING) {
+        throw new BadRequestException(
+          'Check-in is only available for ongoing events',
+        );
+      }
+
+      const registration = await manager.getRepository(Registration).findOne({
+        where: { eventId, userId, status: RegistrationStatus.CONFIRMED },
+      });
+      if (!registration)
+        throw new NotFoundException('Confirmed registration not found');
+      if (registration.attendedAt) {
+        throw new ConflictException('User is already checked in');
+      }
+
+      registration.attendedAt = new Date();
+      return manager.getRepository(Registration).save(registration);
+    });
+
+    const domainEvent: AttendanceConfirmedEvent = {
+      registrationId: saved.id,
+      eventId,
+      userId,
+      attendedAt: saved.attendedAt!.toISOString(),
+    };
+    this.eventBus.emit('AttendanceConfirmed', domainEvent);
+    await this.deliverAttendancePoints(saved);
+    return this.toRegistrationResponse(saved);
+  }
+
   async getLeaderboard(eventId: string): Promise<LeaderboardEntryDto[]> {
     await this.findEntity(eventId);
     return this.buildLeaderboard(eventId);
@@ -216,6 +302,33 @@ export class EventsService {
     // Award fans to winners' sponsors (fire-and-forget; failures logged, not thrown)
     void this.awardFansToWinners(eventId, dto.winners);
 
+    return this.toResponse(event);
+  }
+
+  async cancel(eventId: string, adminId: string): Promise<EventResponseDto> {
+    const event = await this.dataSource.transaction(async (manager) => {
+      const locked = await manager.getRepository(Event).findOne({
+        where: { id: eventId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!locked) throw new NotFoundException('Event not found');
+      if (locked.status === EventStatus.PAST) {
+        throw new ConflictException('Cannot cancel a completed event');
+      }
+      if (locked.status === EventStatus.CANCELLED) {
+        throw new ConflictException('Event is already cancelled');
+      }
+
+      locked.status = EventStatus.CANCELLED;
+      return manager.getRepository(Event).save(locked);
+    });
+
+    const domainEvent: EventCancelledEvent = {
+      eventId,
+      cancelledBy: adminId,
+      timestamp: new Date().toISOString(),
+    };
+    this.eventBus.emit('EventCancelled', domainEvent);
     return this.toResponse(event);
   }
 
@@ -266,15 +379,17 @@ export class EventsService {
         event.needsLeaderboard && topScoreMap.get(reg.eventId)?.has(userId)
           ? '1st Place'
           : undefined;
-      return [{
-        id: reg.id,
-        eventId: reg.eventId,
-        eventTitle: event.title,
-        eventCoverUrl: null,
-        date: reg.registeredAt.toISOString(),
-        role: 'solo',
-        result,
-      }];
+      return [
+        {
+          id: reg.id,
+          eventId: reg.eventId,
+          eventTitle: event.title,
+          eventCoverUrl: null,
+          date: reg.registeredAt.toISOString(),
+          role: 'solo',
+          result,
+        },
+      ];
     });
   }
 
@@ -333,11 +448,15 @@ export class EventsService {
   }
 
   // ponytail: no DB table yet, returns pending immediately if user is registered
-  async applyCaptain(eventId: string, userId: string): Promise<{ status: 'pending' }> {
+  async applyCaptain(
+    eventId: string,
+    userId: string,
+  ): Promise<{ status: 'pending' }> {
     const reg = await this.registrationsRepository.findOne({
       where: { eventId, userId, status: RegistrationStatus.CONFIRMED },
     });
-    if (!reg) throw new BadRequestException('Must be registered to apply for captain');
+    if (!reg)
+      throw new BadRequestException('Must be registered to apply for captain');
     return { status: 'pending' };
   }
 
@@ -351,7 +470,12 @@ export class EventsService {
         await firstValueFrom(
           this.httpService.post(
             `${this.sponsorServiceUrl}/sponsors/${winner.sponsorId}/fans`,
-            { userId: winner.userId, eventId, amount: winner.fanAmount, reason: 'event_win' },
+            {
+              userId: winner.userId,
+              eventId,
+              amount: winner.fanAmount,
+              reason: 'event_win',
+            },
             // H10: attach internal service key so sponsor-service guard accepts the call
             { headers: { 'x-internal-key': this.internalServiceKey } },
           ),
@@ -364,18 +488,102 @@ export class EventsService {
     }
   }
 
-  private async buildLeaderboard(eventId: string): Promise<LeaderboardEntryDto[]> {
+  private async deliverPendingAttendancePoints(): Promise<void> {
+    try {
+      const registrations = await this.registrationsRepository.find({
+        where: { attendedAt: Not(IsNull()), pointsAwardedAt: IsNull() },
+        take: 100,
+      });
+      await Promise.all(
+        registrations.map((registration) =>
+          this.deliverAttendancePoints(registration),
+        ),
+      );
+    } catch (error) {
+      this.logger.error(
+        `Pending attendance points scan failed: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private async deliverAttendancePoints(
+    registration: Registration,
+  ): Promise<void> {
+    try {
+      await firstValueFrom(
+        this.httpService.post(
+          `${this.pointsServiceUrl}/points/internal/attendance`,
+          {
+            registrationId: registration.id,
+            eventId: registration.eventId,
+            userId: registration.userId,
+          },
+          { headers: { 'x-internal-key': this.internalServiceKey } },
+        ),
+      );
+      await this.registrationsRepository.update(
+        { id: registration.id, pointsAwardedAt: IsNull() },
+        { pointsAwardedAt: new Date() },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Attendance points delivery failed for registration ${registration.id}: ${(error as Error).message}`,
+      );
+    }
+  }
+
+  private async buildLeaderboard(
+    eventId: string,
+  ): Promise<LeaderboardEntryDto[]> {
     const scores = await this.scoresRepository.find({
       where: { eventId },
       order: { score: 'DESC' },
     });
 
+    if (scores.length === 0) {
+      return [];
+    }
+
+    const userIds = scores.map((s) => s.userId);
+    const userProfiles = await this.fetchUserProfiles(userIds);
+
     return scores.map((s, index) => ({
       rank: index + 1,
       userId: s.userId,
+      displayName: userProfiles.get(s.userId)?.displayName,
+      avatarUrl: userProfiles.get(s.userId)?.avatarUrl,
       score: s.score,
       submittedAt: s.submittedAt,
     }));
+  }
+
+  private async fetchUserProfiles(
+    userIds: string[],
+  ): Promise<Map<string, { displayName?: string; avatarUrl?: string }>> {
+    try {
+      const response = await firstValueFrom(
+        this.httpService.post<Array<{ id: string; displayName?: string; avatarUrl?: string }>>(
+          `${this.userServiceUrl}/users/batch-profiles`,
+          { userIds },
+          {
+            headers: { 'x-internal-key': this.internalServiceKey },
+            timeout: 3000,
+          },
+        ),
+      );
+
+      const profileMap = new Map<string, { displayName?: string; avatarUrl?: string }>();
+      for (const profile of response.data) {
+        profileMap.set(profile.id, {
+          displayName: profile.displayName,
+          avatarUrl: profile.avatarUrl,
+        });
+      }
+      return profileMap;
+    } catch (error) {
+      this.logger.warn(`Failed to fetch user profiles: ${error}`);
+      return new Map();
+    }
   }
 
   private async findEntity(id: string): Promise<Event> {
@@ -412,6 +620,7 @@ export class EventsService {
       userId: r.userId,
       status: r.status,
       registeredAt: r.registeredAt,
+      attendedAt: r.attendedAt ?? null,
     };
   }
 }
