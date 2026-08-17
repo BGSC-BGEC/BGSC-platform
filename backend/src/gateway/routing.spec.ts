@@ -29,6 +29,8 @@ describe('routing', () => {
     it.each([
       '/auth/login',
       '/auth/register',
+      '/auth/verify-email',
+      '/auth/resend-otp',
       '/auth/refresh',
       '/auth/google',
       '/auth/google/callback',
@@ -52,6 +54,8 @@ describe('routing', () => {
       expect(isAuthAttempt('POST', '/auth/login')).toBe(true);
       expect(isAuthAttempt('post', '/auth/register')).toBe(true);
       expect(isAuthAttempt('POST', '/auth/login?x=1')).toBe(true);
+      expect(isAuthAttempt('POST', '/auth/verify-email')).toBe(true);
+      expect(isAuthAttempt('POST', '/auth/resend-otp')).toBe(true);
     });
 
     it('ignores non-POST and other paths', () => {

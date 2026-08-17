@@ -7,6 +7,9 @@ process.env.JWT_ACCESS_SECRET =
   process.env.JWT_ACCESS_SECRET ||
   'e2e_access_secret_change_in_prod_1234567890abcdef';
 process.env.JWT_ISSUER = process.env.JWT_ISSUER || 'bgsc-auth-service';
+process.env.INTERNAL_SERVICE_KEY =
+  process.env.INTERNAL_SERVICE_KEY ||
+  'e2e_internal_service_key_1234567890abcdef';
 
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -28,7 +31,12 @@ interface TestUser {
 
 function signToken(jwt: JwtService, user: TestUser): string {
   return jwt.sign(
-    { sub: user.id, username: user.username, email: user.email, role: user.role },
+    {
+      sub: user.id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+    },
     { issuer: process.env.JWT_ISSUER, expiresIn: '15m' },
   );
 }
@@ -66,7 +74,11 @@ describe('PointsService e2e', () => {
 
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(
-      new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+      new ValidationPipe({
+        whitelist: true,
+        forbidNonWhitelisted: true,
+        transform: true,
+      }),
     );
 
     await app.init();
@@ -124,8 +136,16 @@ describe('PointsService e2e', () => {
     });
 
     it('returns correct balance after earn transactions', async () => {
-      await insertTransaction({ userId: regularUser.id, amount: 50, type: TransactionType.EARN });
-      await insertTransaction({ userId: regularUser.id, amount: 30, type: TransactionType.EARN });
+      await insertTransaction({
+        userId: regularUser.id,
+        amount: 50,
+        type: TransactionType.EARN,
+      });
+      await insertTransaction({
+        userId: regularUser.id,
+        amount: 30,
+        type: TransactionType.EARN,
+      });
 
       const token = signToken(jwt, regularUser);
       const res = await request(app.getHttpServer())
@@ -141,7 +161,11 @@ describe('PointsService e2e', () => {
     it('rejects unauthenticated callers with 401', async () => {
       await request(app.getHttpServer())
         .post('/points/award')
-        .send({ userId: regularUser.id, amount: 10, source: PointsSource.EVENT })
+        .send({
+          userId: regularUser.id,
+          amount: 10,
+          source: PointsSource.EVENT,
+        })
         .expect(401);
     });
 
@@ -150,7 +174,11 @@ describe('PointsService e2e', () => {
       await request(app.getHttpServer())
         .post('/points/award')
         .set('Authorization', `Bearer ${token}`)
-        .send({ userId: regularUser.id, amount: 10, source: PointsSource.EVENT })
+        .send({
+          userId: regularUser.id,
+          amount: 10,
+          source: PointsSource.EVENT,
+        })
         .expect(403);
     });
 
@@ -178,7 +206,11 @@ describe('PointsService e2e', () => {
       const res = await request(app.getHttpServer())
         .post('/points/award')
         .set('Authorization', `Bearer ${token}`)
-        .send({ userId: regularUser.id, amount: 10, source: PointsSource.CHALLENGE })
+        .send({
+          userId: regularUser.id,
+          amount: 10,
+          source: PointsSource.CHALLENGE,
+        })
         .expect(201);
 
       expect(res.body.amount).toBe(10);
@@ -194,21 +226,30 @@ describe('PointsService e2e', () => {
     });
   });
 
-  describe('POST /points/participation', () => {
-    it('awards 10 participation points and reflects in balance', async () => {
+  describe('POST /points/internal/attendance', () => {
+    it('awards attendance points once across retries', async () => {
       const token = signToken(jwt, founder);
       const userId = randomUUID();
       const eventId = randomUUID();
+      const registrationId = randomUUID();
 
       const res = await request(app.getHttpServer())
-        .post('/points/participation')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ userId, eventId })
+        .post('/points/internal/attendance')
+        .set('x-internal-key', process.env.INTERNAL_SERVICE_KEY!)
+        .send({ registrationId, userId, eventId })
         .expect(201);
 
       expect(res.body.amount).toBe(10);
       expect(res.body.source).toBe(PointsSource.EVENT);
       expect(res.body.referenceId).toBe(eventId);
+
+      const retry = await request(app.getHttpServer())
+        .post('/points/internal/attendance')
+        .set('x-internal-key', process.env.INTERNAL_SERVICE_KEY!)
+        .send({ registrationId, userId, eventId })
+        .expect(201);
+
+      expect(retry.body.id).toBe(res.body.id);
 
       const balanceRes = await request(app.getHttpServer())
         .get(`/points/balance/${userId}`)
@@ -218,11 +259,15 @@ describe('PointsService e2e', () => {
       expect(balanceRes.body.balance).toBe(10);
     });
 
-    it('rejects unauthenticated callers with 401', async () => {
+    it('rejects callers without the internal key', async () => {
       await request(app.getHttpServer())
-        .post('/points/participation')
-        .send({ userId: regularUser.id, eventId: randomUUID() })
-        .expect(401);
+        .post('/points/internal/attendance')
+        .send({
+          registrationId: randomUUID(),
+          userId: regularUser.id,
+          eventId: randomUUID(),
+        })
+        .expect(403);
     });
   });
 

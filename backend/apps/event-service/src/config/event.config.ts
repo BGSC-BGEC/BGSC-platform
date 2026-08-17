@@ -10,6 +10,8 @@ export const eventConfigValidationSchema = Joi.object({
   JWT_ACCESS_SECRET: Joi.string().required(),
   JWT_ISSUER: Joi.string().required(),
   SPONSOR_SERVICE_URL: Joi.string().uri().default('http://localhost:3003'),
+  POINTS_SERVICE_URL: Joi.string().uri().default('http://localhost:3005'),
+  USER_SERVICE_URL: Joi.string().uri().default('http://localhost:3002'),
   INTERNAL_SERVICE_KEY: Joi.string().min(32).required(),
 });
 
@@ -24,5 +26,7 @@ export const eventConfig = registerAs('event', () => ({
     issuer: process.env.JWT_ISSUER,
   },
   sponsorServiceUrl: process.env.SPONSOR_SERVICE_URL ?? 'http://localhost:3003',
+  pointsServiceUrl: process.env.POINTS_SERVICE_URL ?? 'http://localhost:3005',
+  userServiceUrl: process.env.USER_SERVICE_URL ?? 'http://localhost:3002',
   internalServiceKey: process.env.INTERNAL_SERVICE_KEY,
 }));

@@ -35,6 +35,8 @@ export function Login() {
         await login({ usernameOrEmail, password })
       } else {
         await register({ username, email, password, acceptedTos })
+        navigate('/auth/otp', { replace: true })
+        return
       }
       navigate('/', { replace: true })
     } catch (err) {

@@ -45,11 +45,16 @@ export interface User {
   lastActive?: string
 }
 
-/** Response shape of POST /auth/login and /auth/register. */
+/** Full session response returned by login and verified registration. */
 export interface AuthResponse {
   user: User
   accessToken: string
   isNewUser?: boolean
+}
+
+export interface RegistrationPending {
+  verificationToken: string
+  expiresIn: number
 }
 
 export interface RegisterInput {

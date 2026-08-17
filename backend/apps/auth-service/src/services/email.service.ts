@@ -20,6 +20,16 @@ export class EmailService {
     });
   }
 
+  async sendRegistrationCode(to: string, code: string): Promise<void> {
+    await this.transporter.sendMail({
+      from: this.from,
+      to,
+      subject: 'Verify your BGSC Platform email',
+      text: `Your BGSC Platform verification code is ${code}. It expires in 10 minutes.`,
+      html: `<p>Your BGSC Platform verification code is <strong>${code}</strong>.</p><p>It expires in 10 minutes.</p>`,
+    });
+  }
+
   async sendPasswordResetEmail(to: string, rawToken: string): Promise<void> {
     const resetLink = `https://bgsc-platform.in/reset-password?token=${rawToken}`;
 

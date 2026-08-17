@@ -6,4 +6,5 @@ export class RegistrationResponseDto {
   userId!: string;
   status!: RegistrationStatus;
   registeredAt!: Date;
+  attendedAt?: Date | null;
 }

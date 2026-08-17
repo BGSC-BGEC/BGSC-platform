@@ -2,10 +2,12 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  Index,
   PrimaryGeneratedColumn,
 } from 'typeorm';
 
 @Entity({ name: 'event_scores' })
+@Index(['eventId', 'userId'], { unique: true })
 export class EventScore {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

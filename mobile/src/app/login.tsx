@@ -103,7 +103,7 @@ export default function LoginScreen() {
         acceptedTos: true,
         contact: `+91${contactDigits}`,
       });
-      router.replace({ pathname: '/auth/otp', params: { email: email.trim() } });
+      router.replace('/auth/otp');
     } catch {
       setRegBanner(useAuthStore.getState().error ?? "Couldn't create your account — please try again.");
     }

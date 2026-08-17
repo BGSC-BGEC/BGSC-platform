@@ -11,7 +11,7 @@ import { UsersService } from './users.service';
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, Sponsor, UserSponsorAffiliation]),
-    HttpModule,
+    HttpModule.register({ timeout: 5000 }),
     ConfigModule,
   ],
   controllers: [UsersController],

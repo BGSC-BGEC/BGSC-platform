@@ -8,6 +8,7 @@ import {
   announcementConfigValidationSchema,
 } from './config/announcement.config';
 import { CreateAnnouncements1772000000000 } from './migrations/1772000000000-CreateAnnouncements';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { CreateAnnouncements1772000000000 } from './migrations/1772000000000-Cre
     }),
     AuthModule,
     AnnouncementsModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

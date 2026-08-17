@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   Param,
   Patch,
   Post,
@@ -14,6 +15,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUserId } from '../rbac/current-user-id.decorator';
 import { Roles } from '../rbac/roles.decorator';
 import { RolesGuard } from '../rbac/roles.guard';
+import { BatchProfilesRequestDto } from './dto/batch-profiles-request.dto';
+import { BatchProfilesResponseDto } from './dto/batch-profiles-response.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { EventHistoryItemDto } from './dto/event-history-response.dto';
 import { EventSuggestionResponseDto } from './dto/event-suggestion-response.dto';
@@ -209,6 +212,23 @@ export class UsersController {
   }
 
   // ─── Public profile lookup ────────────────────────────────────────────────────
+
+  @Post('batch-profiles')
+  batchProfiles(
+    @Body() dto: BatchProfilesRequestDto,
+    @Headers('x-internal-key') internalKey?: string,
+  ): Promise<BatchProfilesResponseDto[]> {
+    return this.usersService.batchProfiles(dto.userIds, internalKey);
+  }
+
+  @Post(':id/sync-points')
+  syncPoints(
+    @Param('id') id: string,
+    @Body('amount') amount: number,
+    @Headers('x-internal-key') internalKey?: string,
+  ): Promise<{ success: boolean }> {
+    return this.usersService.syncPoints(id, amount, internalKey);
+  }
 
   @Get(':id')
   @Roles(...ALL_USER_ROLES)

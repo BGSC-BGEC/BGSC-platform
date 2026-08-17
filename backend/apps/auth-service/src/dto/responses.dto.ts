@@ -51,6 +51,17 @@ export class AuthResponseDto {
   isNewUser!: boolean;
 }
 
+export class RegistrationPendingResponseDto {
+  @ApiProperty({ description: 'Opaque token used to verify this registration' })
+  verificationToken!: string;
+
+  @ApiProperty({
+    description: 'Verification lifetime in seconds',
+    example: 600,
+  })
+  expiresIn!: number;
+}
+
 export class LoginTotpRequiredResponseDto {
   @ApiProperty({
     description:

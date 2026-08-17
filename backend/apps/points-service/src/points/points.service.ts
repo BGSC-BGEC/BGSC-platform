@@ -1,6 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { AwardPointsDto } from './dto/award-points.dto';
 import { PointsBalanceResponseDto } from './dto/points-balance-response.dto';
 import { TransactionResponseDto } from './dto/transaction-response.dto';
@@ -21,6 +21,10 @@ export class PointsService {
   ) {}
 
   async award(dto: AwardPointsDto): Promise<TransactionResponseDto> {
+    if (!Number.isInteger(dto.amount) || dto.amount <= 0) {
+      throw new BadRequestException('Amount must be a positive integer');
+    }
+
     const transaction = this.transactionsRepository.create({
       userId: dto.userId,
       amount: dto.amount,
@@ -43,18 +47,48 @@ export class PointsService {
     return this.toResponse(saved);
   }
 
-  // ponytail: called from event-service via HTTP when RegistrationCreated fires.
-  // Replace with Kafka consumer when message bus is wired.
-  async awardParticipation(
+  async awardAttendance(
+    registrationId: string,
     userId: string,
     eventId: string,
   ): Promise<TransactionResponseDto> {
-    return this.award({
-      userId,
-      amount: PARTICIPATION_POINTS,
-      source: PointsSource.EVENT,
-      referenceId: eventId,
+    const existing = await this.transactionsRepository.findOne({
+      where: { idempotencyKey: registrationId },
     });
+    if (existing) return this.toResponse(existing);
+
+    try {
+      const transaction = this.transactionsRepository.create({
+        userId,
+        amount: PARTICIPATION_POINTS,
+        type: TransactionType.EARN,
+        source: PointsSource.EVENT,
+        referenceId: eventId,
+        idempotencyKey: registrationId,
+      });
+      const saved = await this.transactionsRepository.save(transaction);
+
+      this.eventBus.emit('PointsEarned', {
+        transactionId: saved.id,
+        userId: saved.userId,
+        amount: saved.amount,
+        source: saved.source,
+        referenceId: saved.referenceId,
+        timestamp: new Date().toISOString(),
+      } satisfies PointsEarnedEvent);
+      return this.toResponse(saved);
+    } catch (error) {
+      if (
+        error instanceof QueryFailedError &&
+        (error.driverError as { code?: string }).code === '23505'
+      ) {
+        const raced = await this.transactionsRepository.findOne({
+          where: { idempotencyKey: registrationId },
+        });
+        if (raced) return this.toResponse(raced);
+      }
+      throw error;
+    }
   }
 
   async getBalance(userId: string): Promise<PointsBalanceResponseDto> {
@@ -65,7 +99,10 @@ export class PointsService {
         'balance',
       )
       .where('t.userId = :userId', { userId })
-      .setParameter('creditTypes', [TransactionType.EARN, TransactionType.REFUND])
+      .setParameter('creditTypes', [
+        TransactionType.EARN,
+        TransactionType.REFUND,
+      ])
       .getRawOne<{ balance: string }>();
 
     return { userId, balance: Number(result?.balance ?? 0) };

@@ -10,6 +10,7 @@ import { AddAffiliationUniqueness1763000000000 } from './migrations/176300000000
 import { RemoveAffiliationUserForeignKey1763000001000 } from './migrations/1763000001000-RemoveAffiliationUserForeignKey';
 import { CreateSponsorsAndAffiliations1762000000000 } from './migrations/1762000000000-CreateSponsorsAndAffiliations';
 import { SponsorsModule } from './sponsors/sponsors.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { SponsorsModule } from './sponsors/sponsors.module';
     }),
     AuthModule,
     SponsorsModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

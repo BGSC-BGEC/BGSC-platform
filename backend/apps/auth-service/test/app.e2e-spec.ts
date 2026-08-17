@@ -129,8 +129,13 @@ describe('AuthService integration (steps 1-10)', () => {
   let server: Server;
   let ipCounter = 10;
   const resetTokensByEmail = new Map<string, string>();
+  const registrationCodesByEmail = new Map<string, string>();
 
   const emailService = {
+    sendRegistrationCode: jest.fn((to: string, code: string): Promise<void> => {
+      registrationCodesByEmail.set(to, code);
+      return Promise.resolve();
+    }),
     sendPasswordResetEmail: jest.fn(
       (to: string, rawToken: string): Promise<void> => {
         resetTokensByEmail.set(to, rawToken);
@@ -170,6 +175,8 @@ describe('AuthService integration (steps 1-10)', () => {
 
   afterEach(() => {
     resetTokensByEmail.clear();
+    registrationCodesByEmail.clear();
+    emailService.sendRegistrationCode.mockClear();
     emailService.sendPasswordResetEmail.mockClear();
     MockGoogleAuthGuard.reset();
   });
@@ -198,16 +205,29 @@ describe('AuthService integration (steps 1-10)', () => {
         })
         .expect(201);
 
-      expect(registerResponse.body.user).toEqual(
+      expect(registerResponse.body).toEqual(
+        expect.objectContaining({
+          verificationToken: expect.stringMatching(/^[a-f0-9]{64}$/),
+          expiresIn: 600,
+        }),
+      );
+      expect(registerResponse.headers['set-cookie']).toBeUndefined();
+      const verificationResponse = await post('/auth/verify-email')
+        .send({
+          verificationToken: registerResponse.body.verificationToken,
+          code: registrationCodesByEmail.get(email),
+        })
+        .expect(200);
+      expect(verificationResponse.body.user).toEqual(
         expect.objectContaining({
           username: 'e2eflowuser',
           email,
           role: 'user',
         }),
       );
-      expect(registerResponse.body.accessToken).toEqual(expect.any(String));
-      expect(registerResponse.body.isNewUser).toBe(true);
-      const firstRefreshCookie = getRefreshCookie(registerResponse);
+      expect(verificationResponse.body.accessToken).toEqual(expect.any(String));
+      expect(verificationResponse.body.isNewUser).toBe(true);
+      const firstRefreshCookie = getRefreshCookie(verificationResponse);
 
       await post('/auth/register')
         .send({
@@ -1004,9 +1024,14 @@ describe('AuthService integration (steps 1-10)', () => {
     email: string,
     password: string,
   ) {
-    return post('/auth/register')
+    const response = await post('/auth/register')
       .send({ username, email, password, acceptedTos: true })
       .expect(201);
+    const code = registrationCodesByEmail.get(email);
+    expect(code).toMatch(/^\d{6}$/);
+    return post('/auth/verify-email')
+      .send({ verificationToken: response.body.verificationToken, code })
+      .expect(200);
   }
 
   function testEmail(label: string): string {

@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, ConflictException, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { AuthService } from '../src/services/auth.service';
 import { UserCredential } from '../src/entities/user-credential.entity';
 import { LoginAuditLog } from '../src/entities/login-audit-log.entity';
@@ -14,6 +19,7 @@ import { InvalidCredentialsException } from '../src/exceptions/invalid-credentia
 import { AccountDisabledException } from '../src/exceptions/account-disabled.exception';
 import { TokenReuseDetectedException } from '../src/exceptions/token-reuse-detected.exception';
 import { EmailAlreadyLinkedException } from '../src/exceptions/email-already-linked.exception';
+import { createHash } from 'crypto';
 
 interface MockUserRepo {
   findOne: jest.Mock;
@@ -48,6 +54,7 @@ interface MockEventBus {
   emit: jest.Mock;
 }
 interface MockEmailService {
+  sendRegistrationCode: jest.Mock;
   sendPasswordResetEmail: jest.Mock;
 }
 interface MockRedis {
@@ -55,6 +62,7 @@ interface MockRedis {
   expire: jest.Mock;
   hgetall: jest.Mock;
   del: jest.Mock;
+  hincrby: jest.Mock;
 }
 
 describe('AuthService', () => {
@@ -122,6 +130,7 @@ describe('AuthService', () => {
     };
 
     emailService = {
+      sendRegistrationCode: jest.fn().mockResolvedValue(undefined),
       sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -130,6 +139,7 @@ describe('AuthService', () => {
       expire: jest.fn().mockResolvedValue(1),
       hgetall: jest.fn().mockResolvedValue({}),
       del: jest.fn().mockResolvedValue(1),
+      hincrby: jest.fn().mockResolvedValue(1),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -178,47 +188,96 @@ describe('AuthService', () => {
   });
 
   describe('register', () => {
-    it('should register a new user successfully', async () => {
+    it('should send a code without creating a user or session', async () => {
       userRepository.findOne.mockResolvedValue(null); // No existing username or email
 
-      const result = await service.register(
-        {
-          username: 'NewUser',
-          email: 'new@example.com',
-          password: 'Password1!',
-          acceptedTos: true,
-        },
-        '127.0.0.1',
-        'test-ua',
-      );
+      const result = await service.register({
+        username: 'NewUser',
+        email: 'new@example.com',
+        password: 'Password1!',
+        acceptedTos: true,
+      });
 
-      expect(result).toBeDefined();
-      expect(result.user.username).toBe('newuser');
-      expect(result.accessToken).toBe('access_jwt_token');
-      expect(result.refreshToken).toBe(
-        '11111111-1111-4111-8111-111111111111.22222222-2222-4222-8222-222222222222.3333333333333333333333333333333333333333333333333333333333333333',
+      expect(result.verificationToken).toMatch(/^[a-f0-9]{64}$/);
+      expect(result.expiresIn).toBe(600);
+      expect(emailService.sendRegistrationCode).toHaveBeenCalledWith(
+        'new@example.com',
+        expect.stringMatching(/^\d{6}$/),
       );
-      expect(eventBusService.emit).toHaveBeenCalledWith(
-        'UserRegistered',
-        expect.any(Object),
-      );
+      expect(userRepository.save).not.toHaveBeenCalled();
+      expect(sessionService.createSession).not.toHaveBeenCalled();
     });
 
     it('should throw ConflictException if username exists', async () => {
       userRepository.findOne.mockResolvedValueOnce({ id: 'existing' }); // Mock existing username
 
       await expect(
-        service.register(
-          {
-            username: 'NewUser',
-            email: 'new@example.com',
-            password: 'Password1!',
-            acceptedTos: true,
-          },
+        service.register({
+          username: 'NewUser',
+          email: 'new@example.com',
+          password: 'Password1!',
+          acceptedTos: true,
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('creates the account and first session only after the code is verified', async () => {
+      const verificationToken = 'a'.repeat(64);
+      const code = '123456';
+      redis.hgetall.mockResolvedValue({
+        username: 'newuser',
+        email: 'new@example.com',
+        passwordHash: 'hashed_pass',
+        codeHash: createHash('sha256')
+          .update(`${verificationToken}:${code}`)
+          .digest('hex'),
+        attempts: '0',
+      });
+      userRepository.findOne.mockResolvedValue(null);
+
+      const result = await service.verifyRegistration(
+        verificationToken,
+        code,
+        '127.0.0.1',
+        'test-ua',
+      );
+
+      expect(result.accessToken).toBe('access_jwt_token');
+      expect(userRepository.save).toHaveBeenCalledTimes(1);
+      expect(sessionService.createSession).toHaveBeenCalledTimes(1);
+      expect(eventBusService.emit).toHaveBeenCalledWith(
+        'UserRegistered',
+        expect.any(Object),
+      );
+    });
+
+    it('does not create an account for an invalid verification code', async () => {
+      const verificationToken = 'a'.repeat(64);
+      redis.hgetall.mockResolvedValue({
+        username: 'newuser',
+        email: 'new@example.com',
+        passwordHash: 'hashed_pass',
+        codeHash: createHash('sha256')
+          .update(`${verificationToken}:123456`)
+          .digest('hex'),
+        attempts: '0',
+      });
+
+      await expect(
+        service.verifyRegistration(
+          verificationToken,
+          '000000',
           '127.0.0.1',
           'test-ua',
         ),
-      ).rejects.toThrow(ConflictException);
+      ).rejects.toThrow(UnauthorizedException);
+      expect(redis.hincrby).toHaveBeenCalledWith(
+        `auth:registration:${verificationToken}`,
+        'attempts',
+        1,
+      );
+      expect(userRepository.save).not.toHaveBeenCalled();
+      expect(sessionService.createSession).not.toHaveBeenCalled();
     });
   });
 
@@ -288,6 +347,27 @@ describe('AuthService', () => {
         expect.objectContaining({
           success: false,
           failureReason: 'account_disabled',
+        }),
+      );
+    });
+
+    it('rejects a deleted account before password verification', async () => {
+      userRepository.findOne.mockResolvedValue({
+        id: 'u-1',
+        username: 'deleteduser',
+        email: 'deleted@example.com',
+        passwordHash: 'hashed',
+        status: UserStatus.DELETED,
+      });
+
+      await expect(
+        service.validateAndLogUser('deleteduser', 'pass', '127.0.0.1', 'ua'),
+      ).rejects.toThrow(AccountDisabledException);
+      expect(passwordService.verifyPassword).not.toHaveBeenCalled();
+      expect(auditLogRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          failureReason: 'account_deleted',
         }),
       );
     });

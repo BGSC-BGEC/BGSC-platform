@@ -4,11 +4,13 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { firstValueFrom } from 'rxjs';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { BatchProfilesResponseDto } from './dto/batch-profiles-response.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { EventHistoryItemDto } from './dto/event-history-response.dto';
 import {
@@ -442,6 +444,45 @@ export class UsersService {
     // Requires per-event fan transaction log not yet in schema.
     // Phase 2: add sponsor_fan_transactions table.
     return [];
+  }
+
+  async batchProfiles(
+    userIds: string[],
+    internalKey?: string,
+  ): Promise<BatchProfilesResponseDto[]> {
+    const expectedKey = this.configService.get<string>('user.internalServiceKey');
+    if (internalKey !== expectedKey) {
+      throw new UnauthorizedException('Invalid internal service key');
+    }
+
+    if (userIds.length === 0) {
+      return [];
+    }
+
+    const users = await this.usersRepository.find({
+      where: { id: In(userIds) },
+      select: ['id', 'displayName', 'avatarUrl'],
+    });
+
+    return users.map((user) => ({
+      id: user.id,
+      displayName: user.displayName ?? undefined,
+      avatarUrl: user.avatarUrl ?? undefined,
+    }));
+  }
+
+  async syncPoints(
+    userId: string,
+    amount: number,
+    internalKey?: string,
+  ): Promise<{ success: boolean }> {
+    const expectedKey = this.configService.get<string>('user.internalServiceKey');
+    if (internalKey !== expectedKey) {
+      throw new UnauthorizedException('Invalid internal service key');
+    }
+
+    await this.usersRepository.increment({ id: userId }, 'pointsBalance', amount);
+    return { success: true };
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────────

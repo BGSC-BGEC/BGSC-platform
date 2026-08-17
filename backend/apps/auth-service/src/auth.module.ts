@@ -34,6 +34,7 @@ import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 
 import { AddTotpAndAccountLifecycleAndAuditLog1718520000000 } from './migrations/1718520000000-AddTotpAndAccountLifecycleAndAuditLog';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -56,7 +57,8 @@ import { AddTotpAndAccountLifecycleAndAuditLog1718520000000 } from './migrations
     }),
     TypeOrmModule.forFeature([UserCredential, LoginAuditLog]),
     JwtModule.register({}),
-    HttpModule,
+    HttpModule.register({ timeout: 5000 }),
+    HealthModule,
   ],
   controllers: [
     AuthController,

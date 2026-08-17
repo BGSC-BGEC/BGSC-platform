@@ -27,6 +27,14 @@ export class PointTransaction {
   @Column({ name: 'reference_id', type: 'uuid', nullable: true })
   referenceId?: string | null;
 
+  @Column({
+    name: 'idempotency_key',
+    type: 'uuid',
+    nullable: true,
+    unique: true,
+  })
+  idempotencyKey?: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

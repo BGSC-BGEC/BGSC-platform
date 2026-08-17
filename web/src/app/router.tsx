@@ -4,6 +4,7 @@ import { AdminLayout } from '../components/layout/AdminLayout'
 import { AdminProvider } from '../context/AdminContext'
 import { Login } from '../pages/Login'
 import { AuthCallback } from '../pages/AuthCallback'
+import { EmailOtpPage } from '../pages/EmailOtpPage'
 import { Events } from '../pages/Events'
 import { AnnouncementsPage } from '../pages/AnnouncementsPage'
 import { UsersPage } from '../pages/UsersPage'
@@ -20,6 +21,7 @@ function AdminShell() {
 export const router = createBrowserRouter([
   { path: '/login', element: <Login /> },
   { path: '/auth/callback', element: <AuthCallback /> },
+  { path: '/auth/otp', element: <EmailOtpPage /> },
   {
     path: '/',
     element: (

@@ -1,4 +1,4 @@
-import { router, useLocalSearchParams } from 'expo-router';
+import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
@@ -7,8 +7,8 @@ import { OtpCells } from '@/components/auth/OtpCells';
 import { useAuthScreen } from '@/components/auth/use-auth-screen';
 import { PillButton } from '@/components/PillButton';
 import { useToast } from '@/components/Toast';
-import { AuthRepository } from '@/core/repositories/AuthRepository';
 import { ApiError } from '@/core/api/ApiError';
+import { useAuthStore } from '@/core/stores/authStore';
 import { FONTS } from '@/core/theme/fonts';
 import { lightColors } from '@/core/theme/tokens';
 
@@ -18,18 +18,17 @@ const RESEND_SECONDS = 30;
 /**
  * OTP verification (handoffSpec §6 / auth-mobile-spec §6): 6 JetBrains Mono
  * cells, 30 s resend countdown, verify via `AuthRepository.verifyEmail`.
- * Reached from register with the email as a route param; on success the
- * session (already persisted by `authStore.register`) flows to the drawer.
+ * Reached after local registration; verification creates and persists the
+ * first authenticated session.
  */
 export default function OtpScreen() {
   useAuthScreen();
   const colors = lightColors;
   const toast = useToast();
-  const params = useLocalSearchParams<{ email?: string | string[] }>();
-  // L-14: expo-router percent-encodes '+' in email addresses (e.g. foo+bar@x.com
-  // becomes foo%2Bbar@x.com). Decode before using.
-  const rawEmail = Array.isArray(params.email) ? params.email[0] ?? '' : (params.email ?? '');
-  const email = decodeURIComponent(rawEmail);
+  const pending = useAuthStore((s) => s.pendingRegistration);
+  const verifyEmail = useAuthStore((s) => s.verifyEmail);
+  const resendRegistrationCode = useAuthStore((s) => s.resendRegistrationCode);
+  const email = pending?.email ?? '';
 
   const [code, setCode] = useState('');
   const [seconds, setSeconds] = useState(RESEND_SECONDS);
@@ -60,7 +59,7 @@ export default function OtpScreen() {
       setVerifying(true);
       setOtpError(null);
       try {
-        await AuthRepository.verifyEmail({ email, code: value });
+        await verifyEmail(value);
         // H-30: busyRef.current was never reset on the success path, so the
         // auto-submit effect would refuse to re-trigger if the user tried
         // again after a navigation failure. Reset it before navigating.
@@ -70,10 +69,10 @@ export default function OtpScreen() {
       } catch (err) {
         busyRef.current = false;
         const msg = err instanceof Error ? err.message : '';
-        if (err instanceof ApiError && err.status === 400) {
-          setOtpError('Incorrect code, try again.');
-        } else if (/expired/i.test(msg)) {
+        if (/expired/i.test(msg)) {
           setOtpError('Code expired — resend a new one.');
+        } else if (err instanceof ApiError && (err.status === 400 || err.status === 401)) {
+          setOtpError('Incorrect code, try again.');
         } else {
           setOtpError("Couldn't verify the code — check your connection.");
         }
@@ -81,7 +80,7 @@ export default function OtpScreen() {
         setVerifying(false);
       }
     },
-    [email, toast],
+    [email, toast, verifyEmail],
   );
 
   // Auto-submit on the last digit (handoffSpec §6.3).
@@ -96,7 +95,7 @@ export default function OtpScreen() {
     if (!email || resending) return;
     setResending(true);
     try {
-      await AuthRepository.resendOtp({ email });
+      await resendRegistrationCode();
       setSeconds(RESEND_SECONDS);
       setOtpError(null);
       toast.show('Verification code sent.');

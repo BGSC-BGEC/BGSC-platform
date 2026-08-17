@@ -11,7 +11,7 @@ import { StravaController } from './strava.controller';
 @Module({
   imports: [
     TypeOrmModule.forFeature([StravaCredential, StravaActivity, User]),
-    HttpModule,
+    HttpModule.register({ timeout: 5000 }),
     ConfigModule,
   ],
   controllers: [StravaController],

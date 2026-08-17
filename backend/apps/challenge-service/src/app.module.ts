@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module';
 import { challengeConfig, challengeConfigValidationSchema } from './config/challenge.config';
 import { CreateChallenges1781000000000 } from './migrations/1781000000000-CreateChallenges';
 import { ChallengesModule } from './challenges/challenges.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { ChallengesModule } from './challenges/challenges.module';
     }),
     AuthModule,
     ChallengesModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

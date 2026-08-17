@@ -7,7 +7,10 @@ import { HallOfFameController } from './hall-of-fame.controller';
 import { HallOfFameService } from './hall-of-fame.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Event, EventScore]), HttpModule],
+  imports: [
+    TypeOrmModule.forFeature([Event, EventScore]),
+    HttpModule.register({ timeout: 5000 }),
+  ],
   controllers: [HallOfFameController],
   providers: [HallOfFameService],
 })

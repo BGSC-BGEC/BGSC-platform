@@ -4,8 +4,13 @@
  * Note: Android emulators reach the host via 10.0.2.2, so set
  * EXPO_PUBLIC_API_URL=http://10.0.2.2:3000 when running on Android.
  */
-export const API_BASE_URL: string =
-  process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+const configuredApiUrl = process.env.EXPO_PUBLIC_API_URL;
+
+if (process.env.NODE_ENV === 'production' && !configuredApiUrl) {
+  throw new Error('EXPO_PUBLIC_API_URL must be set for production builds');
+}
+
+export const API_BASE_URL: string = configuredApiUrl ?? 'http://localhost:3000';
 
 /**
  * Web console URL for coordinator links (e.g. bracket management).
@@ -22,9 +27,3 @@ export const WEB_CONSOLE_URL: string =
  */
 export const APP_URL: string =
   process.env.EXPO_PUBLIC_APP_URL ?? 'https://bgsc.app';
-
-// M-03: assert required env vars at startup in production so mis-configured
-// builds surface a clear error rather than silently hitting localhost.
-if (process.env.NODE_ENV === 'production' && !process.env.EXPO_PUBLIC_API_URL) {
-  console.error('[env] EXPO_PUBLIC_API_URL is not set — all API requests will fail.');
-}
