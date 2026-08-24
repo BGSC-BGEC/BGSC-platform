@@ -1,4 +1,4 @@
-# BGSC Platform — Developer Onboarding
+x# BGSC Platform — Developer Onboarding
 
 This guide has two parts:
 

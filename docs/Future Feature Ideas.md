@@ -1,0 +1,1 @@
+A admin social feed access, aka the web admin panel can add a social feed post like a meme and all

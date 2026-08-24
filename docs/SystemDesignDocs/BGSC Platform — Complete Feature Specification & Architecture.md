@@ -711,6 +711,7 @@ Inspired by: https://pin.it/81Wcd43Gj
 #### Event Details View (Read-Only/Standard Participant Experience)
 
 - Event info (title, description, rules PDF/link, awards, scheduling dates, coordinator contact points).
+- Event Registration (requires auth), where people fill up the fields for registration and the details and all, so  there is a need to have flexibility to add fields required for the event's registration, like for a chess league registration, elo ranking and all, along with multiple parameteres like compulsory or not. (Write more about in detail when implementing)
     
 - **Sponsor Leaderboard Preview:** If event is active, show which sponsor is leading in fan contributions for this event type.
     
@@ -720,7 +721,7 @@ Inspired by: https://pin.it/81Wcd43Gj
         
     - Role selection: Team Captain or Team Member.
         
-        - If Captain: Team name input, invite codes, and joining parameters.
+        - If Captain: Team name input, invite codes, and joining parameters derived from the event registration details
             
         - Team participant count tracking.
             
@@ -737,7 +738,9 @@ Inspired by: https://pin.it/81Wcd43Gj
     - User toggle: Open / Closed / Invite Only (controls if others can invite them to teams).
         
 - Event Leaderboard (if active and enabled).
-    
+	
+- Event Live Bracket (if its any type of tournament or League) 
+	
 - Event Status indicator.
     
 - Event Results (post-completion).
@@ -856,7 +859,7 @@ Inspired by: https://pin.it/81Wcd43Gj
     - Digital (timeline-based, details revealed upon acceptance)
         
 - Progress tracking and submission portal
-    
+-  team formation list for making or joining public teams and all following the structure of teammed events
 
 ### 5.8 F: Sponsor / Newsletters Page
 
@@ -1189,59 +1192,20 @@ Inspired by: https://pin.it/81Wcd43Gj
         
     - Automated task and meeting exports with background sync notifications.
         
-
-### 5.14 P: Users Page (Administration)
-
-**Visibility:** Coordinator, Founder only
-
-**Layout:** Desktop-optimized pagination grids with infinite scroll support.
-
-#### User Management Table
-
-- Columns: Full Name, Active Email, Role, Status Flag (Active/Suspended), Last Active Epoch, Participations Count, Registration Date, Active Sponsor Affiliation.
-    
-- Multi-Faceted Filters: Role dropdown, User status, Join date brackets, Sponsor groups.
-    
-
-#### Role Management Engine
-
-- **Promotion to Core:** Form requires operational authorization logs detailing justifications.
-    
-- **Promotion to Coordinator:** Secure workflow requiring immediate **2FA/TOTP verification code verification** from Founder session on PWA workspace.
-    
-- **Demotion / Suspension:** Audit trail log mandatory. Cannot demote own active session.
-    
-
-#### Sponsor Management
-
-- **Sponsor Onboarding Wizard:** Form initializing corporate sponsors, tenure boundaries, asset fields (high-res logos, website links, custom sponsor promotion videos), and reward tiers.
-    
-- **Tenure End Settlement Panel:** Red action button initiating database aggregation scripts. Freezes current transaction ledger, calculates final sponsor ranking vectors, identifies award winners, automatically distributes digital certificates, and provides comprehensive CSV data reports.
-    
-
-#### Audit & Moderation Workspace
-
-- **Impersonation Sandbox Engine:** Safe view-only portal running sandboxed client simulation mimicking targeted user session for bug diagnostic analysis. Explicit logs are published to the immutable audit ledger.
-    
-- **Audit Log Explorer:** Cryptographically structured data rows showing Timestamp, Actor ID, Event Action, Target Type, Target ID, Previous State Value, and New State Value.
-    
-
 ### 5.15 Web Admin Workspace: Master Event, League & Rule Engine Configurator
 
 **Visibility:** Core, Coordinator, Founder only
 
 **Layout:** Comprehensive multi-step creation workflows and visual structural editors on React Web Console.
 
+this will have the popUps for annoucements, 
 #### 1. Structural Event/League Builder Wizard
 
-- **Base Information Form:** Input Title, Rich-text Description, Cover Media, Venue Dropdown, and Calendar Scheduling bounds.
-    
+This is the main page to create events!
+- **Base Information Form:** Input Title, Rich-text Description, Cover Media, Venue Dropdown, and Calendar Scheduling bounds. (add other fiels depending upon the detials needed for the event to be placed and show  properly in the Events page)
 - **Ruleset PDF Upload Area:** Drag-and-drop media module with EXIF stripping and virus scans. Parses PDF outlines directly to rules metadata fields.
-    
 - **Registration Deadline Gates:** Set registration opening time, team capping limits, and roster finalization closures.
-    
-- **Administrative Assignment Matrix:** Multi-select checklist assigning specific Core and Member roles to serve as administrators/referees of the event.
-    
+- **Administrative Assignment Matrix:** Multi-select checklist assigning specific Core and Member roles to serve as administrators/referees of the event, which gives them the access to the event's edit and all
 
 #### 2. Visual Bracket Generator Engine
 
@@ -1292,6 +1256,55 @@ Inspired by: https://pin.it/81Wcd43Gj
     
 - **Live Bid Controller:** Master interface with "Start Auction Block", "Close Bid", "Sold/Unsold", and countdown override buttons, updating client sessions over WebSockets under $100\text{ms}$.
     
+
+#### 5 Users Page (Administration)
+
+**Visibility:** Coordinator, Founder only
+
+**Layout:** Desktop-optimized pagination grids with infinite scroll support.
+
+##### User Management Table
+
+- Columns: Full Name, Active Email, Role, Status Flag (Active/Suspended), Last Active Epoch, Participations Count, Registration Date, Active Sponsor Affiliation.
+    
+- Multi-Faceted Filters: Role dropdown, User status, Join date brackets, Sponsor groups.
+    
+
+##### Role Management Engine
+
+- **Promotion to Core:** Form requires operational authorization logs detailing justifications.
+    
+- **Promotion to Coordinator:** Secure workflow requiring immediate **2FA/TOTP verification code verification** from Founder session on PWA workspace.
+    
+- **Demotion / Suspension:** Audit trail log mandatory. Cannot demote own active session.
+    
+
+##### Sponsor Management
+
+- **Sponsor Onboarding Wizard:** Form initializing corporate sponsors, tenure boundaries, asset fields (high-res logos, website links, custom sponsor promotion videos), and reward tiers.
+    
+- **Tenure End Settlement Panel:** Red action button initiating database aggregation scripts. Freezes current transaction ledger, calculates final sponsor ranking vectors, identifies award winners, automatically distributes digital certificates, and provides comprehensive CSV data reports.
+    
+
+##### Audit & Moderation Workspace
+
+- **Impersonation Sandbox Engine:** Safe view-only portal running sandboxed client simulation mimicking targeted user session for bug diagnostic analysis. Explicit logs are published to the immutable audit ledger.
+    
+- **Audit Log Explorer:** Cryptographically structured data rows showing Timestamp, Actor ID, Event Action, Target Type, Target ID, Previous State Value, and New State Value.
+    
+
+### Challange Creation
+This covers all the fields needed to create a challange from the web panel:
+- Required fields:
+	- Points
+	- Title
+	- Description 
+	- Time
+	- Location
+	- Status 
+	- Domain
+	- Teammable or not? 
+		- If yes then also add the whole section for there being a team 
 
 ## 6. Popups & Modal Specifications
 
