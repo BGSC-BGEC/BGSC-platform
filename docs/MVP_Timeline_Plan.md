@@ -7,8 +7,8 @@
 
 ## Team Allocation
 
-### Frontend Team (4 people)
-- **FE-Admin (1):** Web Admin Panel
+### Frontend Team (5 people)
+- **FE-Admin (2):** Web Admin Panel
 - **FE-Mobile-1, FE-Mobile-2, FE-Mobile-3:** Mobile Application
 
 ### Backend Team (2 people)
@@ -134,13 +134,13 @@
   - Icon library setup
   - Loading and error state components
 
-- [ ] **FE-Mobile-3: Authentication UI Screens** (8h)
-  - Login screen UI
-  - Registration screen UI
-  - Forgot password UI
-  - Form validation setup
-  - Password strength indicator
-  - Terms and conditions screen
+- [ ] **FE-Mobile-3: Landing Page & Onboarding** (8h)
+  - Landing page with app intro
+  - Onboarding screens (app tour/walkthrough)
+  - Skip and get started flows
+  - First-time user experience
+  - Splash screen
+  - (Can work independently using placeholder components)
 
 **Sunday Aug 30 (8h):**
 - [ ] **FE-Mobile-1: Authentication Integration** (8h)
@@ -159,14 +159,15 @@
   - Loading states and error handling
   - Navigation between main sections
 
-- [ ] **FE-Mobile-3: Landing Page & Onboarding** (8h)
-  - Landing page with app intro
-  - Onboarding screens (app tour/walkthrough)
-  - Skip and get started flows
-  - First-time user experience
-  - Splash screen
+- [ ] **FE-Mobile-3: Authentication UI Screens** (8h)
+  - Login screen UI (using design system from FE-Mobile-2)
+  - Registration screen UI
+  - Forgot password UI
+  - Form validation setup
+  - Password strength indicator
+  - Terms and conditions screen
 
-**Deliverable:** Mobile project initialized + Auth working + Landing page
+**Deliverable:** Mobile project initialized + Design system + Auth UI + Landing page
 
 #### Frontend Web Admin (FE-Admin)
 

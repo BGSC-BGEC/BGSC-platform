@@ -243,8 +243,10 @@
       "bases:Create new base": false
     }
   },
-  "active": "cb98526aaf3cdcf3",
+  "active": "37df7778721855cf",
   "lastOpenFiles": [
+    "MVP_Timeline_Plan.md.tmp.3488426.52632f255d3b",
+    "vps-deploy.md",
     "MVP_Timeline_Plan.md.tmp.3488426.56e168417e32",
     "MVP_Timeline_Plan.md.tmp.3488426.b4173f2c2f93",
     "MVP_Timeline_Plan.md.tmp.3488426.172a06e915e3",
@@ -265,7 +267,6 @@
     "ONBOARDING.md",
     "Frontend/UI-UX-Master-Doc.md",
     "OnboaringDocs.zip",
-    "SystemDesignDocs/System Architecture Guide.pdf",
     "api-gateway.md",
     "manual-testing-gateway.md",
     "mobile.md",
@@ -284,7 +285,6 @@
     "FrontendGuide/Screens Master Doc/sponsor-newsletters-page.md",
     "FrontendGuide/Screens Master Doc/popups-and-modals.md",
     "FrontendGuide/Screens Master Doc/points-challenge-page.md",
-    "FrontendGuide/Screens Master Doc/media-page.md",
     "FrontendGuide/Feedback and contact us screen/svg logos/whatsapp-logo-variant.svg",
     "FrontendGuide/Events/colorscheme.png",
     "FrontendGuide/Auth/onboard.png",
