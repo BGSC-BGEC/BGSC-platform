@@ -12,7 +12,7 @@ export default function LoginScreen() {
       {isLoading ? (
         <ActivityIndicator size="large" />
       ) : (
-        <Button title="Login with Dummy Data" onPress={() => login('jeet@example.com', 'demo')} />
+        <Button title="Login" onPress={() => login('jeet@example.com', 'demo')} />
       )}
     </View>
   );

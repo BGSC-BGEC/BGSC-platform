@@ -1,7 +1,6 @@
-import React, { createContext, useContext, useMemo } from 'react';
+import React, { createContext, useContext, useMemo, useState } from 'react';
 import { useColorScheme as useRNColorScheme } from 'react-native';
 
-import { useThemeStore } from '@/core/stores/themeStore';
 import {
   type UIThemeColors,
   type ThemeMode,
@@ -24,11 +23,11 @@ export interface ThemeProviderProps {
 }
 
 export function ThemeProvider({ children, initialMode }: ThemeProviderProps) {
-  const storeTheme = useThemeStore((s) => s.theme);
-  const setStoreTheme = useThemeStore((s) => s.setTheme);
   const systemScheme = useRNColorScheme();
+  const [selectedTheme, setSelectedTheme] = useState<ThemeMode | 'system'>(
+    initialMode ?? 'system',
+  );
 
-  const selectedTheme = initialMode ?? storeTheme;
   const resolvedMode: ThemeMode =
     selectedTheme === 'system'
       ? systemScheme === 'dark'
@@ -42,9 +41,9 @@ export function ThemeProvider({ children, initialMode }: ThemeProviderProps) {
       mode: resolvedMode,
       isDark,
       colors: isDark ? darkThemeColors : lightThemeColors,
-      setMode: (m) => void setStoreTheme(m),
+      setMode: setSelectedTheme,
     };
-  }, [resolvedMode, setStoreTheme]);
+  }, [resolvedMode]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
@@ -58,13 +57,12 @@ export function useTheme(): ThemeContextValue {
   if (context) return context;
 
   // Standalone fallback: hook into themeStore + systemScheme directly
-  const storeTheme = useThemeStore.getState().theme;
-  const resolved: ThemeMode = storeTheme === 'light' ? 'light' : 'dark';
+  const resolved: ThemeMode = 'dark';
   return {
     mode: resolved,
     isDark: resolved === 'dark',
     colors: resolved === 'dark' ? darkThemeColors : lightThemeColors,
-    setMode: (m) => void useThemeStore.getState().setTheme(m),
+    setMode: () => undefined,
   };
 }
 
