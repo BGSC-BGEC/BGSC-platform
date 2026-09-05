@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Button, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuth } from '../../store/auth';
+import apiClient from '../../services/apiclient';
 
 export default function LoginScreen() {
   const { login, isLoading } = useAuth();

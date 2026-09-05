@@ -6,5 +6,5 @@ export default function App() {
     <AuthProvider>
       <DrawerLayout />
     </AuthProvider>
-  );
+  ) ;
 }
