@@ -1,4 +1,7 @@
 import React, {createContext, useState, useContext} from 'react';
+import apiClient from '../services/apiclient';
+import * as SecureStore from 'expo-secure-store';
+import {Platform} from 'react-native';
 
 const Dummy={
     id:'001',
@@ -20,29 +23,38 @@ export const AuthProvider = ({children}: {children: React.ReactNode})=>{
         setError(null);
 
         try{
-            const response = await fetch('https://example.com/api/login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({email, password}),
-            });
-            const data = await response.json();
+            const response = await apiClient.post('/auth/login', { email, password });
+            const data = response.data;
+            const validToken = data.token ? String(data.token) : 'dummy_token_string';
+            if(Platform.OS === 'web') {
+                localStorage.setItem('authToken', validToken);
+            } else {
+                await SecureStore.setItemAsync('authToken', validToken);
+            }
             setUser(data.user);
             setIsLoggedIn(true);
+            setIsLoading(false);
 
         } catch(error){
             console.log('backend error:', error);
+            if(Platform.OS === 'web') {
+                localStorage.setItem('authToken', 'dummy_token_string');
+            } else {
+                await SecureStore.setItemAsync('authToken', 'dummy_token_string');
+            }
             setTimeout(()=>{
                 setUser(Dummy);
                 setIsLoggedIn(true);
                 setIsLoading(false);
             }, 1000);
-        } finally {
-            setIsLoading(false);
         }
     };
-    const logout = () => {
+    const logout = async () => {
+        if(Platform.OS === 'web') {
+            localStorage.removeItem('authToken');
+        } else {
+            await SecureStore.deleteItemAsync('authToken');
+        }
         setIsLoggedIn(false);
         setUser(null);
     };
