@@ -239,6 +239,21 @@ export const REGISTERED_STATUS: SubmissionStatus = 'confirmed';
 /** Statuses that no longer occupy the one-active-registration-per-user slot. */
 export const INACTIVE_SUBMISSION_STATUS: SubmissionStatus[] = ['cancelled', 'rejected'];
 
+/**
+ * The complement of INACTIVE_SUBMISSION_STATUS, enumerated rather than negated.
+ *
+ * MongoDB rejects `$nin` (and `$not`) inside a partialFilterExpression — only `$eq`, `$exists`,
+ * range operators, `$type`, `$and`, `$or` and `$in` are allowed. Written as a negation the index
+ * is silently never created, which quietly removes the duplicate-registration guard entirely.
+ * The status enum is closed, so listing the active states is exactly equivalent.
+ */
+export const ACTIVE_SUBMISSION_STATUS: SubmissionStatus[] = [
+    'draft',
+    'submitted',
+    'confirmed',
+    'waitlisted',
+];
+
 export interface IFormSubmission extends Document<string> {
     _id: string;
     form_id: string;
@@ -369,7 +384,7 @@ FormSubmissionSchema.pre('validate', function (this: IFormSubmission) {
  */
 FormSubmissionSchema.index(
     { form_id: 1, 'user.user_id': 1 },
-    { unique: true, partialFilterExpression: { status: { $nin: INACTIVE_SUBMISSION_STATUS } } }
+    { unique: true, partialFilterExpression: { status: { $in: ACTIVE_SUBMISSION_STATUS } } }
 );
 FormSubmissionSchema.index({ 'owner.id': 1, status: 1, submitted_at: 1 }); // participants list, waitlist order, CSV
 FormSubmissionSchema.index({ 'user.user_id': 1, 'owner.type': 1, submitted_at: -1 }); // profile History

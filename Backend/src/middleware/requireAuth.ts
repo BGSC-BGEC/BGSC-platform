@@ -11,10 +11,17 @@ import { UserRole } from '../models/User';
  *
  *   { sub: <user _id, uuid string>, role: <UserRole>, iat, exp }
  *
- * Signed with `config.jwt.accessSecret`, 15 min expiry (Spec §11.1). `sub` is the standard JWT
- * subject claim, so it must hold the user id and nothing else. If BE-1 signs a different shape,
- * change it here — one place — rather than in every route.
+ * Signed with `config.jwt.accessSecret` using HS256, 15 min expiry (Spec §11.1). `sub` is the
+ * standard JWT subject claim, so it must hold the user id and nothing else. If BE-1 signs a
+ * different shape, change it here — one place — rather than in every route.
  */
+
+/**
+ * Pinned, not left to the library default. If the project ever moves to RS256, an unpinned verifier
+ * will happily accept a token the attacker signed with HS256 using the *public* key as the HMAC
+ * secret. Pinning now costs nothing and removes the whole class.
+ */
+export const ACCESS_TOKEN_ALGORITHMS: jwt.Algorithm[] = ['HS256'];
 
 export interface AuthUser {
     id: string;
@@ -59,7 +66,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 
     let payload: AccessTokenPayload;
     try {
-        payload = jwt.verify(token, config.jwt.accessSecret) as AccessTokenPayload;
+        payload = jwt.verify(token, config.jwt.accessSecret, {
+            algorithms: ACCESS_TOKEN_ALGORITHMS,
+        }) as AccessTokenPayload;
     } catch {
         res.status(401).json({ error: 'unauthorized' });
         return;
@@ -83,7 +92,9 @@ export function optionalAuth(req: Request, _res: Response, next: NextFunction): 
     const token = bearerToken(req.headers.authorization);
     if (!token) return next();
     try {
-        const payload = jwt.verify(token, config.jwt.accessSecret) as AccessTokenPayload;
+        const payload = jwt.verify(token, config.jwt.accessSecret, {
+            algorithms: ACCESS_TOKEN_ALGORITHMS,
+        }) as AccessTokenPayload;
         if (typeof payload.sub === 'string' && payload.sub && ROLES.has(payload.role)) {
             req.user = { id: payload.sub, role: payload.role };
         }

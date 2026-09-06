@@ -321,12 +321,17 @@ Contains links to:
 
 ### 4.1 Core Entities
 
+> **Implementation note (Sep 6, 2026).** The entities below are the original domain sketch. The
+> collections actually built are in `Backend/src/models/`, designed in `docs/modeldocs/`. Field names
+> there are `snake_case`, `_id` is a UUID v4 **string** (not an ObjectId), and every timestamp ends
+> in `_at`. Where the two disagree, the models are authoritative. Sections 4.1.1 and 4.1.2 list what
+> exists; entities with no subsection below are still unbuilt.
+
 ```
 User: id, username, email, password_hash, contact, role, avatar_url, 
       interests[], socials{}, strava_id, steam_id, points_balance, 
       status, created_at, last_active, settings{}, newsletter_subscriptions[],
       active_sponsor_id
-
 Event: id, title, description, type[LE|DE|ALL|DLL], status[upcoming|ongoing|past], 
        start_date, end_date, venue, rules_pdf_url, award_list[], 
        needs_leaderboard, is_teamed, team_size, max_teams,
@@ -396,6 +401,148 @@ SponsorPrize: id, sponsor_id, title, description,
               criteria[top_fans|most_wins|highest_rank], 
               threshold, points_cost, status[available|claimed|expired]
 ```
+
+
+#### 4.1.1 Collections as built (BE-2)
+
+Field lists are indicative, not exhaustive — see `docs/modeldocs/` for the full shape, invariants and indexes of each.
+
+```
+events               _id, slug, title, description, cover_media_url, logo_url,
+                     category[leagues|bgec|fitsoc|general], type[LE|DE|ALL|DLL],
+                     domain, tags[], status[draft|upcoming|ongoing|past|cancelled], visibility,
+                     start_at, end_at, venue, timezone,
+                     registration{opens_at, closes_at, roster_finalizes_at, form_id,
+                                  max_participants, waitlist_enabled, requires_approval},
+                     teaming{is_teamed, team_size_min, team_size_max, max_teams,
+                             captain_application_required},
+                     rules_pdf_url, rules_summary, awards[], contacts[],
+                     created_by, core_admins[],
+                     points_pool{participation, podium_multipliers[], sponsor_bonus,
+                                 investment_enabled, investment_cap},
+                     scoring{parameters[{key,label,kind,weight}], normalization{lower,upper}},
+                     leaderboard{format, elim_after_n, min_participants} | null,
+                     auction{k_multiplier, min_bid_increment, bid_timer_seconds,
+                             oc_override_quota, status, captain_user_ids[], purse_per_team} | null,
+                     bracket (reserved, Week 4), counts{}, created_at, updated_at, deleted_at
+                     -- invariants: leaderboard != null <=> type != 'DE'; auction != null <=> type == 'ALL'
+
+auction_lots         _id, event_id, player{user_id,display_name,avatar_url}, registration_id,
+                     base_price, oc_adjusted_price, order,
+                     status[queued|on_block|sold|unsold], current_bid, current_bidder,
+                     timer_ends_at, bids[], sold_to_team_id, sold_amount, closed_at,
+                     version (optimistic lock), created_at, updated_at
+
+teams                _id, owner{type[event|challenge], id}, name, name_lower, logo_url,
+                     captain_user_id, members[{user_id, display_name, avatar_url,
+                                               registration_id, joined_at, acquired_via}],
+                     join_policy[open|invite_only|closed], invite_code, size_min, size_max,
+                     pending[{user_id, direction, created_by, created_at, expires_at}],
+                     status[forming|complete|locked|disbanded],
+                     auction{purse_total, purse_spent, version} | null, created_at, updated_at
+                     -- one polymorphic collection for both events and challenges
+
+form_definitions     _id, owner{type[event|challenge|generic], id}, title, description,
+                     version, status[draft|published|archived], fields[FormField],
+                     settings{allow_edit_until, confirmation_message},
+                     created_by, created_at, updated_at, published_at
+
+FormField            key, label, help_text, type[short_text|long_text|number|email|phone|url|
+                     select|multi_select|checkbox|date|file|user_ref], required, placeholder,
+                     options[], validation{min,max,pattern,accept,max_size_bytes},
+                     visible_if{field_key,op,value}, admin_only, order
+
+form_definition_versions
+                     _id, form_id, version, fields[], published_at
+                     -- frozen copies so old submissions still render
+
+form_submissions     _id, form_id, form_version, owner{}, user{user_id,display_name,avatar_url},
+                     answers{}, files[],
+                     context{event{role, team_id, team_visibility, base_price,
+                                   captain_application{}, attended} | challenge{team_id}},
+                     status[draft|submitted|confirmed|waitlisted|rejected|cancelled],
+                     waitlist_position, status_history[],
+                     submitted_at, confirmed_at, cancelled_at, created_at, updated_at
+                     -- registering for an event IS a form_submissions row
+
+point_transactions   _id, user_id, amount (signed int), type[earn|spend|refund|adjust|expire],
+                     source[event|challenge|leaderboard|store|engagement|sponsor|admin], reason,
+                     reference{type,id}, idempotency_key (unique), balance_after,
+                     actor{type,user_id}, note, expires_at, created_at
+                     -- append-only ledger; balance = sum(amount); corrections are new rows
+
+point_rules          _id (== reason key), label, source, default_amount,
+                     overridable_by[event|challenge|null], enabled, expires_after_days,
+                     updated_by, created_at, updated_at
+
+leaderboard_entries  _id, event_id, participant{type[user|team], id, display_name, avatar_url},
+                     registration_id, raw{}, raw_score, normalized_score, invested_points,
+                     final_score, stats{played,won,lost,drawn,round_reached,fails,eliminated},
+                     rank, previous_rank, last_scored_at, scored_by, version,
+                     created_at, updated_at
+
+leaderboard_snapshots
+                     _id, event_id, taken_at, reason[score_update|investment|final|freeze],
+                     frozen, ranks[{participant_id, rank, final_score}]
+
+challenges           _id, slug, title, description, brief_hidden_until_accept, cover_media_url,
+                     domain, kind[physical|digital], difficulty[easy|medium|hard|legend], tags[],
+                     award_points, grants_hall_of_fame,
+                     window{opens_at, closes_at, submissions_close_at, time_limit_minutes},
+                     location{}, teaming{}, max_participants, resources[],
+                     submission{requires_proof, proof_types[], max_files, auto_approve},
+                     status[draft|active|completed|archived], counts{},
+                     created_by, reviewers[], created_at, updated_at, deleted_at
+
+challenge_participations
+                     _id, challenge_id, challenge_snapshot{title,difficulty,award_points},
+                     participant{type,id,display_name,avatar_url}, member_user_ids[],
+                     status[accepted|submitted|under_review|approved|rejected|expired|withdrawn],
+                     accepted_at, deadline_at, progress{percent, steps[], notes},
+                     submission{proofs[], notes, submitted_at, version} | null,
+                     review{reviewer_user_id, decision, reason, reviewed_at} | null,
+                     reward{points_awarded, point_transaction_ids[], hall_of_fame_entry_id} | null,
+                     status_history[], created_at, updated_at
+
+announcements        _id, title, body, media_url, categories[], tags[],
+                     priority[normal|important|urgent],
+                     audience{min_role, event_id},
+                     author{user_id, display_name, role_label, avatar_url},
+                     status[draft|scheduled|published|archived],
+                     scheduled_for, published_at, expires_at, pinned_until,
+                     delivery{whatsapp{requested, per_category[]}, push{}},
+                     created_at, updated_at, deleted_at
+
+audit_logs           _id, actor_id, action (dotted machine key), target_type, target_id,
+                     previous_value, new_value, reason, ip, created_at
+                     -- append-only; required by 7.3. Not in the original entity list above
+```
+
+#### 4.1.2 `users` as built (BE-1 model, converted by BE-2)
+
+```
+users                _id (uuid string), email, username, password_hash*, role, status,
+                     is_email_verified, refresh_token_hash*, last_login_at,
+                     password_reset_token*, password_reset_expires*,
+                     profile{full_name, avatar_url, phone_number, bio, interests[],
+                             social_links{strava_id, instagram, linkedin, steam_id}},
+                     player_card{card_tier, stats{}},
+                     points_balance,          -- written only by Points Service
+                     announcements{last_seen_at, read_ids[]},  -- written only by Announcement Service
+                     settings{notifications{email,whatsapp}, privacy{is_profile_public}, theme},
+                     last_active_at, deleted_at, created_at, updated_at
+                     -- * = select:false, never loaded unless explicitly requested
+```
+
+Dropped from the 4.1 sketch: `newsletter_subscriptions[]` and `active_sponsor_id` — sponsors and
+newsletters are out of MVP scope. `contact` became `profile.phone_number`; `socials{}`, `strava_id`
+and `steam_id` were consolidated into `profile.social_links`.
+
+#### 4.1.3 Not yet built
+
+`Task`, `Post`, `Friendship`, `Notification`, `Match`, `StoreItem`, `MediaAlbum`, `FeedbackTicket`,
+and every `Sponsor*` entity remain as sketched above. Tournament brackets are Week 4 (the `events`
+document reserves a `bracket` slot); sponsors, social feed, friends, store and unions are out of MVP.
 
 ## 5. Page & Feature Specifications
 
@@ -1892,10 +2039,30 @@ PlayerUnsold { auction_id, player_id, timestamp }
     
     - Account Information Request: Complete data export including all chat history, posts, points transactions, sponsor data
         
-    - Right to deletion: Account removal with 30-day grace period
+    - Right to deletion: Account removal with 30-day grace period — **see 11.2.1 for what this actually does as built**
         
     - Privacy Policy and Terms of Service accessible pre-registration and in Account Actions
         
+
+#### 11.2.1 Account Deletion — As Implemented (BE-2, Sep 6 2026)
+
+The delete flow is a **hide plus disclosure**, not an erasure. Recorded here because it differs from the
+plain reading of "right to deletion" above.
+
+| Concern | Behaviour |
+|---|---|
+| On request | `deleted_at` stamped, `status` → `deleted`, refresh token cleared. The account disappears from search, public profile reads and admin lists immediately |
+| Data retained | **Everything.** No field is destroyed and no purge job exists. Registrations, point transactions, leaderboard entries and team rosters keep resolving |
+| Grace period | 30 days, and it governs **restore**, not deletion. Signing in during the window restores the account. After it, restore is admin-only |
+| Disclosure | The client must state before confirming that data is retained. The confirmation captures `confirm`, an optional `reason`, and an opt-in `research_consent` (default off) |
+| `research_consent` | Marks whose identifiable data may be **used** for institutional research. Retention is universal; this flag governs use, not storage |
+| Audit | Every deletion writes an immutable `AuditLog` row recording what was disclosed and what was consented to |
+| Encryption | Not yet implemented. 11.2's AES-256 at rest remains outstanding work; nothing in this flow assumes it |
+
+Consequence to be aware of: a user who deletes their account cannot have their personal data removed
+by any current mechanism. If an erasure obligation is ever asserted, a purge or pseudonymization job
+has to be written — the schema supports it (`deleted_at` is already the marker), but it does not exist.
+
 
 ### 11.3 Content Moderation
 
