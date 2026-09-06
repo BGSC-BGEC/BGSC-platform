@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+  @layer base {
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      @apply bg-white text-black antialiased;
+    }
+  }

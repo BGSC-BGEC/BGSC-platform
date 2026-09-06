@@ -199,22 +199,22 @@
 #### Frontend Web Admin (FE-Admin)
 
 **Saturday Sep 5 (8h):**
-- [ ] **Admin Dashboard Setup** (8h)
-  - Initialize React/Next.js admin project
-  - Setup admin routing and layout
-  - Install and configure admin UI library (MUI/Ant Design/Shadcn)
-  - Create sidebar navigation structure
-  - Setup authentication guards
-  - Admin login page
-  - Dashboard layout with sidebar
+- [X] **Admin Dashboard Setup** (8h)
+  [X] Initialize React/Next.js admin project
+  [X] Setup admin routing and layout
+  [X] Install and configure admin UI library (MUI/Ant Design/Shadcn)
+  [X] Create sidebar navigation structure
+  [X] Setup authentication guards
+  [X] Admin login page
+  [X] Dashboard layout with sidebar
 
 **Sunday Sep 6 (8h):**
-- [ ] **Admin Auth & User Management - Part 1** (8h)
-  - Admin authentication integration
-  - Dashboard home page with stats cards
-  - Users list table (with pagination, search, filter)
-  - User detail view modal
-  - User basic actions (view, search)
+- [X] **Admin Auth & User Management - Part 1** (8h)
+  [X] Admin authentication integration
+  [X] Dashboard home page with stats cards
+  [X] Users list table (with pagination, search, filter)
+  [X] User detail view modal
+  [X] User basic actions (view, search)
 
 **Deliverable:** Admin panel setup + Admin auth + Basic user management
 
