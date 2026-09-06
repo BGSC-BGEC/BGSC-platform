@@ -84,6 +84,17 @@ export interface IUser extends Document<string> {
     last_active_at?: Date | null;
     deleted_at?: Date | null;
 
+    /** Set when the account is deleted; see docs Spec §11.2.1. Cleared on restore. */
+    deletion?: {
+        reason?: string | null;
+        /** Opt-in (default false): may this person's identifiable data be USED for research. */
+        research_consent: boolean;
+        /** Self-service restore is possible until this instant; after it, admin only. */
+        restorable_until: Date;
+        /** Exact disclosure text shown at the gate, stored so we can prove what they agreed to. */
+        disclosure_version: string;
+    } | null;
+
     created_at: Date;
     updated_at: Date;
 }
@@ -146,8 +157,24 @@ const UserSchema = new Schema<IUser>(
         },
 
         last_active_at: { type: Date, default: null },
-        // Soft delete with a 30-day grace period (Spec §11.2). Purge job is Week 4+.
+
+        /**
+         * Deletion hides the account; nothing is destroyed and no purge job exists (Spec §11.2.1).
+         * The 30 days govern self-service RESTORE, not erasure.
+         */
         deleted_at: { type: Date, default: null },
+        deletion: {
+            type: new Schema(
+                {
+                    reason: { type: String, default: null, maxlength: 500 },
+                    research_consent: { type: Boolean, required: true, default: false },
+                    restorable_until: { type: Date, required: true },
+                    disclosure_version: { type: String, required: true },
+                },
+                { _id: false }
+            ),
+            default: null,
+        },
     },
     timestamps
 );
@@ -156,7 +183,8 @@ const UserSchema = new Schema<IUser>(
 UserSchema.index({ role: 1, status: 1 });
 UserSchema.index({ points_balance: -1 }); // fast leaderboard querying
 UserSchema.index({ created_at: -1 });
-UserSchema.index({ last_active_at: -1 }); // admin "Last Active Epoch" column (Spec §5.15.5)
+UserSchema.index({ last_active_at: -1 });
+UserSchema.index({ deleted_at: 1 }); // purge/restore-window sweeps, and 'who deleted recently' // admin "Last Active Epoch" column (Spec §5.15.5)
 UserSchema.index({ username: 'text', 'profile.full_name': 'text' }); // user search (Spec §13.1)
 
 export const User = model<IUser>('User', UserSchema, 'users');

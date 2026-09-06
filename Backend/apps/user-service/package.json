@@ -1,0 +1,22 @@
+{
+  "name": "@bgsc/user-service",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "nodemon --watch src --watch ../../packages/shared/src --ext ts --exec ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "selfcheck": "ts-node src/users/user.selfcheck.ts",
+    "e2e": "ts-node src/users/user.e2e.ts"
+  },
+  "dependencies": {
+    "@bgsc/shared": "1.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.9.5",
+    "zod": "^4.5.4"
+  }
+}

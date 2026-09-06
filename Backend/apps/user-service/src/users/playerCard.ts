@@ -1,7 +1,9 @@
-import { IUser } from '../models/User';
-import { FormSubmission } from '../models/Registration';
-import { LeaderboardEntry } from '../models/Leaderboard';
-import { ChallengeParticipation } from '../models/Challenge';
+import {
+    ChallengeParticipation,
+    FormSubmission,
+    IUser,
+    LeaderboardEntry,
+} from '@bgsc/shared';
 
 /**
  * Player card payload and rating (Spec §5.3, decision D1 in docs/be2-user-service-plan.md).

@@ -1,5 +1,9 @@
-import { IUser, UserRole } from '../models/User';
-import { ROLE_RANK, RoleName } from '../models/shared';
+import {
+    IUser,
+    ROLE_RANK,
+    RoleName,
+    UserRole,
+} from '@bgsc/shared';
 
 /**
  * The single field-masking boundary (Spec §11.2, §7.2 "Field-Level").

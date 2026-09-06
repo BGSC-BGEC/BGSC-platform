@@ -1,10 +1,14 @@
 import { Request, Response, NextFunction } from 'express';
-import { User, UserRole, UserStatus } from '../models/User';
 import * as svc from './user.service';
 import { serializeUser, snapshotOf, Viewer } from './user.serializer';
 import { playerCardFor } from './playerCard';
 import { putObject, deleteObject, sniffImage, IMAGE_MAX_BYTES } from '../storage/storage';
-import { recordAudit } from '../models/AuditLog';
+import {
+    User,
+    UserRole,
+    UserStatus,
+    recordAudit,
+} from '@bgsc/shared';
 
 /** HTTP only. Data access, events and audit rows live in user.service.ts. */
 
@@ -19,8 +23,24 @@ export const wrap =
     };
 
 export const getMe = wrap(async (req, res) => {
-    const user = await svc.findById(req.user!.id);
+    // Deleted-inclusive on purpose: an owner must be able to see their own pending deletion,
+    // otherwise the client has no way to know a restore is available.
+    const user = await svc.findSelfIncludingDeleted(req.user!.id);
     if (!user) return void res.status(404).json({ error: 'not_found' });
+
+    if (user.deleted_at) {
+        res.json({
+            ...serializeUser(user, viewerOf(req), true),
+            deletion: {
+                deleted_at: user.deleted_at,
+                restorable_until: user.deletion?.restorable_until ?? svc.restorableUntil(user.deleted_at),
+                restorable: new Date() <= (user.deletion?.restorable_until ?? svc.restorableUntil(user.deleted_at)),
+                research_consent: user.deletion?.research_consent ?? false,
+            },
+        });
+        return;
+    }
+
     svc.touchLastActive(user._id);
     res.json(serializeUser(user, viewerOf(req)));
 });
@@ -37,12 +57,41 @@ export const updateMySettings = wrap(async (req, res) => {
     res.json(serializeUser(updated, viewerOf(req)));
 });
 
+/**
+ * What deletion does, so the client gate discloses the truth rather than a paraphrase of it
+ * (Spec §11.2.1). Fetch this, show it, then send the confirmation.
+ */
+export const deletionPreview = wrap(async (req, res) => {
+    await svc.findById(req.user!.id);
+    res.json(svc.RETENTION_DISCLOSURE);
+});
+
 export const deleteMe = wrap(async (req, res) => {
     const user = await svc.findById(req.user!.id);
     if (!user) return void res.status(404).json({ error: 'not_found' });
-    await svc.softDelete(user, req.user!.id, 'self-service deletion');
-    // Spec §11.2: 30-day grace. The row survives so ledger rows and snapshots keep resolving.
-    res.status(202).json({ status: 'deletion_scheduled', grace_days: 30 });
+
+    const { reason, research_consent } = req.body as { reason?: string; research_consent: boolean };
+    const { restorable_until } = await svc.softDelete(user, req.user!.id, { reason, research_consent });
+
+    // Not "deleted": nothing was destroyed. The account is hidden and restorable until this date.
+    res.status(202).json({
+        status: 'account_hidden',
+        restorable_until,
+        restore_window_days: svc.RESTORE_WINDOW_DAYS,
+        data_retained: true,
+        research_consent,
+    });
+});
+
+/**
+ * Undo a deletion inside the window (D11). Uses the deleted-inclusive lookup — every other route
+ * filters soft-deleted users out, which is exactly why this one needs its own.
+ */
+export const restoreMe = wrap(async (req, res) => {
+    const user = await svc.findSelfIncludingDeleted(req.user!.id);
+    if (!user) return void res.status(404).json({ error: 'not_found' });
+    const restored = await svc.restoreSelf(user, req.user!.id);
+    res.json(serializeUser(restored, viewerOf(req), true));
 });
 
 export const uploadAvatar = wrap(async (req, res) => {
@@ -155,7 +204,7 @@ export const auditForUser = wrap(async (req, res) => {
     const { ref } = req.params as Record<string, string>;
     const user = await svc.findByRef(ref);
     if (!user) return void res.status(404).json({ error: 'not_found' });
-    const { AuditLog } = await import('../models/AuditLog');
+    const { AuditLog } = await import('@bgsc/shared');
     const rows = await AuditLog.find({ target_type: 'user', target_id: user._id })
         .sort({ created_at: -1 })
         .limit(50);
