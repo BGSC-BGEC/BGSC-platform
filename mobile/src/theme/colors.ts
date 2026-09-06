@@ -102,18 +102,26 @@ export interface UIThemeColors {
  */
 export const darkThemeColors: UIThemeColors = {
   background: PALETTE.forest,
-  backgroundMid: '#143526',
-  surface: withAlpha(PALETTE.moss, 0.45),
+
+  backgroundMid: '#123323',
+
+  surface: '#183D2D',
+
   surfaceSolid: '#183D2D',
-  surfaceMuted: withAlpha(PALETTE.forest, 0.60),
-  surfaceElevated: '#1D4534',
+
+  surfaceMuted: '#1C3427',
+
+  surfaceElevated: '#214936',
 
   text: PALETTE.cream,
+
   textMuted: PALETTE.mint,
+
   textSubtle: PALETTE.sage,
 
-  border: withAlpha(PALETTE.mint, 0.18),
-  borderActive: withAlpha(PALETTE.mint, 0.50),
+  border: withAlpha(PALETTE.mint, 0.14),
+
+  borderActive: withAlpha(PALETTE.orange, 0.85),
 
   primary: PALETTE.orange,
   primaryText: PALETTE.white,
@@ -123,40 +131,45 @@ export const darkThemeColors: UIThemeColors = {
 
   accent: PALETTE.orange,
   accentText: PALETTE.white,
-  accentMuted: withAlpha(PALETTE.orange, 0.16),
+
+  accentMuted: withAlpha(PALETTE.orange, 0.14),
 
   slate: PALETTE.slate,
   slateMuted: withAlpha(PALETTE.slate, 0.18),
 
   success: PALETTE.success,
   successMuted: withAlpha(PALETTE.success, 0.16),
+
   warning: PALETTE.warning,
   warningMuted: withAlpha(PALETTE.warning, 0.16),
+
   danger: PALETTE.danger,
   dangerMuted: withAlpha(PALETTE.danger, 0.16),
+
   info: PALETTE.slate,
   infoMuted: withAlpha(PALETTE.slate, 0.16),
 };
-
 /**
  * Light theme:
  * Crisp organic honeydew cream canvas, moss-forest ink text,
  * frosted white glass overlays, and energetic orange CTA.
  */
 export const lightThemeColors: UIThemeColors = {
-  background: '#F8FAF5',
-  backgroundMid: '#EEF4EA',
-  surface: 'rgba(255, 255, 255, 0.85)',
-  surfaceSolid: '#FFFFFF',
-  surfaceMuted: withAlpha(PALETTE.cream, 0.70),
-  surfaceElevated: '#FFFFFF',
+  background: PALETTE.mint,
+  backgroundMid: '#A5BBA7',
+
+  surface: PALETTE.mint,
+  surfaceSolid: PALETTE.mint,
+
+  surfaceMuted: '#A3B9A5',
+  surfaceElevated: PALETTE.cream,
 
   text: PALETTE.forest,
   textMuted: PALETTE.moss,
   textSubtle: PALETTE.sage,
 
-  border: withAlpha(PALETTE.sage, 0.22),
-  borderActive: PALETTE.moss,
+  border: withAlpha(PALETTE.cream, 0.35),
+  borderActive: PALETTE.orange,
 
   primary: PALETTE.orange,
   primaryText: PALETTE.white,
@@ -166,17 +179,20 @@ export const lightThemeColors: UIThemeColors = {
 
   accent: PALETTE.orange,
   accentText: PALETTE.white,
-  accentMuted: withAlpha(PALETTE.orange, 0.12),
+  accentMuted: withAlpha(PALETTE.orange, 0.14),
 
   slate: PALETTE.slate,
-  slateMuted: withAlpha(PALETTE.slate, 0.14),
+  slateMuted: withAlpha(PALETTE.slate, 0.16),
 
-  success: '#22C55E',
-  successMuted: 'rgba(34, 197, 94, 0.14)',
-  warning: '#D97706',
-  warningMuted: 'rgba(217, 119, 6, 0.14)',
-  danger: '#E5484D',
-  dangerMuted: 'rgba(229, 72, 77, 0.14)',
+  success: PALETTE.success,
+  successMuted: withAlpha(PALETTE.success, 0.14),
+
+  warning: PALETTE.warning,
+  warningMuted: withAlpha(PALETTE.warning, 0.14),
+
+  danger: PALETTE.danger,
+  dangerMuted: withAlpha(PALETTE.danger, 0.14),
+
   info: PALETTE.slate,
   infoMuted: withAlpha(PALETTE.slate, 0.14),
 };
