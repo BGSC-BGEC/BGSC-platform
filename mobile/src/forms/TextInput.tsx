@@ -7,7 +7,7 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
+import { NEU_SHADOWS } from '../theme/shadows';
 
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../icons/Icon';
@@ -44,7 +44,7 @@ export function TextInput({
   rounded = true,
   ...rest
 }: TextInputProps) {
-  const { colors, isDark } = useTheme();
+  const { colors } = useTheme();
   const [focused, setFocused] = useState(false);
   const [passwordHidden, setPasswordHidden] = useState(secureTextEntry);
 
@@ -66,19 +66,17 @@ export function TextInput({
       <View
         style={[
           styles.inputContainer,
+          NEU_SHADOWS.raisedSmall,
           {
-            borderColor,
-            borderRadius: rounded ? 999 : 14,
-            backgroundColor: colors.surfaceMuted,
+            borderRadius: rounded ? 24 : 14,
+            backgroundColor: colors.surface,
+            borderColor: focused
+              ? colors.borderActive
+              : 'transparent',
             opacity: disabled ? 0.5 : 1,
           },
         ]}
       >
-        <BlurView
-          intensity={30}
-          tint={isDark ? 'dark' : 'light'}
-          style={StyleSheet.absoluteFill}
-        />
 
         {leftIcon && (
           <View style={styles.leftIconWrapper}>
@@ -167,9 +165,7 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    height: 48,
-    overflow: 'hidden',
+    height: 52,
     paddingHorizontal: 12,
   },
   leftIconWrapper: {
