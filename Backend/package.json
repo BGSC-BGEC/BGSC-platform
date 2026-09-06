@@ -9,7 +9,7 @@
     "typecheck": "npx -p typescript@7 tsc --noEmit",
     "start": "node dist/index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "selfcheck": "ts-node src/models/selfcheck.ts"
+    "selfcheck": "ts-node src/models/selfcheck.ts && ts-node src/middleware/auth.selfcheck.ts && ts-node src/middleware/shared.selfcheck.ts"
   },
   "keywords": [],
   "author": "Rubber_Duck",

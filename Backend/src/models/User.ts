@@ -1,4 +1,15 @@
 import { Schema, model, Document } from 'mongoose';
+import { uuidId, timestamps } from './shared';
+
+/**
+ * User / Auth Service (BE-1). Converted Sep 6, 2026 to the conventions in docs/modeldocs/README.md:
+ * snake_case fields and a UUID string `_id`.
+ *
+ * The `_id` change is not cosmetic. Every BE-2 collection stores a user reference as a String —
+ * `point_transactions.user_id`, `teams.members[].user_id`, `leaderboard_entries.participant.id`, and the
+ * `{ user_id, display_name, avatar_url }` snapshot in six collections. While `_id` was an ObjectId those
+ * lookups compared a string to an ObjectId and matched nothing.
+ */
 
 export enum UserRole {
     GUEST = 'guest',
@@ -15,39 +26,49 @@ export enum UserStatus {
     PENDING_VERIFICATION = 'pending_verification',
     DELETED = 'deleted'
 }
-// key:value
-export interface IUser extends Document {
+
+export interface IUser extends Document<string> {
+    _id: string;
+
+    // Auth — owned by BE-1's Auth Service
     email: string;
     username: string;
-    passwordHash: string;
+    password_hash: string;
     role: UserRole;
     status: UserStatus;
-    isEmailVerified: boolean;
-    refreshTokenHash?: string;
-    lastLoginAt?: Date;
-    passwordResetToken?: string;
-    passwordResetExpires?: Date;
+    is_email_verified: boolean;
+    refresh_token_hash?: string | null;
+    last_login_at?: Date | null;
+    password_reset_token?: string | null;
+    password_reset_expires?: Date | null;
 
     profile: {
-        fullName: string;
-        avatar?: string;
-        phoneNumber?: string;
+        full_name: string;
+        avatar_url?: string | null;
+        phone_number?: string | null;
         bio?: string;
         interests?: string[];
-        socialLinks?: {
-            staraId?: string;
-            instagram?: string;
-            linkedin?: string;
-            steamId?: string;
+        social_links?: {
+            strava_id?: string | null;
+            instagram?: string | null;
+            linkedin?: string | null;
+            steam_id?: string | null;
         };
     };
 
-    playerCard: {
-        cardTier?: string;
+    player_card: {
+        card_tier?: string;
         stats: Record<string, unknown>;
     };
 
-    pointsBalance?: number;
+    /** Written only by the Points Service (relationships.md §1). */
+    points_balance?: number;
+
+    /** Written only by the Announcement Service (announcement-model.md §3). */
+    announcements: {
+        last_seen_at?: Date | null;
+        read_ids: string[];
+    };
 
     settings: {
         notifications: {
@@ -55,49 +76,62 @@ export interface IUser extends Document {
             whatsapp: boolean;
         };
         privacy: {
-            isProfilePublic: boolean;
+            is_profile_public: boolean;
         };
         theme: 'light' | 'dark' | 'system';
     };
 
-    createdAt: Date;
-    updatedAt: Date;
+    last_active_at?: Date | null;
+    deleted_at?: Date | null;
+
+    created_at: Date;
+    updated_at: Date;
 }
 
 const UserSchema = new Schema<IUser>(
     {
-        // Auth                                                                                                                           
+        _id: uuidId,
+
+        // Auth
         email: { type: String, required: true, unique: true, lowercase: true, trim: true },
         username: { type: String, required: true, unique: true, lowercase: true, trim: true },
-        passwordHash: { type: String, required: true },
+        // Secrets never load on an ordinary read; ask for them explicitly with .select('+password_hash').
+        password_hash: { type: String, required: true, select: false },
         role: { type: String, enum: Object.values(UserRole), default: UserRole.USER },
         status: { type: String, enum: Object.values(UserStatus), default: UserStatus.ACTIVE },
-        isEmailVerified: { type: Boolean, default: false },
-        refreshTokenHash: { type: String, default: null },
-        lastLoginAt: { type: Date, default: null },
-        passwordResetToken: { type: String, default: null },
-        passwordResetExpires: { type: Date, default: null },
+        is_email_verified: { type: Boolean, default: false },
+        refresh_token_hash: { type: String, default: null, select: false },
+        last_login_at: { type: Date, default: null },
+        password_reset_token: { type: String, default: null, select: false },
+        password_reset_expires: { type: Date, default: null, select: false },
 
-        // Profile                                                                                                                        
+        // Profile
         profile: {
-            fullName: { type: String, required: true, trim: true },
-            avatarUrl: { type: String, default: null },
-            phoneNumber: { type: String, default: null },
+            full_name: { type: String, required: true, trim: true },
+            avatar_url: { type: String, default: null },
+            phone_number: { type: String, default: null },
             bio: { type: String, maxlength: 250, default: '' },
             interests: { type: [String], default: [] },
-            socialLinks: {
-                stravaId: { type: String, default: null },
+            social_links: {
+                strava_id: { type: String, default: null },
                 instagram: { type: String, default: null },
                 linkedin: { type: String, default: null },
+                steam_id: { type: String, default: null },
             },
         },
 
-        // Player Card & Points                                                                                                           
-        playerCard: {
-            cardTier: { type: String, default: 'Rookie' },
+        // Player card & points
+        player_card: {
+            card_tier: { type: String, default: 'Rookie' },
             stats: { type: Schema.Types.Mixed, default: {} },
         },
-        pointsBalance: { type: Number, default: 0 },
+        points_balance: { type: Number, default: 0 },
+
+        // Announcement read state (announcement-model.md §3). read_ids capped at 200 by the owner service.
+        announcements: {
+            last_seen_at: { type: Date, default: null },
+            read_ids: { type: [String], default: [] },
+        },
 
         // Settings
         settings: {
@@ -106,19 +140,23 @@ const UserSchema = new Schema<IUser>(
                 whatsapp: { type: Boolean, default: true },
             },
             privacy: {
-                isProfilePublic: { type: Boolean, default: true },
+                is_profile_public: { type: Boolean, default: true },
             },
             theme: { type: String, enum: ['light', 'dark', 'system'], default: 'system' },
         },
+
+        last_active_at: { type: Date, default: null },
+        // Soft delete with a 30-day grace period (Spec §11.2). Purge job is Week 4+.
+        deleted_at: { type: Date, default: null },
     },
-    { timestamps: true }
+    timestamps
 );
 
-// Indexes
-UserSchema.index({ email: 1 }, { unique: true });
-UserSchema.index({ username: 1 }, { unique: true });
+// `email` and `username` already have unique indexes from their field definitions above.
 UserSchema.index({ role: 1, status: 1 });
-UserSchema.index({ pointsBalance: -1 }); // Fast leaderboard querying
-UserSchema.index({ createdAt: -1 });
+UserSchema.index({ points_balance: -1 }); // fast leaderboard querying
+UserSchema.index({ created_at: -1 });
+UserSchema.index({ last_active_at: -1 }); // admin "Last Active Epoch" column (Spec §5.15.5)
+UserSchema.index({ username: 'text', 'profile.full_name': 'text' }); // user search (Spec §13.1)
 
-export const User = model<IUser>('User', UserSchema);
+export const User = model<IUser>('User', UserSchema, 'users');
