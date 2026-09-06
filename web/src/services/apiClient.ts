@@ -10,38 +10,33 @@ body?: unknown
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
     const { body, headers, ...customConfig } = options
 
-    // 1. Clean endpoint slash normalization
     const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
     const url = `${BASE_URL.replace(/\/+$/, '')}${normalizedEndpoint}`
 
-    // 2. Default Headers
     const defaultHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
     }
 
-    // 3. Attach Bearer token if present
     const token = localStorage.getItem('auth_token') || localStorage.getItem('token')
     if (token) {
     defaultHeaders['Authorization'] = `Bearer ${token}`
     }
 
-    // 4. Build fetch options
     const config: RequestInit = {
-    ...customConfig,
-    headers: {
+        ...customConfig,
+        credentials: 'include',
+        headers: {
         ...defaultHeaders,
         ...headers,
-    },
+        },
     }
 
     if (body !== undefined) {
     config.body = typeof body === 'string' ? body : JSON.stringify(body)
     }
 
-    // 5. Network fetch call
     const response = await fetch(url, config)
 
-    // 6. Error handling
     if (!response.ok) {
     let errorMessage = `HTTP Error ${response.status}: ${response.statusText}`
     try {
