@@ -133,7 +133,7 @@ export function IconButton({
     case 'glass':
     default:
       backgroundColor = colors.surface;
-      borderColor = colors.border;
+      borderColor = 'transparent';
       iconColor = colors.text;
       break;
   }
