@@ -33,10 +33,18 @@ export interface IUser extends Document<string> {
     // Auth — owned by BE-1's Auth Service
     email: string;
     username: string;
-    password_hash: string;
+    password_hash?: string;
+    google_id?: string | null;
     role: UserRole;
     status: UserStatus;
     is_email_verified: boolean;
+    email_verification_token?: string | null;
+    email_verification_expires?: Date | null;
+    is_phone_verified: boolean;
+    pending_phone_number?: string | null;
+    phone_verification_otp_hash?: string | null;
+    phone_verification_expires?: Date | null;
+    phone_verification_attempts?: number;
     refresh_token_hash?: string | null;
     last_login_at?: Date | null;
     password_reset_token?: string | null;
@@ -96,10 +104,18 @@ const UserSchema = new Schema<IUser>(
         email: { type: String, required: true, unique: true, lowercase: true, trim: true },
         username: { type: String, required: true, unique: true, lowercase: true, trim: true },
         // Secrets never load on an ordinary read; ask for them explicitly with .select('+password_hash').
-        password_hash: { type: String, required: true, select: false },
+        password_hash: { type: String, select: false },
+        google_id: { type: String, default: null, sparse: true, select: false },
         role: { type: String, enum: Object.values(UserRole), default: UserRole.USER },
         status: { type: String, enum: Object.values(UserStatus), default: UserStatus.ACTIVE },
         is_email_verified: { type: Boolean, default: false },
+        email_verification_token: { type: String, default: null, select: false },
+        email_verification_expires: { type: Date, default: null, select: false },
+        is_phone_verified: { type: Boolean, default: false },
+        pending_phone_number: { type: String, default: null, select: false },
+        phone_verification_otp_hash: { type: String, default: null, select: false },
+        phone_verification_expires: { type: Date, default: null, select: false },
+        phone_verification_attempts: { type: Number, default: 0, select: false },
         refresh_token_hash: { type: String, default: null, select: false },
         last_login_at: { type: Date, default: null },
         password_reset_token: { type: String, default: null, select: false },

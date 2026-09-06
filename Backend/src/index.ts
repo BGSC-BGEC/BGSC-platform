@@ -56,9 +56,9 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // ---- routers -------------------------------------------------------------
-// BE-1 (Auth Service): uncomment when src/auth/auth.routes.ts lands.
-// import { authRoutes } from './auth/auth.routes';
-// app.use('/auth', authRoutes);
+// BE-1 (Auth Service): mounted
+import { authRoutes } from './auth/auth.routes';
+app.use('/auth', authRoutes);
 
 // BE-2 (User Service):
 app.use('/users', userRoutes);

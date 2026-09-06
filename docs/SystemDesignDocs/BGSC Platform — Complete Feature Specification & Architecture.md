@@ -2008,28 +2008,28 @@ PlayerUnsold { auction_id, player_id, timestamp }
     
 - **Password Policy:** Min 8 chars, 1 uppercase, 1 number, 1 special char. BCrypt hashing.
     
-- **OAuth2:** Google sign-in with state parameter CSRF protection
+- **OAuth2:** Google sign-in with state parameter CSRF protection (co-located on same server)
+    
+- **Phone Verification:** 6-digit numeric OTP via SMS/WhatsApp with 5-minute expiry, hashed storage, max 3 verification attempts, and 3 OTP requests per 15 min rate limit
     
 - **2FA:** TOTP-based, required for Coordinator promotion and Founder actions
     
-- **Rate Limiting:**
+- **DDoS Mitigation & Multi-Tier Rate Limiting:**
     
-    - Auth endpoints: 5 attempts per 15 minutes per IP
-        
-    - General API: 100 requests per minute per user
-        
-    - Auction bidding: 1 request per second per user
-        
-    - Friend requests: 10 per day
-        
-    - Posts: 5 per hour for new users, 20 per hour for established users
-        
-    - Sponsor change: 1 per semester
+    - **Edge Layer (Cloudflare DNS Proxy):** Public domain (`api.bgsc.in`) proxied through Cloudflare to absorb Layer 3/4 volumetric DDoS floods and hide the origin server IP.
+    
+    - **Gateway Ingress Layer (Port 3000):** Single public entry point reverse-proxying traffic to downstream microservices (Auth :3001, Users :3002, Events :3004, Points :3005). Drops malformed traffic and enforces payload size limits (1MB default).
+    
+    - **Application Rate Limiting (Sliding Window):**
+        - Auth & OTP endpoints (`/auth/login`, `/auth/register`, `/auth/phone/send-otp`): 5 attempts per 15 minutes per IP (blocks brute force & SMS flooding)
+        - General API: 100 requests per minute per user/IP
+        - Auction bidding: 1 request per second per user
+        - Excess requests immediately reject with `429 Too Many Requests` and `Retry-After` header.
         
 
 ### 11.2 Data Privacy
 
-- **Encryption:** AES-256 at rest, TLS 1.3 in transit
+- **Encryption:** AES-256 at rest, TLS 1.3 in transit (all client-server packets across mobile, web admin, and backend are encrypted end-to-end via TLS 1.3 / HTTPS; no manual client application-layer packet crypto required)
     
 - **Field Masking:** Email and phone partially masked in public APIs (e.g., `r***@gmail.com`)
     
@@ -2039,7 +2039,7 @@ PlayerUnsold { auction_id, player_id, timestamp }
     
     - Account Information Request: Complete data export including all chat history, posts, points transactions, sponsor data
         
-    - Right to deletion: Account removal with 30-day grace period — **see 11.2.1 for what this actually does as built**
+    - Right to deletion: Soft delete with 45-day grace period — **see 11.2.1 for what this actually does as built** before permanent purge. Logging in within 45 days allows account restoration; unrecovered accounts are permanently purged after 45 days
         
     - Privacy Policy and Terms of Service accessible pre-registration and in Account Actions
         
@@ -2123,7 +2123,7 @@ has to be written — the schema supports it (`deleted_at` is already the marker
     
 - Download my data (GDPR export, emailed as ZIP)
     
-- Delete account (with confirmation flow and 30-day grace period)
+- Delete account (with confirmation flow, immediate session termination, and 45-day restoration grace period)
     
 
 ### 12.2 Privacy Settings
