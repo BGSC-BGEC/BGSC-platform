@@ -142,7 +142,7 @@
   - Input validation and sanitization
   - Email verification setup
 
-- [ ] **BE-2: User Service Core** (8h)
+- [x] **BE-2: User Service Core** (8h)
   - User CRUD operations
   - Profile management endpoints
   - User card data structure

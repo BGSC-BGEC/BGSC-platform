@@ -13,5 +13,7 @@ export const config = {
     accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
   },
+  // Shared secret for /internal/* service-to-service routes. Must be overridden in production.
+  internalToken: process.env.INTERNAL_API_TOKEN || 'dev_internal_token_change_me',
   corsOrigin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:3000', 'http://localhost:5173'],
 };

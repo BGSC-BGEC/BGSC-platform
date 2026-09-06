@@ -83,6 +83,24 @@ for (const [label, headers] of [
     assert.deepStrictEqual(r.body, { error: 'unauthorized' }, `${label}: must not say why`);
 }
 
+// The algorithm is pinned, so a token signed with anything else is rejected even if the secret
+// leaks into a different algorithm's key slot (the classic RS256 -> HS256 downgrade).
+const wrongAlg = jwt.sign({ sub: 'u-1', role: UserRole.USER }, config.jwt.accessSecret, {
+    algorithm: 'HS512',
+    expiresIn: '5m',
+});
+const algResult = run(requireAuth, bearer(wrongAlg));
+assert.ok(!algResult.passed, 'a token signed with an unpinned algorithm is rejected');
+assert.strictEqual(algResult.status, 401, 'and it is a 401');
+
+// alg:none forgery, hand-rolled because jsonwebtoken will not sign one.
+const noneToken =
+    Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url') +
+    '.' +
+    Buffer.from(JSON.stringify({ sub: 'u-1', role: UserRole.FOUNDER })).toString('base64url') +
+    '.';
+assert.strictEqual(run(requireAuth, bearer(noneToken)).status, 401, 'alg:none is rejected');
+
 /* ----------------------------- optionalAuth ----------------------------- */
 
 const anon = run(optionalAuth, {});
