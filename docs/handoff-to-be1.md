@@ -9,17 +9,20 @@ Three things you were blocked on now exist and are verified. Three things change
 
 ## 1. TL;DR
 
+**The backend is now microservices** (Spec §2.1), so read §0 first — the layout changed.
+
 **Ready for you:**
 
-| | Where | What it gives you |
+| | Import from | What it gives you |
 |---|---|---|
-| Server entrypoint | `Backend/src/index.ts` | app boots, `/health` returns 200, DB connects. `npm run dev` works |
-| Auth middleware | `Backend/src/middleware/requireAuth.ts` | `requireAuth`, `optionalAuth` — use on your protected routes, don't write your own |
-| Role middleware | `Backend/src/middleware/requireRole.ts` | `requireRole`, `requireSelfOr` — Spec §7.1 ladder |
-| `User.ts` | `Backend/src/models/User.ts` | converted to project conventions, 3 bugs fixed |
-| Request validation | `Backend/src/middleware/validate.ts` | `validate({ body: schema })` — zod, auto-maps to the 422 envelope in §5 |
-| Domain event bus | `Backend/src/events/publish.ts` | `publish(type, producer, payload)` — emit `UserRegistered` / `UserLoggedIn` here |
-| Audit trail | `Backend/src/models/AuditLog.ts` | `recordAudit({...})` — Spec §7.3 requires it for your coordinator promotion |
+| Your service | `apps/auth-service/` | boots, `/health` 200, DB connected, indexes built. Add routes, nothing else |
+| Service bootstrap | `@bgsc/shared` → `createServiceApp`, `startService` | cors, json, security headers, health, 404, error envelope, index build, graceful shutdown |
+| Auth middleware | `@bgsc/shared` → `requireAuth`, `optionalAuth` | use on your protected routes, don't write your own |
+| Role middleware | `@bgsc/shared` → `requireRole`, `requireSelfOr` | Spec §7.1 ladder |
+| `User` model | `@bgsc/shared` → `User`, `UserRole`, `UserStatus` | converted to project conventions, 3 bugs fixed |
+| Request validation | `@bgsc/shared` → `validate({ body: schema })` | zod, auto-maps to the 422 envelope in §5 |
+| Domain event bus | `@bgsc/shared` → `publish(type, producer, payload)` | emit `UserRegistered` / `UserLoggedIn` here. Redis-backed across services |
+| Audit trail | `@bgsc/shared` → `recordAudit({...})` | Spec §7.3 requires it for your coordinator promotion |
 
 **Changes for you — read §2, §3, §5:**
 
@@ -28,6 +31,64 @@ Three things you were blocked on now exist and are verified. Three things change
 3. Password hashes no longer load by default — login and refresh need `.select('+password_hash')` (§3.3).
 
 ---
+
+## 0. The layout changed — microservices
+
+The spec calls for microservices in four places (§1, §2.1, §2.1 diagram, §2.3) and the MVP plan
+never said how to deploy. Split on Sep 6 rather than later, because retrofitting one is worse.
+
+```
+Backend/
+  src/                     gateway :3000   the only public port. routing, JWT, rate limiting
+  packages/shared/         @bgsc/shared    models, middleware, events, config, service bootstrap
+  apps/auth-service/       :3001           YOURS
+  apps/user-service/       :3002           BE-2
+```
+
+Ports 3003–3010 are reserved for the services still to be built; the gateway answers `503` with the
+owner and week for those, so a call to `/events` today says "not built yet (BE-1 · W2)" rather than
+hanging.
+
+Everything you need is one import: `import { ... } from '@bgsc/shared'`.
+
+### 0.1 Writing the Auth Service
+
+`apps/auth-service/src/index.ts` already boots. You add routes:
+
+```ts
+// apps/auth-service/src/auth/auth.routes.ts   ← create this
+export const authRoutes = Router();
+authRoutes.post('/login', validate({ body: LoginSchema }), login);
+
+// apps/auth-service/src/index.ts              ← uncomment the two marked lines
+import { authRoutes } from './auth/auth.routes';
+_app.use('/auth', authRoutes);
+```
+
+The gateway already routes `/auth/**` and `/account/**` to :3001 — no gateway change needed.
+It also applies Spec §11.1 rate limiting to your attempt endpoints (5 per 15 min per IP on login,
+register, verify-email, resend-otp, forgot-password, reset-password, totp/verify), so do not
+implement that yourself. Add a path to `AUTH_ATTEMPT_PATHS` in `src/gateway/routing.ts` if you
+create another brute-forceable endpoint.
+
+### 0.2 Running it
+
+```bash
+cp .env.example .env         # first time only
+docker compose up -d         # everything: gateway, both services, mongo, redis
+curl localhost:3000/health
+```
+
+Or infrastructure in Docker and your service on the host, which is the faster loop:
+
+```bash
+docker compose up -d mongodb redis
+npm run dev --workspace @bgsc/auth-service     # :3001
+npm run dev                                    # gateway :3000
+```
+
+Only :3000 is published. Services are reachable from each other by container name, never from
+outside — so test through the gateway, not against :3001 directly.
 
 ## 2. Access token contract ← most important
 
@@ -120,22 +181,13 @@ Forgetting the `.select()` gives you `undefined`, and `bcrypt.compare` throws ra
 
 ## 4. Where to mount your router
 
-`src/index.ts` has your line ready, commented:
-
-```ts
-// BE-1 (Auth Service): uncomment when src/auth/auth.routes.ts lands.
-// import { authRoutes } from './auth/auth.routes';
-// app.use('/auth', authRoutes);
-```
-
-Uncomment it. Please don't restructure the file — BE-2's router mounts on the line below yours.
+See §0.1 — `apps/auth-service/src/index.ts`, two commented lines. You own that whole file now, so
+there is nothing of BE-2's to avoid breaking.
 
 Using the middleware:
 
 ```ts
-import { requireAuth } from '../middleware/requireAuth';
-import { requireRole } from '../middleware/requireRole';
-import { UserRole } from '../models/User';
+import { requireAuth, requireRole, UserRole } from '@bgsc/shared';
 
 router.post('/logout', requireAuth, logout);          // req.user = { id, role }
 router.post('/promote', requireAuth, requireRole(UserRole.COORDINATOR), promote);
@@ -203,6 +255,26 @@ router.patch('/users/:ref/role',
   validate({ body: RoleChangeSchema }),
   changeRole);
 ```
+
+## 4.3 One thing your login must allow
+
+A soft-deleted user has 30 days to change their mind (`POST /users/me/restore`, Spec §11.2.1).
+They can only reach that endpoint with a valid access token — so **login must still authenticate a
+user whose `status` is `deleted` and whose `deleted_at` is set**, at least while
+`deletion.restorable_until` is in the future.
+
+```ts
+// in login: this check would make restore unreachable
+if (user.deleted_at) throw new Error('no such account');   // ✗ locks them out permanently
+
+// instead: issue the token, let the User Service decide what they may do
+// (it already blocks every write for a non-active account)
+```
+
+Suspended accounts are different — keep rejecting those at login if you want, since a suspended
+user has nothing to restore. It is specifically the deleted-but-restorable case that needs to
+authenticate. `GET /users/me` answers for them with a `deletion` block so the client can offer the
+restore button.
 
 ## 5. Error response shape (agreed convention)
 

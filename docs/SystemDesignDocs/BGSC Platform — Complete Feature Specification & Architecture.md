@@ -322,7 +322,7 @@ Contains links to:
 ### 4.1 Core Entities
 
 > **Implementation note (Sep 6, 2026).** The entities below are the original domain sketch. The
-> collections actually built are in `Backend/src/models/`, designed in `docs/modeldocs/`. Field names
+> collections actually built are in `Backend/packages/shared/src/models/`, designed in `docs/modeldocs/`. Field names
 > there are `snake_case`, `_id` is a UUID v4 **string** (not an ObjectId), and every timestamp ends
 > in `_at`. Where the two disagree, the models are authoritative. Sections 4.1.1 and 4.1.2 list what
 > exists; entities with no subsection below are still unbuilt.
@@ -2054,9 +2054,10 @@ plain reading of "right to deletion" above.
 | On request | `deleted_at` stamped, `status` → `deleted`, refresh token cleared. The account disappears from search, public profile reads and admin lists immediately |
 | Data retained | **Everything.** No field is destroyed and no purge job exists. Registrations, point transactions, leaderboard entries and team rosters keep resolving |
 | Grace period | 30 days, and it governs **restore**, not deletion. Signing in during the window restores the account. After it, restore is admin-only |
-| Disclosure | The client must state before confirming that data is retained. The confirmation captures `confirm`, an optional `reason`, and an opt-in `research_consent` (default off) |
+| Disclosure | `GET /users/me/deletion-preview` returns the exact retention text the client must show, versioned. The confirmation captures `confirm: "DELETE"` (literal, case-sensitive), an optional `reason`, and an opt-in `research_consent` (default off) |
+| Restore | `POST /users/me/restore` while inside the window. `GET /users/me` keeps answering for the owner of a deleted account — otherwise they could never reach it. Past the window: `410`, admin only |
 | `research_consent` | Marks whose identifiable data may be **used** for institutional research. Retention is universal; this flag governs use, not storage |
-| Audit | Every deletion writes an immutable `AuditLog` row recording what was disclosed and what was consented to |
+| Audit | Every deletion writes an immutable `AuditLog` row recording the disclosure version shown and the consent given. Restores write `user.restored` |
 | Encryption | Not yet implemented. 11.2's AES-256 at rest remains outstanding work; nothing in this flow assumes it |
 
 Consequence to be aware of: a user who deletes their account cannot have their personal data removed

@@ -8,16 +8,22 @@ import assert from 'assert';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import { Server } from 'http';
-import { config } from '../config/env';
 import { app } from '../index';
-import { User, UserRole, UserStatus } from '../models/User';
-import { Event } from '../models/Event';
-import { FormSubmission } from '../models/Registration';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { UPLOAD_DIR } from '../storage/storage';
-import { AuditLog } from '../models/AuditLog';
-import { subscribe, resetBus, DomainEvent } from '../events/publish';
+import {
+    AuditLog,
+    DomainEvent,
+    Event,
+    FormSubmission,
+    User,
+    UserRole,
+    UserStatus,
+    config,
+    resetBus,
+    subscribe,
+} from '@bgsc/shared';
 
 const TEST_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_e2e$2');
 
@@ -37,10 +43,11 @@ async function call(
     const headers: Record<string, string> = {};
     if (opts.as) headers.authorization = `Bearer ${opts.as}`;
     if (opts.service) headers['x-internal-token'] = config.internalToken;
-    let payload: string | Uint8Array | undefined;
+    let payload: string | Blob | undefined;
     if (opts.raw) {
         headers['content-type'] = opts.contentType ?? 'image/png';
-        payload = new Uint8Array(opts.raw);
+        // Blob, not a raw Uint8Array: BodyInit does not accept a generic Uint8Array.
+        payload = new Blob([new Uint8Array(opts.raw)]);
     } else if (opts.body !== undefined) {
         headers['content-type'] = 'application/json';
         payload = JSON.stringify(opts.body);
@@ -276,8 +283,11 @@ async function main(): Promise<void> {
         'a suspended user cannot write, even with a valid unexpired token');
     assert.strictEqual((await call('POST', '/users/me/avatar', { as: doomedT, raw: png })).status, 403,
         'a suspended user cannot upload');
-    assert.strictEqual((await call('DELETE', '/users/me', { as: doomedT })).status, 202,
-        'a suspended user may still delete their account');
+    assert.strictEqual(
+        (await call('DELETE', '/users/me', { as: doomedT, body: { confirm: 'DELETE' } })).status,
+        202,
+        'a suspended user may still delete their account — deletion is a right, not a privilege'
+    );
 
     // ---- snapshots --------------------------------------------------------
     assert.strictEqual(
@@ -361,17 +371,114 @@ async function main(): Promise<void> {
     assert.strictEqual(noop.status, 200, 'an empty social_links patch is accepted');
     assert.strictEqual(events.length, before, 'a write that changes nothing emits no UserProfileUpdated');
 
+    // ---- deletion gate (D12) ----------------------------------------------
+    const preview = await call('GET', '/users/me/deletion-preview', { as: anaT });
+    assert.strictEqual(preview.status, 200, 'the client can fetch what deletion actually does');
+    assert.ok(preview.body.retained_indefinitely.length > 0, 'disclosure lists what is kept');
+    assert.ok(
+        JSON.stringify(preview.body).toLowerCase().includes('nothing is erased'),
+        'the disclosure says plainly that nothing is erased'
+    );
+
+    // A stray DELETE must not remove an account: the confirmation is typed.
+    assert.strictEqual((await call('DELETE', '/users/me', { as: anaT })).status, 422,
+        'deletion without a confirmation is refused');
+    assert.strictEqual((await call('DELETE', '/users/me', { as: anaT, body: { confirm: 'delete' } })).status, 422,
+        'the confirmation is case-sensitive');
+    assert.ok(await User.findOne({ _id: ana._id, deleted_at: null }), 'and nothing was deleted by those attempts');
+
+    // ---- restore inside the window (D11) ----------------------------------
+    const tempUser = await User.create({
+        email: 'tmp@bgsc.test', username: 'tmpuser', password_hash: 'x', profile: { full_name: 'Tmp' },
+    });
+    const tmpT = token(tempUser._id, UserRole.USER);
+
+    const tmpDel = await call('DELETE', '/users/me', { as: tmpT, body: { confirm: 'DELETE', reason: 'testing' } });
+    assert.strictEqual(tmpDel.status, 202, 'confirmed deletion is accepted');
+    assert.strictEqual(tmpDel.body.data_retained, true, 'the response states data is retained, not erased');
+    assert.strictEqual(tmpDel.body.research_consent, false, 'research consent defaults to opt-out');
+    assert.ok(tmpDel.body.restorable_until, 'a restore deadline is returned');
+
+    assert.strictEqual((await call('GET', `/users/${tempUser._id}`, { as: boT })).status, 404,
+        'a deleted account is gone from public reads');
+
+    const ownView = await call('GET', '/users/me', { as: tmpT });
+    assert.strictEqual(ownView.status, 200, 'but the owner can still see their own pending deletion');
+    assert.strictEqual(ownView.body.deletion.restorable, true, 'and is told a restore is available');
+
+    const restored = await call('POST', '/users/me/restore', { as: tmpT });
+    assert.strictEqual(restored.status, 200, 'restore succeeds inside the window');
+    const back = await User.findById(tempUser._id);
+    assert.strictEqual(back!.deleted_at, null, 'deleted_at cleared');
+    assert.strictEqual(back!.status, UserStatus.ACTIVE, 'status back to active');
+    assert.strictEqual(back!.deletion, null, 'deletion metadata cleared');
+    assert.strictEqual((await call('GET', `/users/${tempUser._id}`, { as: boT })).status, 200,
+        'and the profile is publicly visible again');
+    assert.ok(events.some((e) => e.type === 'UserRestored'), 'UserRestored emitted');
+    assert.strictEqual((await call('POST', '/users/me/restore', { as: tmpT })).status, 409,
+        'restoring an account that is not deleted is a conflict');
+
+    // ---- concurrency: a double-click must not fabricate audit rows --------
+    const racer = await User.create({
+        email: 'race@bgsc.test', username: 'racer', password_hash: 'x', profile: { full_name: 'Racer' },
+    });
+    const raceT = token(racer._id, UserRole.USER);
+
+    const deletes = await Promise.all(
+        Array.from({ length: 5 }, () => call('DELETE', '/users/me', { as: raceT, body: { confirm: 'DELETE' } }))
+    );
+    assert.strictEqual(deletes.filter((r) => r.status === 202).length, 1, 'exactly one delete succeeds');
+    assert.strictEqual(deletes.filter((r) => r.status >= 500).length, 0, 'losing the race is a 4xx, never a 500');
+    assert.strictEqual(
+        await AuditLog.countDocuments({ target_id: racer._id, action: 'user.deleted' }),
+        1,
+        'one real transition writes exactly one audit row — no fabricated entries'
+    );
+
+    const restores = await Promise.all(
+        Array.from({ length: 5 }, () => call('POST', '/users/me/restore', { as: raceT }))
+    );
+    assert.strictEqual(restores.filter((r) => r.status === 200).length, 1, 'exactly one restore succeeds');
+    assert.strictEqual(restores.filter((r) => r.status >= 500).length, 0, 'and the losers do not 500');
+    assert.strictEqual(
+        await AuditLog.countDocuments({ target_id: racer._id, action: 'user.restored' }),
+        1,
+        'one restore audit row'
+    );
+    assert.strictEqual((await User.findById(racer._id))!.deleted_at, null, 'account ends up restored');
+
+    // ---- restore after the window has closed ------------------------------
+    await call('DELETE', '/users/me', { as: tmpT, body: { confirm: 'DELETE', research_consent: true } });
+    const expired = new Date(Date.now() - 1000);
+    await User.updateOne({ _id: tempUser._id }, { $set: { 'deletion.restorable_until': expired } });
+    assert.strictEqual((await call('POST', '/users/me/restore', { as: tmpT })).status, 410,
+        'once the window closes, self-service restore is gone');
+    const stillThere = await User.findById(tempUser._id);
+    assert.ok(stillThere, 'and the record still exists — nothing is ever erased (D10)');
+    assert.strictEqual(stillThere!.deletion!.research_consent, true, 'opt-in research consent was recorded');
+
+    const consentRow = await AuditLog.findOne({ target_id: tempUser._id, action: 'user.deleted' });
+    assert.ok(consentRow, 'every deletion writes an audit row');
+    assert.strictEqual((consentRow!.new_value as any).research_consent, true,
+        'the audit row records what was consented to');
+    assert.ok((consentRow!.new_value as any).disclosure_version,
+        'and which disclosure text was shown');
+
     // ---- soft delete ------------------------------------------------------
-    const del = await call('DELETE', '/users/me', { as: anaT });
+    const del = await call('DELETE', '/users/me', { as: anaT, body: { confirm: 'DELETE' } });
     assert.strictEqual(del.status, 202, 'deletion is accepted, not immediate');
-    assert.strictEqual(del.body.grace_days, 30, '30-day grace (§11.2)');
+    assert.strictEqual(del.body.restore_window_days, 30, '30-day restore window (§11.2.1)');
 
     const still = await User.findById(ana._id);
     assert.ok(still, 'the row survives so ledger rows and snapshots still resolve');
     assert.strictEqual(still!.status, UserStatus.DELETED, 'status flipped to deleted');
     assert.ok(still!.deleted_at, 'deleted_at stamped');
     assert.strictEqual((await call('GET', `/users/${ana._id}`, { as: boT })).status, 404, 'gone from public reads');
-    assert.strictEqual((await call('GET', '/users/me', { as: anaT })).status, 404, 'own record gone too');
+    const ownAfterDelete = await call('GET', '/users/me', { as: anaT });
+    assert.strictEqual(ownAfterDelete.status, 200,
+        'the owner still sees their own record — otherwise they could never reach restore');
+    assert.ok(ownAfterDelete.body.deletion, 'and it carries the deletion block');
+    assert.strictEqual(ownAfterDelete.body.deletion.restorable, true, 'restore is offered inside the window');
     assert.ok(events.some((e) => e.type === 'UserDeleted'), 'UserDeleted emitted');
 
     const snapAfter = await call('GET', `/internal/users/snapshot?ids=${ana._id}`, { service: true });

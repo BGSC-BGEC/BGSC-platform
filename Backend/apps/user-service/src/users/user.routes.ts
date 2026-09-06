@@ -1,11 +1,14 @@
 import { Router, raw } from 'express';
-import { requireAuth, optionalAuth } from '../middleware/requireAuth';
-import { requireRole } from '../middleware/requireRole';
-import { requireServiceToken } from '../middleware/requireServiceToken';
-import { validate } from '../middleware/validate';
-import { UserRole } from '../models/User';
 import { IMAGE_MAX_BYTES } from '../storage/storage';
 import * as c from './user.controller';
+import {
+    UserRole,
+    optionalAuth,
+    requireAuth,
+    requireRole,
+    requireServiceToken,
+    validate,
+} from '@bgsc/shared';
 import {
     UpdateProfileSchema,
     UpdateSettingsSchema,
@@ -15,6 +18,7 @@ import {
     SearchQuery,
     SnapshotQuery,
     RefParams,
+    DeleteAccountSchema,
 } from './user.schemas';
 
 /**
@@ -31,7 +35,10 @@ export const userRoutes = Router();
 userRoutes.get('/me', requireAuth, c.getMe);
 userRoutes.patch('/me', requireAuth, validate({ body: UpdateProfileSchema }), c.updateMe);
 userRoutes.patch('/me/settings', requireAuth, validate({ body: UpdateSettingsSchema }), c.updateMySettings);
-userRoutes.delete('/me', requireAuth, c.deleteMe);
+userRoutes.get('/me/deletion-preview', requireAuth, c.deletionPreview);
+userRoutes.delete('/me', requireAuth, validate({ body: DeleteAccountSchema }), c.deleteMe);
+// Restore must not sit behind findActiveSelf — the caller is, by definition, deleted.
+userRoutes.post('/me/restore', requireAuth, c.restoreMe);
 
 // Raw image body instead of multipart: one file, no form fields, no new dependency.
 // express.raw enforces the Spec §15.1 size cap before the buffer reaches the handler.

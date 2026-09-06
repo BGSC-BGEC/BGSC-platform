@@ -5,7 +5,7 @@
  *   npx ts-node src/users/user.selfcheck.ts
  */
 import assert from 'assert';
-import { IUser, UserRole } from '../models/User';
+import { IUser, UserRole } from '@bgsc/shared';
 import { maskEmail, maskPhone, visibilityFor, serializeUser, snapshotOf } from './user.serializer';
 import { computeRating, RATING_VERSION, RATING_WEIGHTS } from './playerCard';
 import { sniffImage } from '../storage/storage';

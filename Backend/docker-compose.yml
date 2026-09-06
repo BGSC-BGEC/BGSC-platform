@@ -1,7 +1,22 @@
+# Full backend: gateway on :3000 plus one container per service.
+#
+#   docker compose up -d          everything
+#   docker compose up -d mongodb redis   infrastructure only, run services with npm run dev
+#
+# Inside this network services address each other by container name (http://user-service:3002).
+# On the host they are http://localhost:<port>. That is the whole difference between the compose
+# environment blocks below and .env.example.
+
+# NODE_ENV defaults to development here: this file is the local stack. The image itself defaults to
+# production (see Dockerfile), and a real deployment sets NODE_ENV=production — at which point the
+# boot guard refuses to start on the secrets published in .env.example, which is the point of it.
+#
+# No container_name anywhere: Compose namespaces containers by project (backend-gateway-1, ...).
+# Hardcoding bgsc-* collides with the Legacy stack, which used the same names — address containers
+# by service instead: `docker compose logs -f gateway`, `docker compose exec user-service sh`.
 services:
   mongodb:
     image: mongo:7.0
-    container_name: bgsc-mongodb
     restart: unless-stopped
     ports:
       - "27017:27017"
@@ -11,11 +26,123 @@ services:
       MONGO_INITDB_DATABASE: bgsc_dev
     volumes:
       - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ---- application ---------------------------------------------------------
+  # All three share one image; only the entrypoint and port differ.
+
+  gateway:
+    build: { context: ., dockerfile: Dockerfile }
+    image: bgsc-backend:local
+    restart: unless-stopped
+    command: ["node", "dist/index.js"]
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      GATEWAY_PORT: 3000
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:8081}
+      # Container-network addresses, not localhost.
+      AUTH_SERVICE_URL: http://auth-service:3001
+      USER_SERVICE_URL: http://user-service:3002
+      EVENT_SERVICE_URL: http://event-service:3003
+      REGISTRATION_SERVICE_URL: http://registration-service:3004
+      ANNOUNCEMENT_SERVICE_URL: http://announcement-service:3005
+      POINTS_SERVICE_URL: http://points-service:3006
+      LEADERBOARD_SERVICE_URL: http://leaderboard-service:3007
+      CHALLENGE_SERVICE_URL: http://challenge-service:3008
+      MEDIA_SERVICE_URL: http://media-service:3009
+      NOTIFICATION_SERVICE_URL: http://notification-service:3010
+    depends_on:
+      auth-service: { condition: service_healthy }
+      user-service: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  auth-service:
+    build: { context: ., dockerfile: Dockerfile }
+    image: bgsc-backend:local
+    restart: unless-stopped
+    command: ["node", "apps/auth-service/dist/index.js"]
+    # No host port: reachable only through the gateway and the internal network.
+    expose:
+      - "3001"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3001
+      MONGO_URI: mongodb://bgsc_admin:bgsc_password@mongodb:27017/bgsc_dev?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
+      USER_SERVICE_URL: http://user-service:3002
+    depends_on:
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  user-service:
+    build: { context: ., dockerfile: Dockerfile }
+    image: bgsc-backend:local
+    restart: unless-stopped
+    command: ["node", "apps/user-service/dist/index.js"]
+    expose:
+      - "3002"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3002
+      MONGO_URI: mongodb://bgsc_admin:bgsc_password@mongodb:27017/bgsc_dev?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
+      AUTH_SERVICE_URL: http://auth-service:3001
+    volumes:
+      # Avatar files must outlive the container (Week 4's Media Service replaces this with S3/R2).
+      - user_uploads:/app/uploads
+    depends_on:
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   mongo-express:
     image: mongo-express:1.0.2
-    container_name: bgsc-mongo-express
     restart: unless-stopped
+    profiles: ["tools"]
     ports:
       - "8081:8081"
     environment:
@@ -24,8 +151,10 @@ services:
       ME_CONFIG_MONGODB_URL: mongodb://bgsc_admin:bgsc_password@mongodb:27017/?authSource=admin
       ME_CONFIG_BASICAUTH: "false"
     depends_on:
-      - mongodb
+      mongodb: { condition: service_healthy }
 
 volumes:
   mongodb_data:
+    driver: local
+  user_uploads:
     driver: local

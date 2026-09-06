@@ -1,7 +1,13 @@
-import { User, IUser, UserRole, UserStatus } from '../models/User';
-import { recordAudit } from '../models/AuditLog';
-import { publish } from '../events/publish';
 import { isUuid, UpdateProfileInput, UpdateSettingsInput, ListUsersInput } from './user.schemas';
+import {
+    IUser,
+    User,
+    UserRole,
+    UserStatus,
+    publish,
+    recordAudit,
+    ServiceError,
+} from '@bgsc/shared';
 
 /**
  * All Mongo access for the User Service. Controllers do HTTP; this does data, events and audit.
@@ -12,12 +18,6 @@ const PRODUCER = 'user-service';
 
 /** Never return soft-deleted users from any read path. */
 const alive = { deleted_at: null };
-
-export class ServiceError extends Error {
-    constructor(public status: number, public code: string) {
-        super(code);
-    }
-}
 
 
 /** `:ref` is a UUID or a username — one route, resolved here (be2-user-service-plan.md §3.1). */
@@ -106,30 +106,191 @@ export function touchLastActive(userId: string): void {
         .catch((err) => console.error('touchLastActive failed:', err));
 }
 
-/**
- * Soft delete with a 30-day grace period (Spec §11.2, decision D4). The row stays so that ledger
- * rows and embedded snapshots keep resolving; a purge/anonymize job is Week 4+.
- */
-export async function softDelete(user: IUser, actorId: string, reason: string | null): Promise<void> {
-    const now = new Date();
 
-    // Audit first — same reasoning as changeRole.
-    await recordAudit({
-        actor_id: actorId,
-        action: 'user.deleted',
-        target_type: 'user',
-        target_id: user._id,
-        previous_value: { status: user.status, deleted_at: null },
-        new_value: { status: UserStatus.DELETED, deleted_at: now },
-        reason,
+/**
+ * Apply a state change and its audit row so that neither can exist without the other.
+ *
+ *   1. claim   — one atomic conditional update. Losing the race means nothing happened, so there is
+ *                nothing to audit and the caller gets a clean 4xx instead of a 500.
+ *   2. audit   — only now, and only once, because only one caller got here.
+ *   3. rollback — if the audit write fails, undo the claim rather than leave a change with no trail.
+ *
+ * Earlier this code audited *before* the update, to guarantee no unaudited privilege change. That
+ * was wrong under ordinary concurrency: five simultaneous callers wrote five audit rows for one
+ * real transition, and a fabricated audit entry is worse than a missing one because it is believed.
+ * Claim-then-audit-with-rollback gives both properties instead of trading one for the other.
+ */
+async function auditedTransition<T>(opts: {
+    claim: () => Promise<T | null>;
+    conflict: ServiceError;
+    audit: (claimed: T) => Promise<unknown>;
+    rollback: (claimed: T) => Promise<unknown>;
+}): Promise<T> {
+    const claimed = await opts.claim();
+    if (claimed === null || claimed === undefined) throw opts.conflict;
+    const won: T = claimed;
+
+    try {
+        await opts.audit(won);
+    } catch (auditErr) {
+        try {
+            await opts.rollback(won);
+        } catch (rollbackErr) {
+            // Both failed: the change stands with no audit row. Loud, because it needs a human.
+            console.error('CRITICAL: audit write failed and rollback failed. Unaudited state change.', {
+                auditErr,
+                rollbackErr,
+            });
+        }
+        throw auditErr;
+    }
+
+    return won;
+}
+
+/** Self-service restore window (D11). After this, only an admin can bring the account back. */
+export const RESTORE_WINDOW_DAYS = 30;
+
+/**
+ * What deletion actually does, stated so the client gate can show it verbatim rather than
+ * paraphrasing it (Spec §11.2.1). Versioned: the audit row records which text was agreed to, so
+ * changing the wording later does not rewrite what past users consented to.
+ */
+export const RETENTION_DISCLOSURE_VERSION = '2026-09-06';
+export const RETENTION_DISCLOSURE = {
+    version: RETENTION_DISCLOSURE_VERSION,
+    restore_window_days: RESTORE_WINDOW_DAYS,
+    hidden_immediately: [
+        'your profile, from search and from everyone else',
+        'your account, from the admin user list',
+        'your active sessions — you are signed out everywhere',
+    ],
+    retained_indefinitely: [
+        'your profile details, including name, email and phone number',
+        'your event registrations and attendance',
+        'your points ledger and every transaction in it',
+        'your leaderboard placements and team memberships',
+        'your challenge submissions and their outcomes',
+    ],
+    notes: [
+        `You can restore your account by signing in within ${RESTORE_WINDOW_DAYS} days.`,
+        'Nothing is erased. This platform keeps your data after deletion.',
+        'Consenting to research use is optional and does not change what is kept.',
+    ],
+} as const;
+
+/** Load the caller's own record even when soft-deleted — the only path allowed to see one. */
+export async function findSelfIncludingDeleted(id: string): Promise<IUser | null> {
+    return User.findOne({ _id: id });
+}
+
+export function restorableUntil(deletedAt: Date): Date {
+    return new Date(deletedAt.getTime() + RESTORE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * Deletion hides the account. Nothing is destroyed and no purge job exists (Spec §11.2.1, D10) —
+ * the 30 days govern self-service restore, not erasure. The gate that collects this consent must
+ * say so; RETENTION_DISCLOSURE is what it should say.
+ */
+export async function softDelete(
+    user: IUser,
+    actorId: string,
+    opts: { reason?: string | null; research_consent: boolean }
+): Promise<{ deleted_at: Date; restorable_until: Date }> {
+    const now = new Date();
+    const until = restorableUntil(now);
+
+    await auditedTransition<IUser>({
+        // Only the caller that flips deleted_at from null proceeds; the rest are already-deleted.
+        claim: () =>
+            User.findOneAndUpdate(
+                { _id: user._id, deleted_at: null },
+                {
+                    $set: {
+                        deleted_at: now,
+                        status: UserStatus.DELETED,
+                        refresh_token_hash: null,
+                        deletion: {
+                            reason: opts.reason ?? null,
+                            research_consent: opts.research_consent,
+                            restorable_until: until,
+                            disclosure_version: RETENTION_DISCLOSURE_VERSION,
+                        },
+                    },
+                },
+                { returnDocument: 'before' }
+            ),
+        conflict: new ServiceError(409, 'already_deleted'),
+        audit: (before) =>
+            recordAudit({
+                actor_id: actorId,
+                action: 'user.deleted',
+                target_type: 'user',
+                target_id: user._id,
+                previous_value: { status: before.status, deleted_at: null },
+                new_value: {
+                    status: UserStatus.DELETED,
+                    deleted_at: now,
+                    research_consent: opts.research_consent,
+                    disclosure_version: RETENTION_DISCLOSURE_VERSION,
+                    restorable_until: until,
+                },
+                reason: opts.reason ?? null,
+            }),
+        rollback: (before) =>
+            User.updateOne(
+                { _id: user._id },
+                { $set: { deleted_at: null, status: before.status, deletion: null } }
+            ),
     });
 
-    await User.updateOne(
-        { _id: user._id, deleted_at: null },
-        { $set: { deleted_at: now, status: UserStatus.DELETED, refresh_token_hash: null } }
-    );
+    publish('UserDeleted', PRODUCER, {
+        user_id: user._id,
+        research_consent: opts.research_consent,
+        restorable_until: until,
+    });
 
-    publish('UserDeleted', PRODUCER, { user_id: user._id });
+    return { deleted_at: now, restorable_until: until };
+}
+
+/**
+ * Undo a deletion (D11). Signing in during the window is what triggers this, so BE-1's login must
+ * let a soft-deleted user authenticate — otherwise they can never reach this endpoint.
+ */
+export async function restoreSelf(user: IUser, actorId: string): Promise<IUser> {
+    if (!user.deleted_at) throw new ServiceError(409, 'not_deleted');
+
+    const until = user.deletion?.restorable_until ?? restorableUntil(user.deleted_at);
+    if (new Date() > until) throw new ServiceError(410, 'restore_window_expired');
+
+    await auditedTransition<IUser>({
+        // Whoever flips deleted_at back to null wins; a double-click loses cleanly with 409.
+        claim: () =>
+            User.findOneAndUpdate(
+                { _id: user._id, deleted_at: { $ne: null } },
+                { $set: { deleted_at: null, status: UserStatus.ACTIVE, deletion: null } },
+                { returnDocument: 'before' }
+            ),
+        conflict: new ServiceError(409, 'not_deleted'),
+        audit: (prev) =>
+            recordAudit({
+                actor_id: actorId,
+                action: 'user.restored',
+                target_type: 'user',
+                target_id: user._id,
+                previous_value: { status: prev.status, deleted_at: prev.deleted_at },
+                new_value: { status: UserStatus.ACTIVE, deleted_at: null },
+                reason: 'self-service restore within the window',
+            }),
+        rollback: (prev) =>
+            User.updateOne(
+                { _id: user._id },
+                { $set: { deleted_at: prev.deleted_at, status: prev.status, deletion: prev.deletion } }
+            ),
+    });
+    publish('UserRestored', PRODUCER, { user_id: user._id });
+    return (await User.findById(user._id))!;
 }
 
 /**
@@ -361,8 +522,8 @@ export async function piiScopeFor(viewer?: { id: string; role: UserRole }): Prom
     if (viewer.role === UserRole.COORDINATOR || viewer.role === UserRole.FOUNDER) return 'all';
     if (viewer.role !== UserRole.CORE) return 'none';
 
-    const { Event } = await import('../models/Event');
-    const { FormSubmission } = await import('../models/Registration');
+    const { Event } = await import('@bgsc/shared');
+    const { FormSubmission } = await import('@bgsc/shared');
 
     // Every event this Core admin is assigned to, cancelled ones included — a cancelled event still
     // needs its participants contacted.
@@ -384,3 +545,6 @@ export function scopeAllows(scope: PiiScope, targetId: string): boolean {
     if (scope === 'none') return false;
     return scope.has(targetId);
 }
+
+/** Re-exported so callers importing the service do not need a second import. */
+export { ServiceError };

@@ -1,16 +1,16 @@
 {
-  "name": "backend",
+  "name": "bgsc-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "BGSC platform backend \u2014 API gateway (:3000) plus domain services under apps/.",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts",
-    "build": "tsc",
-    "typecheck": "npx -p typescript@7 tsc --noEmit",
+    "dev": "nodemon --watch src --watch packages/shared/src --ext ts --exec ts-node src/index.ts",
+    "build": "npm run build --workspace @bgsc/shared && tsc --build",
     "start": "node dist/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "selfcheck": "ts-node src/models/selfcheck.ts && ts-node src/middleware/auth.selfcheck.ts && ts-node src/middleware/shared.selfcheck.ts && ts-node src/users/user.selfcheck.ts && ts-node src/auth/auth.selfcheck.ts",
-    "e2e": "ts-node src/models/models.e2e.ts && ts-node src/users/user.e2e.ts"
+    "typecheck": "npx -p typescript@7 tsc --build --force && npx -p typescript@7 tsc --noEmit -p tsconfig.check.json && npm run build",
+    "selfcheck": "npm run selfcheck --workspaces --if-present",
+    "e2e": "npm run e2e --workspaces --if-present",
+    "test": "npm run selfcheck && npm run e2e"
   },
   "keywords": [],
   "author": "Rubber_Duck",
@@ -20,6 +20,9 @@
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.1.0",
+    "http-proxy-middleware": "^3.0.5",
+    "ioredis": "^5.9.0",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.9.5",
     "zod": "^4.5.4"
@@ -33,5 +36,9 @@
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3"
-  }
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
 }

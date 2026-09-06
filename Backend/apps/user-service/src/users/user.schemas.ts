@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { UserRole, UserStatus } from '../models/User';
+import { UserRole, UserStatus } from '@bgsc/shared';
 
 /**
  * Request schemas. Zod strips unknown keys, so these double as the sanitization layer: a client
@@ -87,3 +87,18 @@ export const SnapshotQuery = z.object({
 export type UpdateProfileInput = z.infer<typeof UpdateProfileSchema>;
 export type UpdateSettingsInput = z.infer<typeof UpdateSettingsSchema>;
 export type ListUsersInput = z.infer<typeof ListUsersQuery>;
+
+/**
+ * Account deletion gate (Spec §11.2.1, decision D12).
+ *
+ * `confirm` must be the literal string DELETE — a typed confirmation, so a stray DELETE request
+ * cannot remove an account. `research_consent` is opt-IN and defaults to false: retention is
+ * universal either way, this flag records whether identifiable data may be USED for research.
+ */
+export const DeleteAccountSchema = z.object({
+    confirm: z.literal('DELETE'),
+    reason: z.string().trim().max(500).optional(),
+    research_consent: z.boolean().default(false),
+});
+
+export type DeleteAccountInput = z.infer<typeof DeleteAccountSchema>;

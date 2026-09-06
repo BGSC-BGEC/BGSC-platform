@@ -1,36 +1,11 @@
 {
-    "compilerOptions": {
-        "target": "ES2020",
-        "module": "commonjs",
-        "lib": [
-            "ES2020"
-        ],
-        // Explicit so ts-node sees Node globals too: it compiles files in isolation and,
-        // unlike tsc, does not pick @types/node up from the include globs.
-        "types": [
-            "node"
-        ],
-        "outDir": "./dist",
-        "rootDir": "./src",
-        "strict": true,
-        "esModuleInterop": true,
-        "skipLibCheck": true,
-        "forceConsistentCasingInFileNames": true,
-        "resolveJsonModule": true,
-        "declaration": true,
-        "sourceMap": true,
-        "experimentalDecorators": true,
-        "emitDecoratorMetadata": true,
-        "moduleResolution": "node",
-        "ignoreDeprecations": "6.0"
-    },
-    "include": [
-        "src/**/*"
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": { "outDir": "./dist", "rootDir": "./src" },
+    "references": [
+        { "path": "./packages/shared" },
+        { "path": "./apps/user-service" },
+        { "path": "./apps/auth-service" }
     ],
-    "exclude": [
-        "node_modules",
-        "dist",
-        "**/*.spec.ts",
-        "**/*.test.ts"
-    ]
+    "include": ["src/**/*"],
+    "exclude": ["node_modules", "dist"]
 }
