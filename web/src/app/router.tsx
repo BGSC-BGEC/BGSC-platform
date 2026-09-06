@@ -3,6 +3,7 @@ import { RequireAuth } from '../components/RequireAuth'
 import { AdminLayout } from '../components/layout/adminLayout'
 import { Login } from '../pages/Login'
 import { Dashboard } from '../pages/Dashboard'
+import { Users } from '../pages/Users'
 
 export const router = createBrowserRouter([
     { path: '/login', element: <Login /> },
@@ -32,14 +33,9 @@ export const router = createBrowserRouter([
             </div>
         ),
         },
-        {
-        path: 'users',
-        element: (
-            <div className="p-6 rounded border border-gray-200 bg-white text-gray-700 text-sm">
-            Users Directory Module
-            </div>
-        ),
-        },
+
+        {path: 'users', element: <Users />},
+        
         {
         path: 'tournaments',
         element: (
