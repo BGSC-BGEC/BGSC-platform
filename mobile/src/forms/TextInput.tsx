@@ -7,7 +7,7 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
-import { NEU_SHADOWS } from '../theme/shadows';
+import { NEU_SHADOWS } from '../theme/shadow';
 
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../icons/Icon';
