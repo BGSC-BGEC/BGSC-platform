@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec ts-node src/index.ts",
     "build": "tsc",
+    "typecheck": "npx -p typescript@7 tsc --noEmit",
     "start": "node dist/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "selfcheck": "ts-node src/models/selfcheck.ts"
   },
   "keywords": [],
   "author": "Rubber_Duck",
@@ -29,6 +31,6 @@
     "@types/node": "^26.4.1",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
-    "typescript": "^7.0.2"
+    "typescript": "^6.0.3"
   }
 }
