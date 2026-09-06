@@ -44,6 +44,38 @@ export const router = createBrowserRouter([
             </div>
         ),
         },
+        {
+        path: 'auction',
+        element: (
+            <div className="p-6 rounded border border-gray-200 bg-white text-gray-700 text-sm">
+            Auctions page
+            </div>
+        ),
+        },
+        {
+        path: 'media',
+        element: (
+            <div className="p-6 rounded border border-gray-200 bg-white text-gray-700 text-sm">
+            Media Library page
+            </div>
+        ),
+        },
+        {
+        path: 'leaderboard',
+        element: (
+            <div className="p-6 rounded border border-gray-200 bg-white text-gray-700 text-sm">
+            Leaderboards page
+            </div>
+        ),
+        },
+        {
+        path: 'feedback',
+        element: (
+            <div className="p-6 rounded border border-gray-200 bg-white text-gray-700 text-sm">
+            Feedback and Support page
+            </div>
+        ),
+        },
     ],
     },
     { path: '*', element: <Navigate to="/dashboard" replace /> },
