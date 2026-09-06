@@ -1,18 +1,62 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import type { User } from '../types/user'
-import { DEFAULT_USER_DATA } from '../data/usersData'
+import { userService } from '../services/userService'
 import { UserTable } from '../components/users/UserTable'
 import { UserDetailModal } from '../components/users/UserDetailModal'
 
 export const Users: React.FC = () => {
+    const [users, setUsers] = useState<User[]>([])
+    const [isLoading, setIsLoading] = useState(true)
+    const [error, setError] = useState<string | null>(null)
+
     const [searchTerm, setSearchTerm] = useState('')
     const [roleFilter, setRoleFilter] = useState('all')
     const [statusFilter, setStatusFilter] = useState('all')
     const [selectedUser, setSelectedUser] = useState<User | null>(null)
     const [isModalOpen, setIsModalOpen] = useState(false)
 
+useEffect(() => {
+    let ignore = false
+
+    userService
+        .getUsers()
+        .then((data) => {
+        if (!ignore) {
+            setUsers(data)
+            setIsLoading(false)
+        }
+        })
+        .catch((err) => {
+        if (!ignore) {
+            setError(err instanceof Error ? err.message : 'Failed to load users')
+            setIsLoading(false)
+        }
+        })
+
+    return () => {
+        ignore = true
+    }
+    }, [])
+
+    // 4. Retry Handler (Safe to call setState synchronously in click events)
+    const handleRetry = () => {
+    setIsLoading(true)
+    setError(null)
+    userService
+        .getUsers()
+        .then((data) => {
+        setUsers(data)
+        })
+        .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Failed to load users')
+        })
+        .finally(() => {
+        setIsLoading(false)
+        })
+    }
+
     const filteredUsers = useMemo(() => {
-    return DEFAULT_USER_DATA.filter((user) => {
+    return users.filter((user) => {
         const term = searchTerm.toLowerCase().trim()
         const matchesSearch =
         term === '' ||
@@ -28,8 +72,9 @@ export const Users: React.FC = () => {
 
         return matchesSearch && matchesRole && matchesStatus
     })
-    }, [searchTerm, roleFilter, statusFilter])
+    }, [users, searchTerm, roleFilter, statusFilter])
 
+    // 5. Action Handlers
     const handleViewUser = (user: User) => {
     setSelectedUser(user)
     setIsModalOpen(true)
@@ -48,6 +93,7 @@ export const Users: React.FC = () => {
 
     return (
     <div className="space-y-6">
+        {/* Top Banner / Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between pb-4 border-b border-gray-
 200">
         <div>
@@ -59,7 +105,7 @@ export const Users: React.FC = () => {
             </p>
         </div>
         <div className="mt-2 sm:mt-0 text-sm font-bold text-black">
-            Total Members: {DEFAULT_USER_DATA.length}
+            Total Members: {users.length}
         </div>
         </div>
 
@@ -98,7 +144,7 @@ focus:border-black"
             <option value="suspended">Suspended</option>
             <option value="inactive">Inactive</option>
         </select>
-
+        
         <button
             type="button"
             onClick={handleReset}
@@ -108,8 +154,28 @@ rounded transition-colors"
             Reset
         </button>
         </div>
+        {isLoading && (
+        <div className="p-8 text-center text-sm text-gray-500 border border-gray-200 rounded bg-gray-50">
+            Loading members directory...
+        </div>
+        )}
 
+        {!isLoading && error && (
+        <div className="p-4 border border-black text-black bg-white rounded flex items-center justify-between">
+            <span className="text-sm">{error}</span>
+            <button
+            type="button"
+            onClick={handleRetry}
+            className="px-3 py-1 text-xs border border-black hover:bg-black hover:text-white transition-colors"
+            >
+            Retry
+            </button>
+        </div>
+        )}
+
+        {!isLoading && !error && (
         <UserTable users={filteredUsers} onViewUser={handleViewUser} />
+        )}
 
         <UserDetailModal
         isOpen={isModalOpen}
