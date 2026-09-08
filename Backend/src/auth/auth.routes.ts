@@ -22,9 +22,8 @@ authRoutes.post('/register', validate({ body: RegisterSchema }), AuthController.
 authRoutes.post('/login', validate({ body: LoginSchema }), AuthController.login);
 authRoutes.post('/refresh', validate({ body: RefreshTokenSchema }), AuthController.refresh);
 
-// Protected Session & Identity
+// Protected Session
 authRoutes.post('/logout', requireAuth, AuthController.logout);
-authRoutes.get('/me', requireAuth, AuthController.me);
 
 // Email Verification
 authRoutes.post('/verify-email', validate({ body: VerifyEmailSchema }), AuthController.verifyEmail);
@@ -47,7 +46,6 @@ authRoutes.post(
 );
 
 // Account Lifecycle (45-day restoration grace period)
-authRoutes.post('/account/delete', requireAuth, AuthController.deleteAccount);
 authRoutes.post(
   '/account/reactivate',
   validate({ body: ReactivateAccountSchema }),
