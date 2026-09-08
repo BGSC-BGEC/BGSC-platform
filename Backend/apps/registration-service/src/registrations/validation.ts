@@ -59,11 +59,51 @@ export function validateAnswers(
         }
     }
 
+    /**
+     * Visibility is resolved up front, against the answers as submitted.
+     *
+     * Evaluating it inside the loop made the result depend on `fields` array order: the loop
+     * coerces values and deletes hidden ones as it goes, so a field whose `visible_if` pointed at
+     * a field positioned after it read an uncoerced — or already deleted — value. The same
+     * submission could validate differently purely because of how the form was ordered.
+     */
+    const hiddenKeys = new Set(
+        fields.filter((f) => f.visible_if && !evaluateVisibleIf(f.visible_if, answers)).map((f) => f.key)
+    );
+
     // 2. Validate each field
     for (const field of fields) {
-        // visible_if check (skip if hidden)
-        if (field.visible_if && !evaluateVisibleIf(field.visible_if, answers)) {
-            continue; // field is hidden, don't validate
+        const hidden = hiddenKeys.has(field.key);
+
+        /**
+         * admin_only is checked before visibility, and a rejected or hidden answer is deleted
+         * rather than merely skipped.
+         *
+         * Checking visibility first left two holes: an admin_only field carrying a `visible_if`
+         * the submitter could falsify was skipped entirely, so its value went to the database
+         * unvalidated — the admin gate bypassed by answering an unrelated question. And a hidden
+         * field's answer was never validated but still stored, so `answers` could hold values for
+         * questions the form never asked this submitter.
+         */
+        if (field.admin_only && !context.isAdmin) {
+            // A `file` field answers in files[], not answers, so checking only answers let a
+            // non-admin attach a file to an admin-only field and have it stored unremarked.
+            const supplied = !isEmptyValue(answers[field.key]) || (filesByKey.get(field.key)?.length ?? 0) > 0;
+            if (supplied) {
+                errors.push({
+                    field_key: field.key,
+                    code: 'admin_only',
+                    message: `${field.label} can only be set by admin`,
+                });
+            }
+            // Never required of a non-admin: the form says an admin fills it in.
+            delete answers[field.key];
+            continue;
+        }
+
+        if (hidden) {
+            delete answers[field.key];
+            continue;
         }
 
         if (field.type === 'file') {
@@ -72,11 +112,7 @@ export function validateAnswers(
         }
 
         const value = answers[field.key];
-        const isEmpty =
-            value === null ||
-            value === undefined ||
-            value === '' ||
-            (Array.isArray(value) && value.length === 0);
+        const isEmpty = isEmptyValue(value);
 
         // Required check
         if (field.required && isEmpty) {
@@ -86,16 +122,6 @@ export function validateAnswers(
                 message: `${field.label} is required`,
             });
             continue; // no point in further validation
-        }
-
-        // Admin-only rejection
-        if (field.admin_only && !context.isAdmin && !isEmpty) {
-            errors.push({
-                field_key: field.key,
-                code: 'admin_only',
-                message: `${field.label} can only be set by admin`,
-            });
-            continue;
         }
 
         if (isEmpty) continue; // optional and empty, nothing to validate
@@ -115,6 +141,15 @@ export function validateAnswers(
     }
 
     return errors;
+}
+
+function isEmptyValue(value: unknown): boolean {
+    return (
+        value === null ||
+        value === undefined ||
+        value === '' ||
+        (Array.isArray(value) && value.length === 0)
+    );
 }
 
 function evaluateVisibleIf(

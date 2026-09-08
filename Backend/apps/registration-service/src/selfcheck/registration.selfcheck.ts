@@ -271,7 +271,51 @@ async function main() {
     assert(withFile.files.length === 1, 'A valid upload must be stored on the submission');
     console.log('✓ File field validation enforced (required, accept, max_size_bytes)');
 
+    // An owner editing their own registration must not destroy what an admin filled in: the edit
+    // replaces the whole answer set, and admin_only fields are stripped from a non-admin payload,
+    // so without carrying them across they vanished by omission.
+    console.log('13. Testing that a user edit preserves admin-only answers...');
+    const mixedForm = await formService.createForm({
+        owner: { type: 'generic', id: null },
+        title: 'Mixed Form',
+        fields: [
+            {
+                key: 'name', label: 'Name', help_text: null, type: 'short_text', required: true,
+                placeholder: null, options: null,
+                validation: { min: 1, max: 100, pattern: null, accept: null, max_size_bytes: null },
+                visible_if: null, admin_only: false, order: 0,
+            },
+            {
+                key: 'seed', label: 'Seed', help_text: null, type: 'number', required: false,
+                placeholder: null, options: null,
+                validation: { min: null, max: null, pattern: null, accept: null, max_size_bytes: null },
+                visible_if: null, admin_only: true, order: 1,
+            },
+        ],
+        created_by: creatorId,
+    });
+    await formService.publishForm(mixedForm._id);
+
+    // Submitted by an admin, who may set the admin-only field.
+    const mixed = await registrationService.submitRegistration({
+        form_id: mixedForm._id,
+        owner: { type: 'generic', id: null },
+        answers: { name: 'User Two', seed: 7 },
+        user_id: user2Id,
+        is_admin: true,
+    });
+    assert(mixed.answers.seed === 7, 'an admin can set an admin_only field');
+
+    const edited = await registrationService.updateRegistration(mixed._id, user2Id, {
+        answers: { name: 'User Two Edited' },
+    });
+    assert(edited.answers.name === 'User Two Edited', 'the user edit lands');
+    assert(edited.answers.seed === 7, 'and the admin_only answer survives it');
+    console.log('✓ admin-only answers survive a user edit');
+
     // Cleanup
+    await FormSubmission.deleteMany({ form_id: mixedForm._id });
+    await formService.archiveForm(mixedForm._id);
     await FormSubmission.deleteMany({ form_id: fileForm._id });
     await formService.archiveForm(fileForm._id);
     await FormSubmission.deleteMany({ form_id: form._id });

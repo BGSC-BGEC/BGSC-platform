@@ -1,13 +1,9 @@
 {
-  "extends": "../../tsconfig.json",
-  "compilerOptions": {
-    "composite": true,
-    "rootDir": "src",
-    "outDir": "dist",
-    "types": ["node"]
-  },
-  "references": [
-    { "path": "../../packages/shared" }
-  ],
-  "include": ["src/**/*"]
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": { "outDir": "./dist", "rootDir": "./src" },
+    "references": [{ "path": "../../packages/shared" }],
+    "include": ["src/**/*"],
+    // The whole selfcheck/ tree is test-only, seed helpers included, so it is excluded
+    // wholesale rather than by filename pattern.
+    "exclude": ["node_modules", "dist", "src/selfcheck/**", "**/*.e2e.ts"]
 }

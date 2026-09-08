@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import { AuthController } from './auth.controller';
-import { validate } from '../middleware/validate';
-import { requireAuth } from '../middleware/requireAuth';
+import { requireAuth, validate } from '@bgsc/shared';
 import {
   RegisterSchema,
   LoginSchema,
@@ -15,7 +14,14 @@ import {
   VerifyPhoneOtpSchema,
 } from './auth.schemas';
 
+/**
+ * Two routers, because the gateway routes two prefixes here (`/auth` and `/account`, see
+ * src/gateway/routing.ts). Declaring `/account/reactivate` inside the `/auth` router would have
+ * served it at `/auth/account/reactivate`, and the `/account/reactivate` the gateway forwards
+ * would have 404'd.
+ */
 export const authRoutes = Router();
+export const accountRoutes = Router();
 
 // Public Credentials & Session
 authRoutes.post('/register', validate({ body: RegisterSchema }), AuthController.register);
@@ -45,9 +51,12 @@ authRoutes.post(
   AuthController.resetPassword
 );
 
-// Account Lifecycle (45-day restoration grace period)
-authRoutes.post(
-  '/account/reactivate',
+// Account Lifecycle. Reactivation is unauthenticated by necessity: a deleted user cannot obtain
+// a token (login returns a status, not tokens), so this authenticates by password and issues a
+// fresh pair. It is the only working restore path — User Service's POST /users/me/restore sits
+// behind requireAuth and is unreachable once the caller's old access token expires.
+accountRoutes.post(
+  '/reactivate',
   validate({ body: ReactivateAccountSchema }),
   AuthController.reactivateAccount
 );

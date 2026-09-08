@@ -55,6 +55,11 @@ export const UpdateFormSchema = z.object({
 
 export const FormIdParams = z.object({ id: z.string().uuid() });
 
+export const FormVersionParams = z.object({
+    id: z.string().uuid(),
+    version: z.coerce.number().int().min(1),
+});
+
 export const ListFormsQuery = z.object({
     owner_type: z.enum(['event', 'challenge', 'generic']).optional(),
     owner_id: z.string().uuid().optional(),

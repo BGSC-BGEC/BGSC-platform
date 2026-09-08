@@ -1,18 +1,20 @@
 import express from 'express';
 import { createServiceApp, startService } from '@bgsc/shared';
+import { authRoutes, accountRoutes } from './auth/auth.routes';
 
 /**
- * Auth Service — :3001. BE-1's (MVP plan Week 1 Sunday: JWT, register, login, password reset,
- * token refresh, email verification).
+ * Auth Service — :3001. Credentials, sessions, email/phone verification, password reset, Google
+ * OAuth, and account reactivation (Spec §11.1).
  *
- * This is a skeleton so the gateway has something to route to and the topology is complete. The
- * bootstrap, health check, index build, error envelope and shutdown all come from @bgsc/shared —
- * BE-1 only writes routes.
+ * Converted Sep 8, 2026 from `Backend/src/auth`, where it had been written against the old
+ * single-app layout and imported '../models/User' and '../config/env' — paths that stopped
+ * existing at the microservice split, so it never compiled. Everything it needs now comes from
+ * @bgsc/shared, and the bootstrap, health check, index build, error envelope and shutdown are the
+ * same ones every other service gets from createServiceApp/startService.
  *
- * To add the real thing:
- *   1. create src/auth/auth.routes.ts exporting `authRoutes`
- *   2. uncomment the two lines below
- *   3. sign access tokens as { sub: <user _id>, role } with HS256 — see docs/handoff-to-be1.md §2
+ * Account lifecycle split (Sep 8): User Service owns deletion — DELETE /users/me, with the
+ * retention-consent gate. This service owns getting back in, because a deleted user holds no
+ * token. `GET /auth/me` and `POST /account/delete` were removed upstream for the same reason.
  */
 
 const NAME = 'auth-service';
@@ -21,9 +23,10 @@ const PORT = parseInt(process.env.PORT || '3001', 10);
 const options = {
     name: NAME,
     port: PORT,
-    routes(_app: express.Express) {
-        // import { authRoutes } from './auth/auth.routes';
-        // _app.use('/auth', authRoutes);
+    routes(app: express.Express) {
+        app.use('/auth', authRoutes);
+        // Its own prefix, matching the gateway's routing table rather than nesting under /auth.
+        app.use('/account', accountRoutes);
     },
 };
 

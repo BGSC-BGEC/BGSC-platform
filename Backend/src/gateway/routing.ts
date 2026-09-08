@@ -66,6 +66,10 @@ export const AUTH_ATTEMPT_PATHS = [
     '/auth/forgot-password',
     '/auth/reset-password',
     '/auth/totp/verify',
+    // Takes login + password and mints tokens, so it is a login by another name. It moved out of
+    // the /auth prefix when the account routes were split; without this line the split quietly
+    // dropped it into the 100/min general bucket.
+    '/account/reactivate',
 ];
 
 export const isAuthAttempt = (path: string) =>

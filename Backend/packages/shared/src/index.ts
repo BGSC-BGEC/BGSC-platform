@@ -12,6 +12,7 @@ export * from './middleware/requireAuth';
 export * from './middleware/requireRole';
 export * from './middleware/requireServiceToken';
 export * from './middleware/validate';
+export * from './middleware/wrap';
 export * from './events/publish';
 export * from './errors';
 export * from './service';

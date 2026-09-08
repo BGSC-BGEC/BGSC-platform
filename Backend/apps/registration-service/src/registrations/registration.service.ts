@@ -42,6 +42,19 @@ export async function transition(
     // The invariant is "set exactly when waitlisted", so every other status clears it.
     submission.waitlist_position = to === 'waitlisted' ? await nextWaitlistPosition(submission.owner.id) : null;
 
+    /**
+     * A team seat belongs to a confirmed registration — the model refuses to save any other
+     * combination. Leaving the link behind meant an admin demoting or rejecting a confirmed team
+     * member hit that invariant as an unhandled 500 rather than performing the demotion.
+     *
+     * ponytail: this drops the registration's side of the link only. The team's roster still lists
+     * them until someone removes them; reconciling it belongs in a consumer of this status change,
+     * alongside the same gap on cancel and disband.
+     */
+    if (to !== 'confirmed' && submission.context.event?.team_id) {
+        submission.context.event.team_id = null;
+    }
+
     if (to === 'confirmed' && !submission.confirmed_at) submission.confirmed_at = new Date();
     if (to === 'cancelled') submission.cancelled_at = new Date();
 
@@ -188,6 +201,9 @@ function buildContext(ownerType: string, inputContext: any): any {
                 role: inputContext?.event?.role ?? 'solo',
                 team_id: null,
                 team_visibility: inputContext?.event?.team_visibility ?? 'open',
+                // Member-set by design (plan §0.6). ponytail: registration-model.md §4 also wants
+                // "auction event + role 'member' => base_price > 0", which needs the event's type
+                // — Event Service's to answer. Enforce it here once that call exists.
                 base_price: inputContext?.event?.base_price ?? null,
                 captain_application: {
                     status: inputContext?.event?.role === 'captain' ? 'pending' : 'none',
@@ -262,12 +278,26 @@ export async function updateRegistration(
     const answers = updates.answers ?? registration.answers;
     const files = updates.files ?? registration.files;
 
+    /**
+     * An edit replaces the whole answer set, so anything the editor cannot send is destroyed by
+     * omission. `admin_only` fields are exactly that: the validator strips them from a non-admin's
+     * payload, so without carrying the stored values across, an owner editing their own
+     * registration silently wiped whatever an admin had filled in — a seed, a bib number, an
+     * assessment. Held aside before validation and restored after.
+     */
+    const adminOnly: Record<string, unknown> = {};
+    for (const field of form.fields) {
+        if (field.admin_only && registration.answers[field.key] !== undefined) {
+            adminOnly[field.key] = registration.answers[field.key];
+        }
+    }
+
     const validationErrors = validateAnswers(answers, form.fields, files, { isAdmin: false });
     if (validationErrors.length > 0) {
         throw new ServiceError(400, 'validation_failed', validationErrors);
     }
 
-    registration.answers = answers;
+    registration.answers = { ...answers, ...adminOnly };
     registration.files = files;
     registration.markModified('answers');
 
@@ -371,6 +401,15 @@ export async function updateRegistrationStatus(
     reason?: string
 ): Promise<IFormSubmission> {
     const registration = await getRegistration(registrationId);
+
+    // A cancelled registration is the user's decision, not a status an admin flips back — and
+    // confirming one would reserve a seat for somebody who gave it up. Re-registering is the path.
+    if (registration.status === 'cancelled') {
+        throw new ServiceError(409, 'registration_cancelled');
+    }
+    if (registration.status === status) {
+        throw new ServiceError(409, 'already_in_status');
+    }
 
     const wasConfirmed = registration.status === 'confirmed';
     if (wasConfirmed === (status === 'confirmed')) {

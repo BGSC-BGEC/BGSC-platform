@@ -135,6 +135,26 @@ export async function archiveForm(formId: string): Promise<IFormDefinition> {
     return form;
 }
 
+/**
+ * The archived field set a submission was validated against.
+ *
+ * Editing a published form archives the old fields and bumps the version (§D7), so a submission
+ * made against v1 still knows what it answered. That archive was write-only until this had a
+ * route: the rows were being written and nothing could ever read them back, which is the whole
+ * point of keeping them.
+ *
+ * The current version lives on the form itself, so it is answered from there rather than from an
+ * archive row that only exists once the form has been edited at least once.
+ */
 export async function getFormVersion(formId: string, version: number) {
-    return FormDefinitionVersion.findOne({ form_id: formId, version });
+    const form = await getForm(formId);
+    if (form.version === version) {
+        return { form_id: form._id, version: form.version, fields: form.fields, published_at: form.published_at };
+    }
+
+    const archived = await FormDefinitionVersion.findOne({ form_id: formId, version });
+    if (!archived) {
+        throw new ServiceError(404, 'form_version_not_found');
+    }
+    return archived;
 }

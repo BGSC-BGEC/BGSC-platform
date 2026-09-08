@@ -1,6 +1,7 @@
 import { FormDefinition, ServiceError } from '@bgsc/shared';
 import { Request, Response, NextFunction } from 'express';
 import { putObject, sniff, FILE_MAX_BYTES } from '../storage/storage';
+import { UploadFileInput } from './registration.schemas';
 
 /**
  * `POST /registrations/upload-file?form_id=…&field_key=…` — upload first, submit second (plan §D2).
@@ -12,11 +13,7 @@ import { putObject, sniff, FILE_MAX_BYTES } from '../storage/storage';
  */
 export async function uploadFileHandler(req: Request, res: Response, next: NextFunction) {
     try {
-        const formId = typeof req.query.form_id === 'string' ? req.query.form_id : '';
-        const fieldKey = typeof req.query.field_key === 'string' ? req.query.field_key : '';
-        if (!formId || !fieldKey) {
-            throw new ServiceError(400, 'form_id_and_field_key_required');
-        }
+        const { form_id: formId, field_key: fieldKey, name } = req.query as unknown as UploadFileInput;
 
         const body = req.body as Buffer;
         if (!Buffer.isBuffer(body) || body.length === 0) {
@@ -51,7 +48,7 @@ export async function uploadFileHandler(req: Request, res: Response, next: NextF
         res.status(201).json({
             field_key: fieldKey,
             url: stored.url,
-            name: typeof req.query.name === 'string' ? req.query.name : `upload.${sniffed.ext}`,
+            name: name ?? `upload.${sniffed.ext}`,
             size: stored.size,
             mime: stored.mime,
         });

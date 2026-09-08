@@ -144,11 +144,34 @@ export async function addMemberToTeam(
         throw new ServiceError(404, 'registration_not_found');
     }
 
+    /**
+     * `userId` and `registrationId` arrive as independent arguments, and nothing tied them
+     * together. The invite and join handlers look the registration up by the user, so they were
+     * consistent by construction — but POST /internal/teams/:id/add-member takes both straight from
+     * the request body, so the auction path could seat one user against another's registration and
+     * write a member row carrying A's id with B's name.
+     */
+    if (registration.user.user_id !== userId) {
+        throw new ServiceError(400, 'registration_user_mismatch');
+    }
+
+    // A team's members must be registered for the same thing the team belongs to. Without this a
+    // registration for a different event could be seated on this roster.
+    if (registration.owner.type !== team.owner.type || registration.owner.id !== team.owner.id) {
+        throw new ServiceError(400, 'registration_owner_mismatch');
+    }
+
+    // Event registrations carry the context branch this function writes into; a challenge or
+    // generic one does not, and assigning through it threw a TypeError as a 500.
+    if (!registration.context.event) {
+        throw new ServiceError(400, 'not_event_registration');
+    }
+
     if (registration.status !== 'confirmed') {
         throw new ServiceError(400, 'registration_not_confirmed');
     }
 
-    if (registration.context.event?.team_id) {
+    if (registration.context.event.team_id) {
         throw new ServiceError(409, 'already_in_team');
     }
 
@@ -165,7 +188,7 @@ export async function addMemberToTeam(
     await team.save();
 
     // Link registration to team
-    registration.context.event!.team_id = team._id;
+    registration.context.event.team_id = team._id;
     await registration.save();
 
     await publish(
@@ -234,6 +257,18 @@ export async function lockTeam(teamId: string, lockedBy: string): Promise<ITeam>
 
     if (team.status === 'locked') {
         throw new ServiceError(400, 'already_locked');
+    }
+    if (team.status === 'disbanded') {
+        throw new ServiceError(400, 'team_disbanded');
+    }
+
+    // The model refuses to save a locked team below size_min, so checking here is the difference
+    // between a 409 the caller can act on and an unhandled invariant surfacing as a 500.
+    if (team.members.length < team.size_min) {
+        throw new ServiceError(409, 'team_below_minimum_size', {
+            size_min: team.size_min,
+            members: team.members.length,
+        });
     }
 
     team.status = 'locked';

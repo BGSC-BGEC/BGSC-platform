@@ -12,6 +12,7 @@ import {
     IdParams,
     ListRegistrationsQuery,
     MyRegistrationQuery,
+    UploadFileQuery,
 } from './registration.schemas';
 
 /**
@@ -33,6 +34,7 @@ registrationRoutes.post('/', requireAuth, validate({ body: SubmitRegistrationSch
 registrationRoutes.post(
     '/upload-file',
     requireAuth,
+    validate({ query: UploadFileQuery }),
     raw({ type: ACCEPTED_MIMES, limit: FILE_MAX_BYTES }),
     uploadFileHandler
 );

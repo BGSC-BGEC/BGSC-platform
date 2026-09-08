@@ -14,5 +14,8 @@ export class ServiceError extends Error {
     constructor(public status: number, public code: string, public details?: unknown) {
         super(code);
         this.name = 'ServiceError';
+        // Restores the prototype chain when the class is extended across a compiled boundary, so
+        // `err instanceof ServiceError` in the shared error handler stays true.
+        Object.setPrototypeOf(this, ServiceError.prototype);
     }
 }

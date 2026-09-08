@@ -97,6 +97,8 @@ async function main() {
         name: `Team ${uuid().slice(0, 6)}`,
         captain_user_id: captain._id,
         join_policy: 'open',
+        // A roster that can fall below its own minimum, so the lock guard has something to catch.
+        size_min: 2,
         size_max: 2,
     });
     // The model requires the captain to be in members[]; creating with an empty roster never saved.
@@ -118,7 +120,42 @@ async function main() {
     );
     console.log('✓ Refused');
 
-    console.log('6. Adding a member...');
+    // The auction path passes user_id and registration_id straight from a request body, so the
+    // pairing has to be checked here rather than assumed from how the caller looked them up.
+    console.log('6. Mismatched member arguments are refused...');
+    const stranger = await seedUser('Stranger');
+    userIds.push(stranger._id);
+    const strangerReg = await register(stranger._id, 'member');
+    await registrationService.transition(strangerReg, 'confirmed', adminId, 'selfcheck');
+    await strangerReg.save();
+
+    await assert.rejects(
+        () => teamService.addMemberToTeam(team._id, stranger._id, captainReg._id, 'auction'),
+        (err: any) => err.code === 'registration_user_mismatch',
+        'a user cannot be seated against somebody else\'s registration'
+    );
+
+    // A registration for a different event must not land on this roster.
+    const otherEventReg = await FormSubmission.create({
+        // Its own form as well as its own event: the same user cannot hold two active
+        // registrations against one form, which is what the unique index is there to say.
+        _id: uuid(), form_id: uuid(), form_version: 1,
+        owner: { type: 'event', id: uuid() },
+        user: { user_id: stranger._id, display_name: 'Stranger', avatar_url: null },
+        answers: {}, files: [],
+        context: { event: { role: 'member', team_id: null, team_visibility: 'open', base_price: null,
+            captain_application: { status: 'none', reviewed_by: null, reviewed_at: null, note: null }, attended: null } },
+        status: 'confirmed', waitlist_position: null, status_history: [], submitted_at: new Date(), confirmed_at: new Date(),
+    });
+    await assert.rejects(
+        () => teamService.addMemberToTeam(team._id, stranger._id, otherEventReg._id, 'auction'),
+        (err: any) => err.code === 'registration_owner_mismatch',
+        'a registration for another event cannot join this team'
+    );
+    await FormSubmission.deleteOne({ _id: otherEventReg._id });
+    console.log('✓ Mismatched user / owner pairings refused');
+
+    console.log('7. Adding a member...');
     const memberReg = await register(member._id, 'member');
     await registrationService.transition(memberReg, 'confirmed', adminId, 'selfcheck');
     await memberReg.save();
@@ -129,7 +166,7 @@ async function main() {
     assert(linkedMemberReg.context.event!.team_id === team._id, 'Member registration links to the team');
     console.log('✓ Member added and linked');
 
-    console.log('7. A full roster is refused...');
+    console.log('8. A full roster is refused...');
     const outsiderReg = await register(outsider._id, 'member');
     await registrationService.transition(outsiderReg, 'confirmed', adminId, 'selfcheck');
     await outsiderReg.save();
@@ -140,7 +177,7 @@ async function main() {
     );
     console.log('✓ Refused with team_full');
 
-    console.log('8. The captain cannot be removed from their own team...');
+    console.log('9. The captain cannot be removed from their own team...');
     await assert.rejects(
         () => teamService.removeMemberFromTeam(team._id, captain._id, adminId),
         (err: any) => err.code === 'cannot_remove_captain',
@@ -148,7 +185,7 @@ async function main() {
     );
     console.log('✓ Refused');
 
-    console.log('9. Removing a member unlinks their registration...');
+    console.log('10. Removing a member unlinks their registration...');
     const afterRemove = await teamService.removeMemberFromTeam(team._id, member._id, adminId, 'left');
     assert(afterRemove.members.length === 1, 'Only the captain should remain');
     const unlinked = await registrationService.getRegistration(memberReg._id);
@@ -156,7 +193,27 @@ async function main() {
     console.log('✓ Member removed and unlinked');
 
     // relationships.md §4: a profile change must rewrite the snapshots this service owns.
-    console.log('10. Testing snapshot refresh on UserProfileUpdated...');
+    // Both of these used to surface a model invariant as an unhandled 500.
+    console.log('11. Testing the invariant guards...');
+    await assert.rejects(
+        () => teamService.lockTeam(team._id, adminId),
+        (err: any) => err.code === 'team_below_minimum_size',
+        'locking a team below size_min is a refusal, not a crash'
+    );
+
+    // A team seat only exists on a confirmed registration; demoting one must clear the link.
+    const spare = await seedUser('Spare');
+    userIds.push(spare._id);
+    const seated = await register(spare._id, 'member');
+    await registrationService.transition(seated, 'confirmed', adminId, 'selfcheck');
+    seated.context.event!.team_id = team._id;
+    await seated.save();
+    const demoted = await registrationService.updateRegistrationStatus(seated._id, adminId, 'rejected', 'demoted');
+    assert(demoted.status === 'rejected', 'the demotion goes through');
+    assert(demoted.context.event!.team_id === null, 'and the team link is dropped with it');
+    console.log('✓ Invariant guards refuse cleanly instead of crashing');
+
+    console.log('12. Testing snapshot refresh on UserProfileUpdated...');
     initializeConsumers();
 
     // A change that touches neither display_name nor avatar_url must not rewrite anything.
@@ -184,7 +241,7 @@ async function main() {
     );
     console.log('✓ Snapshots refreshed on rename, untouched on an unrelated edit');
 
-    console.log('11. Disbanding the team...');
+    console.log('13. Disbanding the team...');
     const disbanded = await teamService.disbandTeam(team._id, 'selfcheck');
     assert(disbanded.status === 'disbanded', 'Team should be disbanded');
     const unlinkedCaptain = await registrationService.getRegistration(captainReg._id);

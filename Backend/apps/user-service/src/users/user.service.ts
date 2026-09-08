@@ -1,5 +1,6 @@
 import { isUuid, UpdateProfileInput, UpdateSettingsInput, ListUsersInput } from './user.schemas';
 import {
+    ACCOUNT_DELETION_GRACE_DAYS,
     IUser,
     User,
     UserRole,
@@ -18,9 +19,6 @@ const PRODUCER = 'user-service';
 
 /** Never return soft-deleted users from any read path. */
 const alive = { deleted_at: null };
-
-import { ServiceError } from '../utils/errors';
-
 
 /** `:ref` is a UUID or a username — one route, resolved here (be2-user-service-plan.md §3.1). */
 export async function findByRef(ref: string): Promise<IUser | null> {
@@ -54,11 +52,19 @@ export async function findActiveSelf(id: string): Promise<IUser> {
 }
 
 /** Flat input -> nested paths, so a partial PATCH never clobbers sibling fields. */
-function profilePaths(input: UpdateProfileInput): Record<string, unknown> {
+function profilePaths(input: UpdateProfileInput, current: IUser): Record<string, unknown> {
     const set: Record<string, unknown> = {};
     if (input.full_name !== undefined) set['profile.full_name'] = input.full_name;
     if (input.bio !== undefined) set['profile.bio'] = input.bio;
-    if (input.phone_number !== undefined) set['profile.phone_number'] = input.phone_number;
+    if (input.phone_number !== undefined) {
+        set['profile.phone_number'] = input.phone_number;
+        // A number typed into a profile form is not a verified one. Without this, a user could
+        // verify one number by OTP and then swap in another while keeping the verified badge —
+        // and the badge is what the unique index and every "verified contact" read rely on.
+        if (input.phone_number !== current.profile?.phone_number) {
+            set.is_phone_verified = false;
+        }
+    }
     if (input.interests !== undefined) set['profile.interests'] = input.interests;
     for (const [k, v] of Object.entries(input.social_links ?? {})) {
         if (v !== undefined) set[`profile.social_links.${k}`] = v;
@@ -67,7 +73,7 @@ function profilePaths(input: UpdateProfileInput): Record<string, unknown> {
 }
 
 export async function updateProfile(user: IUser, input: UpdateProfileInput): Promise<IUser> {
-    const set = profilePaths(input);
+    const set = profilePaths(input, user);
 
     // `{ social_links: {} }` passes the schema's "not empty" refine but resolves to no paths.
     // Mongoose drops an empty $set silently, so without this we would emit a change event for
@@ -150,15 +156,26 @@ async function auditedTransition<T>(opts: {
     return won;
 }
 
-/** Self-service restore window (D11). After this, only an admin can bring the account back. */
-export const RESTORE_WINDOW_DAYS = 30;
+/**
+ * Self-service restore window (D11). After this, only an admin can bring the account back.
+ *
+ * Re-exported from @bgsc/shared rather than defined here: Auth Service reads the same number to
+ * decide whether a deleted user may sign back in, and the two were 30 and 45. That gap meant days
+ * 31–45 answered "scheduled_for_deletion, N days remaining" at login while the restore path threw
+ * `restore_window_expired` — the account was advertised as recoverable and was not.
+ */
+export const RESTORE_WINDOW_DAYS = ACCOUNT_DELETION_GRACE_DAYS;
 
 /**
  * What deletion actually does, stated so the client gate can show it verbatim rather than
  * paraphrasing it (Spec §11.2.1). Versioned: the audit row records which text was agreed to, so
  * changing the wording later does not rewrite what past users consented to.
+ *
+ * Bumped from 2026-09-06 when the window moved 30 -> 45: `notes` quotes the number, so the text a
+ * user agrees to changed. Leaving the version alone would have made every past audit row claim
+ * consent to wording those users never saw.
  */
-export const RETENTION_DISCLOSURE_VERSION = '2026-09-06';
+export const RETENTION_DISCLOSURE_VERSION = '2026-09-08';
 export const RETENTION_DISCLOSURE = {
     version: RETENTION_DISCLOSURE_VERSION,
     restore_window_days: RESTORE_WINDOW_DAYS,
@@ -192,8 +209,8 @@ export function restorableUntil(deletedAt: Date): Date {
 
 /**
  * Deletion hides the account. Nothing is destroyed and no purge job exists (Spec §11.2.1, D10) —
- * the 30 days govern self-service restore, not erasure. The gate that collects this consent must
- * say so; RETENTION_DISCLOSURE is what it should say.
+ * the restore window governs self-service restore, not erasure. The gate that collects this
+ * consent must say so; RETENTION_DISCLOSURE is what it should say.
  */
 export async function softDelete(
     user: IUser,
@@ -257,43 +274,12 @@ export async function softDelete(
 }
 
 /**
- * Undo a deletion (D11). Signing in during the window is what triggers this, so BE-1's login must
- * let a soft-deleted user authenticate — otherwise they can never reach this endpoint.
+ * Restoring a deleted account lives in Auth Service (POST /account/reactivate), not here.
+ *
+ * It has to: deletion clears the session and login refuses a deleted user, so there is no token
+ * with which to call a route on this service. Auth authenticates by password, and carries the
+ * audit row and the UserRestored event that used to be written here.
  */
-export async function restoreSelf(user: IUser, actorId: string): Promise<IUser> {
-    if (!user.deleted_at) throw new ServiceError(409, 'not_deleted');
-
-    const until = user.deletion?.restorable_until ?? restorableUntil(user.deleted_at);
-    if (new Date() > until) throw new ServiceError(410, 'restore_window_expired');
-
-    await auditedTransition<IUser>({
-        // Whoever flips deleted_at back to null wins; a double-click loses cleanly with 409.
-        claim: () =>
-            User.findOneAndUpdate(
-                { _id: user._id, deleted_at: { $ne: null } },
-                { $set: { deleted_at: null, status: UserStatus.ACTIVE, deletion: null } },
-                { returnDocument: 'before' }
-            ),
-        conflict: new ServiceError(409, 'not_deleted'),
-        audit: (prev) =>
-            recordAudit({
-                actor_id: actorId,
-                action: 'user.restored',
-                target_type: 'user',
-                target_id: user._id,
-                previous_value: { status: prev.status, deleted_at: prev.deleted_at },
-                new_value: { status: UserStatus.ACTIVE, deleted_at: null },
-                reason: 'self-service restore within the window',
-            }),
-        rollback: (prev) =>
-            User.updateOne(
-                { _id: user._id },
-                { $set: { deleted_at: prev.deleted_at, status: prev.status, deletion: prev.deletion } }
-            ),
-    });
-    publish('UserRestored', PRODUCER, { user_id: user._id });
-    return (await User.findById(user._id))!;
-}
 
 /**
  * Spec §5.15.5: role changes are audited, and an admin cannot demote their own active session.

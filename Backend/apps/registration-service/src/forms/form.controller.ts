@@ -67,6 +67,15 @@ export async function publishFormHandler(req: Request, res: Response, next: Next
     }
 }
 
+export async function getFormVersionHandler(req: Request, res: Response, next: NextFunction) {
+    try {
+        const { id, version } = req.params as unknown as { id: string; version: number };
+        res.json(await formService.getFormVersion(id, Number(version)));
+    } catch (err) {
+        next(err);
+    }
+}
+
 export async function archiveFormHandler(req: Request, res: Response, next: NextFunction) {
     try {
         const formId = req.params.id as string;

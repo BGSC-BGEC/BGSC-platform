@@ -70,6 +70,17 @@ export const CancelRegistrationSchema = z
 
 export const IdParams = z.object({ id: z.string().uuid() });
 
+/**
+ * The upload endpoint takes its target in the query string because the body is the raw file.
+ * `name` is the client's filename and is echoed back into `files[].name`, so it is bounded here
+ * rather than trusted — nothing downstream constrains it.
+ */
+export const UploadFileQuery = z.object({
+    form_id: z.string().uuid(),
+    field_key: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/, 'field_key must match the form field key pattern'),
+    name: z.string().trim().min(1).max(120).optional(),
+});
+
 export const ListRegistrationsQuery = z.object({
     owner_id: z.string().uuid().optional(),
     status: z.enum(SUBMISSION_STATUS).optional(),
@@ -83,3 +94,5 @@ export type UpdateRegistrationInput = z.infer<typeof UpdateRegistrationSchema>;
 export type UpdateCaptainApplicationInput = z.infer<typeof UpdateCaptainApplicationSchema>;
 export type UpdateStatusInput = z.infer<typeof UpdateStatusSchema>;
 export type CancelRegistrationInput = z.infer<typeof CancelRegistrationSchema>;
+
+export type UploadFileInput = z.infer<typeof UploadFileQuery>;

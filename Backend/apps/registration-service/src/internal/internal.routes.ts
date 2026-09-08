@@ -13,7 +13,21 @@ internalRoutes.use(requireServiceToken);
 internalRoutes.post('/registrations/confirm', async (req: Request, res: Response, next: NextFunction) => {
     try {
         const registrationId = typeof req.body?.registration_id === 'string' ? req.body.registration_id : '';
+        if (!registrationId) {
+            throw new ServiceError(400, 'registration_id_required');
+        }
         const registration = await registrationService.getRegistration(registrationId);
+
+        // Same refusals the admin route makes. This one is reached with a service token rather
+        // than a session, which is a reason to be stricter about it, not looser.
+        if (registration.status === 'cancelled') {
+            throw new ServiceError(409, 'registration_cancelled');
+        }
+        if (registration.status === 'confirmed') {
+            // Already done. Idempotent for a retrying caller rather than a second history row.
+            res.json(registration);
+            return;
+        }
 
         // Via the shared transition so this path clears waitlist_position and records the real
         // `from` status, exactly like every other status change.

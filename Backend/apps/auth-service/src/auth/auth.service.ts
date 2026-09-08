@@ -1,11 +1,8 @@
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { User, IUser, UserRole, UserStatus } from '../models/User';
-import { config } from '../config/env';
-import { publish } from '../events/publish';
+import { ACCOUNT_DELETION_GRACE_DAYS, IUser, ServiceError, TOKEN_ALGORITHMS, User, UserRole, UserStatus, config, publish, recordAudit } from '@bgsc/shared';
 import { MailerService } from './mailer.service';
-import { ServiceError, ACCOUNT_DELETION_GRACE_DAYS } from '../utils/errors';
 import {
   RegisterInput,
   LoginInput,
@@ -64,6 +61,24 @@ export class AuthService {
       is_email_verified: user.is_email_verified,
       profile: user.profile,
     };
+  }
+
+  /**
+   * Every path that mints a token pair runs this first.
+   *
+   * `login` and `reactivateAccount` checked account status and the others did not, so a suspended
+   * user could keep minting access tokens from a refresh token indefinitely — suspension did
+   * nothing — and a soft-deleted one could skip the grace-period flow entirely by refreshing or by
+   * clicking their email-verification link. One guard, called from every minting path, so a new
+   * one cannot quietly forget.
+   */
+  private static assertUsable(user: IUser): void {
+    if (user.status === UserStatus.DELETED) {
+      throw new ServiceError(403, 'account_deactivated');
+    }
+    if (user.status === UserStatus.SUSPENDED) {
+      throw new ServiceError(403, 'forbidden');
+    }
   }
 
   /**
@@ -164,9 +179,8 @@ export class AuthService {
       throw new ServiceError(401, 'unauthorized');
     }
 
-    if (user.status === UserStatus.SUSPENDED) {
-      throw new ServiceError(403, 'forbidden');
-    }
+    // DELETED is handled above with a countdown, which is why login does not simply delegate.
+    this.assertUsable(user);
 
     if (!user.password_hash) {
       throw new ServiceError(401, 'unauthorized');
@@ -199,7 +213,12 @@ export class AuthService {
   static async refreshToken(oldRefreshToken: string): Promise<TokenPair> {
     let payload: { sub: string };
     try {
-      payload = jwt.verify(oldRefreshToken, config.jwt.refreshSecret) as { sub: string };
+      // Algorithms pinned, exactly as the access-token verifier pins them: an unpinned verifier
+      // would accept a token an attacker signed with HS256 using the public key, if this ever
+      // moves to RS256. The refresh token is the long-lived one, so it is the worse one to leave open.
+      payload = jwt.verify(oldRefreshToken, config.jwt.refreshSecret, {
+        algorithms: TOKEN_ALGORITHMS,
+      }) as { sub: string };
     } catch {
       throw new ServiceError(401, 'unauthorized');
     }
@@ -208,6 +227,9 @@ export class AuthService {
     if (!user || !user.refresh_token_hash) {
       throw new ServiceError(401, 'unauthorized');
     }
+
+    // A refresh token outlives the session that made it, so status is re-checked on every use.
+    this.assertUsable(user);
 
     const isMatch = await bcrypt.compare(oldRefreshToken, user.refresh_token_hash);
     if (!isMatch) {
@@ -247,6 +269,8 @@ export class AuthService {
     if (!user) {
       throw new ServiceError(400, 'invalid_or_expired_token');
     }
+
+    this.assertUsable(user);
 
     user.is_email_verified = true;
     user.email_verification_token = null;
@@ -334,8 +358,12 @@ export class AuthService {
       throw new ServiceError(401, 'unauthorized');
     }
 
-    const diffDays = (Date.now() - user.deleted_at.getTime()) / (1000 * 60 * 60 * 24);
-    if (diffDays > ACCOUNT_DELETION_GRACE_DAYS) {
+    // The stamped date wins over recomputing from deleted_at: it is what the user was told at
+    // deletion time and what User Service reports as `restorable_until`.
+    const until =
+      user.deletion?.restorable_until ??
+      new Date(user.deleted_at.getTime() + ACCOUNT_DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000);
+    if (new Date() > until) {
       throw new ServiceError(410, 'account_permanently_deleted');
     }
 
@@ -348,14 +376,47 @@ export class AuthService {
       throw new ServiceError(401, 'unauthorized');
     }
 
-    user.status = UserStatus.ACTIVE;
-    user.deleted_at = null;
+    const previous = { status: user.status, deleted_at: user.deleted_at };
     const tokens = this.generateTokenPair(user);
-    user.refresh_token_hash = await bcrypt.hash(tokens.refresh_token, 10);
-    await user.save();
+
+    // Claim the restore atomically. Read-then-save would let two simultaneous reactivations both
+    // succeed and write two audit rows for one event; whoever flips deleted_at back wins.
+    const claimed = await User.findOneAndUpdate(
+      { _id: user._id, deleted_at: { $ne: null } },
+      {
+        $set: {
+          status: UserStatus.ACTIVE,
+          deleted_at: null,
+          // Cleared with the restore — a stale block would leave the account reading as
+          // pending-deletion to every serializer that checks it.
+          deletion: null,
+          refresh_token_hash: await bcrypt.hash(tokens.refresh_token, 10),
+        },
+      },
+      { returnDocument: 'after' }
+    );
+
+    if (!claimed) {
+      // Someone else restored it between the read and the write.
+      throw new ServiceError(409, 'not_deleted');
+    }
+
+    // Restoring an account is an auditable lifecycle event, exactly as deleting one is. This
+    // moved here with the endpoint: User Service used to write it and no longer can.
+    await recordAudit({
+      actor_id: claimed._id,
+      action: 'user.restored',
+      target_type: 'user',
+      target_id: claimed._id,
+      previous_value: previous,
+      new_value: { status: UserStatus.ACTIVE, deleted_at: null },
+      reason: 'self-service reactivation within the window',
+    });
+
+    publish('UserRestored', 'auth-service', { user_id: claimed._id });
 
     return {
-      user: this.formatUser(user),
+      user: this.formatUser(claimed),
       tokens,
     };
   }
@@ -376,13 +437,42 @@ export class AuthService {
       scope: 'openid email profile',
       access_type: 'offline',
       prompt: 'consent',
+      state: this.signState(state),
     });
 
-    if (state) {
-      params.append('state', state);
-    }
-
     return `${rootUrl}?${params.toString()}`;
+  }
+
+  /**
+   * OAuth CSRF protection (RFC 6749 §10.12). `state` was previously passed through unchecked and
+   * ignored on the way back, so an attacker could feed a victim a callback URL carrying their own
+   * authorization code and silently bind the victim's session to the attacker's Google account.
+   *
+   * Signed rather than stored: a random nonce inside a short-lived HMAC token is self-verifying,
+   * so this needs no session store and no new dependency. The caller's own `state` (a return path,
+   * typically) rides along inside it and comes back out on the other side.
+   */
+  private static signState(caller?: string): string {
+    return jwt.sign({ nonce: crypto.randomUUID(), s: caller ?? null }, config.jwt.accessSecret, {
+      algorithm: 'HS256',
+      expiresIn: '10m',
+    });
+  }
+
+  static verifyState(state: string | undefined): string | null {
+    if (!state) {
+      throw new ServiceError(400, 'invalid_oauth_state');
+    }
+    try {
+      const payload = jwt.verify(state, config.jwt.accessSecret, {
+        algorithms: TOKEN_ALGORITHMS,
+      }) as { nonce?: string; s?: string | null };
+      if (!payload.nonce) throw new Error('missing nonce');
+      return payload.s ?? null;
+    } catch {
+      // Expired or forged: both mean this callback did not start here.
+      throw new ServiceError(400, 'invalid_oauth_state');
+    }
   }
 
   /**
@@ -434,6 +524,10 @@ export class AuthService {
     }).select('+google_id');
 
     if (user) {
+      // Without this, Google sign-in was a way around the gates entirely: a soft-deleted account
+      // got a fresh token pair and stayed `deleted`, and a suspended one simply logged in.
+      this.assertUsable(user);
+
       if (!user.google_id) {
         user.google_id = googleUser.id;
       }
@@ -578,13 +672,31 @@ export class AuthService {
       throw new ServiceError(400, 'invalid_otp');
     }
 
+    // The unique index is the real guard; this turns losing that race into a clear refusal
+    // instead of a duplicate-key error surfacing as a 500.
+    const taken = await User.findOne({
+      _id: { $ne: user._id },
+      'profile.phone_number': phoneNumber,
+      is_phone_verified: true,
+    }).select('_id');
+    if (taken) {
+      throw new ServiceError(409, 'phone_number_taken');
+    }
+
     user.profile.phone_number = phoneNumber;
     user.is_phone_verified = true;
     user.pending_phone_number = null;
     user.phone_verification_otp_hash = null;
     user.phone_verification_expires = null;
     user.phone_verification_attempts = 0;
-    await user.save();
+    try {
+      await user.save();
+    } catch (err: unknown) {
+      if ((err as { code?: number }).code === 11000) {
+        throw new ServiceError(409, 'phone_number_taken');
+      }
+      throw err;
+    }
 
     publish('UserPhoneVerified', 'auth-service', {
       user_id: user._id,

@@ -203,7 +203,34 @@ UserSchema.index({ last_active_at: -1 });
 UserSchema.index({ deleted_at: 1 }); // purge/restore-window sweeps, and 'who deleted recently' // admin "Last Active Epoch" column (Spec §5.15.5)
 UserSchema.index({ username: 'text', 'profile.full_name': 'text' }); // user search (Spec §13.1)
 
+/**
+ * One account per verified phone number.
+ *
+ * Partial on `is_phone_verified` rather than covering every stored number: a profile update can
+ * put an unverified number on file, and a plain unique index would let anyone squat a number they
+ * do not own and lock its real owner out of verification. Only a number someone actually proved
+ * they control is claimed.
+ */
+UserSchema.index(
+    { 'profile.phone_number': 1 },
+    {
+        unique: true,
+        partialFilterExpression: { is_phone_verified: true, 'profile.phone_number': { $type: 'string' } },
+    }
+);
+
 export const User = model<IUser>('User', UserSchema, 'users');
+
+/**
+ * Self-service restore window for a soft-deleted account (Spec §11.2: a 45-day restoration grace
+ * period, then permanent purge).
+ *
+ * One constant, here beside the model it governs, because two services read it: User Service
+ * reports it and stamps `deletion.restorable_until`, Auth Service decides whether a deleted user
+ * may sign back in. They were 30 and 45 respectively, which left days 31–45 telling the user they
+ * could restore while the restore path refused them.
+ */
+export const ACCOUNT_DELETION_GRACE_DAYS = 45;
 
 /**
  * The `{ user_id, display_name, avatar_url }` snapshot embedded by form_submissions, teams,

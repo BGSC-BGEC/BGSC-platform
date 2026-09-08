@@ -13,7 +13,5 @@
         "incremental": false
     },
     "include": ["src/**/*", "packages/*/src/**/*", "apps/*/src/**/*"],
-    // src/auth is excluded for the same reason as in tsconfig.json: it is BE-1's auth code sitting
-    // in the gateway tree against the old import layout. See that file's note.
-    "exclude": ["node_modules", "dist", "**/dist/**", "src/auth"]
+    "exclude": ["node_modules", "dist", "**/dist/**"]
 }

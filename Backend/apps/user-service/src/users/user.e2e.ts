@@ -13,6 +13,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { UPLOAD_DIR } from '../storage/storage';
 import {
+    ACCOUNT_DELETION_GRACE_DAYS,
     AuditLog,
     DomainEvent,
     Event,
@@ -54,7 +55,16 @@ async function call(
     }
     const r = await fetch(base + path, { method, headers, body: payload });
     const text = await r.text();
-    return { status: r.status, body: text ? JSON.parse(text) : null };
+    const parsed = text ? JSON.parse(text) : null;
+
+    // Every service wraps success responses as { success, data } (createServiceApp's envelope).
+    // Unwrapped once here so the assertions below read the payload directly; failures keep their
+    // own { error } shape and pass through untouched.
+    const body =
+        parsed && typeof parsed === 'object' && parsed.success === true && 'data' in parsed
+            ? parsed.data
+            : parsed;
+    return { status: r.status, body };
 }
 
 const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(64)]);
@@ -406,17 +416,11 @@ async function main(): Promise<void> {
     assert.strictEqual(ownView.status, 200, 'but the owner can still see their own pending deletion');
     assert.strictEqual(ownView.body.deletion.restorable, true, 'and is told a restore is available');
 
-    const restored = await call('POST', '/users/me/restore', { as: tmpT });
-    assert.strictEqual(restored.status, 200, 'restore succeeds inside the window');
-    const back = await User.findById(tempUser._id);
-    assert.strictEqual(back!.deleted_at, null, 'deleted_at cleared');
-    assert.strictEqual(back!.status, UserStatus.ACTIVE, 'status back to active');
-    assert.strictEqual(back!.deletion, null, 'deletion metadata cleared');
-    assert.strictEqual((await call('GET', `/users/${tempUser._id}`, { as: boT })).status, 200,
-        'and the profile is publicly visible again');
-    assert.ok(events.some((e) => e.type === 'UserRestored'), 'UserRestored emitted');
-    assert.strictEqual((await call('POST', '/users/me/restore', { as: tmpT })).status, 409,
-        'restoring an account that is not deleted is a conflict');
+    // Restore itself is Auth Service's (POST /account/reactivate) and is covered by its own e2e.
+    // This service must not offer a route for it — one behind requireAuth is unreachable to a
+    // deleted user, who holds no token.
+    assert.strictEqual((await call('POST', '/users/me/restore', { as: tmpT })).status, 404,
+        'user-service exposes no restore route');
 
     // ---- concurrency: a double-click must not fabricate audit rows --------
     const racer = await User.create({
@@ -435,24 +439,9 @@ async function main(): Promise<void> {
         'one real transition writes exactly one audit row — no fabricated entries'
     );
 
-    const restores = await Promise.all(
-        Array.from({ length: 5 }, () => call('POST', '/users/me/restore', { as: raceT }))
-    );
-    assert.strictEqual(restores.filter((r) => r.status === 200).length, 1, 'exactly one restore succeeds');
-    assert.strictEqual(restores.filter((r) => r.status >= 500).length, 0, 'and the losers do not 500');
-    assert.strictEqual(
-        await AuditLog.countDocuments({ target_id: racer._id, action: 'user.restored' }),
-        1,
-        'one restore audit row'
-    );
-    assert.strictEqual((await User.findById(racer._id))!.deleted_at, null, 'account ends up restored');
-
-    // ---- restore after the window has closed ------------------------------
+    // ---- the record survives deletion, whatever happens next --------------
+    await User.updateOne({ _id: tempUser._id }, { $set: { deleted_at: null, status: UserStatus.ACTIVE, deletion: null } });
     await call('DELETE', '/users/me', { as: tmpT, body: { confirm: 'DELETE', research_consent: true } });
-    const expired = new Date(Date.now() - 1000);
-    await User.updateOne({ _id: tempUser._id }, { $set: { 'deletion.restorable_until': expired } });
-    assert.strictEqual((await call('POST', '/users/me/restore', { as: tmpT })).status, 410,
-        'once the window closes, self-service restore is gone');
     const stillThere = await User.findById(tempUser._id);
     assert.ok(stillThere, 'and the record still exists — nothing is ever erased (D10)');
     assert.strictEqual(stillThere!.deletion!.research_consent, true, 'opt-in research consent was recorded');
@@ -467,7 +456,11 @@ async function main(): Promise<void> {
     // ---- soft delete ------------------------------------------------------
     const del = await call('DELETE', '/users/me', { as: anaT, body: { confirm: 'DELETE' } });
     assert.strictEqual(del.status, 202, 'deletion is accepted, not immediate');
-    assert.strictEqual(del.body.restore_window_days, 30, '30-day restore window (§11.2.1)');
+    // Asserted against the shared constant, not a literal: Auth Service reads the same value to
+    // decide whether a deleted user may sign back in, and a test that hardcodes one side is how
+    // the two drifted to 30 and 45 in the first place.
+    assert.strictEqual(del.body.restore_window_days, ACCOUNT_DELETION_GRACE_DAYS,
+        'restore window matches the single shared grace period (Spec §11.2)');
 
     const still = await User.findById(ana._id);
     assert.ok(still, 'the row survives so ledger rows and snapshots still resolve');
