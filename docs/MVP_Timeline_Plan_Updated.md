@@ -125,7 +125,7 @@
   - Design Auth token structure
   - Setup database indexes
 
-- [ ] **BE-2: Core Data Models** (8h)
+- [x] **BE-2: Core Data Models** (8h)
   - Design Event model (categories, filters, details, auction)
   - Design Registration model (common schema for dynamic forms)
   - Design Points & Leaderboard model

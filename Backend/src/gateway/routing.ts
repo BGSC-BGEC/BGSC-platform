@@ -17,19 +17,27 @@ export interface Route {
 
 export const ROUTES: Record<string, Route> = {
     auth: { prefixes: ['/auth', '/account'], target: config.services.auth, owner: 'BE-1 · W1' },
-    user: { prefixes: ['/users'], target: config.services.user, owner: 'BE-2 · W1' },
+    user: { prefixes: ['/users', '/uploads/avatars'], target: config.services.user, owner: 'BE-2 · W1' },
     event: { prefixes: ['/events', '/auction'], target: config.services.event, owner: 'BE-1 · W2' },
-    registration: { prefixes: ['/forms', '/registrations', '/teams'], target: config.services.registration, owner: 'BE-2 · W2' },
+    registration: {
+        prefixes: ['/forms', '/registrations', '/teams', '/uploads/registrations'],
+        target: config.services.registration,
+        owner: 'BE-2 · W2',
+    },
     announcement: { prefixes: ['/announcements'], target: config.services.announcement, owner: 'BE-2 · W2' },
     points: { prefixes: ['/points'], target: config.services.points, owner: 'BE-2 · W3' },
     leaderboard: { prefixes: ['/leaderboards'], target: config.services.leaderboard, owner: 'BE-1 · W3' },
     challenge: { prefixes: ['/challenges'], target: config.services.challenge, owner: 'BE-2 · W3' },
+    // '/uploads' stays here as the catch-all, but the two services that serve their own files
+    // today claim their subtrees above and win by declaration order — otherwise every avatar URL
+    // the API hands out 503s at the edge, because media-service does not exist until Week 4.
+    // Delete those two prefixes when Media Service takes the whole tree over.
     media: { prefixes: ['/media', '/uploads'], target: config.services.media, owner: 'BE-1 · W4' },
     notification: { prefixes: ['/notifications'], target: config.services.notification, owner: 'W4' },
 };
 
 /** Services that actually exist today. Everything else 503s with a clear reason, not a hang. */
-export const LIVE_SERVICES = new Set(['auth', 'user']);
+export const LIVE_SERVICES = new Set(['auth', 'user', 'registration']);
 
 /**
  * Prefix match on a whole path segment, so `/usersfoo` never routes to the user service.

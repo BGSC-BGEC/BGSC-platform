@@ -3,6 +3,8 @@ import {
     ROLE_RANK,
     RoleName,
     UserRole,
+    UserSnapshot,
+    userSnapshotOf,
 } from '@bgsc/shared';
 
 /**
@@ -146,17 +148,10 @@ export function serializeUser(user: IUser, viewer?: Viewer, elevated = false): S
     return base;
 }
 
-/** `{ user_id, display_name, avatar_url }` — the shape six BE-2 collections embed. */
-export interface UserSnapshotDTO {
-    user_id: string;
-    display_name: string;
-    avatar_url: string | null;
-}
-
-export function snapshotOf(user: IUser): UserSnapshotDTO {
-    return {
-        user_id: user._id,
-        display_name: user.profile?.full_name ?? user.username,
-        avatar_url: user.profile?.avatar_url ?? null,
-    };
-}
+/**
+ * `{ user_id, display_name, avatar_url }` — the shape six BE-2 collections embed.
+ * Defined next to the User model in @bgsc/shared so the services that read `users` directly
+ * (relationships.md §1: every service reads, only this one writes) cannot drift from it.
+ */
+export type UserSnapshotDTO = UserSnapshot;
+export const snapshotOf = userSnapshotOf;

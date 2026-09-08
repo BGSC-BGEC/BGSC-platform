@@ -13,6 +13,7 @@ COPY package.json package-lock.json ./
 COPY packages/shared/package.json ./packages/shared/
 COPY apps/user-service/package.json ./apps/user-service/
 COPY apps/auth-service/package.json ./apps/auth-service/
+COPY apps/registration-service/package.json ./apps/registration-service/
 RUN npm ci --workspaces --include-workspace-root
 
 COPY tsconfig.base.json tsconfig.json ./
@@ -42,6 +43,8 @@ COPY --from=builder --chown=app:app /app/apps/user-service/dist ./apps/user-serv
 COPY --from=builder --chown=app:app /app/apps/user-service/package.json ./apps/user-service/package.json
 COPY --from=builder --chown=app:app /app/apps/auth-service/dist ./apps/auth-service/dist
 COPY --from=builder --chown=app:app /app/apps/auth-service/package.json ./apps/auth-service/package.json
+COPY --from=builder --chown=app:app /app/apps/registration-service/dist ./apps/registration-service/dist
+COPY --from=builder --chown=app:app /app/apps/registration-service/package.json ./apps/registration-service/package.json
 
 # Avatar uploads land here; compose mounts a volume so they survive a restart.
 RUN mkdir -p /app/uploads && chown -R app:app /app/uploads

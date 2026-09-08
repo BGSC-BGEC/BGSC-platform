@@ -4,8 +4,15 @@
     "references": [
         { "path": "./packages/shared" },
         { "path": "./apps/user-service" },
-        { "path": "./apps/auth-service" }
+        { "path": "./apps/auth-service" },
+        { "path": "./apps/registration-service" }
     ],
     "include": ["src/**/*"],
-    "exclude": ["node_modules", "dist"]
+    // src/auth/* arrived in commit 8c46751 as BE-1's auth implementation, but it landed in the
+    // gateway's source tree and still imports the pre-microservices layout ('../models/User',
+    // '../middleware/requireAuth'), so it does not compile. Nothing imports it — the gateway
+    // proxies /auth to auth-service — and apps/auth-service/src/index.ts is where it belongs.
+    // Excluded rather than edited or deleted: it is BE-1's code to move. Remove this line once
+    // they have.
+    "exclude": ["node_modules", "dist", "src/auth"]
 }

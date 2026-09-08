@@ -1,5 +1,5 @@
 import { Schema, model, Document } from 'mongoose';
-import { uuidId, timestamps } from './shared';
+import { uuidId, timestamps, UserSnapshot } from './shared';
 
 /**
  * User / Auth Service (BE-1). Converted Sep 6, 2026 to the conventions in docs/modeldocs/README.md:
@@ -204,3 +204,21 @@ UserSchema.index({ deleted_at: 1 }); // purge/restore-window sweeps, and 'who de
 UserSchema.index({ username: 'text', 'profile.full_name': 'text' }); // user search (Spec §13.1)
 
 export const User = model<IUser>('User', UserSchema, 'users');
+
+/**
+ * The `{ user_id, display_name, avatar_url }` snapshot embedded by form_submissions, teams,
+ * leaderboard_entries, challenge_participations, announcements and auction_lots
+ * (relationships.md §4).
+ *
+ * Lives here, next to the model it projects, so "what a display name is" has exactly one
+ * definition. User Service serves it over `/internal/users/snapshot` for anything outside this
+ * repo; services inside it read `users` directly — the ownership table (relationships.md §1)
+ * makes every service a reader of `users`, and only User/Auth Service a writer.
+ */
+export function userSnapshotOf(user: IUser): UserSnapshot {
+    return {
+        user_id: user._id,
+        display_name: user.profile?.full_name ?? user.username,
+        avatar_url: user.profile?.avatar_url ?? null,
+    };
+}

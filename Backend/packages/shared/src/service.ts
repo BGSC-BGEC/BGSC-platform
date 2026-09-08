@@ -64,7 +64,9 @@ export function createServiceApp(opts: ServiceOptions): Express {
         // A ServiceError is a deliberate, client-facing refusal. Mapping it centrally means a
         // handler cannot forget and turn a 409 into a 500.
         if (err instanceof ServiceError) {
-            res.status(err.status).json({ error: err.code });
+            res.status(err.status).json(
+                err.details === undefined ? { error: err.code } : { error: err.code, details: err.details }
+            );
             return;
         }
         console.error(`[${opts.name}] Unhandled error:`, err);
