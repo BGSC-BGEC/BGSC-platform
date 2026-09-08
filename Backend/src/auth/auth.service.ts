@@ -5,6 +5,7 @@ import { User, IUser, UserRole, UserStatus } from '../models/User';
 import { config } from '../config/env';
 import { publish } from '../events/publish';
 import { MailerService } from './mailer.service';
+import { ServiceError, ACCOUNT_DELETION_GRACE_DAYS } from '../utils/errors';
 import {
   RegisterInput,
   LoginInput,
@@ -74,9 +75,7 @@ export class AuthService {
     });
 
     if (existing) {
-      const error = new Error('conflict');
-      (error as any).statusCode = 409;
-      throw error;
+      throw new ServiceError(409, 'conflict');
     }
 
     const passwordHash = await bcrypt.hash(input.password, 10);
@@ -137,16 +136,16 @@ export class AuthService {
   /**
    * Logs in a user via email or username.
    */
-  static async login(input: LoginInput): Promise<AuthResult | { account_status: string; days_remaining: number }> {
+  static async login(
+    input: LoginInput
+  ): Promise<AuthResult | { account_status: string; days_remaining: number }> {
     const loginQuery = input.login.toLowerCase();
     const user = await User.findOne({
       $or: [{ email: loginQuery }, { username: loginQuery }],
     }).select('+password_hash +refresh_token_hash');
 
     if (!user) {
-      const error = new Error('unauthorized');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'unauthorized');
     }
 
     // Check soft delete status (45-day grace period)
@@ -154,36 +153,28 @@ export class AuthService {
       if (user.deleted_at) {
         const diffMs = Date.now() - user.deleted_at.getTime();
         const daysElapsed = diffMs / (1000 * 60 * 60 * 24);
-        if (daysElapsed <= 45) {
-          const daysRemaining = Math.max(0, Math.ceil(45 - daysElapsed));
+        if (daysElapsed <= ACCOUNT_DELETION_GRACE_DAYS) {
+          const daysRemaining = Math.max(0, Math.ceil(ACCOUNT_DELETION_GRACE_DAYS - daysElapsed));
           return {
             account_status: 'scheduled_for_deletion',
             days_remaining: daysRemaining,
           };
         }
       }
-      const error = new Error('unauthorized');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'unauthorized');
     }
 
     if (user.status === UserStatus.SUSPENDED) {
-      const error = new Error('forbidden');
-      (error as any).statusCode = 403;
-      throw error;
+      throw new ServiceError(403, 'forbidden');
     }
 
     if (!user.password_hash) {
-      const error = new Error('unauthorized');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'unauthorized');
     }
 
     const isMatch = await bcrypt.compare(input.password, user.password_hash);
     if (!isMatch) {
-      const error = new Error('unauthorized');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'unauthorized');
     }
 
     const tokens = this.generateTokenPair(user);
@@ -210,16 +201,12 @@ export class AuthService {
     try {
       payload = jwt.verify(oldRefreshToken, config.jwt.refreshSecret) as { sub: string };
     } catch {
-      const error = new Error('unauthorized');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'unauthorized');
     }
 
     const user = await User.findById(payload.sub).select('+refresh_token_hash');
     if (!user || !user.refresh_token_hash) {
-      const error = new Error('unauthorized');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'unauthorized');
     }
 
     const isMatch = await bcrypt.compare(oldRefreshToken, user.refresh_token_hash);
@@ -227,9 +214,7 @@ export class AuthService {
       // Possible token reuse / breach - invalidate stored session
       user.refresh_token_hash = null;
       await user.save();
-      const error = new Error('unauthorized');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'unauthorized');
     }
 
     // Issue rotated token pair
@@ -260,9 +245,7 @@ export class AuthService {
     }).select('+email_verification_token +email_verification_expires');
 
     if (!user) {
-      const error = new Error('invalid_or_expired_token');
-      (error as any).statusCode = 400;
-      throw error;
+      throw new ServiceError(400, 'invalid_or_expired_token');
     }
 
     user.is_email_verified = true;
@@ -289,8 +272,7 @@ export class AuthService {
   static async resendVerification(email: string): Promise<void> {
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user || user.is_email_verified) {
-      // Return cleanly to prevent email enumeration
-      return;
+      return; // Generic success to prevent email enumeration
     }
 
     const token = crypto.randomBytes(32).toString('hex');
@@ -307,7 +289,7 @@ export class AuthService {
   static async forgotPassword(email: string): Promise<void> {
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user) {
-      return; // Do not leak email existence
+      return; // Generic success to prevent email enumeration
     }
 
     const resetToken = crypto.randomBytes(32).toString('hex');
@@ -328,9 +310,7 @@ export class AuthService {
     }).select('+password_reset_token +password_reset_expires');
 
     if (!user) {
-      const error = new Error('invalid_or_expired_token');
-      (error as any).statusCode = 400;
-      throw error;
+      throw new ServiceError(400, 'invalid_or_expired_token');
     }
 
     user.password_hash = await bcrypt.hash(input.new_password, 10);
@@ -338,19 +318,6 @@ export class AuthService {
     user.password_reset_expires = null;
     user.refresh_token_hash = null; // Revoke active sessions
     await user.save();
-  }
-
-  /**
-   * Soft deletes user account (initiates 45-day grace period).
-   */
-  static async deleteAccount(userId: string): Promise<void> {
-    await User.findByIdAndUpdate(userId, {
-      $set: {
-        status: UserStatus.DELETED,
-        deleted_at: new Date(),
-        refresh_token_hash: null,
-      },
-    });
   }
 
   /**
@@ -364,29 +331,21 @@ export class AuthService {
     }).select('+password_hash');
 
     if (!user || !user.deleted_at) {
-      const error = new Error('unauthorized');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'unauthorized');
     }
 
     const diffDays = (Date.now() - user.deleted_at.getTime()) / (1000 * 60 * 60 * 24);
-    if (diffDays > 45) {
-      const error = new Error('account_permanently_deleted');
-      (error as any).statusCode = 410;
-      throw error;
+    if (diffDays > ACCOUNT_DELETION_GRACE_DAYS) {
+      throw new ServiceError(410, 'account_permanently_deleted');
     }
 
     if (!user.password_hash) {
-      const error = new Error('unauthorized');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'unauthorized');
     }
 
     const isMatch = await bcrypt.compare(password, user.password_hash);
     if (!isMatch) {
-      const error = new Error('unauthorized');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'unauthorized');
     }
 
     user.status = UserStatus.ACTIVE;
@@ -406,9 +365,7 @@ export class AuthService {
    */
   static getGoogleAuthUrl(state?: string): string {
     if (!config.google.clientId || !config.google.clientSecret) {
-      const error = new Error('google_oauth_not_configured');
-      (error as any).statusCode = 503;
-      throw error;
+      throw new ServiceError(503, 'google_oauth_not_configured');
     }
 
     const rootUrl = 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -433,9 +390,7 @@ export class AuthService {
    */
   static async handleGoogleCallback(code: string): Promise<AuthResult> {
     if (!config.google.clientId || !config.google.clientSecret) {
-      const error = new Error('google_oauth_not_configured');
-      (error as any).statusCode = 503;
-      throw error;
+      throw new ServiceError(503, 'google_oauth_not_configured');
     }
 
     // 1. Exchange code for Google tokens
@@ -452,9 +407,7 @@ export class AuthService {
     });
 
     if (!tokenResponse.ok) {
-      const error = new Error('google_token_exchange_failed');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'google_token_exchange_failed');
     }
 
     const tokenData = (await tokenResponse.json()) as { access_token: string };
@@ -465,9 +418,7 @@ export class AuthService {
     });
 
     if (!userinfoResponse.ok) {
-      const error = new Error('google_userinfo_failed');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'google_userinfo_failed');
     }
 
     const googleUser = (await userinfoResponse.json()) as {
@@ -490,7 +441,6 @@ export class AuthService {
       user.last_login_at = new Date();
       user.last_active_at = new Date();
     } else {
-      // Generate clean unique username from email
       let baseUsername = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_');
       if (baseUsername.length < 3) baseUsername = `user_${baseUsername}`;
       let candidate = baseUsername;
@@ -554,12 +504,13 @@ export class AuthService {
   /**
    * Generates and dispatches a 6-digit Phone verification OTP.
    */
-  static async sendPhoneOtp(userId: string, phoneNumber: string): Promise<{ message: string; expires_in: number }> {
+  static async sendPhoneOtp(
+    userId: string,
+    phoneNumber: string
+  ): Promise<{ message: string; expires_in: number }> {
     const user = await User.findById(userId);
     if (!user) {
-      const error = new Error('unauthorized');
-      (error as any).statusCode = 401;
-      throw error;
+      throw new ServiceError(401, 'unauthorized');
     }
 
     const otp = crypto.randomInt(100000, 999999).toString();
@@ -571,7 +522,6 @@ export class AuthService {
     user.phone_verification_attempts = 0;
     await user.save();
 
-    // Dev mode logger
     if (config.nodeEnv === 'development' || config.nodeEnv === 'test') {
       console.log('----------------------------------------------------');
       console.log(`📱 [DEV SMS/WhatsApp OTP] To: ${phoneNumber}`);
@@ -600,42 +550,32 @@ export class AuthService {
     );
 
     if (!user || !user.phone_verification_otp_hash || !user.phone_verification_expires) {
-      const error = new Error('no_otp_pending');
-      (error as any).statusCode = 400;
-      throw error;
+      throw new ServiceError(400, 'no_otp_pending');
     }
 
     if (user.phone_verification_expires < new Date()) {
       user.phone_verification_otp_hash = null;
       user.phone_verification_expires = null;
       await user.save();
-      const error = new Error('otp_expired');
-      (error as any).statusCode = 400;
-      throw error;
+      throw new ServiceError(400, 'otp_expired');
     }
 
     if (user.pending_phone_number !== phoneNumber) {
-      const error = new Error('phone_number_mismatch');
-      (error as any).statusCode = 400;
-      throw error;
+      throw new ServiceError(400, 'phone_number_mismatch');
     }
 
     if ((user.phone_verification_attempts || 0) >= 3) {
       user.phone_verification_otp_hash = null;
       user.phone_verification_expires = null;
       await user.save();
-      const error = new Error('too_many_attempts');
-      (error as any).statusCode = 429;
-      throw error;
+      throw new ServiceError(429, 'too_many_attempts');
     }
 
     const isMatch = await bcrypt.compare(otp, user.phone_verification_otp_hash);
     if (!isMatch) {
       user.phone_verification_attempts = (user.phone_verification_attempts || 0) + 1;
       await user.save();
-      const error = new Error('invalid_otp');
-      (error as any).statusCode = 400;
-      throw error;
+      throw new ServiceError(400, 'invalid_otp');
     }
 
     user.profile.phone_number = phoneNumber;

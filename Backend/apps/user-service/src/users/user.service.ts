@@ -19,6 +19,8 @@ const PRODUCER = 'user-service';
 /** Never return soft-deleted users from any read path. */
 const alive = { deleted_at: null };
 
+import { ServiceError } from '../utils/errors';
+
 
 /** `:ref` is a UUID or a username — one route, resolved here (be2-user-service-plan.md §3.1). */
 export async function findByRef(ref: string): Promise<IUser | null> {

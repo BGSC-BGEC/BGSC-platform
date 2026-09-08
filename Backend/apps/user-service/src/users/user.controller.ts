@@ -15,12 +15,7 @@ import {
 const viewerOf = (req: Request): Viewer | undefined =>
     req.user ? { id: req.user.id, role: req.user.role } : undefined;
 
-/** Wraps an async handler so a rejected promise reaches the error middleware instead of hanging. */
-export const wrap =
-    (fn: (req: Request, res: Response) => Promise<unknown>) =>
-    (req: Request, res: Response, next: NextFunction): void => {
-        fn(req, res).catch(next);
-    };
+import { wrap, ACCOUNT_DELETION_GRACE_DAYS } from '../utils/errors'; 
 
 export const getMe = wrap(async (req, res) => {
     // Deleted-inclusive on purpose: an owner must be able to see their own pending deletion,
