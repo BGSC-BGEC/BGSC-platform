@@ -33,6 +33,26 @@ export const config = {
   },
   // Shared secret for /internal/* service-to-service routes. Must be overridden in production.
   internalToken: process.env.INTERNAL_API_TOKEN || 'dev_internal_token_change_me',
+
+  /**
+   * The public edge — the gateway, which is the only port compose publishes. These were :3001 and
+   * :3000 when auth was the whole API; after the split :3001 is an internal-only service port and
+   * :3000 is the gateway, so an OAuth redirect or an email link pointing at either was aimed at
+   * something the user's browser cannot reach.
+   */
+  apiBaseUrl: process.env.API_BASE_URL || `http://localhost:${process.env.GATEWAY_PORT || '3000'}`,
+  /** The web app, not the API. Matches the Vite dev server already trusted in corsOrigin. */
+  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+    // Google matches redirect_uri exactly against the console entry, so this must be the address
+    // the browser is sent to — the gateway — and the same string in both places.
+    callbackUrl:
+      process.env.GOOGLE_CALLBACK_URL ||
+      `${process.env.API_BASE_URL || `http://localhost:${process.env.GATEWAY_PORT || '3000'}`}/auth/google/callback`,
+  },
   /** Port this process listens on. Each service overrides via its own PORT. */
   gatewayPort: parseInt(process.env.GATEWAY_PORT || '3000', 10),
 

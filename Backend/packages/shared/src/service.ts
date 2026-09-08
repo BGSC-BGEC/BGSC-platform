@@ -24,12 +24,42 @@ export interface ServiceOptions {
     onReady?: () => Promise<void>;
 }
 
+/**
+ * One success envelope for every service: `{ success: true, data: <payload> }`.
+ *
+ * Auth Service wrapped its responses and the others returned bare objects, so a client behind the
+ * gateway had to know which service it was talking to before it could read a response. Done here
+ * rather than at ~60 call sites because a rule enforced in one place cannot be forgotten in a
+ * handler written next week.
+ *
+ * Deliberately left alone:
+ *  - failures, which already carry `error` and stay `{ error, details? }` — the error handler owns
+ *    that shape, and wrapping it would make every client unwrap twice to find out something broke;
+ *  - anything a handler already wrapped, so a hand-written envelope is not nested inside another;
+ *  - `/health`, which orchestrators and the compose healthcheck parse as-is.
+ */
+export function successEnvelope(req: Request, res: Response, next: NextFunction): void {
+    if (req.path === '/health') return next();
+
+    const json = res.json.bind(res);
+    res.json = (body: unknown) => {
+        const wrapped =
+            body !== null &&
+            typeof body === 'object' &&
+            !Array.isArray(body) &&
+            ('error' in (body as object) || 'success' in (body as object));
+        return json(wrapped ? body : { success: true, data: body });
+    };
+    next();
+}
+
 export function createServiceApp(opts: ServiceOptions): Express {
     const app = express();
 
     app.use(cors({ origin: config.corsOrigin, credentials: true }));
     app.use(express.json({ limit: '1mb' }));
     app.use(express.urlencoded({ extended: true }));
+    app.use(successEnvelope);
 
     // nosniff matters most where a service serves user-supplied bytes from its own origin.
     app.use((_req, res, next) => {
@@ -64,7 +94,9 @@ export function createServiceApp(opts: ServiceOptions): Express {
         // A ServiceError is a deliberate, client-facing refusal. Mapping it centrally means a
         // handler cannot forget and turn a 409 into a 500.
         if (err instanceof ServiceError) {
-            res.status(err.status).json({ error: err.code });
+            res.status(err.status).json(
+                err.details === undefined ? { error: err.code } : { error: err.code, details: err.details }
+            );
             return;
         }
         console.error(`[${opts.name}] Unhandled error:`, err);

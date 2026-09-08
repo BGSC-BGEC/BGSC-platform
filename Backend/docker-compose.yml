@@ -76,6 +76,7 @@ services:
     depends_on:
       auth-service: { condition: service_healthy }
       user-service: { condition: service_healthy }
+      registration-service: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -134,6 +135,34 @@ services:
       redis: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3002/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  registration-service:
+    build: { context: ., dockerfile: Dockerfile }
+    image: bgsc-backend:local
+    restart: unless-stopped
+    command: ["node", "apps/registration-service/dist/index.js"]
+    expose:
+      - "3004"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3004
+      MONGO_URI: mongodb://bgsc_admin:bgsc_password@mongodb:27017/bgsc_dev?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
+      # Seat reservation is the one call this service makes out; unreachable means a submission
+      # stays 'submitted' rather than falsely claiming a seat.
+      EVENT_SERVICE_URL: http://event-service:3003
+    depends_on:
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3004/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5

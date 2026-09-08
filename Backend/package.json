@@ -10,7 +10,8 @@
     "typecheck": "npx -p typescript@7 tsc --build --force && npx -p typescript@7 tsc --noEmit -p tsconfig.check.json && npm run build",
     "selfcheck": "npm run selfcheck --workspaces --if-present",
     "e2e": "npm run e2e --workspaces --if-present",
-    "test": "npm run selfcheck && npm run e2e"
+    "test": "npm run selfcheck && npm run e2e",
+    "smoke": "ts-node src/gateway/gateway.smoke.ts"
   },
   "keywords": [],
   "author": "Rubber_Duck",

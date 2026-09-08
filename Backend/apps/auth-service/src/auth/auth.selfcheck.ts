@@ -12,8 +12,7 @@ import {
   VerifyPhoneOtpSchema,
 } from './auth.schemas';
 import { AuthService } from './auth.service';
-import { config } from '../config/env';
-import { UserRole, IUser } from '../models/User';
+import { IUser, UserRole, config } from '@bgsc/shared';
 
 /* ------------------------------- schemas ------------------------------- */
 

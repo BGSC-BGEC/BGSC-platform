@@ -4,8 +4,11 @@
     "references": [
         { "path": "./packages/shared" },
         { "path": "./apps/user-service" },
-        { "path": "./apps/auth-service" }
+        { "path": "./apps/auth-service" },
+        { "path": "./apps/registration-service" }
     ],
     "include": ["src/**/*"],
-    "exclude": ["node_modules", "dist"]
+    // Test code is compiled by tsconfig.check.json and run with ts-node; it must never reach dist,
+    // which is what ships in the image.
+    "exclude": ["node_modules", "dist", "**/*.selfcheck.ts", "**/*.e2e.ts", "**/*.smoke.ts"]
 }

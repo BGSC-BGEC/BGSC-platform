@@ -37,8 +37,9 @@ userRoutes.patch('/me', requireAuth, validate({ body: UpdateProfileSchema }), c.
 userRoutes.patch('/me/settings', requireAuth, validate({ body: UpdateSettingsSchema }), c.updateMySettings);
 userRoutes.get('/me/deletion-preview', requireAuth, c.deletionPreview);
 userRoutes.delete('/me', requireAuth, validate({ body: DeleteAccountSchema }), c.deleteMe);
-// Restore must not sit behind findActiveSelf — the caller is, by definition, deleted.
-userRoutes.post('/me/restore', requireAuth, c.restoreMe);
+// No POST /me/restore. Restoring is Auth Service's POST /account/reactivate: a soft-deleted user
+// holds no token (login returns a status, not tokens), so a route behind requireAuth here was
+// unreachable the moment their last access token expired. Auth authenticates by password instead.
 
 // Raw image body instead of multipart: one file, no form fields, no new dependency.
 // express.raw enforces the Spec §15.1 size cap before the buffer reaches the handler.

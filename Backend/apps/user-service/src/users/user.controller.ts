@@ -4,18 +4,18 @@ import { serializeUser, snapshotOf, Viewer } from './user.serializer';
 import { playerCardFor } from './playerCard';
 import { putObject, deleteObject, sniffImage, IMAGE_MAX_BYTES } from '../storage/storage';
 import {
+    ACCOUNT_DELETION_GRACE_DAYS,
     User,
     UserRole,
     UserStatus,
     recordAudit,
+    wrap,
 } from '@bgsc/shared';
 
 /** HTTP only. Data access, events and audit rows live in user.service.ts. */
 
 const viewerOf = (req: Request): Viewer | undefined =>
     req.user ? { id: req.user.id, role: req.user.role } : undefined;
-
-import { wrap, ACCOUNT_DELETION_GRACE_DAYS } from '../utils/errors'; 
 
 export const getMe = wrap(async (req, res) => {
     // Deleted-inclusive on purpose: an owner must be able to see their own pending deletion,
@@ -31,6 +31,10 @@ export const getMe = wrap(async (req, res) => {
                 restorable_until: user.deletion?.restorable_until ?? svc.restorableUntil(user.deleted_at),
                 restorable: new Date() <= (user.deletion?.restorable_until ?? svc.restorableUntil(user.deleted_at)),
                 research_consent: user.deletion?.research_consent ?? false,
+                // Named because this service deliberately has no restore route: a deleted user
+                // holds no token, so restoring authenticates by password at the Auth Service.
+                // Without this the only place a client learns a restore exists does not say how.
+                restore_with: 'POST /account/reactivate',
             },
         });
         return;
@@ -76,17 +80,6 @@ export const deleteMe = wrap(async (req, res) => {
         data_retained: true,
         research_consent,
     });
-});
-
-/**
- * Undo a deletion inside the window (D11). Uses the deleted-inclusive lookup — every other route
- * filters soft-deleted users out, which is exactly why this one needs its own.
- */
-export const restoreMe = wrap(async (req, res) => {
-    const user = await svc.findSelfIncludingDeleted(req.user!.id);
-    if (!user) return void res.status(404).json({ error: 'not_found' });
-    const restored = await svc.restoreSelf(user, req.user!.id);
-    res.json(serializeUser(restored, viewerOf(req), true));
 });
 
 export const uploadAvatar = wrap(async (req, res) => {

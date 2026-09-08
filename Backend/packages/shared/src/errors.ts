@@ -6,8 +6,16 @@
  * importing from a service (which would invert the dependency).
  */
 export class ServiceError extends Error {
-    constructor(public status: number, public code: string) {
+    /**
+     * `details` carries the per-field reasons behind a refusal — the form validation engine's
+     * output, for instance. Without it a `validation_failed` tells a client that something is
+     * wrong and nothing about what, which is not an error message, it is a shrug.
+     */
+    constructor(public status: number, public code: string, public details?: unknown) {
         super(code);
         this.name = 'ServiceError';
+        // Restores the prototype chain when the class is extended across a compiled boundary, so
+        // `err instanceof ServiceError` in the shared error handler stays true.
+        Object.setPrototypeOf(this, ServiceError.prototype);
     }
 }

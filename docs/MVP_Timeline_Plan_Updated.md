@@ -117,7 +117,7 @@
 #### Backend (BE-1 & BE-2)
 
 **Saturday Sep 5 (8h):**
-- [ ] **BE-1: NoSQL Database Setup & Auth Models** (8h)
+- [x] **BE-1: NoSQL Database Setup & Auth Models** (8h)
   - Finalize database choice (MongoDB/Firestore/DynamoDB)
   - Setup development environment
   - Create database instance and configure connections
@@ -125,7 +125,7 @@
   - Design Auth token structure
   - Setup database indexes
 
-- [ ] **BE-2: Core Data Models** (8h)
+- [x] **BE-2: Core Data Models** (8h)
   - Design Event model (categories, filters, details, auction)
   - Design Registration model (common schema for dynamic forms)
   - Design Points & Leaderboard model
@@ -134,7 +134,7 @@
   - Document relationships and references
 
 **Sunday Sep 6 (8h):**
-- [ ] **BE-1: Authentication Service** (8h)
+- [x] **BE-1: Authentication Service** (8h)
   - JWT implementation
   - Registration endpoint (email, username, password)
   - Login endpoint
@@ -238,7 +238,7 @@
   - Event image upload
   - Event capacity and registration deadline
 
-- [ ] **BE-2: Registration Service (Common)** (8h)
+- [x] **BE-2: Registration Service (Common)** (8h)
   - Dynamic form schema design
   - Form creation endpoint (admin creates forms)
   - Form submission endpoint (users submit responses)

@@ -3,7 +3,7 @@
  * constraints actually fire, and that the concurrency patterns the modeldocs promise hold under
  * real parallel writes.
  *
- * `models/selfcheck.ts` covers schema rules and invariant hooks in memory. Neither of those catches
+ * `models/models.selfcheck.ts` covers schema rules and invariant hooks in memory. Neither of those catches
  * an index that MongoDB refuses to create — which is how a duplicate-registration guard can be
  * documented, reviewed, merged, and never exist.
  *

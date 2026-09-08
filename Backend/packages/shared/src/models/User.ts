@@ -1,5 +1,5 @@
 import { Schema, model, Document } from 'mongoose';
-import { uuidId, timestamps } from './shared';
+import { uuidId, timestamps, UserSnapshot } from './shared';
 
 /**
  * User / Auth Service (BE-1). Converted Sep 6, 2026 to the conventions in docs/modeldocs/README.md:
@@ -203,4 +203,49 @@ UserSchema.index({ last_active_at: -1 });
 UserSchema.index({ deleted_at: 1 }); // purge/restore-window sweeps, and 'who deleted recently' // admin "Last Active Epoch" column (Spec §5.15.5)
 UserSchema.index({ username: 'text', 'profile.full_name': 'text' }); // user search (Spec §13.1)
 
+/**
+ * One account per verified phone number.
+ *
+ * Partial on `is_phone_verified` rather than covering every stored number: a profile update can
+ * put an unverified number on file, and a plain unique index would let anyone squat a number they
+ * do not own and lock its real owner out of verification. Only a number someone actually proved
+ * they control is claimed.
+ */
+UserSchema.index(
+    { 'profile.phone_number': 1 },
+    {
+        unique: true,
+        partialFilterExpression: { is_phone_verified: true, 'profile.phone_number': { $type: 'string' } },
+    }
+);
+
 export const User = model<IUser>('User', UserSchema, 'users');
+
+/**
+ * Self-service restore window for a soft-deleted account (Spec §11.2: a 45-day restoration grace
+ * period, then permanent purge).
+ *
+ * One constant, here beside the model it governs, because two services read it: User Service
+ * reports it and stamps `deletion.restorable_until`, Auth Service decides whether a deleted user
+ * may sign back in. They were 30 and 45 respectively, which left days 31–45 telling the user they
+ * could restore while the restore path refused them.
+ */
+export const ACCOUNT_DELETION_GRACE_DAYS = 45;
+
+/**
+ * The `{ user_id, display_name, avatar_url }` snapshot embedded by form_submissions, teams,
+ * leaderboard_entries, challenge_participations, announcements and auction_lots
+ * (relationships.md §4).
+ *
+ * Lives here, next to the model it projects, so "what a display name is" has exactly one
+ * definition. User Service serves it over `/internal/users/snapshot` for anything outside this
+ * repo; services inside it read `users` directly — the ownership table (relationships.md §1)
+ * makes every service a reader of `users`, and only User/Auth Service a writer.
+ */
+export function userSnapshotOf(user: IUser): UserSnapshot {
+    return {
+        user_id: user._id,
+        display_name: user.profile?.full_name ?? user.username,
+        avatar_url: user.profile?.avatar_url ?? null,
+    };
+}

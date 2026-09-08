@@ -21,7 +21,7 @@ import { UserRole } from '../models/User';
  * will happily accept a token the attacker signed with HS256 using the *public* key as the HMAC
  * secret. Pinning now costs nothing and removes the whole class.
  */
-export const ACCESS_TOKEN_ALGORITHMS: jwt.Algorithm[] = ['HS256'];
+export const TOKEN_ALGORITHMS: jwt.Algorithm[] = ['HS256'];
 
 export interface AuthUser {
     id: string;
@@ -67,7 +67,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     let payload: AccessTokenPayload;
     try {
         payload = jwt.verify(token, config.jwt.accessSecret, {
-            algorithms: ACCESS_TOKEN_ALGORITHMS,
+            algorithms: TOKEN_ALGORITHMS,
         }) as AccessTokenPayload;
     } catch {
         res.status(401).json({ error: 'unauthorized' });
@@ -93,7 +93,7 @@ export function optionalAuth(req: Request, _res: Response, next: NextFunction): 
     if (!token) return next();
     try {
         const payload = jwt.verify(token, config.jwt.accessSecret, {
-            algorithms: ACCESS_TOKEN_ALGORITHMS,
+            algorithms: TOKEN_ALGORITHMS,
         }) as AccessTokenPayload;
         if (typeof payload.sub === 'string' && payload.sub && ROLES.has(payload.role)) {
             req.user = { id: payload.sub, role: payload.role };
