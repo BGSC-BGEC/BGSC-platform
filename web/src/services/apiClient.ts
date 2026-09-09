@@ -38,25 +38,40 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     const response = await fetch(url, config)
 
     if (!response.ok) {
-    let errorMessage = `HTTP Error ${response.status}: ${response.statusText}`
-    try {
-        const errorData = await response.json()
-        if (errorData && typeof errorData === 'object' && 'message' in errorData) {
-        errorMessage = String(errorData.message)
+        let errorMessage = `HTTP Error ${response.status}: ${response.statusText}`
+        try {
+            const errorData = await response.json()
+            if (errorData && typeof errorData === 'object') {
+            if ('error' in errorData && typeof errorData.error === 'string') {
+                errorMessage = errorData.error
+            } else if ('message' in errorData && typeof errorData.message === 'string') {
+                errorMessage = errorData.message
+            }
+            }
+        } catch {
+            // Non-JSON response body; keep default HTTP message
         }
-    } catch {
-        // Non-JSON response body; keep default message
-    }
-    throw new Error(errorMessage)
-    }
+        throw new Error(errorMessage)
+        }
 
-    // 7. Parse 204 No Content or JSON Body
-    if (response.status === 204) {
-    return null as T
-    }
+        if (response.status === 204) {
+        return null as T
+        }
 
-    return (await response.json()) as T
-}
+        const result = await response.json()
+
+        if (
+        result &&
+        typeof result === 'object' &&
+        'success' in result &&
+        result.success === true &&
+        'data' in result
+        ) {
+        return (result as { data: T }).data
+        }
+
+        return result as T
+    }
 
 
 export const apiClient = {

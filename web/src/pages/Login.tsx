@@ -30,7 +30,7 @@ export const Login: React.FC<LoginProps> = ({
 
     setLoading(true)
     try {
-        await login(username, role)
+        await login(username, password, role)
         navigate('/dashboard', { replace: true })
     } finally {
         setLoading(false)
