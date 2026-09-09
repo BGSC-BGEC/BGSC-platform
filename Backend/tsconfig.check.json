@@ -1,0 +1,17 @@
+{
+    // Typecheck-only project covering EVERYTHING, tests included.
+    //
+    // The build configs exclude *.selfcheck.ts and *.e2e.ts so test code does not ship in dist —
+    // but that also meant ~1500 lines of it were never typechecked by `npm run build`. This config
+    // closes that hole: no emit, no composite, so it can include the whole tree.
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        "noEmit": true,
+        "composite": false,
+        "declaration": false,
+        "declarationMap": false,
+        "incremental": false
+    },
+    "include": ["src/**/*", "packages/*/src/**/*", "apps/*/src/**/*"],
+    "exclude": ["node_modules", "dist", "**/dist/**"]
+}

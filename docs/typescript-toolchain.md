@@ -74,7 +74,7 @@ npm run selfcheck   # ts-node → "models selfcheck: all assertions passed"
 
 ## 7. Still open (BE-1)
 
-`Backend/src/index.ts` does not exist, so `npm run dev` has no entrypoint to run. That is separate from the TypeScript problem and outlives this fix.
+~~`Backend/src/index.ts` does not exist, so `npm run dev` has no entrypoint to run.~~ **Resolved later the same day:** BE-2 wrote it, and after the microservices split it is the API gateway. `npm run dev` runs the gateway; each service has its own.
 
 ## 8. Note on the spec
 

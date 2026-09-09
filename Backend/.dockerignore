@@ -8,7 +8,9 @@ pnpm-debug.log*
 # Build and compilation outputs                                                                                                       
 dist/                                                                                                                                 
 build/                                                                                                                                
-*.tsbuildinfo                                                                                                                         
+# Must be **/ — a bare *.tsbuildinfo only matches the root directory, and a stale nested one makes
+# `tsc --build` declare a project up to date, emit no dist/, and fail everything that imports it.
+**/*.tsbuildinfo                                                                                                                         
                                                                                                                                       
 # Environment & Secrets (Never bake actual secrets into images)                                                                       
 .env                                                                                                                                  
@@ -40,3 +42,12 @@ logs/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Workspace build outputs (the image builds its own)
+packages/*/dist/
+apps/*/dist/
+packages/*/node_modules/
+apps/*/node_modules/
+
+# Local upload storage — never bake user files into an image
+uploads/

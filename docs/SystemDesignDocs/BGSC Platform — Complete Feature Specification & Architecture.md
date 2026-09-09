@@ -322,7 +322,7 @@ Contains links to:
 ### 4.1 Core Entities
 
 > **Implementation note (Sep 6, 2026).** The entities below are the original domain sketch. The
-> collections actually built are in `Backend/src/models/`, designed in `docs/modeldocs/`. Field names
+> collections actually built are in `Backend/packages/shared/src/models/`, designed in `docs/modeldocs/`. Field names
 > there are `snake_case`, `_id` is a UUID v4 **string** (not an ObjectId), and every timestamp ends
 > in `_at`. Where the two disagree, the models are authoritative. Sections 4.1.1 and 4.1.2 list what
 > exists; entities with no subsection below are still unbuilt.
@@ -2008,28 +2008,28 @@ PlayerUnsold { auction_id, player_id, timestamp }
     
 - **Password Policy:** Min 8 chars, 1 uppercase, 1 number, 1 special char. BCrypt hashing.
     
-- **OAuth2:** Google sign-in with state parameter CSRF protection
+- **OAuth2:** Google sign-in with state parameter CSRF protection (co-located on same server)
+    
+- **Phone Verification:** 6-digit numeric OTP via SMS/WhatsApp with 5-minute expiry, hashed storage, max 3 verification attempts, and 3 OTP requests per 15 min rate limit
     
 - **2FA:** TOTP-based, required for Coordinator promotion and Founder actions
     
-- **Rate Limiting:**
+- **DDoS Mitigation & Multi-Tier Rate Limiting:**
     
-    - Auth endpoints: 5 attempts per 15 minutes per IP
-        
-    - General API: 100 requests per minute per user
-        
-    - Auction bidding: 1 request per second per user
-        
-    - Friend requests: 10 per day
-        
-    - Posts: 5 per hour for new users, 20 per hour for established users
-        
-    - Sponsor change: 1 per semester
+    - **Edge Layer (Cloudflare DNS Proxy):** Public domain (`api.bgsc.in`) proxied through Cloudflare to absorb Layer 3/4 volumetric DDoS floods and hide the origin server IP.
+    
+    - **Gateway Ingress Layer (Port 3000):** Single public entry point reverse-proxying traffic to downstream microservices (Auth :3001, Users :3002, Events :3004, Points :3005). Drops malformed traffic and enforces payload size limits (1MB default).
+    
+    - **Application Rate Limiting (Sliding Window):**
+        - Auth & OTP endpoints (`/auth/login`, `/auth/register`, `/auth/phone/send-otp`): 5 attempts per 15 minutes per IP (blocks brute force & SMS flooding)
+        - General API: 100 requests per minute per user/IP
+        - Auction bidding: 1 request per second per user
+        - Excess requests immediately reject with `429 Too Many Requests` and `Retry-After` header.
         
 
 ### 11.2 Data Privacy
 
-- **Encryption:** AES-256 at rest, TLS 1.3 in transit
+- **Encryption:** AES-256 at rest, TLS 1.3 in transit (all client-server packets across mobile, web admin, and backend are encrypted end-to-end via TLS 1.3 / HTTPS; no manual client application-layer packet crypto required)
     
 - **Field Masking:** Email and phone partially masked in public APIs (e.g., `r***@gmail.com`)
     
@@ -2039,7 +2039,7 @@ PlayerUnsold { auction_id, player_id, timestamp }
     
     - Account Information Request: Complete data export including all chat history, posts, points transactions, sponsor data
         
-    - Right to deletion: Account removal with 30-day grace period — **see 11.2.1 for what this actually does as built**
+    - Right to deletion: Soft delete with 45-day grace period — **see 11.2.1 for what this actually does as built** before permanent purge. Logging in within 45 days allows account restoration; unrecovered accounts are permanently purged after 45 days
         
     - Privacy Policy and Terms of Service accessible pre-registration and in Account Actions
         
@@ -2054,9 +2054,10 @@ plain reading of "right to deletion" above.
 | On request | `deleted_at` stamped, `status` → `deleted`, refresh token cleared. The account disappears from search, public profile reads and admin lists immediately |
 | Data retained | **Everything.** No field is destroyed and no purge job exists. Registrations, point transactions, leaderboard entries and team rosters keep resolving |
 | Grace period | 30 days, and it governs **restore**, not deletion. Signing in during the window restores the account. After it, restore is admin-only |
-| Disclosure | The client must state before confirming that data is retained. The confirmation captures `confirm`, an optional `reason`, and an opt-in `research_consent` (default off) |
+| Disclosure | `GET /users/me/deletion-preview` returns the exact retention text the client must show, versioned. The confirmation captures `confirm: "DELETE"` (literal, case-sensitive), an optional `reason`, and an opt-in `research_consent` (default off) |
+| Restore | `POST /users/me/restore` while inside the window. `GET /users/me` keeps answering for the owner of a deleted account — otherwise they could never reach it. Past the window: `410`, admin only |
 | `research_consent` | Marks whose identifiable data may be **used** for institutional research. Retention is universal; this flag governs use, not storage |
-| Audit | Every deletion writes an immutable `AuditLog` row recording what was disclosed and what was consented to |
+| Audit | Every deletion writes an immutable `AuditLog` row recording the disclosure version shown and the consent given. Restores write `user.restored` |
 | Encryption | Not yet implemented. 11.2's AES-256 at rest remains outstanding work; nothing in this flow assumes it |
 
 Consequence to be aware of: a user who deletes their account cannot have their personal data removed
@@ -2123,7 +2124,7 @@ has to be written — the schema supports it (`deleted_at` is already the marker
     
 - Download my data (GDPR export, emailed as ZIP)
     
-- Delete account (with confirmation flow and 30-day grace period)
+- Delete account (with confirmation flow, immediate session termination, and 45-day restoration grace period)
     
 
 ### 12.2 Privacy Settings
