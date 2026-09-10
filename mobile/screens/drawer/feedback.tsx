@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Alert } from '../../src/feedback/Alert';
 import { Button } from '../../src/components/Button';
 import { Card } from '../../src/components/Card';
+import { AppHeader } from '../../src/components/AppHeader';
 import { RadioGroup } from '../../src/forms/RadioGroup';
 import { TextArea } from '../../src/forms/TextArea';
 import { Typography } from '../../src/typography/Typography';
@@ -15,12 +16,12 @@ export default function Feedback() {
   const [message, setMessage] = useState('');
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <AppHeader title="Feedback" />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        <Typography variant="displayTitle">Feedback</Typography>
         <Typography variant="body" color="textMuted">Help us make the BGSC experience better.</Typography>
         <Alert variant="info" title="Your feedback matters" description="Tell us what worked and what we can improve." />
-        <Card variant="glass">
+        <Card variant="solid">
           <Typography variant="h3">What is this about?</Typography>
           <RadioGroup value={category} onChange={setCategory} options={[
             { label: 'App experience', value: 'experience', subtitle: 'Usability, bugs, or ideas' },

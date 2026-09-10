@@ -5,9 +5,6 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import HallOfFame from './hall-of-fame';
-import Feedback from './feedback';
-import Announcement from './announcement';
 import BottomTabsLayout from './bottom-tabs-layout';
 import { useAuth } from '../../store/auth';
 
@@ -50,33 +47,57 @@ function DrawerWithTabs() {
             <Ionicons name="home-outline" size={size} color={color} />
           ),
         }}
+        listeners={({ navigation }) => ({
+          drawerItemPress: (e) => {
+            e.preventDefault();
+            navigation.navigate('MainTabs', { screen: 'HomeTab' });
+          },
+        })}
       />
       <Drawer.Screen
         name="Announcements"
-        component={Announcement}
+        component={BottomTabsLayout}
         options={{
           drawerIcon: ({ color, size }) => (
             <Ionicons name="megaphone-outline" size={size} color={color} />
           ),
         }}
+        listeners={({ navigation }) => ({
+          drawerItemPress: (e) => {
+            e.preventDefault();
+            navigation.navigate('MainTabs', { screen: 'AnnouncementsTab' });
+          },
+        })}
       />
       <Drawer.Screen
         name="Hall of Fame"
-        component={HallOfFame}
+        component={BottomTabsLayout}
         options={{
           drawerIcon: ({ color, size }) => (
             <Ionicons name="star-outline" size={size} color={color} />
           ),
         }}
+        listeners={({ navigation }) => ({
+          drawerItemPress: (e) => {
+            e.preventDefault();
+            navigation.navigate('MainTabs', { screen: 'HallOfFameTab' });
+          },
+        })}
       />
       <Drawer.Screen
         name="Feedback"
-        component={Feedback}
+        component={BottomTabsLayout}
         options={{
           drawerIcon: ({ color, size }) => (
             <Ionicons name="chatbox-outline" size={size} color={color} />
           ),
         }}
+        listeners={({ navigation }) => ({
+          drawerItemPress: (e) => {
+            e.preventDefault();
+            navigation.navigate('MainTabs', { screen: 'FeedbackTab' });
+          },
+        })}
       />
       <Drawer.Screen
         name="Logout"
