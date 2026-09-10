@@ -24,6 +24,7 @@ import {
 } from '../../src/auth';
 import { TextInput } from '../../src/forms/TextInput';
 import { Typography } from '../../src/typography/Typography';
+import { PALETTE, withAlpha } from '../../src/theme/colors';
 
 export default function LoginScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();

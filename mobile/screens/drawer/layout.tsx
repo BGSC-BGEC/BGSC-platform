@@ -3,13 +3,12 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import HallOfFame from './hall-of-fame';
 import Feedback from './feedback';
-import Events from './events';
 import Announcement from './announcement';
-import Home from './home';
-import Leaderboard from './leaderboard';
+import BottomTabsLayout from './bottom-tabs-layout';
 import { useAuth } from '../../store/auth';
 
 import LoginScreen from '../login/login';
@@ -30,39 +29,88 @@ function LogoutScreen() {
   return <View style={{ flex: 1, backgroundColor: '#FFF8F2' }} />;
 }
 
+function DrawerWithTabs() {
+  const { logout } = useAuth();
+
+  return (
+    <Drawer.Navigator
+      screenOptions={{
+        headerShown: false,
+        drawerActiveTintColor: '#FF6B35',
+        drawerInactiveTintColor: '#6E665D',
+        drawerType: 'front',
+      }}
+    >
+      <Drawer.Screen
+        name="MainTabs"
+        component={BottomTabsLayout}
+        options={{
+          drawerLabel: 'Home',
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="home-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Drawer.Screen
+        name="Announcements"
+        component={Announcement}
+        options={{
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="megaphone-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Drawer.Screen
+        name="Hall of Fame"
+        component={HallOfFame}
+        options={{
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="star-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Drawer.Screen
+        name="Feedback"
+        component={Feedback}
+        options={{
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="chatbox-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Drawer.Screen
+        name="Logout"
+        component={LogoutScreen}
+        options={{
+          drawerLabel: 'Logout',
+          drawerLabelStyle: {
+            color: '#D32F2F',
+            fontWeight: '700',
+          },
+          drawerActiveTintColor: '#D32F2F',
+          drawerInactiveTintColor: '#D32F2F',
+          drawerIcon: ({ color, size }) => (
+            <Ionicons name="log-out-outline" size={size} color={color} />
+          ),
+        }}
+        listeners={{
+          drawerItemPress: (e) => {
+            e.preventDefault();
+            void logout();
+          },
+        }}
+      />
+    </Drawer.Navigator>
+  );
+}
+
 function DrawerLayout() {
-  const { isLoggedIn, logout } = useAuth();
+  const { isLoggedIn } = useAuth();
 
   return (
     <NavigationContainer>
       {isLoggedIn ? (
-        <Drawer.Navigator>
-          <Drawer.Screen name="Home" component={Home} />
-          <Drawer.Screen name="Announcement" component={Announcement} />
-          <Drawer.Screen name="Events" component={Events} />
-          <Drawer.Screen name="Feedback" component={Feedback} />
-          <Drawer.Screen name="Hall of Fame" component={HallOfFame} />
-          <Drawer.Screen name="Leaderboard" component={Leaderboard} />
-          <Drawer.Screen
-            name="Logout"
-            component={LogoutScreen}
-            options={{
-              drawerLabel: 'Logout',
-              drawerLabelStyle: {
-                color: '#D32F2F',
-                fontWeight: '700',
-              },
-              drawerActiveTintColor: '#D32F2F',
-              drawerInactiveTintColor: '#D32F2F',
-            }}
-            listeners={{
-              drawerItemPress: (e) => {
-                e.preventDefault();
-                void logout();
-              },
-            }}
-          />
-        </Drawer.Navigator>
+        <DrawerWithTabs />
       ) : (
         <Stack.Navigator
           screenOptions={{

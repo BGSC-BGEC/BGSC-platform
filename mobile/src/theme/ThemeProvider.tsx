@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo, useState } from 'react';
-import { useColorScheme as useRNColorScheme } from 'react-native';
+import { useColorScheme as useRNColorScheme, ViewStyle } from 'react-native';
 
 import {
   type UIThemeColors,
@@ -7,12 +7,19 @@ import {
   darkThemeColors,
   lightThemeColors,
 } from './colors';
+import { getNeumorphicShadow, getNeumorphicStyle } from './neumorphism';
 
 interface ThemeContextValue {
   mode: ThemeMode;
   isDark: boolean;
   colors: UIThemeColors;
   setMode: (mode: 'light' | 'dark' | 'system') => void;
+  shadow: (type: 'pressed' | 'flat' | 'raised' | 'elevated' | 'inner') => ViewStyle;
+  neumorphic: (
+    backgroundColor: string,
+    shadowType: 'pressed' | 'flat' | 'raised' | 'elevated' | 'inner',
+    borderRadius?: number
+  ) => ViewStyle;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -42,6 +49,8 @@ export function ThemeProvider({ children, initialMode }: ThemeProviderProps) {
       isDark,
       colors: isDark ? darkThemeColors : lightThemeColors,
       setMode: setSelectedTheme,
+      shadow: (type) => getNeumorphicShadow(type, resolvedMode),
+      neumorphic: (bg, shadowType, radius) => getNeumorphicStyle(bg, shadowType, resolvedMode, radius),
     };
   }, [resolvedMode]);
 
