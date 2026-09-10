@@ -6,14 +6,12 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
-
 import { useTheme } from '../theme/ThemeProvider';
 import { Typography } from '../typography/Typography';
 import { ANIMATION } from '../theme/spacing';
 
-export type CardVariant = 'glass' | 'solid' | 'elevated' | 'accent';
+export type CardVariant = 'solid' | 'elevated' | 'accent' | 'layered' | 'inner';
 
 export interface CardProps {
   children: React.ReactNode;
@@ -26,13 +24,13 @@ export interface CardProps {
 
 export function Card({
   children,
-  variant = 'glass',
+  variant = 'solid',
   selected = false,
   onPress,
   accessibilityLabel,
   style,
 }: CardProps) {
-  const { colors, isDark } = useTheme();
+  const { colors, shadow, mode } = useTheme();
   const [scale] = useState(() => new Animated.Value(1));
   const [opacity] = useState(() => new Animated.Value(1));
 
@@ -73,63 +71,58 @@ export function Card({
     onPress?.();
   };
 
-  let backgroundColor = 'transparent';
-  let borderColor = colors.border;
+  let backgroundColor = colors.surface;
+  let borderColor = 'transparent';
+  let borderWidth = 0;
+  let cardShadow = shadow('raised');
+  let borderRadius = 24;
 
   switch (variant) {
     case 'solid':
-      backgroundColor = colors.surfaceSolid;
+      backgroundColor = colors.surface;
+      cardShadow = shadow('raised');
       break;
     case 'elevated':
       backgroundColor = colors.surfaceElevated;
+      cardShadow = shadow('elevated');
       break;
     case 'accent':
       backgroundColor = colors.accentMuted;
       borderColor = colors.accent;
+      borderWidth = 1;
+      cardShadow = shadow('raised');
       break;
-    case 'glass':
-    default:
-      backgroundColor = 'transparent';
+    case 'layered':
+      // Special layered card with inner surface
+      backgroundColor = colors.surface;
+      cardShadow = shadow('raised');
+      break;
+    case 'inner':
+      // Inner card surface (lighter)
+      backgroundColor = colors.surfaceInner;
+      cardShadow = shadow('flat');
+      borderRadius = 20;
       break;
   }
 
   if (selected) {
     borderColor = colors.accent;
+    borderWidth = 2;
   }
-
-  const surfaceOverlay = (
-    <>
-      {variant === 'glass' && (
-        <BlurView
-          intensity={50}
-          tint={isDark ? 'dark' : 'light'}
-          style={StyleSheet.absoluteFill}
-        />
-      )}
-      <View
-        pointerEvents="none"
-        style={[
-          StyleSheet.absoluteFill,
-          {
-            backgroundColor:
-              variant === 'glass'
-                ? selected
-                  ? colors.accentMuted
-                  : colors.surface
-                : backgroundColor,
-          },
-        ]}
-      />
-    </>
-  );
 
   const containerStyle = [
     styles.card,
     {
+      backgroundColor,
       borderColor,
+      borderWidth,
+      borderRadius,
     },
+    cardShadow,
     style,
   ];
+
+  const content = <>{children}</>;
 
   if (onPress) {
     return (
@@ -142,19 +135,13 @@ export function Card({
           accessibilityLabel={accessibilityLabel}
           style={containerStyle}
         >
-          {surfaceOverlay}
-          {children}
+          {content}
         </Pressable>
       </Animated.View>
     );
   }
 
-  return (
-    <View style={containerStyle}>
-      {surfaceOverlay}
-      {children}
-    </View>
-  );
+  return <View style={containerStyle}>{content}</View>;
 }
 
 // Subcomponents for Card
@@ -219,9 +206,7 @@ Card.Footer = CardFooter;
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 16,
-    borderWidth: 1,
-    overflow: 'hidden',
+    overflow: 'visible',
     padding: 16,
     gap: 12,
   },
@@ -250,4 +235,3 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
-

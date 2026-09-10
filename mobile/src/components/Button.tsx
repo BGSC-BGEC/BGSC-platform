@@ -59,7 +59,7 @@ export function Button({
   accessibilityLabel,
   style,
 }: ButtonProps) {
-  const { colors, isDark } = useTheme();
+  const { colors, isDark, shadow } = useTheme();
   const [scale] = useState(() => new Animated.Value(1));
   const [opacity] = useState(() => new Animated.Value(1));
 
