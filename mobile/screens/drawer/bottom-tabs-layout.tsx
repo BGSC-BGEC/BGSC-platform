@@ -7,6 +7,9 @@ import Home from './home';
 import Events from './events';
 import Leaderboard from './leaderboard';
 import Profile from './profile';
+import Announcement from './announcement';
+import HallOfFame from './hall-of-fame';
+import Feedback from './feedback';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 const Tab = createBottomTabNavigator();
@@ -72,6 +75,31 @@ export default function BottomTabsLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="person" size={size} color={color} />
           ),
+        }}
+      />
+      {/* Hidden tabs for drawer screens - accessible via drawer but with bottom nav */}
+      <Tab.Screen
+        name="AnnouncementsTab"
+        component={Announcement}
+        options={{
+          tabBarButton: () => null, // Hide from bottom tabs
+          tabBarLabel: 'Announcements',
+        }}
+      />
+      <Tab.Screen
+        name="HallOfFameTab"
+        component={HallOfFame}
+        options={{
+          tabBarButton: () => null, // Hide from bottom tabs
+          tabBarLabel: 'Hall of Fame',
+        }}
+      />
+      <Tab.Screen
+        name="FeedbackTab"
+        component={Feedback}
+        options={{
+          tabBarButton: () => null, // Hide from bottom tabs
+          tabBarLabel: 'Feedback',
         }}
       />
     </Tab.Navigator>
