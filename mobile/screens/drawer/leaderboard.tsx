@@ -3,6 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Badge } from '../../src/components/Badge';
 import { Card } from '../../src/components/Card';
 import { SectionHeader } from '../../src/components/SectionHeader';
+import { AppHeader } from '../../src/components/AppHeader';
 import { Typography } from '../../src/typography/Typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
@@ -11,9 +12,9 @@ export default function Leaderboard() {
   const players = [['1', 'Aarav Sharma', '2,480'], ['2', 'Meera Das', '2,120'], ['3', 'Jeet Patel', '1,250']];
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <AppHeader title="Leaderboard" />
       <ScrollView contentContainerStyle={styles.content}>
-        <Typography variant="displayTitle">Leaderboard</Typography>
         <Typography variant="body" color="textMuted">Season rankings across all activities.</Typography>
         <Card variant="accent">
           <Card.Header title="Your position" rightAction={<Badge label="Top 10%" variant="success" />} />

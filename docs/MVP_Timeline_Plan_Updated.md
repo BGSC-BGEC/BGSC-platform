@@ -90,9 +90,12 @@
 - **Impact:** Backend architecture redesign required
 - **Priority:** Must complete early (Week 1)
 
-### New Service Architecture
-- **Registration Service:** Common/shared service for all form-based registrations
-- **Modular Design:** Services must be independently deployable
+### New Service Architecture (API Gateway & Microservices)
+- **API Gateway Topology:** Single public ingress (port 3000) bound to domain DNS (e.g. `api.bgsc.in`), reverse-proxying to downstream microservices (Auth :3001, Users :3002, Events :3004, Points :3005).
+- **Shared Database Model:** One MongoDB database instance (`bgsc_dev`), with each microservice feeding from and owning its dedicated collections.
+- **Registration Service:** Common/shared service for all form-based registrations.
+- **DDoS & Abuse Prevention:** Cloudflare DNS proxy on public domain; API Gateway sliding-window rate limiting (100 req/min general, 5/15min on auth & phone OTP).
+- **Modular Containerization:** Each service independently deployable with Docker containers.
 
 ---
 
@@ -114,7 +117,7 @@
 #### Backend (BE-1 & BE-2)
 
 **Saturday Sep 5 (8h):**
-- [ ] **BE-1: NoSQL Database Setup & Auth Models** (8h)
+- [x] **BE-1: NoSQL Database Setup & Auth Models** (8h)
   - Finalize database choice (MongoDB/Firestore/DynamoDB)
   - Setup development environment
   - Create database instance and configure connections
@@ -122,7 +125,7 @@
   - Design Auth token structure
   - Setup database indexes
 
-- [ ] **BE-2: Core Data Models** (8h)
+- [x] **BE-2: Core Data Models** (8h)
   - Design Event model (categories, filters, details, auction)
   - Design Registration model (common schema for dynamic forms)
   - Design Points & Leaderboard model
@@ -131,7 +134,7 @@
   - Document relationships and references
 
 **Sunday Sep 6 (8h):**
-- [ ] **BE-1: Authentication Service** (8h)
+- [x] **BE-1: Authentication Service** (8h)
   - JWT implementation
   - Registration endpoint (email, username, password)
   - Login endpoint
@@ -139,8 +142,10 @@
   - Token refresh mechanism
   - Input validation and sanitization
   - Email verification setup
+  - Phone number OTP verification setup (send OTP, verify OTP with dev logger fallback)
+  - Account deactivation & deletion workflow (45-day restoration grace period)
 
-- [ ] **BE-2: User Service Core** (8h)
+- [x] **BE-2: User Service Core** (8h)
   - User CRUD operations
   - Profile management endpoints
   - User card data structure
@@ -194,22 +199,22 @@
 #### Frontend Web Admin (FE-Admin)
 
 **Saturday Sep 5 (8h):**
-- [ ] **Admin Dashboard Setup** (8h)
-  - Initialize React/Next.js admin project
-  - Setup admin routing and layout
-  - Install and configure admin UI library (MUI/Ant Design/Shadcn)
-  - Create sidebar navigation structure
-  - Setup authentication guards
-  - Admin login page
-  - Dashboard layout with sidebar
+- [X] **Admin Dashboard Setup** (8h)
+  [X] Initialize React/Next.js admin project
+  [X] Setup admin routing and layout
+  [X] Install and configure admin UI library (MUI/Ant Design/Shadcn)
+  [X] Create sidebar navigation structure
+  [X] Setup authentication guards
+  [X] Admin login page
+  [X] Dashboard layout with sidebar
 
 **Sunday Sep 6 (8h):**
-- [ ] **Admin Auth & User Management - Part 1** (8h)
-  - Admin authentication integration
-  - Dashboard home page with stats cards
-  - Users list table (with pagination, search, filter)
-  - User detail view modal
-  - User basic actions (view, search)
+- [X] **Admin Auth & User Management - Part 1** (8h)
+  [X] Admin authentication integration
+  [X] Dashboard home page with stats cards
+  [X] Users list table (with pagination, search, filter)
+  [X] User detail view modal
+  [X] User basic actions (view, search)
 
 **Deliverable:** Admin panel setup + Admin auth + Basic user management
 
@@ -233,7 +238,7 @@
   - Event image upload
   - Event capacity and registration deadline
 
-- [ ] **BE-2: Registration Service (Common)** (8h)
+- [x] **BE-2: Registration Service (Common)** (8h)
   - Dynamic form schema design
   - Form creation endpoint (admin creates forms)
   - Form submission endpoint (users submit responses)
@@ -829,7 +834,7 @@
 
 6. **File Storage:** AWS S3, GCP Storage, or Firebase Storage
 
-7. **Authentication:** JWT-based with refresh tokens
+7. **Authentication & Transport Security:** JWT-based with rotating refresh tokens; TLS 1.3 / HTTPS encryption for all in-transit packets across clients and backend (no client application-layer crypto needed). Account deletion with 45-day restoration grace period.
 
 8. **Real-time (if needed):** Polling for auction (MVP), WebSockets (future)
 

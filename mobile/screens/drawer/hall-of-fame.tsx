@@ -2,6 +2,7 @@ import { ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Badge } from '../../src/components/Badge';
 import { Card } from '../../src/components/Card';
+import { AppHeader } from '../../src/components/AppHeader';
 import { Typography } from '../../src/typography/Typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
@@ -9,9 +10,9 @@ export default function HallOfFame() {
   const { colors } = useTheme();
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
+      <AppHeader title="Hall of Fame" />
       <ScrollView contentContainerStyle={styles.content}>
-        <Typography variant="displayTitle">Hall of Fame</Typography>
         <Typography variant="body" color="textMuted">Celebrating the people who define BGSC.</Typography>
         <Card variant="accent">
           <Card.Header title="Athlete of the month" rightAction={<Badge label="2026" variant="primary" />} />

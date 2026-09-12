@@ -13,6 +13,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from './Icon';
 import { Typography } from '../typography/Typography';
 import { ANIMATION } from '../theme/spacing';
+import { NEU_SHADOWS } from '../theme/shadow';
 
 export type IconButtonVariant =
   | 'glass'
@@ -133,7 +134,7 @@ export function IconButton({
     case 'glass':
     default:
       backgroundColor = colors.surface;
-      borderColor = colors.border;
+      borderColor = 'transparent';
       iconColor = colors.text;
       break;
   }
@@ -150,6 +151,7 @@ export function IconButton({
         accessibilityState={{ disabled }}
         style={[
           styles.container,
+          variant === 'glass' && NEU_SHADOWS.raisedSmall,
           {
             width: dim,
             height: dim,
@@ -162,13 +164,6 @@ export function IconButton({
           style,
         ]}
       >
-        {variant === 'glass' && !disabled && (
-          <BlurView
-            intensity={40}
-            tint={isDark ? 'dark' : 'light'}
-            style={StyleSheet.absoluteFill}
-          />
-        )}
         <Icon
           name={icon}
           size={ICON_SIZE_MAPPING[size]}

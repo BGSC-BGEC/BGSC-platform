@@ -1,31 +1,39 @@
 /**
- * Palette directly derived from mobile/color/f932fc38-8800-4c3e-ad9b-54679a8e5b7b.png
- *
- * 1. #0F2A1D — Dark Forest Green (Deep canvas / rich dark background)
- * 2. #375534 — Deep Moss Green (Secondary dark / elevated surface fill)
- * 3. #6B9071 — Sage Green (Muted green accent / subtitles / inactive tabs)
- * 4. #AEC3B0 — Soft Mint / Sage Frost (Hairlines / borders / muted text / tags)
- * 5. #E3EED4 — Pale Honeydew / Cream (Primary text on dark / light canvas base)
- * 6. #E07A3F — Warm Burnt Orange (Primary CTA / interactive highlights / active tags)
- * 7. #5B8FA8 — Ocean Slate / Steel Blue (Secondary accent / information / links)
+ * Premium Neumorphic Color Palette
+ * Based on soft, layered design with subtle shadows
  */
 
 export const PALETTE = {
-  forest: '#0F2A1D',
-  moss: '#375534',
-  sage: '#6B9071',
-  mint: '#AEC3B0',
-  cream: '#E3EED4',
-  orange: '#E07A3F',
-  slate: '#5B8FA8',
+  // Light mode - Soft beige/cream tones
+  lightBase: '#E8E4DF',           // Main background (light warm gray)
+  lightCard: '#EBE7E2',           // Card surface
+  lightCardInner: '#F5F2ED',      // Inner card layer (lighter)
+  lightText: '#4A4A4A',           // Primary text
+  lightTextMuted: '#8A8A8A',      // Secondary text
+  lightShadowDark: '#D1CCC7',     // Dark shadow
+  lightShadowLight: '#FFFFFF',    // Light highlight shadow
 
-  // Utility tints / shades
+  // Dark mode - Soft slate/charcoal tones
+  darkBase: '#2C3135',            // Main background (dark slate)
+  darkCard: '#33383D',            // Card surface
+  darkCardInner: '#3A4045',       // Inner card layer (lighter)
+  darkText: '#E8E8E8',            // Primary text
+  darkTextMuted: '#9A9A9A',       // Secondary text
+  darkShadowDark: '#1E2226',      // Dark shadow
+  darkShadowLight: '#3D4449',     // Light highlight shadow
+
+  // Accent colors
+  orange: '#E07A3F',              // Primary CTA (warm orange)
+  orangeDark: '#D4632A',          // Darker orange for press states
+  red: '#E74C3C',                 // Error/love/favorite
+  blue: '#5B8FA8',                // Info/links
+  green: '#34D27B',               // Success
+  yellow: '#F59E0B',              // Warning
+
+  // Utility
   white: '#FFFFFF',
   black: '#000000',
-  danger: '#F2686C',
-  warning: '#F59E0B',
-  success: '#34D27B',
-  info: '#5B8FA8',
+  transparent: 'transparent',
 } as const;
 
 /** Converts a 6-digit hex code and alpha (0-1) to rgba string */
@@ -40,49 +48,42 @@ export function withAlpha(hex: string, alpha: number): string {
 export interface UIThemeColors {
   /** Canvas background */
   background: string;
-  /** Section / card underlying canvas variant */
-  backgroundMid: string;
-  /** Primary frosted glass card surface overlay */
+  /** Card surface */
   surface: string;
-  /** Non-blurred opaque fallback surface */
-  surfaceSolid: string;
-  /** Muted surface for inputs, chips, search bars */
-  surfaceMuted: string;
-  /** Higher elevation surface */
+  /** Inner card layer (lighter than surface) */
+  surfaceInner: string;
+  /** Elevated surface variant */
   surfaceElevated: string;
+  /** Muted surface for inputs */
+  surfaceMuted: string;
 
   /** Primary body and heading text */
   text: string;
   /** Secondary and helper text */
   textMuted: string;
-  /** Subtle text (captions, disabled, placeholders) */
+  /** Subtle text (disabled, placeholders) */
   textSubtle: string;
+
+  /** Neumorphic dark shadow */
+  shadowDark: string;
+  /** Neumorphic light highlight shadow */
+  shadowLight: string;
 
   /** Default hairline borders */
   border: string;
   /** Active / focused borders */
   borderActive: string;
 
-  /** Primary brand CTA — warm burnt orange from palette */
+  /** Primary brand CTA */
   primary: string;
   /** Text on primary button */
   primaryText: string;
+  /** Darker primary for press states */
+  primaryDark: string;
 
-  /** Secondary action fill — deep moss green from palette */
-  secondary: string;
-  /** Text on secondary button */
-  secondaryText: string;
-
-  /** Brand highlight accent — orange */
+  /** Accent colors */
   accent: string;
-  /** Text on accent */
-  accentText: string;
-  /** Translucent accent tint for pills and cards */
   accentMuted: string;
-
-  /** Ocean slate accent from palette */
-  slate: string;
-  slateMuted: string;
 
   /** System feedback states */
   success: string;
@@ -93,92 +94,99 @@ export interface UIThemeColors {
   dangerMuted: string;
   info: string;
   infoMuted: string;
+
+  /** Utility */
+  white: string;
+  black: string;
+  surfaceHighlight: string;
 }
 
 /**
- * Dark theme (Default):
- * Deep forest canvas (#0F2A1D), moss green elevated surfaces (#375534),
- * frosted sage glass overlays, crisp cream text (#E3EED4), and warm orange CTA (#E07A3F).
+ * Light theme - Soft beige neumorphism
  */
-export const darkThemeColors: UIThemeColors = {
-  background: PALETTE.forest,
-  backgroundMid: '#143526',
-  surface: withAlpha(PALETTE.moss, 0.45),
-  surfaceSolid: '#183D2D',
-  surfaceMuted: withAlpha(PALETTE.forest, 0.60),
-  surfaceElevated: '#1D4534',
+export const lightThemeColors: UIThemeColors = {
+  background: PALETTE.lightBase,
+  surface: PALETTE.lightCard,
+  surfaceInner: PALETTE.lightCardInner,
+  surfaceElevated: PALETTE.lightCardInner,
+  surfaceMuted: PALETTE.lightBase,
 
-  text: PALETTE.cream,
-  textMuted: PALETTE.mint,
-  textSubtle: PALETTE.sage,
+  text: PALETTE.lightText,
+  textMuted: PALETTE.lightTextMuted,
+  textSubtle: withAlpha(PALETTE.lightText, 0.5),
 
-  border: withAlpha(PALETTE.mint, 0.18),
-  borderActive: withAlpha(PALETTE.mint, 0.50),
+  shadowDark: PALETTE.lightShadowDark,
+  shadowLight: PALETTE.lightShadowLight,
+
+  border: withAlpha(PALETTE.lightText, 0.1),
+  borderActive: PALETTE.orange,
 
   primary: PALETTE.orange,
   primaryText: PALETTE.white,
-
-  secondary: PALETTE.moss,
-  secondaryText: PALETTE.cream,
+  primaryDark: PALETTE.orangeDark,
 
   accent: PALETTE.orange,
-  accentText: PALETTE.white,
-  accentMuted: withAlpha(PALETTE.orange, 0.16),
+  accentMuted: withAlpha(PALETTE.orange, 0.15),
 
-  slate: PALETTE.slate,
-  slateMuted: withAlpha(PALETTE.slate, 0.18),
+  success: PALETTE.green,
+  successMuted: withAlpha(PALETTE.green, 0.15),
 
-  success: PALETTE.success,
-  successMuted: withAlpha(PALETTE.success, 0.16),
-  warning: PALETTE.warning,
-  warningMuted: withAlpha(PALETTE.warning, 0.16),
-  danger: PALETTE.danger,
-  dangerMuted: withAlpha(PALETTE.danger, 0.16),
-  info: PALETTE.slate,
-  infoMuted: withAlpha(PALETTE.slate, 0.16),
+  warning: PALETTE.yellow,
+  warningMuted: withAlpha(PALETTE.yellow, 0.15),
+
+  danger: PALETTE.red,
+  dangerMuted: withAlpha(PALETTE.red, 0.15),
+
+  info: PALETTE.blue,
+  infoMuted: withAlpha(PALETTE.blue, 0.15),
+
+  white: PALETTE.white,
+  black: PALETTE.black,
+  surfaceHighlight: withAlpha(PALETTE.orange, 0.08),
 };
 
 /**
- * Light theme:
- * Crisp organic honeydew cream canvas, moss-forest ink text,
- * frosted white glass overlays, and energetic orange CTA.
+ * Dark theme - Soft slate neumorphism
  */
-export const lightThemeColors: UIThemeColors = {
-  background: '#F8FAF5',
-  backgroundMid: '#EEF4EA',
-  surface: 'rgba(255, 255, 255, 0.85)',
-  surfaceSolid: '#FFFFFF',
-  surfaceMuted: withAlpha(PALETTE.cream, 0.70),
-  surfaceElevated: '#FFFFFF',
+export const darkThemeColors: UIThemeColors = {
+  background: PALETTE.darkBase,
+  surface: PALETTE.darkCard,
+  surfaceInner: PALETTE.darkCardInner,
+  surfaceElevated: PALETTE.darkCardInner,
+  surfaceMuted: PALETTE.darkBase,
 
-  text: PALETTE.forest,
-  textMuted: PALETTE.moss,
-  textSubtle: PALETTE.sage,
+  text: PALETTE.darkText,
+  textMuted: PALETTE.darkTextMuted,
+  textSubtle: withAlpha(PALETTE.darkText, 0.5),
 
-  border: withAlpha(PALETTE.sage, 0.22),
-  borderActive: PALETTE.moss,
+  shadowDark: PALETTE.darkShadowDark,
+  shadowLight: PALETTE.darkShadowLight,
+
+  border: withAlpha(PALETTE.darkText, 0.1),
+  borderActive: PALETTE.orange,
 
   primary: PALETTE.orange,
   primaryText: PALETTE.white,
-
-  secondary: PALETTE.moss,
-  secondaryText: PALETTE.cream,
+  primaryDark: PALETTE.orangeDark,
 
   accent: PALETTE.orange,
-  accentText: PALETTE.white,
-  accentMuted: withAlpha(PALETTE.orange, 0.12),
+  accentMuted: withAlpha(PALETTE.orange, 0.15),
 
-  slate: PALETTE.slate,
-  slateMuted: withAlpha(PALETTE.slate, 0.14),
+  success: PALETTE.green,
+  successMuted: withAlpha(PALETTE.green, 0.15),
 
-  success: '#22C55E',
-  successMuted: 'rgba(34, 197, 94, 0.14)',
-  warning: '#D97706',
-  warningMuted: 'rgba(217, 119, 6, 0.14)',
-  danger: '#E5484D',
-  dangerMuted: 'rgba(229, 72, 77, 0.14)',
-  info: PALETTE.slate,
-  infoMuted: withAlpha(PALETTE.slate, 0.14),
+  warning: PALETTE.yellow,
+  warningMuted: withAlpha(PALETTE.yellow, 0.15),
+
+  danger: PALETTE.red,
+  dangerMuted: withAlpha(PALETTE.red, 0.15),
+
+  info: PALETTE.blue,
+  infoMuted: withAlpha(PALETTE.blue, 0.15),
+
+  white: PALETTE.white,
+  black: PALETTE.black,
+  surfaceHighlight: withAlpha(PALETTE.orange, 0.08),
 };
 
 export type ThemeMode = 'dark' | 'light';
@@ -186,4 +194,5 @@ export type ThemeMode = 'dark' | 'light';
 export function getThemeColors(mode: ThemeMode): UIThemeColors {
   return mode === 'light' ? lightThemeColors : darkThemeColors;
 }
+
 
