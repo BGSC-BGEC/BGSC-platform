@@ -36,6 +36,7 @@ export interface ButtonProps {
   disabled?: boolean;
   fullWidth?: boolean;
   accessibilityLabel?: string;
+  labelColor?: string;
   style?: ViewStyle;
 }
 
@@ -57,6 +58,7 @@ export function Button({
   disabled = false,
   fullWidth = false,
   accessibilityLabel,
+  labelColor,
   style,
 }: ButtonProps) {
   const { colors, isDark, shadow } = useTheme();
@@ -118,8 +120,8 @@ export function Button({
       textColor = colors.primaryText;
       break;
     case 'secondary': // Deep Moss Green
-      backgroundColor = colors.secondary;
-      textColor = colors.secondaryText;
+      backgroundColor = colors.surfaceInner;
+      textColor = colors.text;
       break;
     case 'glass':
       backgroundColor = colors.surface;
@@ -140,6 +142,8 @@ export function Button({
       textColor = colors.primaryText;
       break;
   }
+
+  const resolvedTextColor = labelColor ?? textColor;
 
   return (
     <Animated.View
@@ -201,14 +205,14 @@ export function Button({
               <Icon
                 name={leftIcon}
                 size={spec.iconSize}
-                color={isDisabled ? colors.textSubtle : textColor}
+                color={isDisabled ? colors.textSubtle : resolvedTextColor}
               />
             )}
             <Typography
               variant="button"
               style={[
                 styles.label,
-                { fontSize: spec.fontSize, color: isDisabled ? colors.textSubtle : textColor },
+                { fontSize: spec.fontSize, color: isDisabled ? colors.textSubtle : resolvedTextColor },
               ]}
             >
               {label}
@@ -217,7 +221,7 @@ export function Button({
               <Icon
                 name={rightIcon}
                 size={spec.iconSize}
-                color={isDisabled ? colors.textSubtle : textColor}
+                color={isDisabled ? colors.textSubtle : resolvedTextColor}
               />
             )}
           </>

@@ -12,6 +12,11 @@ import LoginScreen from '../login/login';
 import RegisterScreen from '../login/register';
 import OtpScreen from '../login/otp';
 import CompleteProfileScreen from '../login/complete-profile';
+import ForgotPassword from '../login/forgot-password';
+import EventDetails from '../events/event-details';
+import EventRegistration from '../events/registration';
+import EditProfile from '../profile/edit-profile';
+import History from '../profile/history';
 
 const Stack = createNativeStackNavigator();
 const Drawer = createDrawerNavigator();
@@ -128,10 +133,22 @@ function DrawerWithTabs() {
 function DrawerLayout() {
   const { isLoggedIn } = useAuth();
 
+  function LoggedInStack() {
+    return (
+      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+        <Stack.Screen name="App" component={DrawerWithTabs} />
+        <Stack.Screen name="EventDetails" component={EventDetails} />
+        <Stack.Screen name="EventRegistration" component={EventRegistration} />
+        <Stack.Screen name="EditProfile" component={EditProfile} />
+        <Stack.Screen name="History" component={History} />
+      </Stack.Navigator>
+    );
+  }
+
   return (
     <NavigationContainer>
       {isLoggedIn ? (
-        <DrawerWithTabs />
+        <LoggedInStack />
       ) : (
         <Stack.Navigator
           screenOptions={{
@@ -143,6 +160,7 @@ function DrawerLayout() {
           <Stack.Screen name="Register" component={RegisterScreen} />
           <Stack.Screen name="OTP" component={OtpScreen} />
           <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
+          <Stack.Screen name="ForgotPassword" component={ForgotPassword} />
         </Stack.Navigator>
       )}
     </NavigationContainer>

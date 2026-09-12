@@ -64,11 +64,7 @@ export default function LoginScreen() {
   };
 
   const handleForgotPassword = () => {
-    Alert.alert(
-      'Reset Password',
-      'Please enter your university email to receive a password reset link.',
-      [{ text: 'OK' }]
-    );
+    navigation.navigate('ForgotPassword');
   };
 
   return (
