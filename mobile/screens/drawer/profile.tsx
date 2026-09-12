@@ -68,20 +68,20 @@ export default function Profile() {
           <Card.Header title="Recent Events" />
           <Card.Body>
             <View style={styles.eventItem}>
-              <Typography variant="bodyBold">Football Championship</Typography>
+              <Typography variant="body">Football Championship</Typography>
               <Typography variant="caption" color="textMuted">Completed • +150 pts</Typography>
             </View>
             <View style={styles.eventItem}>
-              <Typography variant="bodyBold">Coding Workshop</Typography>
+              <Typography variant="body">Coding Workshop</Typography>
               <Typography variant="caption" color="textMuted">Completed • +100 pts</Typography>
             </View>
             <View style={styles.eventItem}>
-              <Typography variant="bodyBold">Cricket League</Typography>
+              <Typography variant="body">Cricket League</Typography>
               <Typography variant="caption" color="textMuted">Registered</Typography>
             </View>
           </Card.Body>
           <Card.Footer>
-            <Button label="View all history" variant="outline" size="sm" onPress={() => {}} />
+            <Button label="View all history" variant="outline" size="sm" onPress={() => navigation.navigate('History' as never)} />
           </Card.Footer>
         </Card>
 
@@ -93,7 +93,7 @@ export default function Profile() {
               { backgroundColor: colors.surface },
               pressed && styles.actionPressed
             ]}
-            onPress={() => {}}
+            onPress={() => navigation.navigate('EditProfile' as never)}
           >
             <Ionicons name="settings-outline" size={20} color={colors.text} />
             <Typography variant="body">Account Settings</Typography>
@@ -105,7 +105,7 @@ export default function Profile() {
               { backgroundColor: colors.surface },
               pressed && styles.actionPressed
             ]}
-            onPress={() => {}}
+            onPress={() => navigation.navigate('EditProfile' as never)}
           >
             <Ionicons name="help-circle-outline" size={20} color={colors.text} />
             <Typography variant="body">Help & Support</Typography>

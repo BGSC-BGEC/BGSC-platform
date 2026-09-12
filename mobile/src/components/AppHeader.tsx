@@ -213,7 +213,7 @@ export function AppHeader({
                   </View>
                   <View style={styles.notificationContent}>
                     <Typography
-                      variant="bodyBold"
+                      variant="body"
                       style={{ color: item.read ? colors.textMuted : colors.text }}
                     >
                       {item.title}

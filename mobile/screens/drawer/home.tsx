@@ -1,4 +1,5 @@
 import { ScrollView, StyleSheet, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
@@ -10,6 +11,7 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 
 export default function Home() {
   const { colors } = useTheme();
+  const navigation = useNavigation<any>();
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
@@ -36,7 +38,7 @@ export default function Home() {
               </View>
             </View>
           </Card>
-          <Button label="View Leaderboard" size="sm" variant="primary" onPress={() => {}} />
+          <Button label="View Leaderboard" size="sm" variant="primary" onPress={() => navigation.navigate('MainTabs', { screen: 'LeaderboardTab' })} />
         </Card>
 
         <SectionHeader title="Upcoming Events" subtitle="Don't miss out" />
@@ -54,7 +56,7 @@ export default function Home() {
             </Typography>
           </Card.Body>
           <Card.Footer>
-            <Button label="Register Now" variant="primary" size="sm" onPress={() => {}} />
+            <Button label="Register Now" variant="primary" size="sm" onPress={() => navigation.navigate('EventRegistration')} />
           </Card.Footer>
         </Card>
 
@@ -70,7 +72,7 @@ export default function Home() {
             </Typography>
           </Card.Body>
           <Card.Footer>
-            <Button label="View Details" variant="outline" size="sm" onPress={() => {}} />
+            <Button label="View Details" variant="outline" size="sm" onPress={() => navigation.navigate('EventDetails')} />
           </Card.Footer>
         </Card>
 
@@ -80,13 +82,13 @@ export default function Home() {
         <View style={styles.actionsGrid}>
           <Card variant="elevated" style={styles.actionCard}>
             <Typography variant="h3">🎯</Typography>
-            <Typography variant="bodyBold">Challenges</Typography>
+            <Typography variant="body">Challenges</Typography>
             <Typography variant="caption" color="textMuted">5 active</Typography>
           </Card>
 
           <Card variant="elevated" style={styles.actionCard}>
             <Typography variant="h3">⭐</Typography>
-            <Typography variant="bodyBold">Rewards</Typography>
+            <Typography variant="body">Rewards</Typography>
             <Typography variant="caption" color="textMuted">3 pending</Typography>
           </Card>
         </View>
