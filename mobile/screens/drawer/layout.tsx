@@ -15,6 +15,8 @@ import CompleteProfileScreen from '../login/complete-profile';
 import ForgotPassword from '../login/forgot-password';
 import EventDetails from '../events/event-details';
 import EventRegistration from '../events/registration';
+import Auction from '../events/auction';
+import AuctionConsole from '../events/auction-console';
 import EditProfile from '../profile/edit-profile';
 import History from '../profile/history';
 
@@ -139,6 +141,8 @@ function DrawerLayout() {
         <Stack.Screen name="App" component={DrawerWithTabs} />
         <Stack.Screen name="EventDetails" component={EventDetails} />
         <Stack.Screen name="EventRegistration" component={EventRegistration} />
+        <Stack.Screen name="Auction" component={Auction} />
+        <Stack.Screen name="AuctionConsole" component={AuctionConsole} />
         <Stack.Screen name="EditProfile" component={EditProfile} />
         <Stack.Screen name="History" component={History} />
       </Stack.Navigator>
