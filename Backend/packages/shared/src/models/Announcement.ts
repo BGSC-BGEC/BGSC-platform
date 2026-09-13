@@ -193,7 +193,8 @@ AnnouncementSchema.pre('validate', function (this: IAnnouncement) {
     if (extra) return fail(`delivery row references category '${extra.category}' which is not on this announcement`);
 });
 
-// audience.min_role is filtered in memory: a 4-month window is at most a few hundred live docs.
+// audience.min_role is filtered in the query (`$in` over the viewer's allowed roles) but is not an
+// index key: a 4-month window is at most a few hundred live docs, so the status/published_at scan does the work.
 AnnouncementSchema.index({ status: 1, published_at: -1 }); // feed
 AnnouncementSchema.index({ status: 1, categories: 1, published_at: -1 }); // category chips
 AnnouncementSchema.index({ status: 1, 'audience.event_id': 1, published_at: -1 }); // event detail
@@ -207,7 +208,8 @@ export const Announcement = model<IAnnouncement>('Announcement', AnnouncementSch
 
 /**
  * announcement-model.md §4. The event-scoped check is server-side: the caller passes the viewer's
- * confirmed event IDs fetched from Registration Service, never a client-supplied list.
+ * confirmed event IDs read from `form_submissions` (be2-announcement-service-plan.md D3), never a
+ * client-supplied list. For single documents only — list queries build the same rule as a filter.
  */
 export function isVisibleTo(
     a: Pick<IAnnouncement, 'status' | 'audience'>,

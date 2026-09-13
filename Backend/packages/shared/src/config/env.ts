@@ -77,5 +77,15 @@ export const config = {
   /** Cross-process event bus. Absent => the in-process emitter only (single-service dev). */
   redisUrl: process.env.REDIS_URL || '',
 
-  corsOrigin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:3000', 'http://localhost:5173'],
+  /**
+   * Allowed CORS origins. Defaults to dev localhost only. In production the env var must be set;
+   * empty/default is a hard boot error — silently trusting localhost with `credentials: true`
+   * is the kind of bug a deployer never notices until a real audit lands.
+   */
+  corsOrigin:
+    process.env.CORS_ORIGIN
+      ? process.env.CORS_ORIGIN.split(',').map((s) => s.trim()).filter(Boolean)
+      : process.env.NODE_ENV === 'production'
+        ? (() => { throw new Error('CORS_ORIGIN must be set in production'); })()
+        : ['http://localhost:3000', 'http://localhost:5173'],
 };

@@ -54,7 +54,8 @@ outside a model (`_id` defaults to one already).
     "dev": "nodemon --watch src --watch ../../packages/shared/src --ext ts --exec ts-node src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "selfcheck": "ts-node src/selfcheck/<domain>.selfcheck.ts"
+    "selfcheck": "ts-node src/selfcheck/<domain>.selfcheck.ts",
+    "e2e": "ts-node src/<domain>/<domain>.e2e.ts"
   },
   "dependencies": {
     "@bgsc/shared": "1.0.0",
@@ -331,6 +332,9 @@ router.get('/:id', optionalAuth, validate({ params: IdParams }), c.get);
   handler never runs.
 - `requireRole` after `requireAuth`. No token → 401; valid token, low rank → 403. An anonymous
   caller never sees a 403 (it confirms the endpoint exists).
+- `requireRole` ranks the token's role claim, which stays valid for up to 15 minutes after a
+  suspension or demotion. On writes, rank the live user document instead —
+  `apps/announcement-service/src/announcements/actor.ts` (`requireActiveUser(floor)`) is the pattern.
 - `optionalAuth` on reads whose response differs for a signed-in viewer. The gateway also runs it
   and never rejects; the service re-verifies, so it is correct with or without the gateway.
 - Literal paths (`/heads`, `/me`, `/read-all`) are declared **before** `/:id`, or Express matches
@@ -404,22 +408,63 @@ who may not see a document gets 404, not 403 — they should not learn that it e
 
 ## 7. Tests
 
-Selfchecks are `ts-node` scripts with `assert`, one per area, run against the local Mongo
+Every service ships two test layers: selfchecks cover the service-layer functions; e2e covers the
+HTTP service (routes, middleware, envelope, mass-assignment via zod stripping, audit log on the
+write path). Selfchecks catch logic bugs; e2e catches wiring bugs, and a service needs both.
+Today auth, user and announcement have both; **registration-service has no e2e yet** and owes one.
+
+### 7.1 Selfchecks
+
+`ts-node` scripts with `assert`, one per area, run against the local Mongo
 (`docker compose up -d mongodb redis`). No framework.
 
-- Start with `connectDB()` then `resetFixtures()` — delete anything a previous failed run left
-  behind, scoped to rows the checks create (an email domain, an id prefix). Cleanup at the end is
-  not enough; a check that dies mid-way must not make the next run assert against its own debris.
+- Give them a scratch database of their own and drop it **at the start** (a run that dies mid-way
+  never reaches the end) — `openScratchDb()` in `apps/announcement-service/src/selfcheck/seed.ts`.
+  Never point them at `bgsc_dev`: anything that acts on a whole collection (a scheduler tick, a
+  retention sweep) rewrites real dev data, and audit rows are append-only, so every run's rows
+  stay forever. Older services still `connectDB()` + `resetFixtures()` against dev; move them over
+  when you next touch them.
 - Test the service layer directly (`svc.create(...)`, `svc.list(...)`) for logic. Test the model's
   invariants nowhere — `packages/shared/src/models/models.selfcheck.ts` already does, and a second
   copy is a second place to update.
 - Test as a query what is enforced as a query: a filter that is right on page one can leak on
   page two.
-- An HTTP-level check (route order, auth gates, `validate` on `query`, the envelope) needs
-  `app.listen(0)` and a signed JWT — `user-service/src/users/user.e2e.ts` is the pattern, with a
-  scratch database it drops on exit.
 - Register each file in the `selfcheck` script of the service's `package.json`. The root
   `npm run selfcheck` runs every workspace's.
+
+### 7.2 e2e
+
+One file per service, `src/<domain>/<domain>.e2e.ts`. Boots the real Express app against a
+scratch Mongo and hits routes over `fetch()` with signed JWTs. Pattern copied from
+`apps/user-service/src/users/user.e2e.ts`:
+
+- `import { app } from '../index'` — `createServiceApp` already exports it.
+- scratch DB: `const TEST_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_e2e$2')`.
+- `await mongoose.connect(TEST_DB); await mongoose.connection.dropDatabase(); await Model.syncIndexes();`
+- ephemeral port: `server = app.listen(0); base = http://127.0.0.1:${port}`. Never collides.
+- inline JWT: `const token = (id, role) => jwt.sign({sub:id, role}, config.jwt.accessSecret, {expiresIn:'5m'})`.
+- `call(method, path, {as?, body?})` helper builds Bearer header, unwraps the `{success, data}`
+  envelope on success, keeps the `{error}` shape on failure, returns `{status, body}`.
+- teardown: `await mongoose.connection.dropDatabase(); server?.close(); mongoose.disconnect()`.
+  Run in a `finally` so a mid-run failure does not leak the DB or the port.
+
+**Cases worth pinning (adapt per service):** `/health` 200 + `db:'connected'` + the
+`X-Content-Type-Options: nosniff` security header; happy + sad paths for every route (401 anon,
+403 wrong rank, 404 not-found, 422 validation, 409 conflict, 500 unhandled); mass-assignment
+guard (zod strips `{status:'published'}` from a POST body and the response shows `status:'draft'`);
+double-click race on a status transition (exactly one 200, one 409, one audit row);
+audit-failure regression (monkey-patch `AuditLog.create` to throw, mirroring
+`user.e2e.ts:488-505`, and assert whichever audit ordering the service documents — e.g. announcement
+audits first on create, so it rejects with nothing written, but audits after a compare-and-swap
+publish, so the publish still answers 200 and still emits); audit-read endpoint returns the rows the
+writes created.
+
+**Register the file** in the service's `package.json` `e2e` script. The root `npm test` chains
+`selfcheck && e2e` over every workspace, so passing both flips the merge gate.
+
+The teardown drops `bgsc_e2e`. If a workspace ordering matters (e.g. user.e2e must drop before
+announcement.e2e because they share scratch-DB state at boot), document it in the file's header
+comment. Today they all use distinct service exports so order is unconstrained.
 
 ---
 

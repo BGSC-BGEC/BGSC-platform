@@ -29,7 +29,7 @@ Official, editorial, short-lived posts. One document per announcement. Delivery 
 
   // ---- audience (plan: "target audience filtering") ----
   audience: {
-    min_role: 'guest' | 'user' | 'member' | 'core' | 'coordinator',   // 'teams' category forces >= 'core' (Spec §6.4)
+    min_role: 'guest' | 'user' | 'member' | 'core' | 'coordinator' | 'founder',   // 'teams' forces >= 'core' (Spec §6.4); never above the author's own rank
     event_id: string | null                                            // scope to registrants of one event; null = everyone
   },
 
@@ -75,7 +75,7 @@ Official, editorial, short-lived posts. One document per announcement. Delivery 
 | Field | Notes |
 |---|---|
 | `categories[]` | Spec §4.1 has singular `type`; Spec §6.4 says multi-select. Multi-select wins (array). Enum values are the nine Spec §6.4 tags in snake_case. |
-| `audience.min_role` | Derived at publish: `'teams' ∈ categories` ⇒ `min_role = 'core'` (Spec §6.4 "Teams (Visible to Core, Coordinator, Founder only)"). Everything else `guest` (Spec §5.2 announcements are public). Admin may raise, never lower below the derived value. |
+| `audience.min_role` | Derived at publish: `'teams' ∈ categories` ⇒ `min_role = 'core'` (Spec §6.4 "Teams (Visible to Core, Coordinator, Founder only)"). Everything else `guest` (Spec §5.2 announcements are public). Admin may raise, never lower below the derived value, and never above their own rank (`422 min_role_above_own_rank`) — a composer cannot write what they could not read. |
 | `expires_at` | Set at publish. Mongo TTL index **does not delete** here (Spec §15.3 wants 1-year archive) — a scheduler flips `status → archived` at `expires_at`; a second TTL-style job hard-deletes `archived` docs at `expires_at + 8 months` (= 1 year total). |
 | `delivery.whatsapp.per_category` | One row per category present at publish. Rate limit (Spec §9.4: 1/tag/hour) is checked per row: Redis key `wa:rl:{category}` with 1h TTL; blocked ⇒ `rate_limited`, in-app still publishes (Spec fallback). |
 | `pinned_until` | Cheap way to power the homepage banner without a "featured" collection. |
@@ -91,13 +91,13 @@ draft ──publish now──> published ──(expires_at)──> archived ─�
 
 | Transition | Who | Guard | Emits |
 |---|---|---|---|
-| create draft | Coordinator+, or Core with `announcements:create` permission (Spec §6.4) | — | — |
-| draft → published | same | `categories.length ≥ 1`; if `'teams'` then author role ≥ core; sets `published_at = now`, `expires_at = +4mo`, derives `audience.min_role` | `AnnouncementPublished` |
-| draft → scheduled | same | `scheduled_for > now` | `AnnouncementScheduled` |
+| create draft | Core+ (Spec §6.4 "Core with permission" — no per-user permission field exists on `users`, so it collapses to the role gate) | — | — |
+| draft → published | same | `categories.length ≥ 1`; if `'teams'` then author role ≥ core; sets `published_at = now`, `expires_at = +4mo`, derives `audience.min_role`, sets `delivery.*.requested = true` (Spec §6.4: WhatsApp auto-sends on publish) | `AnnouncementPublished` |
+| draft / scheduled → scheduled | same | `scheduled_for > now`; from `scheduled` it is a reschedule | `AnnouncementScheduled` |
 | scheduled → published | scheduler | — | `AnnouncementPublished` |
-| published → archived | scheduler | `now ≥ expires_at` | `AnnouncementArchived` |
-| edit published | Coordinator+ | title/body/media only; categories frozen (WhatsApp already sent) | `AnnouncementUpdated` |
-| delete | Coordinator+ | soft (`deleted_at`) | `AnnouncementDeleted` |
+| published → archived | scheduler | `now ≥ expires_at` | none — one `updateMany`, nothing consumes it before Week 4 (plan D13) |
+| edit published / scheduled | Core+ | title/body/media/priority/tags/pinned_until; `categories` and `audience` frozen once out of `draft` (WhatsApp fan-out keys off them) | `AnnouncementUpdated` |
+| delete | Coordinator+ | soft (`deleted_at`). A deleted draft/scheduled item never gets `expires_at`, so the scheduler hard-purges it 1 year after `deleted_at` | `AnnouncementDeleted` |
 
 ### 2.3 Invariants
 
@@ -113,13 +113,14 @@ draft ──publish now──> published ──(expires_at)──> archived ─�
 
 | Index | Serves |
 |---|---|
-| `{ status: 1, published_at: -1 }` | announcements feed (newest first, `status: 'published'`). `audience.min_role` is filtered in-memory; ≤ a few hundred live docs (4-month window), not worth its own index |
+| `{ status: 1, published_at: -1 }` | announcements feed (newest first, `status: 'published'`). `audience.min_role` is filtered **in the query** as a `$in` over the viewer's allowed prefix of `ROLE_RANK` — not in memory, which would break `limit` and keyset pagination (plan D1). It is not an index key: ≤ a few hundred live docs (4-month window), the `{ status, published_at }` scan does the work |
 | `{ status: 1, categories: 1, published_at: -1 }` | category filter chips |
 | `{ status: 1, 'audience.event_id': 1, published_at: -1 }` | event-scoped announcements on event detail |
 | `{ 'author.user_id': 1, status: 1, published_at: -1 }` | "What Our Heads Have to Say": latest per coordinator (Spec §5.2 Tab 1) |
 | `{ status: 1, scheduled_for: 1 }` partial (`status == scheduled`) | scheduler |
 | `{ status: 1, expires_at: 1 }` | archive + purge jobs |
-| `{ status: 1, pinned_until: 1 }` partial | homepage banner |
+| `{ status: 1, pinned_until: 1 }` | homepage banner |
+| `{ title: 'text', body: 'text' }` | `q` search (MVP stand-in for Elasticsearch, Spec §13) |
 
 ## 3. Read / unread (plan Week 2: "read/unread status")
 
@@ -132,8 +133,9 @@ users.announcements = {
 }
 ```
 
+- `last_seen_at` is a watermark (opening the tab / "read all" sets it); `read_ids` holds cards opened one at a time.
 - Unread count = `count({ status: 'published', published_at > last_seen_at, audience matches })` — one indexed count.
-- Per-card dot = `_id ∉ read_ids`.
+- Per-card dot = `published_at > last_seen_at && _id ∉ read_ids`. Both halves, or "read all" clears the badge but leaves every dot lit.
 
 ponytail: `read_ids` array capped at 200 on the user doc; 4-month retention means the active set is small. If per-announcement read analytics are ever needed, add `announcement_reads { announcement_id, user_id, read_at }`.
 
@@ -146,7 +148,9 @@ visible(a, viewer) :=
   && (a.audience.event_id == null || viewer registered (confirmed) for that event)
 ```
 
-Guests: `role = guest`. The event-scoped check is **server-side**: Announcement Service fetches the viewer's confirmed event IDs from Registration Service (internal endpoint, cached 60s per user) and adds `{ $or: [{ 'audience.event_id': null }, { 'audience.event_id': { $in: my_event_ids } }] }` to the query. Never trust a client-supplied list.
+Guests: `role = guest`. The event-scoped check is **server-side**: Announcement Service reads the viewer's confirmed event IDs straight from `form_submissions` (`distinct('owner.id', { 'user.user_id', 'owner.type': 'event', status: 'confirmed' })` — a read, so no internal endpoint and no cache, plan D3) and adds `{ $or: [{ 'audience.event_id': null }, { 'audience.event_id': { $in: my_event_ids } }] }` to the query. Never trust a client-supplied list. Every read path also carries `deleted_at: null`.
+
+Core+ bypasses the **status and event** gates on `GET /:id` and on the list: a composer has to be able to open its own drafts and find a published announcement it scoped to an event it is not registered for. The **rank** gate is never bypassed — a core member does not see a coordinator- or founder-only announcement, on reads or on writes.
 
 ## 5. Domain events
 
@@ -154,7 +158,7 @@ Guests: `role = guest`. The event-scoped check is **server-side**: Announcement 
 AnnouncementPublished   { announcement_id, categories[], priority, author_user_id, audience }   // Notification + Broadcast consume
 AnnouncementScheduled   { announcement_id, scheduled_for }
 AnnouncementUpdated     { announcement_id, changed_fields[] }
-AnnouncementArchived    { announcement_id }
+AnnouncementArchived    { announcement_id }                                                    // NOT emitted: archiving is one updateMany (plan D13)
 AnnouncementDeleted     { announcement_id, deleted_by }
 AnnouncementDelivered   { announcement_id, channel: 'whatsapp' | 'push', category | null, status }
 ```
@@ -165,12 +169,14 @@ Week 4 Broadcast/WhatsApp service subscribes to `AnnouncementPublished`, writes 
 
 | Screen | Query |
 |---|---|
-| Announcements tab (All) | `find({ status: 'published', 'audience.min_role': { $in: allowedForViewer } }).sort({ published_at: -1 }).limit(20)` |
+| Announcements tab (All) | `find({ status: 'published', deleted_at: null, 'audience.min_role': { $in: allowedForViewer }, $or: [event_id null \| in mine] }).sort({ published_at: -1, _id: -1 }).limit(20)` — keyset cursor on `(published_at, _id)` |
 | Category chip | add `categories: 'bgec'` |
-| Homepage "Heads" section | for each coordinator id: `findOne({ 'author.user_id', status: 'published' }).sort({ published_at: -1 })` — or one `$group` by author with `$first`; cache 5 min |
-| Homepage banner | `findOne({ status: 'published', pinned_until: { $gt: now } }).sort({ priority: -1, published_at: -1 })` |
+| Homepage "Heads" section | `users` where role ∈ {coordinator, founder}, `status: 'active'`, then one `$match` + `$sort` + `$group`/`$first` by `author.user_id`; a coordinator with no announcement gets `announcement: null` (Spec §5.2 meme slot) |
+| Homepage banner | `find({ ...feed filter, pinned_until: { $gt: now } })`, then ordered in memory by `ANNOUNCEMENT_PRIORITY.indexOf` desc, `published_at` desc — `priority` is a string enum, so a Mongo sort on it is alphabetical and wrong |
 | Event detail → announcements | `find({ status: 'published', 'audience.event_id': eventId })` |
-| Composer → delivery status | the doc's `delivery` block |
+| Composer → my drafts | `?status=draft&author_id=<me>`, newest created first |
+| Composer → schedule queue | `?status=scheduled`, `scheduled_for` ascending (soonest first), keyset on `(scheduled_for, _id)` |
+| Composer → delivery status | the doc's `delivery` block — core+ only; readers' responses omit it |
 
 ## 7. Deferred
 

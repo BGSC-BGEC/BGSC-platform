@@ -9,6 +9,8 @@ import { Request, Response } from 'express';
 import { validate, issuesOf } from './validate';
 import { publish, subscribe, resetBus, DomainEvent } from '../events/publish';
 import { AuditLog } from '../models/AuditLog';
+import { errorHandler } from '../service';
+import { ServiceError } from '../errors';
 
 /* -------------------------------- validate ------------------------------- */
 
@@ -162,3 +164,42 @@ async function auditChecks(): Promise<void> {
 auditChecks()
     .then(() => console.log('shared infra selfcheck: all assertions passed'))
     .catch((e) => { console.error(e); process.exit(1); });
+
+
+/* ------------------------------ error handler ---------------------------- */
+
+/** Same fake-res shape as run() above; the handler takes four args, so it needs its own caller. */
+function runErr(err: Error): { status: number | null; body: any } {
+    const out: { status: number | null; body: any } = { status: null, body: null };
+    const res = {
+        status(c: number) { out.status = c; return this; },
+        json(b: unknown) { out.body = b; return this; },
+    } as unknown as Response;
+    errorHandler('selfcheck')(err, {} as Request, res, () => {});
+    return out;
+}
+
+const refusal = runErr(new ServiceError(409, 'already_published'));
+assert.strictEqual(refusal.status, 409, 'a ServiceError keeps its status');
+assert.strictEqual(refusal.body.error, 'already_published', 'and its code');
+
+// body-parser's own errors. A malformed body is the client's mistake, not the server's: answering
+// 500 tells the caller to retry something that can never succeed.
+const malformed = Object.assign(new SyntaxError('Unexpected token'), {
+    status: 400, expose: true, type: 'entity.parse.failed',
+});
+const badBody = runErr(malformed);
+assert.strictEqual(badBody.status, 400, 'a malformed JSON body is 400, not 500');
+assert.strictEqual(badBody.body.error, 'malformed_body', 'with a code the client can branch on');
+
+const tooLarge = Object.assign(new Error('request entity too large'), {
+    status: 413, expose: true, type: 'entity.too.large',
+});
+assert.strictEqual(runErr(tooLarge).status, 413, 'an oversized body is 413');
+assert.strictEqual(runErr(tooLarge).body.error, 'payload_too_large', 'and says so');
+
+// Anything not explicitly marked safe to show stays a 500 with no detail, however it is tagged.
+const internal = Object.assign(new Error('connect ECONNREFUSED 10.0.0.4:5432'), { status: 400 });
+const hidden = runErr(internal);
+assert.strictEqual(hidden.status, 500, 'an untagged error is 500 even with a 4xx status on it');
+assert.strictEqual(hidden.body.error, 'internal_error', 'and leaks nothing');

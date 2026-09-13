@@ -171,8 +171,15 @@ async function main(): Promise<void> {
     assert.strictEqual(card.body.formula_version, 1, 'card carries the formula version');
 
     // ---- avatar upload ----------------------------------------------------
+    const eventsBeforeUpload = events.length;
     const up = await call('POST', '/users/me/avatar', { as: anaT, raw: png });
     assert.strictEqual(up.status, 201, 'png upload accepted');
+    assert.ok(
+        events.slice(eventsBeforeUpload).some(
+            (e) => e.type === 'UserProfileUpdated' && (e.payload.changed_fields as string[]).includes('avatar_url')
+        ),
+        'an avatar upload emits UserProfileUpdated so snapshots follow it'
+    );
     assert.ok(up.body.avatar_url.startsWith('/uploads/avatars/'), 'avatar_url returned');
     const served = await fetch(base + up.body.avatar_url);
     assert.strictEqual(served.status, 200, 'uploaded avatar is served back');
