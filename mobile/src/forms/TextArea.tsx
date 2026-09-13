@@ -65,9 +65,9 @@ export function TextArea({
         ]}
       >
         <BlurView
-          intensity={30}
+          intensity={2}
           tint={isDark ? 'dark' : 'light'}
-          style={StyleSheet.absoluteFill}
+          style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}
         />
 
         <RNTextInput

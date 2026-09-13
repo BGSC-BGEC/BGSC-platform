@@ -68,9 +68,9 @@ export function SearchInput({
       ]}
     >
       <BlurView
-        intensity={35}
+        intensity={2}
         tint={isDark ? 'dark' : 'light'}
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}
       />
 
       <Icon
