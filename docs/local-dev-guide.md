@@ -42,18 +42,20 @@ for one that is down, so you only need to start the service you are working on.
 Backend/
   src/                  gateway :3000  — routing, JWT verification, rate limiting. No database.
   packages/shared/      @bgsc/shared   — models, middleware, events, config, service bootstrap
-  apps/auth-service/    :3001  BE-1
-  apps/user-service/    :3002  BE-2
+  apps/auth-service/           :3001  BE-1
+  apps/user-service/           :3002  BE-2
+  apps/registration-service/   :3004  BE-2
+  apps/announcement-service/   :3005  BE-2
 ```
 
 | Port | Service | Owner · week | Status |
 |---|---|---|---|
 | 3000 | gateway | — | live |
-| 3001 | auth-service | BE-1 · W1 | skeleton |
+| 3001 | auth-service | BE-1 · W1 | live |
 | 3002 | user-service | BE-2 · W1 | live |
 | 3003 | event-service | BE-1 · W2 | not built |
-| 3004 | registration-service | BE-2 · W2 | not built |
-| 3005 | announcement-service | BE-2 · W2 | not built |
+| 3004 | registration-service | BE-2 · W2 | live |
+| 3005 | announcement-service | BE-2 · W2 | live |
 | 3006 | points-service | BE-2 · W3 | not built |
 | 3007 | leaderboard-service | BE-1 · W3 | not built |
 | 3008 | challenge-service | BE-2 · W3 | not built |
@@ -95,7 +97,9 @@ if (require.main === module) startService(app, options).catch(...);
 ```
 
 Health check, index building, security headers, the error envelope, process guards and graceful
-shutdown are all handled. Then add the service to `src/gateway/routing.ts` and to `LIVE_SERVICES`.
+shutdown are all handled. The rest is wiring outside the service — lock file, root `tsconfig.json`
+references, two `Dockerfile` layers, a compose block, `LIVE_SERVICES` — and every one of them has
+a silent failure mode. **Follow `docs/adding-a-service.md`**; it is the checklist plus templates.
 
 ## Gotchas
 
@@ -109,6 +113,7 @@ shutdown are all handled. Then add the service to `src/gateway/routing.ts` and t
 
 ## Reference
 
+- `docs/adding-a-service.md` — checklist and templates for standing up a new service
 - `docs/modeldocs/` — data models, invariants, indexes, event flows
 - `docs/handoff-to-be1.md` — the shared contracts: token payload, error envelope, middleware
 - `docs/typescript-toolchain.md` — why `typescript` is pinned to 6.x
