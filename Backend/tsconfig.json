@@ -5,7 +5,8 @@
         { "path": "./packages/shared" },
         { "path": "./apps/user-service" },
         { "path": "./apps/auth-service" },
-        { "path": "./apps/registration-service" }
+        { "path": "./apps/registration-service" },
+        { "path": "./apps/announcement-service" }
     ],
     "include": ["src/**/*"],
     // Test code is compiled by tsconfig.check.json and run with ts-node; it must never reach dist,

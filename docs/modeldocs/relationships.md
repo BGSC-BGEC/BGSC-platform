@@ -179,7 +179,7 @@ Envelope (all events): `{ message_id: uuid, type, occurred_at, producer, schema_
 ## 8. Open items for BE-1 sync (today)
 
 1. DB vendor (Mongo assumed here). Transactions available? Decides §5.1 compensation vs txn.
-2. Who writes `users.points_balance` and `users.announcements.*` — direct write or internal endpoint.
+2. Who writes `users.points_balance` and `users.announcements.*` — direct write or internal endpoint. **Settled Sep 13, 2026 for `users.announcements.*`: direct write by Announcement Service** (be2-announcement-service-plan.md D2). `users.points_balance` still open.
 3. Shared `UserSnapshot` shape `{ user_id, display_name, avatar_url }` — confirm field names against BE-1's User model.
 4. Role enum spelling (`guest|user|member|core|coordinator|founder`) used in `announcements.audience.min_role` and RBAC guards.
 5. `UserProfileUpdated` payload includes `changed_fields` so snapshot refresh is cheap.

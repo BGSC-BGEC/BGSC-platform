@@ -55,6 +55,9 @@ export function successEnvelope(req: Request, res: Response, next: NextFunction)
 
 export function createServiceApp(opts: ServiceOptions): Express {
     const app = express();
+    // One proxy hop (the gateway). `req.ip` then reflects the client's `X-Forwarded-For`
+    // instead of the loopback, which is what audit-log `ip` columns want.
+    app.set('trust proxy', 1);
 
     app.use(cors({ origin: config.corsOrigin, credentials: true }));
     app.use(express.json({ limit: '1mb' }));
@@ -89,8 +92,19 @@ export function createServiceApp(opts: ServiceOptions): Express {
         res.status(404).json({ error: 'not_found' });
     });
 
-    // Four args: Express identifies the error handler by arity, so `_next` must stay.
-    app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+    app.use(errorHandler(opts.name));
+
+    return app;
+}
+
+/**
+ * The one error handler every service mounts. Exported so it can be checked directly, the way the
+ * rest of the shared middleware is — no server, no sockets.
+ *
+ * Four args: Express identifies an error handler by arity, so `_next` must stay.
+ */
+export function errorHandler(serviceName: string) {
+    return function (err: Error, _req: Request, res: Response, _next: NextFunction): void {
         // A ServiceError is a deliberate, client-facing refusal. Mapping it centrally means a
         // handler cannot forget and turn a 409 into a 500.
         if (err instanceof ServiceError) {
@@ -99,11 +113,25 @@ export function createServiceApp(opts: ServiceOptions): Express {
             );
             return;
         }
-        console.error(`[${opts.name}] Unhandled error:`, err);
-        res.status(500).json({ error: 'internal_error' });
-    });
 
-    return app;
+        // body-parser rejects a malformed or oversized body before any route sees it, tagging the
+        // error `expose: true` with a 4xx status. Falling through to 500 told the client that its
+        // own bad request was a server fault — so it retries something that can never succeed, and
+        // the noise lands in this service's error log instead of the caller's.
+        //
+        // `expose` is the gate rather than the status alone: it is http-errors' own marker for
+        // "this message is safe to show the client", so nothing internal leaks through it.
+        const parseErr = err as Error & { status?: number; expose?: boolean; type?: string };
+        if (parseErr.expose === true && typeof parseErr.status === 'number' && parseErr.status < 500) {
+            res.status(parseErr.status).json({
+                error: parseErr.type === 'entity.too.large' ? 'payload_too_large' : 'malformed_body',
+            });
+            return;
+        }
+
+        console.error(`[${serviceName}] Unhandled error:`, err);
+        res.status(500).json({ error: 'internal_error' });
+    };
 }
 
 /**

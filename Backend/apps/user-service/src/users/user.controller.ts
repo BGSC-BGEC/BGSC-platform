@@ -8,6 +8,7 @@ import {
     User,
     UserRole,
     UserStatus,
+    publish,
     recordAudit,
     wrap,
 } from '@bgsc/shared';
@@ -123,6 +124,10 @@ export const uploadAvatar = wrap(async (req, res) => {
             console.error('Failed to remove replaced avatar:', err)
         );
     }
+
+    // avatar_url is half of every UserSnapshot. Without this, form_submissions, teams and
+    // announcements keep the old picture forever — the profile PATCH path emits, this one did not.
+    publish('UserProfileUpdated', 'user-service', { user_id: previous._id, changed_fields: ['avatar_url'] });
 
     res.status(201).json({ avatar_url: stored.url, bytes: stored.bytes, mime: stored.mime });
 });

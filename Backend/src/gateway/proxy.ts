@@ -26,6 +26,11 @@ export function createServiceProxy(key: string, target: string, prefixes: string
     const options: Options = {
         target,
         changeOrigin: true,
+        // Appends the caller's socket address to X-Forwarded-For. Services trust exactly one hop
+        // (`trust proxy: 1` in createServiceApp), so `req.ip` downstream is the rightmost entry —
+        // the one the gateway wrote. Without this the header arrives as the client sent it, and
+        // audit rows record whatever IP the client chose to claim.
+        xfwd: true,
         // A predicate, not a glob: http-proxy-middleware 3.0.7 does not match glob pathFilters
         // (verified — '/users/**' never fires), and this shares the routing rule rather than
         // restating it in a second syntax.
