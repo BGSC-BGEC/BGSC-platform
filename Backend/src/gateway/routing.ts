@@ -18,7 +18,7 @@ export interface Route {
 export const ROUTES: Record<string, Route> = {
     auth: { prefixes: ['/auth', '/account'], target: config.services.auth, owner: 'BE-1 · W1' },
     user: { prefixes: ['/users', '/uploads/avatars'], target: config.services.user, owner: 'BE-2 · W1' },
-    event: { prefixes: ['/events', '/auction'], target: config.services.event, owner: 'BE-1 · W2' },
+    event: { prefixes: ['/events', '/auction', '/uploads/events'], target: config.services.event, owner: 'BE-1 · W2' },
     registration: {
         prefixes: ['/forms', '/registrations', '/teams', '/uploads/registrations'],
         target: config.services.registration,
@@ -37,7 +37,7 @@ export const ROUTES: Record<string, Route> = {
 };
 
 /** Services that actually exist today. Everything else 503s with a clear reason, not a hang. */
-export const LIVE_SERVICES = new Set(['auth', 'user', 'registration', 'announcement']);
+export const LIVE_SERVICES = new Set(['auth', 'user', 'registration', 'announcement', 'event']);
 
 /**
  * Prefix match on a whole path segment, so `/usersfoo` never routes to the user service.

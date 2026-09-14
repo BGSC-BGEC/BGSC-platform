@@ -229,7 +229,7 @@
 #### Backend (BE-1 & BE-2)
 
 **Saturday Sep 12 (8h):**
-- [ ] **BE-1: Events Service - Core** (8h)
+- [x] **BE-1: Events Service - Core** (8h)
   - Event CRUD operations
   - Event categories management
   - Event filters implementation (by category, date, status)
@@ -248,7 +248,7 @@
   - Form versioning
 
 **Sunday Sep 13 (8h):**
-- [ ] **BE-1: Events Service - Advanced** (8h)
+- [x] **BE-1: Events Service - Advanced** (8h)
   - League-specific registration integration
   - Event participants management
   - Event search and filtering logic
@@ -256,7 +256,7 @@
   - Event waitlist management
   - Event attendance tracking
 
-- [ ] **BE-2: Announcements Service** (8h)
+- [x] **BE-2: Announcements Service** (8h)
   - Announcement CRUD operations
   - Announcement categories
   - Announcement priority levels

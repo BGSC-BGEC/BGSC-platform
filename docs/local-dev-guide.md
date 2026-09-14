@@ -44,6 +44,7 @@ Backend/
   packages/shared/      @bgsc/shared   — models, middleware, events, config, service bootstrap
   apps/auth-service/           :3001  BE-1
   apps/user-service/           :3002  BE-2
+  apps/event-service/          :3003  BE-1
   apps/registration-service/   :3004  BE-2
   apps/announcement-service/   :3005  BE-2
 ```
@@ -53,7 +54,7 @@ Backend/
 | 3000 | gateway | — | live |
 | 3001 | auth-service | BE-1 · W1 | live |
 | 3002 | user-service | BE-2 · W1 | live |
-| 3003 | event-service | BE-1 · W2 | not built |
+| 3003 | event-service | BE-1 · W2 | live |
 | 3004 | registration-service | BE-2 · W2 | live |
 | 3005 | announcement-service | BE-2 · W2 | live |
 | 3006 | points-service | BE-2 · W3 | not built |

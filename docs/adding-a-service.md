@@ -6,8 +6,8 @@ The service-specific code is small; what gets missed is the wiring around it, be
 lives in the service's own directory.
 
 This doc is the checklist and the templates. Verified against the tree on Sep 13, 2026 with
-four services built (auth, user, registration, announcement). Copy from `registration-service`
-or `announcement-service` when in doubt — they are the most recent.
+five services built (auth, user, registration, announcement, event). Copy from `event-service`
+or `registration-service` when in doubt — they are the most recent.
 
 Related: `local-dev-guide.md` (running things), `handoff-to-be1.md` §2, §4, §5 (token contract,
 middleware reference, error envelope), `typescript-toolchain.md` (why TypeScript is pinned to 6.x).

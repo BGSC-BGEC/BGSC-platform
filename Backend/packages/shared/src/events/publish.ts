@@ -52,7 +52,7 @@ export async function connectEventBus(): Promise<void> {
     await sub.connect();
     await sub.subscribe(CHANNEL);
 
-    sub.on('message', (_channel, raw) => {
+    sub.on('message', (_channel: string, raw: string) => {
         try {
             const event = JSON.parse(raw) as DomainEvent & { occurred_at: string };
             // A publisher receives its own message back; it already emitted locally.
@@ -64,12 +64,12 @@ export async function connectEventBus(): Promise<void> {
     });
 
     // Redis dropping is not fatal: the service keeps serving, it just stops hearing other services.
-    pub.on('error', (err) => console.error('Event bus (pub) error:', err.message));
-    sub.on('error', (err) => console.error('Event bus (sub) error:', err.message));
+    pub.on('error', (err: Error) => console.error('Event bus (pub) error:', err.message));
+    sub.on('error', (err: Error) => console.error('Event bus (sub) error:', err.message));
 
     transport = {
         publish: (event) => {
-            pub.publish(CHANNEL, JSON.stringify(event)).catch((err) =>
+            pub.publish(CHANNEL, JSON.stringify(event)).catch((err: Error) =>
                 console.error('Failed to publish event:', err.message)
             );
         },

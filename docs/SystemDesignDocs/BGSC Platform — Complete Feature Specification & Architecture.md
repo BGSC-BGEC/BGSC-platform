@@ -55,67 +55,54 @@ The platform follows an **Event-Driven Architecture (EDA)** where all significan
 │         └─────────────────┴─────────────────┴─────────────────┘          │
 │                                    │                                     │
 │                         MVVM Pattern (ViewModel)                         │
-│                         Event Sourcing (Client State)                    │
+│                         Secure Client Token Storage                      │
 └────────────────────────────────────┬─────────────────────────────────────┘
-                                     │ HTTPS / WebSocket
+                                     │ HTTPS (TLS 1.3)
 ┌────────────────────────────────────┴─────────────────────────────────────┐
-│                      API GATEWAY (Kong / AWS API GW)                     │
-│  - JWT Validation  - Rate Limiting  - Request Routing  - SSL/TLS         │
+│                    EDGE & API GATEWAY (:3000 / api.bgsc.in)              │
+│  - Cloudflare DDoS Proxy & SSL/TLS Termination                           │
+│  - Gateway Sliding-Window Rate Limiting (100 req/min, 5/15min on Auth)   │
+│  - Request Proxying to Internal Service Network (http-proxy-middleware)  │
+│  - Edge Blocks on /internal/* Routes                                     │
 └────────────────────────────────────┬─────────────────────────────────────┘
-                                     │
+                                     │ Internal Docker Network (bgsc-network)
 ┌────────────────────────────────────┴─────────────────────────────────────┐
-│                      EVENT BUS (Apache Kafka / RabbitMQ)                 │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-│  │  user    │  │  event   │  │  social  │  │  union   │  │  points  │    │
-│  │ events   │  │ events   │  │ events   │  │ events   │  │ events   │    │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
-└────────────────────────────────────┬─────────────────────────────────────┘
-                                     │ Publish / Subscribe
-┌────────────────────────────────────┴─────────────────────────────────────┐
-│                     MICROSERVICES (Domain-Driven)                        │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │
-│  │  Auth    │ │  User    │ │  Event   │ │  Social  │ │  Union   │        │
-│  │ Service  │ │ Service  │ │ Service  │ │ Service  │ │ Service  │        │
-│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘        │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐        │
-│  │  Points  │ │  Media   │ │  Notif.  │ │  Search  │ │  Audit   │        │
-│  │ Service  │ │ Service  │ │ Service  │ │ Service  │ │ Service  │        │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘        │
-│  ┌──────────┐ ┌──────────┐                                               │
-│  │ Sponsor  │ │  Hall    │                                               │
-│  │ Service  │ │  of Fame │                                               │
-│  │          │ │ Service  │                                               │
-│  └──────────┘ └──────────┘                                               │
-└────────────────────────────────────┬─────────────────────────────────────┘
-                                     │
-┌────────────────────────────────────┴─────────────────────────────────────┐
-│                      Cache (Redis)                                       │
-└────────────────────────────────────┬─────────────────────────────────────┘
-                                     |
-┌────────────────────────────────────┴─────────────────────────┐
-│                      DATA LAYER                              │
-│  ┌──────────┐ ┌──────────┐ ┌─────────────┐  ┌──────────┐     │
-│  │PostgreSQL│ | MongoDB  │ │Elasticsearch│  │  S3      │     │
-│  │ (Primary)│ │ (Logs)   │ │  (Search)   │  │(Files)   │     │
-│  └──────────┘ └──────────┘ └─────────────┘  └──────────┘     │
-└──────────────────────────────────────────────────────────────┘
+│                     MICROSERVICES (Port Topology)                        │
+│  ┌──────────────────────┐ ┌──────────────────────┐ ┌───────────────────┐ │
+│  │ auth-service (:3001) │ │ user-service (:3002) │ │event-serv (:3003) │ │
+│  └──────────┬───────────┘ └──────────┬───────────┘ └─────────┬─────────┘ │
+│  ┌──────────┴───────────┐ ┌──────────┴───────────┐ ┌─────────┴─────────┘ │
+│  │ registration (:3004) │ │ announcement (:3005) │ │ points (:3006)    │ │
+│  └──────────┬───────────┘ └──────────┬───────────┘ └─────────┬─────────┘ │
+│  ┌──────────┴───────────┐ ┌──────────┴───────────┐ ┌─────────┴─────────┘ │
+│  │ leaderboard (:3007)  │ │ challenge (:3008)    │ │ media (:3009)     │ │
+│  └──────────────────────┘ └──────────────────────┘ └───────────────────┘ │
+└─────────────────────────────┬──────────────────┬─────────────────────────┘
+                              │                  │
+┌─────────────────────────────┴─────┐      ┌─────┴─────────────────────────┐
+│       EVENT BUS (Redis Pub/Sub)   │      │        SHARED DATA LAYER      │
+│  Channel: `bgsc.events`           │      │  Single MongoDB 7.0 Instance  │
+│  Async domain event distribution  │      │  Database: `bgsc_dev`         │
+│  Local in-process fallback        │      │  Dedicated collection borders │
+└───────────────────────────────────┘      └───────────────────────────────┘
 ```
 
 #### Event-Driven Flow Examples
 
-**Event Registration Flow:**
+**Event Registration Flow (As Implemented):**
 
-1. User clicks "Register" → `POST /api/events/{id}/register`
-    
-2. Event Service validates → writes to DB → emits `EventRegistrationCreated` event
-    
-3. Points Service consumes → awards points → emits `PointsAwarded` event
-    
-4. Sponsor Service consumes → updates sponsor fan counts if user is affiliated
-    
-5. Notification Service consumes → sends push/email
-    
-6. User Service consumes → updates user's event history cache
+1. User checks registration eligibility → `GET /events/{id}/eligibility`
+2. Client fetches dynamic form schema from Registration Service → `GET /forms/{form_id}`
+3. User submits form answers → `POST /registrations`
+4. Registration Service validates fields and issues synchronous internal call to Event Service → `POST /internal/events/{id}/reserve-seat` (`X-Internal-Token` protected)
+5. Event Service atomically checks capacity (`max_participants`) and deadlines (`closes_at <= start_at`):
+   - If capacity is available: increments `counts.registrations_confirmed` and returns `{ reserved: true, waitlisted: false }`
+   - If capacity is full & `waitlist_enabled` is true: increments `counts.registrations_waitlisted` and returns `{ reserved: true, waitlisted: true }`
+   - If capacity is full & `waitlist_enabled` is false: returns `{ reserved: false, reason: 'capacity_full' }`
+6. Registration Service saves `form_submissions` document and emits `RegistrationCreated` on Redis Pub/Sub channel `bgsc.events`
+7. Points Service consumes `RegistrationCreated` → awards base participation points (`points_pool.participation`)
+8. Notification Service consumes `RegistrationCreated` → dispatches confirmation email/push
+9. On cancellation (`DELETE /registrations/{id}`), Registration Service calls `POST /internal/events/{id}/release-seat`, decrements confirmed count, emits `RegistrationCancelled`, and automatically promotes the next waitlisted applicant
     
 
 **Auction Bid Flow:**
@@ -226,37 +213,43 @@ const EventCard = ({ eventId }: { eventId: string }) => {
 |**Mobile App**|React Native (Expo)|Single codebase for iOS/Android; campus users are mobile-first|
 |**Web Frontend**|React + Tailwind CSS|Admin dashboards, PWA for desktop users|
 |**Frontend Pattern**|MVVM + Event Sourcing|Clean separation, testable, real-time reactive UI|
-|**Backend API**|Node.js (NestJS)|Native TypeScript, excellent event-driven support, high concurrency|
-|**Event Bus**|Apache Kafka|Durable event log, replay capability, horizontal scaling|
-|**Primary Database**|PostgreSQL|Relational data integrity, ACID compliance for transactions|
-|**Cache & Sessions**|Redis|Session store, rate limiting, real-time leaderboards, pub/sub|
-|**Document Store**|MongoDB|Media metadata, event logs, unstructured content|
+|**API Gateway**|Node.js (Express Gateway :3000)|Single public ingress, Cloudflare DDoS edge, rate limiting, request routing|
+|**Microservices**|Node.js (Express 5 + TypeScript)|Monorepo workspaces (`apps/*`) sharing `@bgsc/shared` core package|
+|**Event Bus**|Redis 7.0 Pub/Sub (`bgsc.events`)|Lightweight cross-process domain event propagation with local in-process fallback|
+|**Primary Database**|MongoDB 7.0 (Mongoose 9)|Flexible NoSQL schema, shared `bgsc_dev` instance with strict collection ownership|
+|**Cache & Sessions**|Redis 7.0|Rate limiting buckets, event bus, cached snapshots|
 |**Real-Time**|Socket.io + Redis Adapter|Auctions, chat, live leaderboard updates across server instances|
-|**Message Queue**|BullMQ (Redis-based)|Async job processing: WhatsApp sends, email digests, image processing|
-|**File Storage**|AWS S3 / Cloudflare R2|Media, PDFs, profile pictures, exports|
-|**CDN**|CloudFront / Cloudflare|Global delivery for static assets and media|
-|**Search**|Elasticsearch|Fuzzy username/event search, typo tolerance, faceted search|
-|**Authentication**|JWT (Access + Refresh) + OAuth2|Stateless, scalable auth; Google OAuth integration|
-|**Push Notifications**|Firebase Cloud Messaging (FCM)|Cross-platform push delivery|
-|**Error Tracking**|Sentry|Real-time error monitoring and alerting|
-|**Infrastructure Monitoring**|Grafana + Prometheus|API latency, DB performance, queue depth|
-|**Container Orchestration**|Docker + Kubernetes|Scalable microservices deployment|
-|**CI/CD**|GitHub Actions + ArgoCD|Automated testing and deployment|
+|**File Storage**|Local Disk (`/uploads/`) → AWS S3 / R2|Avatars, event posters, dynamic form uploads (Media Service in Week 4)|
+|**CDN & DNS**|Cloudflare|DNS proxy (`api.bgsc.in`), edge DDoS protection, TLS 1.3 termination|
+|**Authentication**|JWT (15m Access + 7d Refresh) + Google OAuth + Phone OTP|Stateless session tokens, 6-digit SMS OTP, 45-day restoration grace period|
+|**Containerization**|Docker + Docker Compose|Multi-stage single image build, internal `bgsc-network` bridge|
 
-### 2.4 Scalability Considerations
+### 2.4 Scalability Considerations & Production Patterns
 
-- **Horizontal Pod Autoscaling:** API servers scale based on CPU/memory and request queue depth
-    
-- **Database Read Replicas:** Event browsing and leaderboard queries served from replicas
-    
-- **CDN Caching:** Public event pages and media cached at edge locations
-    
-- **Async Job Processing:** Image resizing, video compression, bulk notifications via worker queues
-    
-- **Event Replay:** Kafka event log enables replay for debugging, new service hydration, and audit
-    
-- **CQRS (Command Query Responsibility Segregation):** Write model (PostgreSQL) separate from read model (Redis + Elasticsearch) for complex queries
-    
+- **Horizontal Pod Autoscaling:** API servers scale based on CPU/memory and request queue depth.
+- **Database Read Isolation:** Single MongoDB instance partitioned by service boundaries; read-heavy queries (event browsing, leaderboards) leverage index-covered queries and can point to secondary replicas.
+- **Burst Seat Dropping & Contention Mitigation:**
+  - When popular tournament registrations open, high concurrent traffic hits `/registrations`.
+  - Seat capacity reservations (`/internal/events/:id/reserve-seat`) execute single-document atomic updates with conditions:
+    `findOneAndUpdate({ _id: eventId, 'counts.registrations_confirmed': { $lt: max_participants } }, { $inc: { 'counts.registrations_confirmed': 1 } })`.
+  - Submissions supply deterministic `idempotency_key`s derived from the registration ID, ensuring network timeouts and retries do not count seats twice.
+  - Overflow entries atomically route to `counts.registrations_waitlisted` without deadlocks or row locks.
+- **Snapshot Pattern & Distributed Decoupling:**
+  - Avoids distributed joins and N+1 query cascades across microservices.
+  - Collections store display snapshots: `{ user_id, display_name, avatar_url }` on registrations, teams, and event contacts.
+  - Asynchronous event bus consumers listen to `UserProfileUpdated` and update display snapshots in background batches without blocking core user operations.
+  - Authoritative financial, scoring, and permission gates always verify against live IDs.
+- **Optimistic Concurrency in High-Velocity State (Auctions):**
+  - Player auction lots enforce monotonic integer `version` fields.
+  - Bids execute conditional updates: `findOneAndUpdate({ _id, version, status: 'on_block', timer_ends_at: { $gt: now } }, { ..., $inc: { version: 1 } })`.
+  - Conflicting bids immediately fail fast without locking team purse balances.
+- **Media Asset Tiering & Security:**
+  - Local upload directories (`/uploads/avatars`, `/uploads/events`, `/uploads/registrations`) are partitioned by domain service.
+  - Enforces magic-byte sniffing (JPEG/PNG/WebP) and hard 10MB ceilings before processing, protecting against file extension spoofing and denial-of-service memory exhausts.
+  - Gateway path routing maps cleanly to the Week 4 migration to S3/Cloudflare R2 + CDN without changing client-facing URLs.
+- **Event Replay & Audit:**
+  - Domain events published to Redis Pub/Sub carry unique `message_id`, `producer`, `occurred_at`, and `schema_version`.
+  - Critical state changes persist immutable `audit_logs` entries for dispute resolution and compliance.
 
 ## 3. Global UI/UX Frame & Navigation
 
@@ -403,7 +396,7 @@ SponsorPrize: id, sponsor_id, title, description,
 ```
 
 
-#### 4.1.1 Collections as built (BE-2)
+#### 4.1.1 Collections as built (BE-1 & BE-2, Sep 13 2026)
 
 Field lists are indicative, not exhaustive — see `docs/modeldocs/` for the full shape, invariants and indexes of each.
 
@@ -522,7 +515,11 @@ audit_logs           _id, actor_id, action (dotted machine key), target_type, ta
 
 ```
 users                _id (uuid string), email, username, password_hash*, role, status,
-                     is_email_verified, refresh_token_hash*, last_login_at,
+                     google_id (sparse unique), is_email_verified,
+                     email_verification_token*, email_verification_expires*,
+                     is_phone_verified, pending_phone_number,
+                     phone_verification_otp_hash*, phone_verification_expires*, phone_verification_attempts,
+                     refresh_token_hash*, last_login_at,
                      password_reset_token*, password_reset_expires*,
                      profile{full_name, avatar_url, phone_number, bio, interests[],
                              social_links{strava_id, instagram, linkedin, steam_id}},
@@ -625,6 +622,37 @@ document reserves a `bracket` slot); sponsors, social feed, friends, store and u
 - Attribution: Shows which coordinator/admin made each announcement
     
 - Categories: BGEC, FitSoc, Airball, Offside, PowerPlay, Around The Net, Deuce, Highlight Events, Teams
+
+#### 5.2.1 Announcement Engine Architecture & Invariants (As Implemented — BE-2, Sep 13 2026)
+
+The Announcement Service (`apps/announcement-service`, Port 3005) operates as an autonomous microservice responsible for real-time news dissemination, targeted audience broadcasts, read tracking, and landing page coordinator presence:
+
+- **Multi-Tier Audience Resolution (`audience.ts`):**
+  - **Public / All (`all`):** Globally visible to all users and unauthenticated guests (`optionalAuth` on read endpoints).
+  - **Role-Scoped (`roles: RoleName[]`):** Filtered server-side using hierarchical role ranks (`ROLE_RANK`). Users only see announcements where `audience.min_role <= viewer.role`.
+  - **Event Participant Scoped (`event_participants: eventId`):** Scoped dynamically by querying confirmed event registrations from `form_submissions` via index `{ 'user.user_id': 1, 'owner.type': 1, submitted_at: -1 }`. Users only see announcements for events where they hold confirmed registrations.
+  - **Team Captain Scoped (`team_captains: eventId`):** Filtered to users holding verified captaincy on active teams for the designated event.
+  - *Zero Client-Side Trust:* Audience matching is evaluated strictly server-side; clients cannot assert audience membership.
+
+- **High-Performance Read Tracking Architecture (`reads.ts`):**
+  - **Bounded Embedded State:** Instead of an unbounded relational mapping table (`O(users * announcements)`), read state is maintained directly on the `User` aggregate root as `{ 'announcements.last_seen_at': Date, 'announcements.read_ids': string[] }`. Announcement Service is the sole designated cross-service writer for this embedded subdocument.
+  - **Watermark Model:** `last_seen_at` acts as a high-water mark; all announcements published prior to this timestamp are considered read.
+  - **Capped Ring Buffer:** Individual reads (`POST /announcements/:id/read`) append to `read_ids` with a server-side Mongo `$slice: -200` ceiling and a `$ne` idempotency guard, guaranteeing zero document bloat and lock-free concurrency.
+  - **Batch Read Dismissal:** Opening the Announcements feed or tapping "Mark all read" (`POST /announcements/read-all`) performs an atomic `$set` on `last_seen_at`, instantly clearing unread dots and badges.
+  - **Unread Badge API:** `GET /announcements/unread-count` returns the real-time unread count matching the viewer's audience predicate published since `last_seen_at`.
+
+- **Landing Page Coordinator Speech Bubbles (`GET /announcements/heads`):**
+  - Powers Tab 1 of the Landing Page: fetches coordinator portrait metadata and their latest active announcement in a comic-style speech bubble. If a coordinator has no active announcements, a fallback meme or placeholder is returned.
+
+- **Publication Lifecycle & Distributed CAS Scheduler (`tick.ts`):**
+  - State Machine: `draft` ──publish──> `published` (or `scheduled` if future `scheduled_for` is set) ──archive──> `archived` / `deleted_at`.
+  - Distributed Compare-And-Swap (CAS): Background 60-second ticker uses `Announcement.findOneAndUpdate({ status: 'scheduled', scheduled_for: { $lte: now }, deleted_at: null }, { $set: publishedSet(now) })`. Under horizontal scaling across multiple instances, exactly one node claims and publishes each document.
+  - Retention Automation: Scheduler enforces the 4-month active window (`ACTIVE_MONTHS = 4`) and 12-month archive retention (`ARCHIVE_MONTHS = 12`).
+  - Domain Event Emission: Emits `AnnouncementPublished` on Redis Pub/Sub channel `bgsc.events` upon publication.
+
+- **Security & Authorization Invariants:**
+  - Sensitive composer routes (`POST /announcements`, `POST /:id/publish`, `POST /:id/unschedule`) execute `requireActiveUser(UserRole.CORE)` which performs a live database lookup rather than trusting the JWT's 15-minute claims, ensuring deactivated or demoted coordinators cannot post announcements.
+  - Reads utilize `optionalAuth`, enabling guest visitors to browse public announcements without authentication.
     
 
 #### Tab 3: General Social Feed
@@ -855,13 +883,52 @@ Inspired by: https://pin.it/81Wcd43Gj
 - Multi-select enabled (can view all simultaneously)
     
 
-#### Event Details View (Read-Only/Standard Participant Experience)
+- Event Details View: Event info (title, description, rules PDF/link, awards, scheduling dates, coordinator contact points).
+- **Event Registration Architecture (As Implemented — BE-1, Sep 12 2026):**
+  - **Dynamic Form Delegation:** Event Service does not own form fields directly. The Registration Service (`registration-service` :3004) owns `form_definitions` and `form_submissions`. The Event document stores `registration.form_id`.
+  - **Atomic Seat Reservation Handshake:**
+    - Registration submissions call `POST /internal/events/:id/reserve-seat` (authenticated via `X-Internal-Token`) with `{ registration_id, idempotency_key }`.
+    - Event Service atomically checks deadlines (`closes_at <= start_at`) and capacity (`max_participants`).
+    - If capacity is full and `waitlist_enabled` is true, it increments `counts.registrations_waitlisted` and returns `{ reserved: true, waitlisted: true }`. If waitlist is disabled, it returns `{ reserved: false, reason: 'capacity_full' }`.
+    - On registration cancellation, Registration Service calls `POST /internal/events/:id/release-seat` to decrement `counts.registrations_confirmed`.
+  - **URL-Safe Slugs:** Derived automatically as `slugify(title) + '-' + year` (with automatic deduplication suffix if collisions occur). Deep links can query by either UUID `_id` or `slug`.
+  - **Lifecycle State Machine:**
+    - `draft` ──publish──> `upcoming` ──start_at──> `ongoing` ──end_at──> `past`
+    - Any active state can transition to `cancelled`. `past` and `cancelled` are strictly terminal.
+    - Soft-deletion (`deleted_at`) is restricted exclusively to `draft` status; published events must be cancelled to preserve ledger and participant records.
+  - **Invariants Enforced:**
+    - `start_at < end_at`
+    - `registration.opens_at < registration.closes_at <= start_at`
+    - `roster_finalizes_at >= registration.closes_at` (for teamed events)
+    - `teaming.is_teamed == true` ⇒ `1 <= team_size_min <= team_size_max`
+    - `type === 'DE'` ⇒ `leaderboard == null` (Direct Events have no leaderboard)
+    - `type === 'ALL'` ⇒ `auction != null` (Auctions only apply to Auction Leagues)
+  - **Media Uploads:** `POST /events/:ref/media` accepts raw images up to 10MB, validated via magic bytes (JPEG/PNG/WebP), and stores them under `/uploads/events/` on disk (replaced by Media Service in Week 4).
+- **Advanced Events Architecture (As Implemented — BE-1, Sep 13 2026):**
+  - **Search & Multi-Filter Query Engine (`GET /events`):**
+    - Multi-select filtering: `category` (leagues, bgec, fitsoc, general), `status` (draft, upcoming, ongoing, past, cancelled), `type` (LE, DE, ALL, DLL), `domain` (sports, esports, fitness, general), `tags`, and date bounds (`from`, `to`).
+    - Full-text and regex search matching `title`, `description`, and `tags`.
+    - Dual pagination support: Cursor pagination (`cursor`) for fast mobile infinite scroll + Offset pagination (`page`, `limit`, returning `total` and `total_pages`) for web admin tables.
+    - Configurable sorting: `date_asc` (default for upcoming), `date_desc`, `popular` (by `counts.registrations_confirmed`), and `title`.
+  - **Registration Eligibility Pre-Flight API (`GET /events/:ref/eligibility`):**
+    - A single lightweight read returning `{ eligible: boolean, reason, capacity_status: 'open' | 'waitlist_only' | 'full', seats_remaining, form_id, waitlist_enabled, requires_approval, is_teamed, captain_application_required, existing_registration_id }`.
+    - Enables frontend clients to render exact registration CTA states (Register, Waitlist, Registration Closed, or Already Registered) in a single request.
+  - **Participant Management & Privacy Boundaries (`GET /events/:ref/participants`, `GET /events/:ref/participants/stats`):**
+    - Public requests receive a privacy-sanitized roster exposing only confirmed participants and non-sensitive attributes (`user`, `status`, `role`, `team_id`, `submitted_at`).
+    - Organizer / Admin requests receive unmasked participant submissions including auction `base_price`, waitlist position, and full answers.
+    - Aggregated metrics endpoint (`/participants/stats`) provides real-time totals across statuses, roles, and attendance.
+  - **Waitlist FIFO & Promotion Engine (`GET /events/:ref/waitlist`, `POST /events/:ref/waitlist/:id/promote`):**
+    - Exposes ordered waitlist queue with FIFO positions.
+    - Admins can promote waitlisted participants with optional `admin_override: boolean`.
+    - Promotion atomically increments `counts.registrations_confirmed`, decrements `counts.registrations_waitlisted`, flips submission status to `confirmed`, and emits `RegistrationConfirmed` domain event.
+  - **Attendance Verification (`GET /events/:ref/attendance`, `POST /events/:ref/attendance`):**
+    - Organizers can record check-in status individually or in bulk at match/venue check-in.
+    - Persists `context.event.attended` boolean and emits `ParticipantAttended` domain event to trigger automated participation point crediting by Points Service.
+  - **Captains Management & Event Consumer Handshake:**
+    - Dedicated captain administration endpoints: `GET /events/:ref/captains`, `POST /events/:ref/captains`, `DELETE /events/:ref/captains/:userId`.
+    - Event Service subscribes to Redis Pub/Sub channel `bgsc:events` and consumes `CaptainApproved` (emitted by `registration-service`) to automatically and idempotently add approved captains to `event.auction.captain_user_ids`.
+    - Subscribes to `UserProfileUpdated` to automatically sync contact person display names in `event.contacts`.
 
-- Event info (title, description, rules PDF/link, awards, scheduling dates, coordinator contact points).
-- Event Registration (requires auth), where people fill up the fields for registration and the details and all, so  there is a need to have flexibility to add fields required for the event's registration, like for a chess league registration, elo ranking and all, along with multiple parameteres like compulsory or not. (Write more about in detail when implementing)
-    
-- **Sponsor Leaderboard Preview:** If event is active, show which sponsor is leading in fan contributions for this event type.
-    
 - Event registration section:
     
     - Name, game name.
@@ -915,6 +982,32 @@ Inspired by: https://pin.it/81Wcd43Gj
         
     - System displays: Average price, deviation, variance to guide pricing.
         
+
+#### 5.5.2 Dynamic Form & Teaming Engine Architecture (As Implemented — BE-2, Sep 12-13 2026)
+
+The Registration Service (`apps/registration-service`, Port 3004) owns dynamic form generation, participant submission processing, waitlist lifecycles, and team assembly for events and challenges:
+
+- **Dynamic Form Builder & Schema Engine (`/forms`):**
+  - **Polymorphic Form Definitions (`forms`):** Forms are owned polymorphically (`owner: { type: 'event' | 'challenge' | 'generic', id }`).
+  - **9 Core Field Types:** Supports `text`, `number`, `email`, `phone`, `select`, `multiselect`, `file`, `checkbox`, and `textarea`.
+  - **Validation Constraints:** Each field supports `required`, length bounds (`min_length`, `max_length`), numerical limits (`min_value`, `max_value`), custom regex pattern evaluation, and option dictionaries. Admin-only fields are stripped when rendered to non-admin viewers.
+  - **Immutable Version Pinning:** Modifying a published form increments its `version` counter without mutating existing submissions. Every submission stores its exact `form_version`. The historical endpoint (`GET /forms/:id/versions/:version`) guarantees past submissions can be reliably audited against the exact schema in effect at the time of submission.
+
+- **Participant Registration Lifecycle (`/registrations`):**
+  - **Pre-Flight File Upload Pipeline (`POST /registrations/upload-file`):** Files are uploaded prior to form submission via streaming raw binary parser (`limit: 10MB`). Validated via magic bytes (JPEG, PNG, WebP, PDF) and stored at `/uploads/registrations/`. Returns a reference token/URL to embed in submission `files[]`.
+  - **Single Active Registration Invariant:** Enforced via MongoDB unique partial index `{ 'owner.id': 1, 'user.user_id': 1 }` where `status != 'cancelled'`. Concurrent or duplicate submissions immediately fail with `409 already_registered`.
+  - **Synchronous Capacity Handshake:** Handshake invokes Event Service's `POST /internal/events/:id/reserve-seat` with `{ registration_id, idempotency_key }` guarded by `X-Internal-Token`. If the event is full and waitlisting is enabled, the submission is saved with `status: 'waitlisted'` and an assigned `waitlist_position`.
+  - **User Cancellation & Immediate Seat Release:** Calling `POST /registrations/:id/cancel` sets `status: 'cancelled'`, invokes `POST /internal/events/:id/release-seat`, and emits `RegistrationCancelled` with payload `{ owner, freed_seat: true }`.
+  - **Autonomous FIFO Waitlist Promotion:** A background event consumer subscribes to `RegistrationCancelled`. When `freed_seat: true`, it selects the lowest `waitlist_position` (`sort({ waitlist_position: 1 })`), invokes `reserveSeat` with the registration ID as idempotency key, transitions the registration to `confirmed`, and emits `RegistrationCreated`.
+  - **Manual Admin Override:** Core administrators can force-promote or override registration states via `PATCH /registrations/:id/status`.
+
+- **Teaming Lifecycle & Captain Authorization (`/teams`):**
+  - **Captain Approval Gate:** Participants applying for team captaincy submit an application payload during registration. Core reviewers approve applications via `PATCH /registrations/:id/captain-application`, which emits `CaptainApproved`. This event unlocks `POST /teams` creation for the captain and updates `event.auction.captain_user_ids`.
+  - **Team Capacity & Invariants:** Teams enforce `team_size_min` and `team_size_max` inherited from event configuration.
+  - **Roster Invitation & Join:** Captains issue member invitations (`POST /teams/:id/invite`); eligible registered members join (`POST /teams/:id/join`). Members can be pruned by the captain, the member themselves, or Core (`DELETE /teams/:id/members/:user_id`).
+  - **Roster Lockdown:** Core freezes team changes prior to competition via `PATCH /teams/:id/lock`, preventing roster churn.
+  - **Asynchronous Snapshot Reconciliation:** The service subscribes to `UserProfileUpdated`. When full name or avatar changes occur, it asynchronously updates user snapshots across both `form_submissions.user` and `teams.members[]`.
+
 
 #### Spectator Bracket View
 
@@ -1354,6 +1447,14 @@ This is the main page to create events!
 - **Registration Deadline Gates:** Set registration opening time, team capping limits, and roster finalization closures.
 - **Administrative Assignment Matrix:** Multi-select checklist assigning specific Core and Member roles to serve as administrators/referees of the event, which gives them the access to the event's edit and all
 
+#### 1.1 Event Operations & Live Roster Management Console (As Implemented — BE-1, Sep 13 2026)
+
+Operational console for event coordinators and Core referees during active event lifecycle:
+- **Participant Directory & Audit Controls:** Live data grid of registered participants filterable by status (`confirmed`, `waitlisted`, `rejected`, `cancelled`), teaming role (`solo`, `captain`, `member`), team assignment, and attendance. Provides organizers with full submission answers and auction base prices.
+- **FIFO Waitlist Queue & Manual Override Promotion:** Real-time waitlist inspection with promotion triggers (`POST /events/:id/waitlist/:id/promote`) allowing organizers to promote waitlisted participants on demand with optional capacity limit overrides.
+- **Venue Check-in & Attendance Verification:** Match/venue attendance interface (`POST /events/:id/attendance`) allowing individual or bulk check-ins, persisting attendance records and firing `ParticipantAttended` events for points distribution.
+- **Captain Roster Governance:** Dedicated controls (`POST/DELETE /events/:id/captains`) for assigning or revoking team captain privileges for auction-style leagues, integrated with the Redis domain event bus (`CaptainApproved`).
+
 #### 2. Visual Bracket Generator Engine
 
 - **Bracket Type Configuration:** Dropdown to select system structures:
@@ -1746,14 +1847,18 @@ EventRegistrationOpened { event_id, timestamp }
 EventRegistrationClosed { event_id, timestamp }
 EventStarted { event_id, timestamp }
 EventCompleted { event_id, timestamp }
+EventCancelled { event_id, cancelled_by, reason, timestamp }
 EventDeleted { event_id, deleted_by, timestamp }
+ParticipantAttended { event_id, registration_id, user_id, marked_by, timestamp }
 ```
 
 #### Registration Domain Events
 
 ```
 RegistrationCreated { registration_id, event_id, user_id, role, timestamp }
-RegistrationCancelled { registration_id, event_id, user_id, reason, timestamp }
+RegistrationCancelled { registration_id, event_id, user_id, freed_seat, reason, timestamp }
+RegistrationConfirmed { registration_id, event_id, user_id, promoted_by, timestamp }
+CaptainApproved { registration_id, event_id, user_id, approved_by, timestamp }
 TeamCreated { team_id, event_id, captain_id, name, timestamp }
 TeamUpdated { team_id, changed_fields[], updated_by, timestamp }
 TeamMemberAdded { team_id, user_id, added_by, timestamp }
@@ -1814,13 +1919,24 @@ PlayerSold { auction_id, player_id, team_id, amount, timestamp }
 PlayerUnsold { auction_id, player_id, timestamp }
 ```
 
+#### Announcement Domain Events
+
+```
+AnnouncementCreated { announcement_id, title, author_id, timestamp }
+AnnouncementPublished { announcement_id, title, category, priority, audience, timestamp }
+AnnouncementArchived { announcement_id, archived_by, timestamp }
+```
+
 ### 8.2 Event Consumers by Service
 
 |   |   |   |
 |---|---|---|
 |**Service**|**Events Consumed**|**Actions Taken**|
+|**Event Service**|CaptainApproved, UserProfileUpdated|Adds approved captains to `event.auction.captain_user_ids`; synchronizes contact display snapshots in `event.contacts`|
+|**Registration Service**|RegistrationCancelled, UserProfileUpdated|Auto-promotes next waitlisted participant when a confirmed seat is freed; synchronizes user snapshots on `form_submissions` and `teams`|
+|**Announcement Service**|UserProfileUpdated|Synchronizes author display snapshots in `announcements.author`|
 |**Notification Service**|All domain events|Routes to appropriate channel (push, email, WhatsApp) based on user preferences|
-|**Points Service**|EventCompleted, ChallengeCompleted, RegistrationCreated|Awards points, updates balances|
+|**Points Service**|EventCompleted, ChallengeCompleted, RegistrationCreated, ParticipantAttended|Awards base participation and attendance points, updates user points balances|
 |**Sponsor Service**|EventCompleted, UserAffiliated, FanEarned|Updates sponsor fan counts, rankings, prize eligibility|
 |**Search Service**|EventCreated, EventUpdated, UserRegistered, PostCreated, SponsorCreated|Updates Elasticsearch indices|
 |**Audit Service**|UserRoleChanged, EventDeleted, PointsEarned, BidPlaced, SponsorTenureEnded|Writes immutable audit records|
@@ -2018,7 +2134,7 @@ PlayerUnsold { auction_id, player_id, timestamp }
     
     - **Edge Layer (Cloudflare DNS Proxy):** Public domain (`api.bgsc.in`) proxied through Cloudflare to absorb Layer 3/4 volumetric DDoS floods and hide the origin server IP.
     
-    - **Gateway Ingress Layer (Port 3000):** Single public entry point reverse-proxying traffic to downstream microservices (Auth :3001, Users :3002, Events :3004, Points :3005). Drops malformed traffic and enforces payload size limits (1MB default).
+    - **Gateway Ingress Layer (Port 3000):** Single public entry point reverse-proxying traffic to downstream microservices (Auth :3001, Users :3002, Events :3003, Registration :3004, Announcements :3005, Points :3006). Drops malformed traffic and enforces payload size limits (1MB default).
     
     - **Application Rate Limiting (Sliding Window):**
         - Auth & OTP endpoints (`/auth/login`, `/auth/register`, `/auth/phone/send-otp`): 5 attempts per 15 minutes per IP (blocks brute force & SMS flooding)
@@ -2044,7 +2160,7 @@ PlayerUnsold { auction_id, player_id, timestamp }
     - Privacy Policy and Terms of Service accessible pre-registration and in Account Actions
         
 
-#### 11.2.1 Account Deletion — As Implemented (BE-2, Sep 6 2026)
+#### 11.2.1 Account Deletion — As Implemented (BE-2, Sep 6 2026; Re-Audited Sep 12 2026)
 
 The delete flow is a **hide plus disclosure**, not an erasure. Recorded here because it differs from the
 plain reading of "right to deletion" above.
@@ -2053,11 +2169,11 @@ plain reading of "right to deletion" above.
 |---|---|
 | On request | `deleted_at` stamped, `status` → `deleted`, refresh token cleared. The account disappears from search, public profile reads and admin lists immediately |
 | Data retained | **Everything.** No field is destroyed and no purge job exists. Registrations, point transactions, leaderboard entries and team rosters keep resolving |
-| Grace period | 30 days, and it governs **restore**, not deletion. Signing in during the window restores the account. After it, restore is admin-only |
+| Grace period | 45 days (governed by canonical constant `ACCOUNT_DELETION_GRACE_DAYS = 45`), and it governs **restore**, not deletion. Signing in during the window detects `status: deleted` with `ACCOUNT_DELETED` error payload indicating remaining days. After 45 days, restore is permanently closed (`410 Gone`) |
 | Disclosure | `GET /users/me/deletion-preview` returns the exact retention text the client must show, versioned. The confirmation captures `confirm: "DELETE"` (literal, case-sensitive), an optional `reason`, and an opt-in `research_consent` (default off) |
-| Restore | `POST /users/me/restore` while inside the window. `GET /users/me` keeps answering for the owner of a deleted account — otherwise they could never reach it. Past the window: `410`, admin only |
+| Restore | Canonical restoration path: **Credentials-based Restoration via `POST /account/reactivate`** (Auth Service :3001) with `{ login, password }`. Restores user within the 45-day window (`ACCOUNT_DELETION_GRACE_DAYS = 45`), resets `status` to `active`, unsets `deleted_at`, records `user.restored` / `account_reactivated` audit log, and issues a fresh JWT token pair. User Service deliberately exposes no authenticated `/users/me/restore` route because soft-deletion revokes active tokens and login yields status `{ account_status: 'scheduled_for_deletion' }`; `GET /users/me` instead points clients directly to `restore_with: 'POST /account/reactivate'`. Past 45 days: `410 Gone`, restore blocked |
 | `research_consent` | Marks whose identifiable data may be **used** for institutional research. Retention is universal; this flag governs use, not storage |
-| Audit | Every deletion writes an immutable `AuditLog` row recording the disclosure version shown and the consent given. Restores write `user.restored` |
+| Audit | Every deletion writes an immutable `AuditLog` row recording the disclosure version shown and the consent given. Restores write `user.restored` / `account_reactivated` |
 | Encryption | Not yet implemented. 11.2's AES-256 at rest remains outstanding work; nothing in this flow assumes it |
 
 Consequence to be aware of: a user who deletes their account cannot have their personal data removed
