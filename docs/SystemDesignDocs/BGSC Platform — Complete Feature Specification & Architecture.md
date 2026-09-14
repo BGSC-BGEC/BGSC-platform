@@ -215,7 +215,7 @@ const EventCard = ({ eventId }: { eventId: string }) => {
 |**Frontend Pattern**|MVVM + Event Sourcing|Clean separation, testable, real-time reactive UI|
 |**API Gateway**|Node.js (Express Gateway :3000)|Single public ingress, Cloudflare DDoS edge, rate limiting, request routing|
 |**Microservices**|Node.js (Express 5 + TypeScript)|Monorepo workspaces (`apps/*`) sharing `@bgsc/shared` core package|
-|**Event Bus**|Redis 7.0 Pub/Sub (`bgsc.events`)|Lightweight cross-process domain event propagation with local in-process fallback|
+|**Event Bus**|Redis 7.0 Pub/Sub (`bgsc-events`)|Lightweight cross-process domain event propagation with local in-process fallback|
 |**Primary Database**|MongoDB 7.0 (Mongoose 9)|Flexible NoSQL schema, shared `bgsc_dev` instance with strict collection ownership|
 |**Cache & Sessions**|Redis 7.0|Rate limiting buckets, event bus, cached snapshots|
 |**Real-Time**|Socket.io + Redis Adapter|Auctions, chat, live leaderboard updates across server instances|
@@ -224,32 +224,20 @@ const EventCard = ({ eventId }: { eventId: string }) => {
 |**Authentication**|JWT (15m Access + 7d Refresh) + Google OAuth + Phone OTP|Stateless session tokens, 6-digit SMS OTP, 45-day restoration grace period|
 |**Containerization**|Docker + Docker Compose|Multi-stage single image build, internal `bgsc-network` bridge|
 
-### 2.4 Scalability Considerations & Production Patterns
+### 2.4 Scalability Considerations
 
-- **Horizontal Pod Autoscaling:** API servers scale based on CPU/memory and request queue depth.
-- **Database Read Isolation:** Single MongoDB instance partitioned by service boundaries; read-heavy queries (event browsing, leaderboards) leverage index-covered queries and can point to secondary replicas.
-- **Burst Seat Dropping & Contention Mitigation:**
-  - When popular tournament registrations open, high concurrent traffic hits `/registrations`.
-  - Seat capacity reservations (`/internal/events/:id/reserve-seat`) execute single-document atomic updates with conditions:
-    `findOneAndUpdate({ _id: eventId, 'counts.registrations_confirmed': { $lt: max_participants } }, { $inc: { 'counts.registrations_confirmed': 1 } })`.
-  - Submissions supply deterministic `idempotency_key`s derived from the registration ID, ensuring network timeouts and retries do not count seats twice.
-  - Overflow entries atomically route to `counts.registrations_waitlisted` without deadlocks or row locks.
-- **Snapshot Pattern & Distributed Decoupling:**
-  - Avoids distributed joins and N+1 query cascades across microservices.
-  - Collections store display snapshots: `{ user_id, display_name, avatar_url }` on registrations, teams, and event contacts.
-  - Asynchronous event bus consumers listen to `UserProfileUpdated` and update display snapshots in background batches without blocking core user operations.
-  - Authoritative financial, scoring, and permission gates always verify against live IDs.
-- **Optimistic Concurrency in High-Velocity State (Auctions):**
-  - Player auction lots enforce monotonic integer `version` fields.
-  - Bids execute conditional updates: `findOneAndUpdate({ _id, version, status: 'on_block', timer_ends_at: { $gt: now } }, { ..., $inc: { version: 1 } })`.
-  - Conflicting bids immediately fail fast without locking team purse balances.
-- **Media Asset Tiering & Security:**
-  - Local upload directories (`/uploads/avatars`, `/uploads/events`, `/uploads/registrations`) are partitioned by domain service.
-  - Enforces magic-byte sniffing (JPEG/PNG/WebP) and hard 10MB ceilings before processing, protecting against file extension spoofing and denial-of-service memory exhausts.
-  - Gateway path routing maps cleanly to the Week 4 migration to S3/Cloudflare R2 + CDN without changing client-facing URLs.
-- **Event Replay & Audit:**
-  - Domain events published to Redis Pub/Sub carry unique `message_id`, `producer`, `occurred_at`, and `schema_version`.
-  - Critical state changes persist immutable `audit_logs` entries for dispute resolution and compliance.
+- **Horizontal Pod Autoscaling:** API servers scale based on CPU/memory and request queue depth
+    
+- **Database Read Replicas:** Event browsing and leaderboard queries served from replicas
+    
+- **CDN Caching:** Public event pages and media cached at edge locations
+    
+- **Async Job Processing:** Image resizing, video compression, bulk notifications via worker queues
+    
+- **Event Replay:** Kafka event log enables replay for debugging, new service hydration, and audit
+    
+- **CQRS (Command Query Responsibility Segregation):** Write model (PostgreSQL) separate from read model (Redis + Elasticsearch) for complex queries
+    
 
 ## 3. Global UI/UX Frame & Navigation
 
