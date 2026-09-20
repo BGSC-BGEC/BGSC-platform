@@ -1,0 +1,510 @@
+import assert from 'assert';
+import {
+    Challenge,
+    ChallengeParticipation,
+    DomainEvent,
+    PointTransaction,
+    ServiceError,
+    Team,
+    User,
+    UserRole,
+    idempotencyKey,
+    resetBus,
+    subscribe,
+} from '@bgsc/shared';
+import { v4 as uuid } from 'uuid';
+import * as catalog from '../challenges/challenge.service';
+import * as part from '../challenges/participation.service';
+import { tick } from '../scheduler/expiry';
+import { actorOf, challengeInput, closeScratchDb, openScratchDb, seedUser } from './seed';
+
+/**
+ * The participation lifecycle, and the one event this service exists to produce.
+ *
+ * `ChallengeCompleted` is consumed by the Points Service (points consumers.ts:231) with a payload
+ * type it pinned on Sep 19. The assertions below are written against THAT shape, not against this
+ * service's convenience — if the producer drifts, this file goes red before the payout does.
+ *
+ *   npx ts-node src/selfcheck/participation.selfcheck.ts
+ */
+
+const section = (name: string) => console.log(`\n-- ${name} --`);
+const pass = (what: string) => console.log(`  ok  ${what}`);
+
+async function refuses(status: number, code: string, fn: () => Promise<unknown>): Promise<void> {
+    try {
+        await fn();
+    } catch (err) {
+        assert.ok(err instanceof ServiceError, `expected ServiceError ${code}, got ${(err as Error).message}`);
+        assert.strictEqual(err.status, status, `expected ${status} ${code}, got ${err.status} ${err.code}`);
+        assert.strictEqual(err.code, code);
+        return;
+    }
+    assert.fail(`expected ${status} ${code}, but the call succeeded`);
+}
+
+/** Collects one event type off the in-process bus for the duration of a block. */
+function collect<P extends Record<string, unknown>>(type: string): { events: DomainEvent<P>[]; stop: () => void } {
+    const events: DomainEvent<P>[] = [];
+    const stop = subscribe<P>(type, (e) => void events.push(e));
+    return { events, stop };
+}
+
+async function main(): Promise<void> {
+    await openScratchDb();
+    try {
+        const admin = await seedUser('Reviewer', UserRole.CORE);
+        const adminActor = actorOf(admin);
+        const alice = await seedUser('Alice');
+        const bob = await seedUser('Bob');
+
+        /** A live challenge, ready to accept. */
+        const live = async (over: Record<string, unknown> = {}) => {
+            const c = await catalog.createChallenge(challengeInput(over) as never, adminActor);
+            return catalog.transition(c._id, 'activate', adminActor);
+        };
+
+        section('solo acceptance');
+        const c1 = await live();
+        const p1 = await part.accept(c1._id, {}, actorOf(alice));
+        assert.strictEqual(p1.status, 'accepted');
+        assert.deepStrictEqual(p1.member_user_ids, [alice._id]);
+        assert.strictEqual(p1.challenge_snapshot.award_points, 50);
+        assert.strictEqual((await Challenge.findById(c1._id))!.counts.accepted, 1);
+        pass('accept snapshots the award and increments counts.accepted');
+
+        await refuses(409, 'already_accepted', () => part.accept(c1._id, {}, actorOf(alice)));
+        assert.strictEqual((await Challenge.findById(c1._id))!.counts.accepted, 1);
+        pass('a second accept is a 409 and does NOT leave counts.accepted inflated');
+
+        const draft = await catalog.createChallenge(challengeInput() as never, adminActor);
+        await refuses(409, 'challenge_not_active', () => part.accept(draft._id, {}, actorOf(bob)));
+        pass('a draft challenge refuses acceptance');
+
+        const closed = await live({
+            window: {
+                opens_at: null,
+                closes_at: new Date(Date.now() - 3600_000),
+                submissions_close_at: null,
+                time_limit_minutes: null,
+            },
+        });
+        await refuses(409, 'challenge_window_closed', () => part.accept(closed._id, {}, actorOf(bob)));
+        pass('a closed window refuses acceptance');
+
+        section('capacity is claimed inside the filter, not around it');
+        const capped = await live({ max_participants: 3 });
+        const crowd = await Promise.all([1, 2, 3, 4, 5].map(() => seedUser('Crowd')));
+        const results = await Promise.allSettled(crowd.map((u) => part.accept(capped._id, {}, actorOf(u))));
+        const accepted = results.filter((r) => r.status === 'fulfilled').length;
+        assert.strictEqual(accepted, 3, `5 racing accepts on a cap of 3 produced ${accepted}`);
+        assert.strictEqual(await ChallengeParticipation.countDocuments({ challenge_id: capped._id }), 3);
+        assert.strictEqual((await Challenge.findById(capped._id))!.counts.accepted, 3);
+        for (const r of results.filter((x) => x.status === 'rejected') as PromiseRejectedResult[]) {
+            assert.strictEqual((r.reason as ServiceError).code, 'challenge_full');
+        }
+        pass('5 simultaneous accepts on a cap of 3: exactly 3 rows, counts.accepted === 3');
+
+        section('deadlines');
+        const timed = await live({
+            window: { opens_at: null, closes_at: null, submissions_close_at: null, time_limit_minutes: 60 },
+        });
+        const pt = await part.accept(timed._id, {}, actorOf(alice));
+        assert.ok(pt.deadline_at, 'a time limit produces a deadline');
+        assert.ok(Math.abs(pt.deadline_at!.getTime() - (pt.accepted_at.getTime() + 3_600_000)) < 1000);
+
+        const hardStop = new Date(Date.now() + 10 * 60_000);
+        const both = await live({
+            window: { opens_at: null, closes_at: null, submissions_close_at: hardStop, time_limit_minutes: 60 },
+        });
+        const pb = await part.accept(both._id, {}, actorOf(bob));
+        assert.strictEqual(pb.deadline_at!.getTime(), hardStop.getTime());
+        pass('deadline_at is min(personal limit, submissions_close_at)');
+
+        section('progress and submission');
+        const flow = await live({ reviewers: [] });
+        const pf = await part.accept(flow._id, {}, actorOf(alice));
+
+        await refuses(404, 'participation_not_found', () =>
+            part.updateProgress(pf._id, { percent: 50 } as never, actorOf(bob))
+        );
+        pass('a non-member gets 404, not 403 — they must not learn the row exists');
+
+        const progressed = await part.updateProgress(pf._id, { percent: 40, steps: [{ key: 'a', label: 'A', done: true }] } as never, actorOf(alice));
+        assert.strictEqual(progressed.progress.percent, 40);
+        const firstDoneAt = progressed.progress.steps[0].done_at!;
+        const again = await part.updateProgress(pf._id, { steps: [{ key: 'a', label: 'A', done: true }] } as never, actorOf(alice));
+        assert.strictEqual(again.progress.steps[0].done_at!.getTime(), firstDoneAt.getTime());
+        pass('re-sending a done step keeps its original done_at');
+
+        await refuses(422, 'proof_url_invalid', () =>
+            part.submit(pf._id, { proofs: [{ type: 'url', value: 'not-a-url', name: null }], notes: null } as never, actorOf(alice))
+        );
+        const submitted = await part.submit(
+            pf._id,
+            { proofs: [{ type: 'url', value: 'https://example.com/proof', name: null }], notes: null } as never,
+            actorOf(alice)
+        );
+        assert.strictEqual(submitted.status, 'under_review');
+        assert.strictEqual(submitted.submission!.version, 1);
+        assert.strictEqual((await Challenge.findById(flow._id))!.counts.submitted, 1);
+        pass('submit moves to under_review and counts.submitted once');
+
+        const resubmitted = await part.submit(
+            pf._id,
+            { proofs: [{ type: 'url', value: 'https://example.com/better', name: null }], notes: null } as never,
+            actorOf(alice)
+        );
+        assert.strictEqual(resubmitted.submission!.version, 2);
+        assert.strictEqual((await Challenge.findById(flow._id))!.counts.submitted, 1);
+        pass('a resubmit bumps version and does NOT double-count counts.submitted');
+
+        section('the deadline is enforced on submit, not only on the sweeper');
+        {
+            const late = await live({
+                window: { opens_at: null, closes_at: null, submissions_close_at: null, time_limit_minutes: 60 },
+            });
+            const pl2 = await part.accept(late._id, {}, actorOf(bob));
+            await ChallengeParticipation.updateOne({ _id: pl2._id }, { $set: { deadline_at: new Date(Date.now() - 1000) } });
+            await refuses(409, 'deadline_passed', () =>
+                part.submit(pl2._id, { proofs: [{ type: 'url', value: 'https://example.com/late', name: null }], notes: null } as never, actorOf(bob))
+            );
+            pass('a submission after deadline_at is refused even before the sweeper has run');
+        }
+
+        section('an archived challenge stops taking submissions, a completed one does not');
+        {
+            const stillOpen = await live();
+            const po = await part.accept(stillOpen._id, {}, actorOf(alice));
+            await catalog.transition(stillOpen._id, 'complete', adminActor);
+            const okAfterComplete = await part.submit(
+                po._id,
+                { proofs: [{ type: 'url', value: 'https://example.com/ok', name: null }], notes: null } as never,
+                actorOf(alice)
+            );
+            assert.strictEqual(okAfterComplete.status, 'under_review', 'challenge-model.md §2.1');
+
+            await catalog.transition(stillOpen._id, 'archive', adminActor);
+            await refuses(409, 'challenge_archived', () =>
+                part.submit(po._id, { proofs: [{ type: 'url', value: 'https://example.com/no', name: null }], notes: null } as never, actorOf(alice))
+            );
+            pass('a completed challenge still accepts submissions; an archived one does not');
+        }
+
+        section('review: the only place the payout is published');
+        await refuses(403, 'forbidden', () =>
+            part.review(pf._id, { decision: 'approved', reason: null } as never, actorOf(bob), UserRole.USER)
+        );
+        pass('a member who is neither a named reviewer nor CORE is refused');
+
+        // The interesting case is the privileged one: rank alone must not let someone pay themselves.
+        const selfDealer = await seedUser('Self Dealer', UserRole.COORDINATOR);
+        const ownChallenge = await live();
+        const ownP = await part.accept(ownChallenge._id, {}, actorOf(selfDealer));
+        await part.submit(
+            ownP._id,
+            { proofs: [{ type: 'url', value: 'https://example.com/self', name: null }], notes: null } as never,
+            actorOf(selfDealer)
+        );
+        await refuses(403, 'cannot_review_own_participation', () =>
+            part.review(ownP._id, { decision: 'approved', reason: null } as never, actorOf(selfDealer), UserRole.COORDINATOR)
+        );
+        // ...and somebody else still can.
+        const byOther = await part.review(ownP._id, { decision: 'approved', reason: null } as never, adminActor, UserRole.CORE);
+        assert.strictEqual(byOther.status, 'approved');
+        pass('a coordinator cannot approve their own participation, but another reviewer can');
+
+        resetBus();
+        const completed = collect<{ participation_id: string; challenge_id: string; member_user_ids: string[]; award_points: number }>('ChallengeCompleted');
+        const approved = await part.review(pf._id, { decision: 'approved', reason: null } as never, adminActor, UserRole.CORE);
+        completed.stop();
+
+        assert.strictEqual(approved.status, 'approved');
+        assert.strictEqual(approved.reward!.points_awarded, 50);
+        assert.strictEqual(completed.events.length, 1, 'exactly one ChallengeCompleted');
+        const payload = completed.events[0].payload;
+        // The exact fields points-service/src/events/consumers.ts:189-195 destructures.
+        assert.strictEqual(payload.participation_id, pf._id);
+        assert.strictEqual(payload.challenge_id, flow._id);
+        assert.deepStrictEqual(payload.member_user_ids, [alice._id]);
+        assert.strictEqual(typeof payload.award_points, 'number');
+        assert.ok(payload.award_points > 0, 'award_points must be non-zero: the seeded rule defaults to 0, so a 0 here pays nobody, silently');
+        pass('ChallengeCompleted carries the four fields the live consumer reads, with a non-zero award');
+
+        const doubleClick = collect('ChallengeCompleted');
+        await refuses(409, 'participation_not_reviewable', () =>
+            part.review(pf._id, { decision: 'approved', reason: null } as never, adminActor, UserRole.CORE)
+        );
+        doubleClick.stop();
+        assert.strictEqual(doubleClick.events.length, 0, 'a losing approve must publish nothing');
+        assert.strictEqual((await Challenge.findById(flow._id))!.counts.approved, 1);
+        pass('a second approve is 409, publishes nothing, and does not re-count');
+
+        section('a named reviewer below CORE may review their own challenge');
+        const scout = await seedUser('Scout', UserRole.MEMBER);
+        const reviewed = await live({ reviewers: [scout._id] });
+        const pr = await part.accept(reviewed._id, {}, actorOf(bob));
+        await part.submit(pr._id, { proofs: [{ type: 'url', value: 'https://example.com/x', name: null }], notes: null } as never, actorOf(bob));
+        const rejected = await part.review(pr._id, { decision: 'rejected', reason: 'blurry' } as never, actorOf(scout), UserRole.MEMBER);
+        assert.strictEqual(rejected.status, 'rejected');
+        pass('the challenge reviewers[] allow-list works below the CORE floor');
+
+        const fixed = await part.submit(
+            pr._id,
+            { proofs: [{ type: 'url', value: 'https://example.com/clear', name: null }], notes: null } as never,
+            actorOf(bob)
+        );
+        assert.strictEqual(fixed.status, 'under_review');
+        assert.strictEqual(fixed.review, null, 'a resubmit clears the old verdict');
+        pass('a rejected participation can resubmit, and the stale review is cleared');
+
+        section('auto-approve pays on submit');
+        resetBus();
+        const trust = await live({ submission: { requires_proof: true, proof_types: ['text'], max_files: 1, auto_approve: true } });
+        const auto = collect<{ award_points: number }>('ChallengeCompleted');
+        const pa = await part.accept(trust._id, {}, actorOf(alice));
+        const autoApproved = await part.submit(pa._id, { proofs: [{ type: 'text', value: 'done', name: null }], notes: null } as never, actorOf(alice));
+        auto.stop();
+        assert.strictEqual(autoApproved.status, 'approved');
+        assert.strictEqual(auto.events.length, 1);
+        assert.strictEqual(auto.events[0].payload.award_points, 50);
+        // The review route is never involved on this path, so the reward has to be written by the
+        // submit — without it fillRewardIds has nothing to fill and the payout is invisible.
+        assert.ok(autoApproved.reward, 'an auto-approved participation still carries a reward');
+        assert.strictEqual(autoApproved.reward!.points_awarded, 50);
+        assert.strictEqual((await Challenge.findById(trust._id))!.counts.approved, 1);
+        pass('auto_approve approves on submit, carries the reward, and publishes the same payout event');
+
+        section('legend challenges announce themselves to Hall of Fame');
+        resetBus();
+        const legendEvents = collect('ChallengeLegendAchieved');
+        const legend = await live({ difficulty: 'legend', submission: { requires_proof: true, proof_types: ['text'], max_files: 1, auto_approve: true } });
+        const pl = await part.accept(legend._id, {}, actorOf(bob));
+        await part.submit(pl._id, { proofs: [{ type: 'text', value: 'legendary', name: null }], notes: null } as never, actorOf(bob));
+        legendEvents.stop();
+        assert.strictEqual(legendEvents.events.length, 1);
+        pass('grants_hall_of_fame publishes ChallengeLegendAchieved alongside the payout');
+
+        section('team acceptance');
+        const teamChallenge = await live({
+            teaming: { enabled: true, team_size_min: 2, team_size_max: 4, max_teams: 1 },
+        });
+        const captain = await seedUser('Captain');
+        const mate = await seedUser('Mate');
+        const team = await Team.create({
+            _id: uuid(),
+            owner: { type: 'challenge', id: teamChallenge._id },
+            name: 'The Pair',
+            name_lower: 'the pair',
+            captain_user_id: captain._id,
+            invite_code: uuid().replace(/-/g, '').slice(0, 8),
+            members: [
+                { user_id: captain._id, display_name: 'Captain', avatar_url: null, registration_id: null, joined_at: new Date(), acquired_via: 'created' },
+                { user_id: mate._id, display_name: 'Mate', avatar_url: null, registration_id: null, joined_at: new Date(), acquired_via: 'join_request' },
+            ],
+            size_min: 2,
+            size_max: 4,
+            // `forming` on purpose: nothing in registration-service ever produces 'complete', so a
+            // fixture that used it was testing a state the platform cannot reach. Acceptance takes
+            // a formed roster and locks it itself.
+            status: 'forming',
+        });
+
+        await refuses(403, 'not_team_captain', () => part.accept(teamChallenge._id, { team_id: team._id }, actorOf(mate)));
+
+        // A disbanded roster is the one state that cannot accept.
+        await Team.updateOne({ _id: team._id }, { $set: { status: 'disbanded' } });
+        await refuses(409, 'team_disbanded', () => part.accept(teamChallenge._id, { team_id: team._id }, actorOf(captain)));
+        await Team.updateOne({ _id: team._id }, { $set: { status: 'forming' } });
+        const tp = await part.accept(teamChallenge._id, { team_id: team._id }, actorOf(captain));
+        assert.strictEqual(tp.participant.type, 'team');
+        assert.deepStrictEqual([...tp.member_user_ids].sort(), [captain._id, mate._id].sort());
+        pass('a team still `forming` can accept — that is the only state a real roster is ever in');
+
+        const rival = await Team.create({
+            _id: uuid(),
+            owner: { type: 'challenge', id: teamChallenge._id },
+            name: 'Rivals',
+            name_lower: 'rivals',
+            captain_user_id: mate._id,
+            invite_code: uuid().replace(/-/g, '').slice(0, 8),
+            members: [
+                { user_id: mate._id, display_name: 'Mate', avatar_url: null, registration_id: null, joined_at: new Date(), acquired_via: 'created' },
+                { user_id: alice._id, display_name: 'Alice', avatar_url: null, registration_id: null, joined_at: new Date(), acquired_via: 'join_request' },
+            ],
+            size_min: 2,
+            size_max: 4,
+            status: 'forming',
+        });
+        // The unique index is on the TEAM id, so without the overlap query this would be accepted
+        // and Points would pay `mate` twice.
+        await refuses(409, 'member_already_participating', () =>
+            part.accept(teamChallenge._id, { team_id: rival._id }, actorOf(mate))
+        );
+        pass('a member already on another accepted roster is refused — the index cannot express this');
+
+        resetBus();
+        const teamPayout = collect<{ member_user_ids: string[]; award_points: number }>('ChallengeCompleted');
+        await part.submit(tp._id, { proofs: [{ type: 'url', value: 'https://example.com/team', name: null }], notes: null } as never, actorOf(captain));
+        await part.review(tp._id, { decision: 'approved', reason: null } as never, adminActor, UserRole.CORE);
+        teamPayout.stop();
+        assert.strictEqual(teamPayout.events[0].payload.member_user_ids.length, 2);
+        pass('a team payout names both members — Points fans out over exactly this list');
+
+        section('the reviewer queue is a work queue: oldest submission first');
+        {
+            const qc = await live({ reviewers: [admin._id] });
+            const workers = await Promise.all([...Array(3)].map(() => seedUser('Worker')));
+            const pids: string[] = [];
+            for (const w of workers) {
+                const pw = await part.accept(qc._id, {}, actorOf(w));
+                pids.push(pw._id);
+            }
+            // Submit middle, first, last. Deliberately an order that matches NEITHER acceptance
+            // ascending NOR descending — reverse order would have made "oldest submitted" and
+            // "newest accepted" the same sequence, and the test would pass against either sort.
+            const submitOrder = [1, 0, 2];
+            for (const i of submitOrder) {
+                await part.submit(pids[i], { proofs: [{ type: 'url', value: 'https://example.com/q', name: null }], notes: null } as never, actorOf(workers[i]));
+                await new Promise((r) => setTimeout(r, 15));
+            }
+            const expected = submitOrder.map((i) => pids[i]);
+            assert.notDeepStrictEqual(expected, pids, 'the fixture must not coincide with acceptance order');
+            assert.notDeepStrictEqual(expected, [...pids].reverse(), 'nor with reverse acceptance order');
+
+            const page = await part.queue(qc._id, { status: 'under_review', limit: 10 } as never);
+            const order = page.rows.map((r) => r._id);
+            assert.deepStrictEqual(order, expected, 'the queue must run oldest submission first');
+            const times = page.rows.map((r) => r.submission!.submitted_at.getTime());
+            assert.deepStrictEqual(times, [...times].sort((a, b) => a - b), 'submitted_at must ascend');
+            pass('the queue orders by submission time ascending, not by acceptance');
+
+            // Paginate it, since the cursor now runs in the other direction too.
+            const first = await part.queue(qc._id, { status: 'under_review', limit: 2 } as never);
+            assert.strictEqual(first.rows.length, 2);
+            assert.ok(first.next_cursor);
+            const second = await part.queue(qc._id, { status: 'under_review', limit: 2, cursor: first.next_cursor! } as never);
+            assert.deepStrictEqual(
+                [...first.rows, ...second.rows].map((r) => r._id),
+                order,
+                'an ascending keyset cursor must cover the queue exactly once'
+            );
+            pass('the ascending cursor paginates the queue without gaps or repeats');
+
+            // `accepted` rows carry no submission, so the sort field is null there. That used to be
+            // a 500 from `.toISOString()` on the cursor.
+            const accepted = await part.queue(qc._id, { status: 'accepted', limit: 1 } as never);
+            assert.ok(Array.isArray(accepted.rows), 'a status with no submission must still list');
+            pass('a status whose sort field is null lists instead of 500-ing');
+        }
+
+        section('reward ids are read back from the ledger, not listened for');
+        const fresh = await ChallengeParticipation.findById(tp._id);
+        assert.deepStrictEqual(fresh!.reward!.point_transaction_ids, [], 'empty until the rows exist');
+
+        // Stand in for the Points Service: the rows it would have written, with the keys it uses.
+        const txIds: string[] = [];
+        for (const uid of fresh!.member_user_ids) {
+            const txId = uuid();
+            txIds.push(txId);
+            await PointTransaction.create({
+                _id: txId,
+                user_id: uid,
+                amount: 50,
+                type: 'earn',
+                source: 'challenge',
+                reason: 'challenge.completed',
+                reference: { type: 'challenge', id: teamChallenge._id },
+                idempotency_key: idempotencyKey.challengeCompleted(tp._id, uid),
+                balance_after: 50,
+                actor: { type: 'system', user_id: null },
+            });
+        }
+
+        const filled = await part.fillRewardIds((await ChallengeParticipation.findById(tp._id))!);
+        assert.deepStrictEqual([...filled.reward!.point_transaction_ids].sort(), [...txIds].sort());
+        const persisted = await ChallengeParticipation.findById(tp._id);
+        assert.strictEqual(persisted!.reward!.point_transaction_ids.length, 2, 'the fill is persisted, not recomputed forever');
+        // Idempotent: a second call must not duplicate.
+        await part.fillRewardIds(persisted!);
+        assert.strictEqual((await ChallengeParticipation.findById(tp._id))!.reward!.point_transaction_ids.length, 2);
+        pass('fillRewardIds matches by idempotency key, persists, and is idempotent');
+
+        section('the expiry sweeper is the only exit from accepted');
+        const expiring = await live({
+            window: { opens_at: null, closes_at: null, submissions_close_at: null, time_limit_minutes: 1 },
+        });
+        const pe = await part.accept(expiring._id, {}, actorOf(alice));
+        await ChallengeParticipation.updateOne({ _id: pe._id }, { $set: { deadline_at: new Date(Date.now() - 1000) } });
+
+        resetBus();
+        const expired = collect<{ participation_id: string }>('ChallengeExpired');
+        // Two ticks CONCURRENTLY, which is what two containers do. Sequential ticks would pass
+        // with no compare-and-swap at all — the second one's `find` filters on `status: 'accepted'`
+        // and simply returns nothing, so the guard that actually matters is never exercised.
+        const [tickA, tickB] = await Promise.all([tick(), tick()]);
+        expired.stop();
+
+        // Counted per row, not per tick: other fixtures above are overdue too, so a tick total
+        // says nothing about whether THIS row was moved twice.
+        const row = (await ChallengeParticipation.findById(pe._id))!;
+        assert.strictEqual(row.status, 'expired');
+        const transitions = row.status_history.filter((h) => h.to === 'expired').length;
+        assert.strictEqual(transitions, 1, `status_history records ${transitions} expiries for one row, want 1`);
+        const mine = expired.events.filter((e) => e.payload.participation_id === pe._id);
+        assert.strictEqual(mine.length, 1, `${mine.length} ChallengeExpired reached the bus for one row, want 1`);
+        void tickA;
+        void tickB;
+
+        assert.strictEqual((await tick()).expired, 0, 'a later tick finds nothing left to do');
+        pass('two concurrent sweepers expire an overdue participation exactly once, and publish once');
+
+        const closing = await live({
+            window: {
+                opens_at: null,
+                closes_at: new Date(Date.now() - 1000),
+                submissions_close_at: null,
+                time_limit_minutes: null,
+            },
+        });
+        await tick();
+        assert.strictEqual((await Challenge.findById(closing._id))!.status, 'completed');
+        pass('a challenge past window.closes_at auto-completes');
+
+        // An evergreen challenge sets no deadline at all. `deadline_at: null` must never match the
+        // sweeper's `$lte` — it does not, because Mongo brackets comparisons by BSON type, but that
+        // is exactly the kind of guarantee a well-meant `$or: [{deadline_at: null}, ...]` breaks.
+        const evergreen = await live();
+        const pever = await part.accept(evergreen._id, {}, actorOf(bob));
+        assert.strictEqual(pever.deadline_at, null, 'no window and no time limit means no deadline');
+        await tick();
+        assert.strictEqual((await ChallengeParticipation.findById(pever._id))!.status, 'accepted');
+        pass('a participation with no deadline is never swept');
+
+        // Expiry does not free the unique slot, and that is deliberate: `expired` is terminal in
+        // challenge-model.md §3.1 and there is no edge back to `accepted`.
+        await refuses(409, 'already_accepted', () => part.accept(expiring._id, {}, actorOf(alice)));
+        assert.strictEqual((await Challenge.findById(expiring._id))!.counts.accepted, 1, 'nor does it give the seat back');
+        pass('one attempt per participant per challenge — expiring is terminal, not a reset');
+
+        section('snapshot maintenance');
+        const { handlers } = await import('../events/consumers');
+        await User.updateOne({ _id: alice._id }, { $set: { 'profile.full_name': 'Alice Renamed' } });
+        await handlers.refreshSnapshot({ user_id: alice._id, changed_fields: ['full_name'] });
+        assert.strictEqual((await ChallengeParticipation.findById(p1._id))!.participant.display_name, 'Alice Renamed');
+        await handlers.anonymize({ user_id: alice._id });
+        assert.strictEqual((await ChallengeParticipation.findById(p1._id))!.participant.display_name, 'Deleted user');
+        const teamRow = await ChallengeParticipation.findById(tp._id);
+        assert.strictEqual(teamRow!.participant.display_name, 'The Pair', 'a team snapshot is not a user snapshot');
+        pass('UserProfileUpdated refreshes and UserDeleted anonymizes, solo rows only');
+
+        console.log('\nparticipation.selfcheck: all good.');
+    } finally {
+        await closeScratchDb();
+    }
+}
+
+main().catch((err) => {
+    console.error('\nparticipation.selfcheck FAILED:', err);
+    process.exit(1);
+});

@@ -73,6 +73,31 @@ internalRoutes.post('/teams/:id/add-member', async (req: Request, res: Response,
     }
 });
 
+/**
+ * POST /internal/teams/:id/lock - freeze a roster (called by Challenge Service on team acceptance).
+ *
+ * The Challenge Service snapshots `member_user_ids` when a team accepts, and the Points Service
+ * pays exactly that list. A roster that keeps moving afterwards produces members who did the work
+ * and are paid nothing (challenge-model.md §3.1).
+ */
+internalRoutes.post('/teams/:id/lock', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const teamId = req.params.id as string;
+        const lockedBy = typeof req.body?.locked_by === 'string' ? req.body.locked_by : 'system';
+
+        const team = await teamService.getTeam(teamId);
+        // Already done. Idempotent for a retrying caller rather than a 400 it has to special-case.
+        if (team.status === 'locked') {
+            res.json(team);
+            return;
+        }
+
+        res.json(await teamService.lockTeam(teamId, lockedBy));
+    } catch (err) {
+        next(err);
+    }
+});
+
 // GET /internal/teams/snapshot?ids=id1,id2 - bulk team snapshots
 internalRoutes.get('/teams/snapshot', async (req: Request, res: Response, next: NextFunction) => {
     try {

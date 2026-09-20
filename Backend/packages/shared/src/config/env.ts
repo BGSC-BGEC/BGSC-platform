@@ -53,6 +53,28 @@ export const config = {
       process.env.GOOGLE_CALLBACK_URL ||
       `${process.env.API_BASE_URL || `http://localhost:${process.env.GATEWAY_PORT || '3000'}`}/auth/google/callback`,
   },
+  /**
+   * Strava account linking (Spec §9.1, §12.4). A CONNECTION, never a login method: `clientId` and
+   * `clientSecret` blank means every /strava route answers 503 strava_not_configured, exactly like
+   * the Google block above when OAuth is unconfigured.
+   *
+   * `callbackUrl` is built off API_BASE_URL — the gateway, the only port compose publishes — for
+   * the same reason the Google one is: a redirect aimed at an internal service port is aimed at
+   * something the user's browser cannot reach.
+   *
+   * `tokenKey` encrypts the stored Strava tokens at rest (AES-256-GCM). Blank is tolerated in
+   * development, where it is derived from the JWT secret, and refused at boot in production —
+   * a predictable key on a third-party bearer token is not a dev convenience worth shipping.
+   */
+  strava: {
+    clientId: process.env.STRAVA_CLIENT_ID || '',
+    clientSecret: process.env.STRAVA_CLIENT_SECRET || '',
+    callbackUrl:
+      process.env.STRAVA_CALLBACK_URL ||
+      `${process.env.API_BASE_URL || `http://localhost:${process.env.GATEWAY_PORT || '3000'}`}/strava/callback`,
+    tokenKey: process.env.STRAVA_TOKEN_ENCRYPTION_KEY || '',
+  },
+
   /** Port this process listens on. Each service overrides via its own PORT. */
   gatewayPort: parseInt(process.env.GATEWAY_PORT || '3000', 10),
 

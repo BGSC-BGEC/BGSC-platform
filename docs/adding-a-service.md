@@ -92,8 +92,16 @@ out of the image by `npm prune --omit=dev`.
 Two things this buys you:
 
 - **`references`** makes `tsc --build` compile `@bgsc/shared` first and resolve the import through
-  the `paths` mapping in `tsconfig.base.json` — so `ts-node` runs against shared's *source* and
-  `dist/` runs against shared's *dist*, with no symlink tricks.
+  the `paths` mapping in `tsconfig.base.json`.
+
+  **That mapping is compile-time only.** `ts-node` does not apply tsconfig `paths` at runtime, so
+  a selfcheck or e2e resolves `@bgsc/shared` the way Node does: through the workspace symlink in
+  `node_modules/`, to `packages/shared/dist/index.js`. **Every test in this repo runs against
+  compiled shared code, not source.** Edit a shared model, run the suite without building, and you
+  are testing the previous build — a changed invariant appears to pass before it exists. The root
+  `preselfcheck` / `pree2e` hooks build `@bgsc/shared` first so `npm test` is correct by
+  construction; a per-workspace `npm run selfcheck --workspace @bgsc/<name>` still skips them, so
+  run `npx tsc --build` yourself after touching `packages/shared`.
 - **`exclude`** keeps test code out of `dist/`. `tsconfig.check.json` at the root typechecks the
   whole tree, tests included, so nothing goes unchecked — it just does not ship.
 
@@ -510,6 +518,32 @@ for why both exist.
   wired; and events published during the gap are dropped, exactly as they are during any later
   outage. Neither changes a call site — `publish()` and `subscribe()` are unchanged, and
   fire-and-forget was always their contract.
+- **Changing an index's OPTIONS on a collection that already exists is a migration, not a schema
+  edit — and it fails the boot.** `startService` builds indexes with `createIndexes()`, which
+  refuses to alter an index that already exists under the same auto-generated name:
+
+  ```
+  Failed to build indexes for StravaCredential: An existing index has the same name as the
+  requested index... Requested: { unique: true, key: { athlete_id: 1 }, name: "athlete_id_1" },
+  existing: { key: { athlete_id: 1 }, name: "athlete_id_1" }
+  ```
+
+  The container then crash-loops on every database that has the old index. **The test suite will
+  not catch this**: selfchecks and e2e open a scratch DB and call `syncIndexes()`, which *can* drop
+  and recreate, so they pass against a green field while the real stack cannot start. Adding a new
+  index is safe; adding `unique`, `partialFilterExpression` or a TTL to an existing one is not.
+
+  There is no migration runner in this repo, and while the dev database is wiped regularly this
+  mostly resolves itself: a wipe rebuilds every index from the current schema. It matters when a
+  database is **not** wiped — a long-lived staging or production one, or a colleague who pulls
+  mid-week. The procedure there is: drop the old index (`db.<coll>.dropIndex('<name>')`), let the
+  next boot build the new one, and **check for duplicates first** — a unique index cannot build
+  over existing violations, which turns a crash-loop into a crash-loop you also have to clean data
+  for. Say so in the PR either way.
+
+  Note this is the index half only. The stale-`dist` trap in §2.2 is a different animal: a database
+  wipe does nothing for it, because the stale artefact is `packages/shared/dist`, not data. That one
+  is handled by the root `preselfcheck` / `pree2e` hooks.
 - **Mongo is standalone**: no multi-document transactions. Use conditional atomic updates
   (`relationships.md` §5).
 - **`req.query` is a getter in Express 5.** `validate` writes the parsed value through

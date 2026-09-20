@@ -3,12 +3,15 @@
   "version": "1.0.0",
   "description": "BGSC platform backend \u2014 API gateway (:3000) plus domain services under apps/.",
   "main": "dist/index.js",
+  "//preselfcheck": "ts-node does NOT apply tsconfig `paths` at runtime: Node resolves @bgsc/shared through the workspace symlink to packages/shared/dist, so every selfcheck and e2e runs against COMPILED shared code. Without these hooks, editing a shared model and running the suite tests the previous build \u2014 a changed invariant appears to pass before it exists.",
   "scripts": {
     "dev": "nodemon --watch src --watch packages/shared/src --ext ts --exec ts-node src/index.ts",
     "build": "npm run build --workspace @bgsc/shared && tsc --build",
     "start": "node dist/index.js",
     "typecheck": "npx -p typescript@7 tsc --build --force && npx -p typescript@7 tsc --noEmit -p tsconfig.check.json && npm run build",
+    "preselfcheck": "npm run build --workspace @bgsc/shared",
     "selfcheck": "npm run selfcheck --workspaces --if-present",
+    "pree2e": "npm run build --workspace @bgsc/shared",
     "e2e": "npm run e2e --workspaces --if-present",
     "test": "npm run selfcheck && npm run e2e",
     "smoke": "ts-node src/gateway/gateway.smoke.ts"

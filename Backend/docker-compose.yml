@@ -80,6 +80,7 @@ services:
       event-service: { condition: service_healthy }
       announcement-service: { condition: service_healthy }
       points-service: { condition: service_healthy }
+      challenge-service: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -254,6 +255,43 @@ services:
       redis: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3006/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  challenge-service:
+    build: { context: ., dockerfile: Dockerfile }
+    image: bgsc-backend:local
+    restart: unless-stopped
+    command: ["node", "apps/challenge-service/dist/index.js"]
+    expose:
+      - "3008"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3008
+      MONGO_URI: mongodb://bgsc_admin:bgsc_password@mongodb:27017/bgsc_dev?authSource=admin
+      # Without this, ChallengeCompleted never leaves this process and the Points Service — which
+      # has consumed it since Sep 19 — pays nobody, while both containers look healthy.
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:8081}
+      # The team lock on acceptance — the only service this one calls.
+      REGISTRATION_SERVICE_URL: http://registration-service:3004
+      # Strava. `:-` and not `:?`: the three platform secrets are required to boot, but an
+      # unregistered Strava app is a 503 on six routes, not a reason the stack cannot start.
+      STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
+      STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
+      STRAVA_CALLBACK_URL: ${STRAVA_CALLBACK_URL:-http://localhost:3000/strava/callback}
+      STRAVA_TOKEN_ENCRYPTION_KEY: ${STRAVA_TOKEN_ENCRYPTION_KEY:-}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    depends_on:
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3008/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5

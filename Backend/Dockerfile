@@ -17,6 +17,7 @@ COPY apps/registration-service/package.json ./apps/registration-service/
 COPY apps/announcement-service/package.json ./apps/announcement-service/
 COPY apps/event-service/package.json ./apps/event-service/
 COPY apps/points-service/package.json ./apps/points-service/
+COPY apps/challenge-service/package.json ./apps/challenge-service/
 RUN npm ci --workspaces --include-workspace-root
 
 COPY tsconfig.base.json tsconfig.json ./
@@ -54,6 +55,8 @@ COPY --from=builder --chown=app:app /app/apps/event-service/dist ./apps/event-se
 COPY --from=builder --chown=app:app /app/apps/event-service/package.json ./apps/event-service/package.json
 COPY --from=builder --chown=app:app /app/apps/points-service/dist ./apps/points-service/dist
 COPY --from=builder --chown=app:app /app/apps/points-service/package.json ./apps/points-service/package.json
+COPY --from=builder --chown=app:app /app/apps/challenge-service/dist ./apps/challenge-service/dist
+COPY --from=builder --chown=app:app /app/apps/challenge-service/package.json ./apps/challenge-service/package.json
 
 # Avatar uploads land here; compose mounts a volume so they survive a restart.
 RUN mkdir -p /app/uploads && chown -R app:app /app/uploads

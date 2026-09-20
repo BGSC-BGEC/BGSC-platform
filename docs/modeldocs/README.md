@@ -30,6 +30,7 @@ Legacy code/docs are **not** a source.
 | [leaderboard-model.md](leaderboard-model.md) | `leaderboard_entries` + leaderboard config embedded in `events` | §5.6, §5.15.3, §4.1 Event.points_pool |
 | [challenge-model.md](challenge-model.md) | `challenges`, `challenge_participations` | §4.1 Challenge, §5.7, §5.15 "Challenge Creation" |
 | [announcement-model.md](announcement-model.md) | `announcements` | §4.1 Announcement, §5.2 Tab 2, §6.4, §9.4, §15.3 |
+| [strava-model.md](strava-model.md) | `strava_credentials`, `strava_activities` | §9.1 Strava, §12.4 Integration Settings (added Week 3 Sunday — see the gap note below) |
 | [relationships.md](relationships.md) | — | How everything references everything; write ownership; event flow |
 
 ## MVP scope filter applied
@@ -42,4 +43,5 @@ From `MVP_Timeline_Plan_Updated.md` "MVP Scope Summary":
 
 ## Plan gaps found while designing
 
+- **Strava had no model at all.** `MVP_Timeline_Plan_Updated.md:381-382` asks BE-2 for "Strava OAuth integration (basic)" and a "Strava activity sync endpoint" in Week 3, and `docs/SystemDesignDocs/strava-integration.md` designs it — for TypeORM on Postgres with NestJS and BullMQ, none of which this repo uses. Redesigned for this stack as `strava-model.md`, owned by the Challenge Service. Note that **Spec §14's scope table (line 2597) excludes Strava from the MVP** while the plan asks for it; the plan is the task source and wins, which is why the scope stops exactly where its two lines stop. Decision: Sep 20, 2026.
 - **Team model has no owner in the plan.** Spec §4.1 defines `Team` as its own entity and §5.15.4 auction (Week 3) cannot work without rosters and purses, but `MVP_Timeline_Plan_Updated.md` assigns no team task to anyone. Designed here as `team-model.md`, owned by Registration Service, generalized to events + challenges (Spec §5.7). Decision: Sep 5, 2026.

@@ -47,6 +47,8 @@ Backend/
   apps/event-service/          :3003  BE-1
   apps/registration-service/   :3004  BE-2
   apps/announcement-service/   :3005  BE-2
+  apps/points-service/         :3006  BE-2
+  apps/challenge-service/      :3008  BE-2   (also serves /strava)
 ```
 
 | Port | Service | Owner · week | Status |
@@ -57,9 +59,9 @@ Backend/
 | 3003 | event-service | BE-1 · W2 | live |
 | 3004 | registration-service | BE-2 · W2 | live |
 | 3005 | announcement-service | BE-2 · W2 | live |
-| 3006 | points-service | BE-2 · W3 | not built |
+| 3006 | points-service | BE-2 · W3 | live |
 | 3007 | leaderboard-service | BE-1 · W3 | not built |
-| 3008 | challenge-service | BE-2 · W3 | not built |
+| 3008 | challenge-service | BE-2 · W3 | live — serves `/challenges` **and** `/strava` |
 | 3009 | media-service | BE-1 · W4 | not built |
 | 3010 | notification-service | W4 | not built |
 
