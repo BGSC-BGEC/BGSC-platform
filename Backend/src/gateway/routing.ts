@@ -37,7 +37,7 @@ export const ROUTES: Record<string, Route> = {
 };
 
 /** Services that actually exist today. Everything else 503s with a clear reason, not a hang. */
-export const LIVE_SERVICES = new Set(['auth', 'user', 'registration', 'announcement', 'event']);
+export const LIVE_SERVICES = new Set(['auth', 'user', 'registration', 'announcement', 'event', 'points']);
 
 /**
  * Prefix match on a whole path segment, so `/usersfoo` never routes to the user service.

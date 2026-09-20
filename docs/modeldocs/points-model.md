@@ -49,31 +49,40 @@ Design rule: **no doc in `point_transactions` is ever updated or deleted.** Corr
 |---|---|
 | `amount` signed | One arithmetic rule: `balance = Σ amount`. No `CASE WHEN type`. `spend`/`expire` rows are negative; `earn`/`refund` positive; `adjust` either. |
 | `idempotency_key` | Unique index. Points Service will consume the same domain event twice (retries, replay). Second insert fails on the index ⇒ ignore. This is the whole dedupe story. |
-| `balance_after` | Lets transaction history show a running balance without re-summing, and makes ledger-vs-cache drift detectable (`last tx.balance_after == user.points_balance`). |
+| `balance_after` | Lets transaction history show a running balance without re-summing. Not used for drift detection: `created_at` is millisecond-resolution and `_id` is a uuid, so "the newest row" is ambiguous among same-millisecond writes — drift is `Σ amount` vs the cache, which the summary aggregate already computes. |
 | `reason` | Drives the "Points breakdown by source" UI grouping and maps to a `point_rules` entry. |
 | `reference` | Deep link from history row to the thing (event page, challenge page). |
 | `expires_at` | Only on positive rows. Expiry job inserts a negative `type: 'expire'` row with `reference: { type: 'transaction', id: <credit _id> }`; the credit row itself is **not** touched (ledger stays immutable). "Already expired" = an `expire` row referencing it exists. MVP: rules default to `null` = no expiry; the field exists so enabling it later is a config change, not a migration. |
 
 ### 2.2 Write path (single atomic unit)
 
+**Revised Sep 19, 2026 when the service was built** — cache first, row second, compensate on
+failure. Implemented in `apps/points-service/src/points/ledger.ts`; rationale in
+`docs/be2-points-service-plan.md` §3.2 (D1).
+
 ```
-0. read users(user_id).points_balance  → old
-1. new = old + amount
-2. if amount < 0 and new balance < 0  → reject (insufficient)
-3. insert point_transactions row      → fails if idempotency_key exists → return existing
-4. users.updateOne({ _id, points_balance: old }, { $set: { points_balance: new } })
-   → if 0 matched: concurrent write; retry from 1 (optimistic, max 3)
-5. emit PointsEarned | PointsSpent | PointsRefunded
+1. read point_transactions by idempotency_key → exists? return it, write nothing
+2. users.findOneAndUpdate({ _id, deleted_at: null, points_balance: { $gte: -amount } if debit },
+                          { $inc: { points_balance: amount } }, { returnDocument: 'after' })
+   → no match: 409 insufficient_points if the user exists, else 404 user_not_found
+3. insert point_transactions row with balance_after = the balance the $inc produced
+   → throws? $inc the balance back. Duplicate key ⇒ a racing caller won; return their row
+4. emit PointsEarned | PointsSpent | PointsRefunded | PointsAdjusted | PointsExpired
 ```
 
-Steps 3–4 inside a Mongo transaction where available. ponytail: optimistic retry on the user doc instead of a per-user lock; fine at campus scale. If the DB has no multi-doc transactions, step 4 failing after step 3 is repaired by the reconcile job (§5).
+The original order (insert, then compare-and-swap the balance, retry on a lost swap) cannot be
+repaired: this collection refuses updates and deletes by hook, so a row written before a lost swap
+keeps a wrong `balance_after` forever, and a retry re-enters on the same `idempotency_key`. The
+order above has one failure window, step 3, and the *cache* is not immutable — so `$inc: -amount`
+undoes it. It is also one round trip with no retry loop, and the solvency check moves inside the
+filter, where concurrency cannot step around it (proved by a ten-way concurrent-spend selfcheck).
 
 ### 2.3 Indexes
 
 | Index | Serves |
 |---|---|
 | `{ idempotency_key: 1 }` unique | dedupe |
-| `{ user_id: 1, created_at: -1 }` | transaction history (paginated) |
+| `{ user_id: 1, created_at: -1, _id: -1 }` | transaction history (paginated). `_id` is in the index because it is in the sort — the keyset tiebreak — and without it Mongo adds a SORT stage that reads every row the user has to return one page (measured 500 vs 20 examined). The two-key prefix still serves `user_id`-only reads |
 | `{ user_id: 1, source: 1 }` | breakdown by source |
 | `{ 'reference.type': 1, 'reference.id': 1 }` | "all points for event X" (admin, refunds on cancel) |
 | `{ expires_at: 1 }` partial (`expires_at != null`) | expiry job (candidate credits; job skips those with an `expire` row via the `reference` index) |
@@ -113,10 +122,10 @@ Resolution order: trigger override → rule `default_amount`. If rule `enabled =
 
 | Consumed event | Rule | Idempotency key | Type |
 |---|---|---|---|
-| `RegistrationCreated` (confirmed) | `event.participation` | `event.participation:${registration_id}` | earn |
-| `RegistrationCancelled` | reverse the participation credit if one exists | `event.participation.reversal:${registration_id}` | adjust (negative) |
-| `EventCompleted { winners[] }` | `event.podium.N` per winner; team winner ⇒ one row per `teams.members[].user_id` | `event.podium:${event_id}:${user_id}` | earn |
-| `EventCancelled` | (a) reverse every `event.participation` earn for the event; (b) refund every `leaderboard.investment` spend whose entry belongs to the event | (a) `event.cancel.reversal:${original_tx_id}` (b) `event.cancel.refund:${original_tx_id}` | (a) adjust (b) refund |
+| `ParticipantAttended` | `event.participation` | `event.participation:${registration_id}` | earn |
+| `RegistrationCancelled` | reverse the participation credit if one exists | `event.participation.reversal:${credit_tx_id}` | adjust (negative) |
+| ~~`EventCompleted { winners[] }`~~ — **no producer publishes a winner**; `EventCompleted` carries `{ event_id }` only and nothing records who won until BE-1's leaderboard. Podium points come from `POST /points/award` (core+) until a final-rank event exists | `event.podium.N` | `event.podium:${event_id}:${user_id}` | earn |
+| `EventCancelled` | (a) refund every `leaderboard.investment` spend whose entry belongs to the event; (b) reverse every `event.participation` earn for it — **refunds first**, or an investor who spent everything cannot afford the reversal | (a) `event.cancel.refund:${original_tx_id}` (b) `event.participation.reversal:${original_tx_id}` | (a) refund (b) adjust |
 | `ChallengeCompleted` (approved) | `challenge.completed`, one row per `member_user_ids[]`, amount from payload | `challenge.completed:${participation_id}:${user_id}` | earn |
 | Leaderboard Service internal call `POST /internal/points/spend` | `leaderboard.investment` | `leaderboard.investment:${request_id}` (Leaderboard generates `request_id`) | spend |
 | Admin `POST /points/adjust` | `admin.manual` | `admin:${request_uuid}` | adjust |
@@ -125,8 +134,8 @@ Type semantics: `earn` and `refund` are always positive, `spend` and `expire` al
 
 ## 5. Balance cache & reconciliation
 
-- `users.points_balance` (User Service schema, BE-1) is written only by Points Service via an internal endpoint or direct write to the shared DB (decide with BE-1 today).
-- Nightly job: for users with activity in last 24h, `Σ amount` vs `points_balance`; mismatch ⇒ log + fix cache + alert. Ledger wins.
+- `users.points_balance` (User Service schema, BE-1) is written only by Points Service, **by direct `$inc`** — settled Sep 19, 2026 (plan D7).
+- **No nightly job** (plan D8): `Σ amount` vs `points_balance` is one aggregate, reported as `ledger_synced` on the admin read at no extra cost, and repaired on demand by `POST /points/users/:id/recalculate` (compare-and-swapped, audited). Ledger wins. Build the sweep when something has actually drifted.
 - Read of balance never touches the ledger.
 
 ## 6. Domain events emitted (Spec §8.1)
@@ -153,4 +162,4 @@ PointsExpired   { transaction_id, user_id, amount, credit_transaction_id, balanc
 
 - Store spend/refund flow — store out of MVP; `source: 'store'` reserved.
 - Sponsor bonus — reserved `source: 'sponsor'`, rule not seeded.
-- Expiry job — schema ready; not scheduled in MVP.
+- Expiry job — **built** (60s sweep, `apps/points-service/src/scheduler/expiry.ts`), but inert: every seeded rule has `expires_after_days: null`, so enabling expiry is a rule edit, not a deployment.

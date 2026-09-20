@@ -502,6 +502,14 @@ for why both exist.
   defaults its own.
 - **`REDIS_URL` in compose.** Without it every `publish()` stays inside the process. Fine for one
   service in dev; wrong the moment a second service is supposed to hear it.
+- **An unreachable Redis is not fatal (changed Sep 20, 2026).** `connectEventBus()` used to await
+  its first connect, so a Redis outage crash-looped every service in the platform — the HTTP API
+  down because the *event bus* was down. It now wires the transport, connects in the background and
+  retries every 10s, logging `Event bus unreachable at startup` until it lands. Two consequences for
+  a new service: `startService()` resolving no longer means the bus is connected, only that it is
+  wired; and events published during the gap are dropped, exactly as they are during any later
+  outage. Neither changes a call site — `publish()` and `subscribe()` are unchanged, and
+  fire-and-forget was always their contract.
 - **Mongo is standalone**: no multi-document transactions. Use conditional atomic updates
   (`relationships.md` §5).
 - **`req.query` is a getter in Express 5.** `validate` writes the parsed value through

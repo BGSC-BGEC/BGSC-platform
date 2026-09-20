@@ -39,7 +39,26 @@ interface Transport {
 }
 
 let transport: Transport | null = null;
+/** Retry handle for a bus that was not reachable at startup. Cleared on shutdown. */
+let reconnectTimer: NodeJS.Timeout | null = null;
 
+const RECONNECT_MS = 10_000;
+
+/**
+ * Wire the bus, but never make it a reason not to serve.
+ *
+ * The initial `connect()` used to be awaited, so an unreachable Redis rejected out of
+ * `startService()` and the process exited — every service in the platform crash-looping because
+ * the *event* bus was down, while producers stayed up and dropped their events silently. That
+ * contradicted this module's own contract two lines below ("Redis dropping is not fatal: the
+ * service keeps serving, it just stops hearing other services"), which held only *after* a
+ * successful first connect.
+ *
+ * Now the first connect happens in the background and retries until it lands. A service that boots
+ * during a Redis outage answers HTTP immediately and starts hearing events when Redis returns.
+ * What is lost either way is events published during the outage: Redis pub/sub has no persistence,
+ * so this is the same exposure a producer already had, not a new one.
+ */
 export async function connectEventBus(): Promise<void> {
     if (!config.redisUrl || transport) return;
 
@@ -47,10 +66,6 @@ export async function connectEventBus(): Promise<void> {
     const { default: Redis } = await import('ioredis');
     const pub = new Redis(config.redisUrl, { maxRetriesPerRequest: null, lazyConnect: true });
     const sub = new Redis(config.redisUrl, { maxRetriesPerRequest: null, lazyConnect: true });
-
-    await pub.connect();
-    await sub.connect();
-    await sub.subscribe(CHANNEL);
 
     sub.on('message', (_channel: string, raw: string) => {
         try {
@@ -74,11 +89,44 @@ export async function connectEventBus(): Promise<void> {
             );
         },
         close: async () => {
+            if (reconnectTimer) clearInterval(reconnectTimer);
+            reconnectTimer = null;
             await Promise.allSettled([pub.quit(), sub.quit()]);
             transport = null;
         },
     };
-    console.log('Event bus connected (redis pub/sub).');
+
+    const attempt = async (): Promise<boolean> => {
+        try {
+            // A client that already connected throws rather than connecting twice; either way the
+            // only thing that matters is that the subscription is live.
+            if (pub.status !== 'ready') await pub.connect();
+            if (sub.status !== 'ready') await sub.connect();
+            await sub.subscribe(CHANNEL);
+            console.log('Event bus connected (redis pub/sub).');
+            return true;
+        } catch (err) {
+            return false;
+        }
+    };
+
+    if (!(await attempt())) {
+        console.error(
+            `Event bus unreachable at startup; serving without cross-service events, retrying every ${
+                RECONNECT_MS / 1000
+            }s.`
+        );
+        reconnectTimer = setInterval(() => {
+            void attempt().then((ok) => {
+                if (ok && reconnectTimer) {
+                    clearInterval(reconnectTimer);
+                    reconnectTimer = null;
+                }
+            });
+        }, RECONNECT_MS);
+        // Never hold the process open on a retry timer during shutdown.
+        reconnectTimer.unref();
+    }
 }
 
 export async function disconnectEventBus(): Promise<void> {

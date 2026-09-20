@@ -79,6 +79,7 @@ services:
       registration-service: { condition: service_healthy }
       event-service: { condition: service_healthy }
       announcement-service: { condition: service_healthy }
+      points-service: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -224,6 +225,35 @@ services:
       redis: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3005/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  points-service:
+    build: { context: ., dockerfile: Dockerfile }
+    image: bgsc-backend:local
+    restart: unless-stopped
+    command: ["node", "apps/points-service/dist/index.js"]
+    expose:
+      - "3006"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3006
+      MONGO_URI: mongodb://bgsc_admin:bgsc_password@mongodb:27017/bgsc_dev?authSource=admin
+      # Without this every consumer in this service is deaf: ParticipantAttended is published by
+      # another container, so a Points Service with no Redis awards nothing and looks healthy.
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:8081}
+      # No *_SERVICE_URL: this service makes no outbound calls. Leaderboard calls us.
+    depends_on:
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3006/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5

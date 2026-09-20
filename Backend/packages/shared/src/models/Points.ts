@@ -126,7 +126,11 @@ PointTransactionSchema.pre(
 );
 
 PointTransactionSchema.index({ idempotency_key: 1 }, { unique: true });
-PointTransactionSchema.index({ user_id: 1, created_at: -1 }); // paginated transaction history
+// Paginated transaction history. `_id` is in the index because it is in the sort: the keyset
+// tiebreak is `(created_at, _id)`, and without the third key Mongo adds a SORT stage that reads
+// EVERY row the user has to return one page (measured: 500 examined for a 20-row page, vs 20 with
+// it). The two-key prefix still serves every `user_id`-only read.
+PointTransactionSchema.index({ user_id: 1, created_at: -1, _id: -1 });
 PointTransactionSchema.index({ user_id: 1, source: 1 }); // breakdown by source
 PointTransactionSchema.index({ 'reference.type': 1, 'reference.id': 1 }); // "all points for event X"; refunds on cancel
 PointTransactionSchema.index({ expires_at: 1 }, { partialFilterExpression: { expires_at: { $type: 'date' } } });
@@ -197,11 +201,17 @@ export const POINT_RULE_SEED: PointRuleSeed[] = [
 /** Idempotency keys are contracts between services — build them in one place, never inline. */
 export const idempotencyKey = {
     eventParticipation: (registration_id: string) => `event.participation:${registration_id}`,
-    eventParticipationReversal: (registration_id: string) => `event.participation.reversal:${registration_id}`,
+    /**
+     * Keyed on the CREDIT row, not on the registration: a registration cancel and an event
+     * cancellation can both want to reverse the same credit, and keying them apart would let both
+     * land — one reversal each, balance driven negative. One credit, at most one reversal.
+     */
+    participationReversal: (credit_tx_id: string) => `event.participation.reversal:${credit_tx_id}`,
     eventPodium: (event_id: string, user_id: string) => `event.podium:${event_id}:${user_id}`,
-    eventCancelReversal: (tx_id: string) => `event.cancel.reversal:${tx_id}`,
     eventCancelRefund: (tx_id: string) => `event.cancel.refund:${tx_id}`,
     challengeCompleted: (participation_id: string, user_id: string) => `challenge.completed:${participation_id}:${user_id}`,
     leaderboardInvestment: (request_id: string) => `leaderboard.investment:${request_id}`,
     adminAdjust: (request_uuid: string) => `admin:${request_uuid}`,
+    /** The expiry sweep's marker: an 'expire' row referencing the credit is what makes it done. */
+    expire: (tx_id: string) => `expire:${tx_id}`,
 };

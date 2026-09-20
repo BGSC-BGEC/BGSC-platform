@@ -1,0 +1,397 @@
+import {
+    AuditLog,
+    Event,
+    IAuditLog,
+    IPointTransaction,
+    LeaderboardEntry,
+    PointTransaction,
+    PointsSource,
+    PointsType,
+    ServiceError,
+    User,
+    idempotencyKey,
+    recordAudit,
+} from '@bgsc/shared';
+import { Resolved, resolve } from '../rules/rules.service';
+import { allOf, keysetFilter, pageOf } from './cursor';
+import { ledgerSum, record, signed } from './ledger';
+
+/**
+ * Everything above the ledger: the reads, the two admin writes, the internal debit and the cache
+ * repair. All of them go through `record()` for anything that moves points
+ * (be2-points-service-plan.md §§5-6).
+ */
+
+/** Who did it, for the audit trail. `id` is the live user document's id, not the token's claim. */
+export interface Actor {
+    id: string;
+    ip: string | null;
+}
+
+/**
+ * An audit row after the fact, never in front of it: the ledger row is itself the immutable record
+ * Spec §7.3 asks for, so a failed audit write must not undo points that already moved (plan D14).
+ */
+async function auditCommitted(entry: Parameters<typeof recordAudit>[0]): Promise<void> {
+    try {
+        await recordAudit(entry);
+    } catch (err) {
+        console.error('[points-service] AUDIT WRITE FAILED after commit:', {
+            action: entry.action,
+            target_id: entry.target_id,
+            err,
+        });
+    }
+}
+
+/** Only places the rule table knows about can be awarded (Points.ts:186). */
+const SEEDED_PODIUM_PLACES = 3;
+
+/** Only a credit may carry an expiry; the model refuses one on a debit. */
+const creditExpiry = (r: Resolved): Date | null => (r.amount > 0 ? r.expires_at : null);
+
+/* ------------------------------------------------------------------ *
+ * Reads
+ * ------------------------------------------------------------------ */
+
+export interface Summary {
+    balance: number;
+    lifetime_earned: number;
+    lifetime_spent: number;
+}
+
+async function liveUser(user_id: string): Promise<{ points_balance: number }> {
+    const user = await User.findOne({ _id: user_id, deleted_at: null }).select('points_balance');
+    if (!user) throw new ServiceError(404, 'user_not_found');
+    return { points_balance: user.points_balance ?? 0 };
+}
+
+/**
+ * Credits and debits, both as raw signed sums. Split by sign rather than by `type`: a negative
+ * `adjust` is a clawback and a positive one is a grant, which `{ type: 'earn' }` would miscount.
+ */
+async function totals(user_id: string): Promise<{ earned: number; spent: number }> {
+    const [row] = await PointTransaction.aggregate<{ earned: number; spent: number }>([
+        { $match: { user_id } },
+        {
+            $group: {
+                _id: null,
+                earned: { $sum: { $cond: [{ $gt: ['$amount', 0] }, '$amount', 0] } },
+                spent: { $sum: { $cond: [{ $lt: ['$amount', 0] }, '$amount', 0] } },
+            },
+        },
+    ]);
+    return { earned: row?.earned ?? 0, spent: row?.spent ?? 0 };
+}
+
+/** The balance is one document read — never a ledger sum (points-model.md §7). */
+export async function summary(user_id: string): Promise<Summary> {
+    const [user, t] = await Promise.all([liveUser(user_id), totals(user_id)]);
+    return {
+        balance: user.points_balance,
+        lifetime_earned: t.earned,
+        // Stored negative; reported as a positive magnitude, which is how a UI shows "spent".
+        lifetime_spent: Math.abs(t.spent),
+    };
+}
+
+/**
+ * The admin view adds the drift flag — an ops signal, not something a member can act on, and not
+ * something `GET /points/me` should pay for.
+ *
+ * `earned + spent` is Σ amount, so the check is free: the aggregate the summary already ran is the
+ * same one `ledgerSum` would run (plan §3.5).
+ */
+export async function adminSummary(user_id: string): Promise<Summary & { ledger_synced: boolean }> {
+    const [user, t] = await Promise.all([liveUser(user_id), totals(user_id)]);
+    return {
+        balance: user.points_balance,
+        lifetime_earned: t.earned,
+        lifetime_spent: Math.abs(t.spent),
+        ledger_synced: t.earned + t.spent === user.points_balance,
+    };
+}
+
+export interface HistoryQuery {
+    type?: PointsType;
+    source?: PointsSource;
+    limit: number;
+    cursor?: string;
+}
+
+export interface Page {
+    transactions: IPointTransaction[];
+    next_cursor: string | null;
+}
+
+/**
+ * One paged read for every list in this service. Both lists sort on `(created_at, _id)`
+ * descending, so the ordering, the cap and the cursor live here once — two copies of a pagination
+ * rule is how one of them starts returning a row twice.
+ */
+async function listLedger(scope: Record<string, unknown>, q: HistoryQuery): Promise<Page> {
+    const conditions: Record<string, unknown>[] = [scope];
+    if (q.type) conditions.push({ type: q.type });
+    if (q.source) conditions.push({ source: q.source });
+    // $and, never a spread: keysetFilter carries a top-level $or, and `{ ...a, ...b }` would keep
+    // only the second — dropping either the cursor or the scope that decides whose rows these are.
+    if (q.cursor) conditions.push(keysetFilter(q.cursor));
+
+    const rows = await PointTransaction.find(allOf(conditions))
+        .sort({ created_at: -1, _id: -1 })
+        .limit(q.limit)
+        .lean<IPointTransaction[]>();
+
+    const { rows: transactions, next_cursor } = pageOf(rows, q.limit);
+    return { transactions, next_cursor };
+}
+
+/**
+ * Served directly by `{ user_id: 1, created_at: -1 }` (Points.ts:129).
+ *
+ * No `liveUser` check: a deleted user's rows stay in the ledger by design (relationships.md §3
+ * anonymizes the user and keeps the history), and an admin investigating a balance needs to read
+ * them.
+ */
+export const history = (user_id: string, q: HistoryQuery): Promise<Page> => listLedger({ user_id }, q);
+
+/** The refund/audit view: every row that names this event. Served by the `reference` index. */
+export const eventLedger = (event_id: string, q: HistoryQuery): Promise<Page> =>
+    listLedger({ 'reference.type': 'event', 'reference.id': event_id }, q);
+
+export interface BreakdownRow {
+    source: PointsSource;
+    total: number;
+    count: number;
+}
+
+/** Served by `{ user_id: 1, source: 1 }` (Points.ts:130), which exists for exactly this query. */
+export async function breakdown(user_id: string): Promise<{ balance: number; breakdown: BreakdownRow[] }> {
+    const [user, rows] = await Promise.all([
+        liveUser(user_id),
+        PointTransaction.aggregate<{ _id: PointsSource; total: number; count: number }>([
+            { $match: { user_id } },
+            { $group: { _id: '$source', total: { $sum: '$amount' }, count: { $sum: 1 } } },
+            { $sort: { total: -1 } },
+        ]),
+    ]);
+
+    return {
+        balance: user.points_balance,
+        breakdown: rows.map((r) => ({ source: r._id, total: r.total, count: r.count })),
+    };
+}
+
+export async function transactionAudit(transaction_id: string): Promise<IAuditLog[]> {
+    if (!(await PointTransaction.exists({ _id: transaction_id }))) {
+        throw new ServiceError(404, 'transaction_not_found');
+    }
+    return AuditLog.find({ target_type: 'point_transaction', target_id: transaction_id })
+        .sort({ created_at: -1 })
+        .limit(50)
+        .lean<IAuditLog[]>();
+}
+
+/* ------------------------------------------------------------------ *
+ * Admin writes
+ * ------------------------------------------------------------------ */
+
+export interface AdjustInput {
+    user_id: string;
+    /** Signed: positive grants, negative claws back. The only route where the caller sets the sign. */
+    amount: number;
+    note: string;
+    /** Stable across a retry — it is the idempotency key. A fresh uuid is a second adjustment. */
+    request_id: string;
+}
+
+export async function adjust(input: AdjustInput, actor: Actor): Promise<{ tx: IPointTransaction; replayed: boolean }> {
+    const resolved = await resolve('admin.manual', input.amount);
+    if (!resolved) throw new ServiceError(409, 'rule_disabled');
+
+    const result = await record({
+        user_id: input.user_id,
+        amount: resolved.amount,
+        type: 'adjust',
+        source: 'admin',
+        reason: 'admin.manual',
+        reference: { type: null, id: null },
+        idempotency_key: idempotencyKey.adminAdjust(input.request_id),
+        actor: { type: 'admin', user_id: actor.id },
+        note: input.note,
+        expires_at: creditExpiry(resolved),
+    });
+
+    // A replay is the same decision arriving twice, not a second one to record.
+    if (!result.replayed) {
+        await auditCommitted({
+            actor_id: actor.id,
+            action: 'points.adjusted',
+            target_type: 'point_transaction',
+            target_id: result.tx._id,
+            new_value: {
+                user_id: input.user_id,
+                amount: result.tx.amount,
+                balance_after: result.tx.balance_after,
+            },
+            reason: input.note,
+            ip: actor.ip,
+        });
+    }
+    return result;
+}
+
+export interface AwardInput {
+    user_id: string;
+    event_id: string;
+    place: number;
+}
+
+/**
+ * Podium points. No producer publishes a winner today — `EventCompleted` carries `{ event_id }`
+ * only and `events.awards[]` is prizes, not people — so an admin states the result (plan §5.3, D5).
+ *
+ * Keyed on `(event_id, user_id)`, the same key a future `LeaderboardFinalized` consumer would use,
+ * so the automated path can never double-pay on top of a manual award.
+ */
+export async function awardPodium(input: AwardInput, actor: Actor): Promise<{ tx: IPointTransaction; replayed: boolean }> {
+    const event = await Event.findOne({ _id: input.event_id, deleted_at: null }).select('points_pool status');
+    if (!event) throw new ServiceError(404, 'event_not_found');
+    // 'past' is the status that makes EventCompleted fire (event.service.ts:304).
+    if (event.status !== 'past') throw new ServiceError(409, 'event_not_completed');
+
+    const multipliers = event.points_pool.podium_multipliers;
+    // Awardable only if the event pays that many places AND a rule exists for it: only
+    // event.podium.1..SEEDED_PODIUM_PLACES are seeded (Points.ts:186).
+    if (input.place > multipliers.length || input.place > SEEDED_PODIUM_PLACES) {
+        throw new ServiceError(422, 'place_not_awarded');
+    }
+
+    const reason = `event.podium.${input.place}`;
+
+    // The key is (event, user), so one user takes one podium place per event. A second call for a
+    // DIFFERENT place would otherwise come back as a silent "replay" carrying the first place's
+    // row — an admin correcting a mis-click would believe it went through. Refuse it by name and
+    // let them decide: the existing row stands until someone adjusts it deliberately.
+    const already = await PointTransaction.findOne({
+        idempotency_key: idempotencyKey.eventPodium(event._id, input.user_id),
+    });
+    if (already && already.reason !== reason) {
+        throw new ServiceError(409, 'already_awarded', { place: already.reason, amount: already.amount });
+    }
+
+    const override = event.points_pool.participation * multipliers[input.place - 1];
+    const resolved = await resolve(reason, override);
+    if (!resolved) throw new ServiceError(409, 'rule_disabled');
+
+    const result = await record({
+        user_id: input.user_id,
+        amount: signed('earn', resolved.amount),
+        type: 'earn',
+        source: 'event',
+        reason,
+        reference: { type: 'event', id: event._id },
+        idempotency_key: idempotencyKey.eventPodium(event._id, input.user_id),
+        actor: { type: 'admin', user_id: actor.id },
+        expires_at: resolved.expires_at,
+    });
+
+    if (!result.replayed) {
+        await auditCommitted({
+            actor_id: actor.id,
+            action: 'points.awarded',
+            target_type: 'point_transaction',
+            target_id: result.tx._id,
+            new_value: {
+                user_id: input.user_id,
+                event_id: event._id,
+                place: input.place,
+                amount: result.tx.amount,
+            },
+            ip: actor.ip,
+        });
+    }
+    return result;
+}
+
+/**
+ * Repair the cache from the ledger. The ledger is truth, so this never writes a transaction — it
+ * rewrites the denormalized number that drifted away from it (plan §3.5).
+ */
+export async function recalculate(
+    user_id: string,
+    actor: Actor
+): Promise<{ previous: number; balance: number; repaired: boolean }> {
+    const user = await liveUser(user_id);
+    const total = await ledgerSum(user_id);
+    if (total === user.points_balance) {
+        return { previous: user.points_balance, balance: total, repaired: false };
+    }
+
+    // A balance with no ledger behind it is not drift, it is a number that predates this service
+    // (or was written by something that should not have). "Repairing" it would delete points
+    // nobody can reconstruct, so it takes a deliberate POST /points/adjust instead.
+    if (total === 0 && (await PointTransaction.countDocuments({ user_id })) === 0) {
+        throw new ServiceError(409, 'ledger_empty');
+    }
+
+    // Compare-and-swap on the balance we summed against. A plain $set would clobber any transaction
+    // that landed while we were summing — repairing drift by creating it.
+    const swap = await User.updateOne(
+        { _id: user_id, points_balance: user.points_balance },
+        { $set: { points_balance: total } }
+    );
+    if (swap.matchedCount === 0) throw new ServiceError(409, 'balance_moved');
+    await auditCommitted({
+        actor_id: actor.id,
+        action: 'points.recalculated',
+        target_type: 'user',
+        target_id: user_id,
+        previous_value: { points_balance: user.points_balance },
+        new_value: { points_balance: total },
+        ip: actor.ip,
+    });
+    return { previous: user.points_balance, balance: total, repaired: true };
+}
+
+/* ------------------------------------------------------------------ *
+ * Internal: the leaderboard investment debit
+ * ------------------------------------------------------------------ */
+
+export interface SpendInput {
+    user_id: string;
+    /** Positive magnitude. The route debits; a caller never sends a sign. */
+    amount: number;
+    reference: { type: 'leaderboard_entry'; id: string };
+    request_id: string;
+}
+
+export async function spendForInvestment(input: SpendInput): Promise<{ tx: IPointTransaction; replayed: boolean }> {
+    // The entry is BE-1's document and this is a read, so it goes straight to the model. Checked
+    // because a debit whose reference names nothing can never be refunded: the event-cancel sweep
+    // finds spends by their entry ids (§5.4), and a typo would silently opt out of it.
+    const entry = await LeaderboardEntry.findById(input.reference.id).select('participant');
+    if (!entry) throw new ServiceError(404, 'leaderboard_entry_not_found');
+    // Same round trip, one more guarantee: on a solo entry the payer must be the participant. A
+    // caller holding the service token can name any user_id, so a bug on the other side would
+    // otherwise debit a stranger. Team entries are not checked here — membership lives in `teams`,
+    // and the investing service is the one that knows who may spend on a team's behalf.
+    if (entry.participant.type === 'user' && entry.participant.id !== input.user_id) {
+        throw new ServiceError(409, 'entry_participant_mismatch');
+    }
+
+    const resolved = await resolve('leaderboard.investment', input.amount);
+    if (!resolved) throw new ServiceError(409, 'rule_disabled');
+
+    return record({
+        user_id: input.user_id,
+        amount: signed('spend', resolved.amount),
+        type: 'spend',
+        source: 'leaderboard',
+        reason: 'leaderboard.investment',
+        reference: input.reference,
+        idempotency_key: idempotencyKey.leaderboardInvestment(input.request_id),
+        // The user chose to invest; the Leaderboard Service is only the messenger.
+        actor: { type: 'user', user_id: input.user_id },
+    });
+}
