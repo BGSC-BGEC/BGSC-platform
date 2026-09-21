@@ -8,3 +8,4 @@ export * from './Points';
 export * from './Leaderboard';
 export * from './Challenge';
 export * from './Announcement';
+export * from './Strava';

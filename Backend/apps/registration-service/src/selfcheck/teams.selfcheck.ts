@@ -1,4 +1,4 @@
-import { FormSubmission, Team, User, connectDB, disconnectDB, publish } from '@bgsc/shared';
+import { Challenge, FormSubmission, Team, User, connectDB, disconnectDB, publish } from '@bgsc/shared';
 import assert from 'assert';
 import { v4 as uuid } from 'uuid';
 import * as formService from '../forms/form.service';
@@ -248,7 +248,110 @@ async function main() {
     assert(unlinkedCaptain.context.event!.team_id === null, 'Disband must unlink every member');
     console.log('✓ Team disbanded and rosters unlinked');
 
+    /**
+     * Challenge teams (be2-challenge-service-plan.md D5). Before this branch existed, every
+     * `owner.type: 'challenge'` create was an unconditional 403 — the captain lookup demanded an
+     * approved captain application on a form a challenge does not have — and had it passed,
+     * `registration_id` would have tripped the model's own invariant (Team.ts:161) as a 500.
+     */
+    console.log('14. Creating a team for a CHALLENGE, which has no form and no registrations...');
+    const challengeId = uuid();
+    await Challenge.create({
+        _id: challengeId,
+        slug: `sc-${challengeId.slice(0, 12)}`,
+        title: 'Selfcheck Team Challenge',
+        description: 'x',
+        domain: 'sports',
+        kind: 'digital',
+        difficulty: 'easy',
+        award_points: 10,
+        teaming: { enabled: true, team_size_min: 2, team_size_max: 4, max_teams: 2 },
+        submission: { requires_proof: true, proof_types: ['url'], max_files: 1, auto_approve: false },
+        status: 'active',
+        created_by: adminId,
+    });
+
+    const challengeTeam = await teamService.createTeam({
+        owner: { type: 'challenge', id: challengeId },
+        name: 'Challenge Crew',
+        captain_user_id: captain._id,
+        join_policy: 'open',
+    });
+    assert(challengeTeam.members.length === 1, 'The captain is a member of their own team');
+    assert(
+        challengeTeam.members[0].registration_id === null,
+        'A challenge team member must carry no registration_id (Team.ts:161)'
+    );
+    assert(challengeTeam.size_min === 2 && challengeTeam.size_max === 4, 'Bounds are copied from challenges.teaming');
+    console.log('✓ Challenge team created with null registration_id and the challenge\'s own size bounds');
+
+    // The caller cannot widen them: size_min/size_max are client-supplied on POST /teams, and a
+    // team that locks outside the challenge's bounds can never be accepted.
+    const overridden = await teamService.createTeam({
+        owner: { type: 'challenge', id: challengeId },
+        name: 'Greedy Crew',
+        captain_user_id: outsider._id,
+        size_min: 1,
+        size_max: 100,
+    });
+    assert(
+        overridden.size_min === 2 && overridden.size_max === 4,
+        `Caller-supplied bounds must be ignored for a challenge team, got ${overridden.size_min}..${overridden.size_max}`
+    );
+    await Team.deleteOne({ _id: overridden._id });
+    console.log('✓ Caller-supplied size bounds cannot override the challenge');
+
+    // A team only exists in order to accept, and only an active challenge accepts.
+    await Challenge.updateOne({ _id: challengeId }, { $set: { status: 'archived' } });
+    let builtOnArchived = false;
+    try {
+        await teamService.createTeam({
+            owner: { type: 'challenge', id: challengeId },
+            name: 'Too Late',
+            captain_user_id: outsider._id,
+        });
+        builtOnArchived = true;
+    } catch {
+        /* expected: challenge_not_active */
+    }
+    assert(!builtOnArchived, 'A team cannot be formed for a challenge that is not active');
+    await Challenge.updateOne({ _id: challengeId }, { $set: { status: 'active' } });
+    console.log('✓ A team cannot be formed against a non-active challenge');
+
+    const challengeDuo = await teamService.addMemberToTeam(challengeTeam._id, member._id, null, 'join');
+    assert(challengeDuo.members.length === 2, 'A member can join a challenge team without registering');
+    assert(challengeDuo.members[1].registration_id === null, 'And still carries no registration_id');
+
+    let doubleJoined = false;
+    try {
+        await teamService.addMemberToTeam(challengeTeam._id, member._id, null, 'join');
+        doubleJoined = true;
+    } catch {
+        /* expected */
+    }
+    assert(!doubleJoined, 'Joining twice must be refused');
+
+    const locked = await teamService.lockTeam(challengeTeam._id, adminId);
+    assert(locked.status === 'locked', 'A complete challenge team locks, which is what acceptance does');
+    console.log('✓ Members join without a registration, duplicates are refused, and the roster locks');
+
+    let wrongOwner = false;
+    try {
+        await teamService.createTeam({
+            owner: { type: 'challenge', id: uuid() },
+            name: 'Ghost',
+            captain_user_id: outsider._id,
+        });
+        wrongOwner = true;
+    } catch {
+        /* expected: challenge_not_found */
+    }
+    assert(!wrongOwner, 'A team for a challenge that does not exist must be refused');
+    console.log('✓ A team cannot be created for a challenge that is not there');
+
     // Cleanup
+    await Team.deleteMany({ 'owner.id': challengeId });
+    await Challenge.deleteOne({ _id: challengeId });
     await Team.deleteMany({ 'owner.id': eventId });
     await FormSubmission.deleteMany({ form_id: form._id });
     await formService.archiveForm(form._id);

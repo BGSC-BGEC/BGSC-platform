@@ -28,6 +28,11 @@ export const ROUTES: Record<string, Route> = {
     points: { prefixes: ['/points'], target: config.services.points, owner: 'BE-2 · W3' },
     leaderboard: { prefixes: ['/leaderboards'], target: config.services.leaderboard, owner: 'BE-1 · W3' },
     challenge: { prefixes: ['/challenges'], target: config.services.challenge, owner: 'BE-2 · W3' },
+    // Strava account linking is served by the Challenge Service, not by a container of its own:
+    // physical challenges are what the activities are proof for, and a second port for four routes
+    // is a deployment nobody wants to operate (be2-challenge-service-plan.md D1). Two keys, one
+    // target — `target` is what the proxy dials, so nothing else here cares.
+    strava: { prefixes: ['/strava'], target: config.services.challenge, owner: 'BE-2 · W3' },
     // '/uploads' stays here as the catch-all, but the two services that serve their own files
     // today claim their subtrees above and win by declaration order — otherwise every avatar URL
     // the API hands out 503s at the edge, because media-service does not exist until Week 4.
@@ -37,7 +42,17 @@ export const ROUTES: Record<string, Route> = {
 };
 
 /** Services that actually exist today. Everything else 503s with a clear reason, not a hang. */
-export const LIVE_SERVICES = new Set(['auth', 'user', 'registration', 'announcement', 'event']);
+export const LIVE_SERVICES = new Set([
+    'auth',
+    'user',
+    'registration',
+    'announcement',
+    'event',
+    'points',
+    'challenge',
+    // Same container as `challenge`; live or not live together, always.
+    'strava',
+]);
 
 /**
  * Prefix match on a whole path segment, so `/usersfoo` never routes to the user service.

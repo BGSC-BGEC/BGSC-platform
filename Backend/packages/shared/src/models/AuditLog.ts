@@ -19,6 +19,9 @@ export const AUDIT_TARGET_TYPE = [
     'team',
     'registration',
     'point_transaction',
+    // Rule edits are Spec §5.15.3's "Point Award Toggles": a point modification that changes every
+    // future transaction, so it is audited like one.
+    'point_rule',
     'leaderboard_entry',
     'challenge',
     'announcement',

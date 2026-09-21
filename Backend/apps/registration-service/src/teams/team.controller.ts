@@ -48,19 +48,25 @@ export async function inviteMemberHandler(req: Request, res: Response, next: Nex
             throw new ServiceError(403, 'not_captain');
         }
 
-        // Find member's registration
-        const memberReg = await FormSubmission.findOne({
-            'owner.id': team.owner.id,
-            'user.user_id': user_id,
-            'context.event.role': 'member',
-            status: 'confirmed',
-        });
+        // A challenge team has no form, so there is no registration to look up (be2-challenge-
+        // service-plan.md D5). Eligibility for a challenge team is the Challenge Service's, at
+        // accept time.
+        let memberRegId: string | null = null;
+        if (team.owner.type === 'event') {
+            const memberReg = await FormSubmission.findOne({
+                'owner.id': team.owner.id,
+                'user.user_id': user_id,
+                'context.event.role': 'member',
+                status: 'confirmed',
+            });
 
-        if (!memberReg) {
-            throw new ServiceError(404, 'member_not_registered');
+            if (!memberReg) {
+                throw new ServiceError(404, 'member_not_registered');
+            }
+            memberRegId = memberReg._id;
         }
 
-        const updatedTeam = await teamService.addMemberToTeam(teamId, user_id, memberReg._id, 'invite');
+        const updatedTeam = await teamService.addMemberToTeam(teamId, user_id, memberRegId, 'invite');
 
         res.json(updatedTeam);
     } catch (err) {
@@ -73,16 +79,19 @@ export async function joinTeamHandler(req: Request, res: Response, next: NextFun
         const teamId = req.params.id as string;
         const team = await teamService.getTeam(teamId);
 
-        // Find user's registration
-        const userReg = await FormSubmission.findOne({
-            'owner.id': team.owner.id,
-            'user.user_id': req.user!.id,
-            'context.event.role': 'member',
-            status: 'confirmed',
-        });
+        let userRegId: string | null = null;
+        if (team.owner.type === 'event') {
+            const userReg = await FormSubmission.findOne({
+                'owner.id': team.owner.id,
+                'user.user_id': req.user!.id,
+                'context.event.role': 'member',
+                status: 'confirmed',
+            });
 
-        if (!userReg) {
-            throw new ServiceError(404, 'not_registered_as_member');
+            if (!userReg) {
+                throw new ServiceError(404, 'not_registered_as_member');
+            }
+            userRegId = userReg._id;
         }
 
         if (team.status !== 'forming') {
@@ -94,7 +103,7 @@ export async function joinTeamHandler(req: Request, res: Response, next: NextFun
             throw new ServiceError(403, 'team_not_open');
         }
 
-        const updatedTeam = await teamService.addMemberToTeam(teamId, req.user!.id, userReg._id, 'join');
+        const updatedTeam = await teamService.addMemberToTeam(teamId, req.user!.id, userRegId, 'join');
 
         res.json(updatedTeam);
     } catch (err) {

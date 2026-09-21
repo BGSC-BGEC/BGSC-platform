@@ -61,6 +61,11 @@ async function main(): Promise<void> {
     check('GET  /users/me      -> user-service', await status('GET', '/users/me'), 401);
     check('GET  /forms         -> registration-service', await status('GET', '/forms'), 401);
     check('POST /auth/logout   -> auth-service', await status('POST', '/auth/logout'), 401);
+    check('GET  /points/me     -> points-service', await status('GET', '/points/me'), 401);
+    check('GET  /challenges     -> challenge-service', await status('GET', '/challenges'), 401);
+    // Two ROUTES keys, one container: /strava is served by challenge-service, so a 503 here would
+    // mean the second routing row never went live while the first did.
+    check('GET  /strava/activities -> challenge-service', await status('GET', '/strava/activities'), 401);
 
     console.log('\n-- services that do not exist yet answer, rather than hang --');
     for (const [key, route] of Object.entries(ROUTES)) {
@@ -72,6 +77,12 @@ async function main(): Promise<void> {
     console.log('\n-- /internal is service-to-service only, never reachable from the edge --');
     check('GET /internal/users/snapshot', await status('GET', '/internal/users/snapshot', auth), 404);
     check('GET /internal/teams/snapshot', await status('GET', '/internal/teams/snapshot', auth), 404);
+    // The Points Service's leaderboard debit: reachable by Leaderboard over the internal network,
+    // never by a client that happens to know the path.
+    check('POST /internal/points/spend', await status('POST', '/internal/points/spend', auth), 404);
+    // The Challenge Service's team lock: reachable by challenge-service over the internal network,
+    // never by a client that happens to know the path.
+    check('POST /internal/teams/x/lock', await status('POST', '/internal/teams/x/lock', auth), 404);
     check(
         'GET /internal/* even with a valid service token',
         await status('GET', '/internal/users/snapshot?ids=x', {
@@ -83,6 +94,8 @@ async function main(): Promise<void> {
 
     console.log('\n-- prefixes match whole segments, so neighbours do not leak --');
     check('GET /usersfoo', await status('GET', '/usersfoo', auth), 404);
+    check('GET /challengesfoo', await status('GET', '/challengesfoo', auth), 404);
+    check('GET /stravafoo', await status('GET', '/stravafoo', auth), 404);
     check('GET /formsfoo', await status('GET', '/formsfoo', auth), 404);
     check('GET /nope', await status('GET', '/nope', auth), 404);
 
