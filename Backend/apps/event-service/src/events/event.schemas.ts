@@ -151,7 +151,9 @@ export const RecordAttendanceItemSchema = z.object({
 });
 
 export const RecordAttendanceSchema = z.object({
-    attendances: z.array(RecordAttendanceItemSchema).min(1),
+    // Capped as well as floored: the handler runs one query per item, so an uncapped array is an
+    // unbounded amount of work for one request. Five hundred is a bulk check-in at a big event.
+    attendances: z.array(RecordAttendanceItemSchema).min(1).max(500),
 });
 
 export const SingleAttendanceSchema = z.object({

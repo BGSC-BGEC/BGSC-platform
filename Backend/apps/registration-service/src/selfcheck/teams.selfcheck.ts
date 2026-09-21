@@ -239,6 +239,23 @@ async function main() {
         refreshedReg.user.display_name === 'Captain Renamed',
         'The submission snapshot must follow a renamed user'
     );
+
+    // And when the account goes, so does the name — on the roster and on the registration.
+    // The UI cannot do this for us: a snapshot carries no deletion signal and `GET /users/:ref`
+    // answers 404 for a deleted account (whole-backend audit, Sep 27).
+    publish('UserDeleted', 'user-service', { user_id: captain._id });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const erasedTeam = await teamService.getTeam(team._id);
+    const erasedMember = erasedTeam.members.find((m) => m.user_id === captain._id)!;
+    assert(erasedMember.display_name === 'Deleted user', 'the roster loses the name');
+    assert(erasedMember.deleted === true, 'and raises the flag the UI renders from');
+    assert(erasedMember.user_id === captain._id, 'while the reference stays, so the roster resolves');
+
+    const erasedReg = await registrationService.getRegistration(captainReg._id);
+    assert(erasedReg.user.display_name === 'Deleted user', 'the registration loses it too');
+    assert(erasedReg.user.deleted === true, 'with the same flag');
+    console.log('✓ a deleted account is erased from rosters and registrations, reference intact');
     console.log('✓ Snapshots refreshed on rename, untouched on an unrelated edit');
 
     console.log('13. Disbanding the team...');

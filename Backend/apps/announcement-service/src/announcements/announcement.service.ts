@@ -34,7 +34,12 @@ import {
     keysetFilter,
     rankFilter,
 } from './audience';
-import { CreateAnnouncementInput, ListAnnouncementsInput, UpdateAnnouncementInput } from './announcement.schemas';
+import {
+    CreateAnnouncementInput,
+    ListAnnouncementsInput,
+    RecordDeliveryInput,
+    UpdateAnnouncementInput,
+} from './announcement.schemas';
 
 /**
  * Data access, invariant guards and domain events. HTTP concerns stay in the controller.
@@ -600,4 +605,97 @@ export async function remove(id: string, editor: Editor): Promise<IAnnouncement>
         ip: editor.ip,
     });
     return deleted;
+}
+
+/* ------------------------------------------------------------------ *
+ * Delivery writeback (be2-broadcast-service-plan.md §6)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Record what the Notification Service's broadcast actually did, per channel.
+ *
+ * This closes plan D7 ("build the internal route when there is a caller"): Week 4's broadcast is
+ * that caller. It is the ONLY write to `delivery.*` — publishing sets the two `requested` flags and
+ * nothing else, because group ids are the broadcaster's configuration, not this service's (D6).
+ *
+ * Every refusal happens before any write. Query updates run no document middleware, so the model's
+ * `pre('validate')` guard on `delivery.whatsapp.per_category[].category` never fires here — and it
+ * throws a plain `Error`, which would surface as a 500 for what is a caller mistake.
+ */
+export async function recordDelivery(id: string, input: RecordDeliveryInput): Promise<IAnnouncement> {
+    const a = await Announcement.findOne({ _id: id, ...alive });
+    if (!a) throw new ServiceError(404, 'announcement_not_found');
+    // Delivery describes a broadcast, and only a published announcement has had one. An archived
+    // one still accepts a late receipt: it was published, it just aged out of the feed.
+    if (a.status !== 'published' && a.status !== 'archived') {
+        throw new ServiceError(409, 'not_published');
+    }
+
+    for (const row of input.whatsapp ?? []) {
+        if (!a.categories.includes(row.category)) {
+            throw new ServiceError(422, 'category_not_on_announcement', { category: row.category });
+        }
+    }
+
+    for (const row of input.whatsapp ?? []) {
+        const stored = {
+            category: row.category,
+            group_id: row.group_id,
+            status: row.status,
+            message_id: row.message_id ?? null,
+            attempted_at: row.attempted_at ?? null,
+            error: row.error ?? null,
+        };
+
+        // Update in place if the category already has a row...
+        // `alive` is repeated on every update, not only on the load above: a delete can land
+        // between them, and a delivery receipt written onto a soft-deleted announcement is a write
+        // to a document every read path has already stopped returning.
+        const updated = await Announcement.updateOne(
+            { _id: id, ...alive, 'delivery.whatsapp.per_category.category': row.category },
+            { $set: { 'delivery.whatsapp.per_category.$[r]': stored } },
+            { arrayFilters: [{ 'r.category': row.category }] }
+        );
+
+        // ...otherwise append it. The `$ne` guard is what makes the pair safe under concurrency:
+        // a second writer that lost the race above matches nothing here, so one category can never
+        // end up with two rows (the same trick as `reads.ts:markRead`).
+        if ((updated.matchedCount ?? 0) === 0) {
+            await Announcement.updateOne(
+                { _id: id, ...alive, 'delivery.whatsapp.per_category.category': { $ne: row.category } },
+                { $push: { 'delivery.whatsapp.per_category': stored } }
+            );
+        }
+
+        publish('AnnouncementDelivered', PRODUCER, {
+            announcement_id: id,
+            channel: 'whatsapp',
+            category: row.category,
+            status: row.status,
+        });
+    }
+
+    if (input.push) {
+        await Announcement.updateOne(
+            { _id: id, ...alive },
+            {
+                $set: {
+                    'delivery.push.status': input.push.status,
+                    'delivery.push.sent_count': input.push.sent_count ?? null,
+                },
+            }
+        );
+        publish('AnnouncementDelivered', PRODUCER, {
+            announcement_id: id,
+            channel: 'push',
+            category: null,
+            status: input.push.status,
+        });
+    }
+
+    // No audit row: `AuditLog` records human actions with an actor and an IP (AuditLog.ts), and the
+    // delivery block already carries the full per-category history of the machine ones (plan D7).
+    const fresh = await Announcement.findOne({ _id: id, ...alive });
+    if (!fresh) throw new ServiceError(404, 'announcement_not_found');
+    return fresh;
 }

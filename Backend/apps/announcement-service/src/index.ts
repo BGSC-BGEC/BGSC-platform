@@ -1,6 +1,7 @@
 import { createServiceApp, startService } from '@bgsc/shared';
 import express from 'express';
 import { announcementRoutes } from './announcements/announcement.routes';
+import { internalRoutes } from './internal/internal.routes';
 import { initializeConsumers } from './events/consumers';
 import { startScheduler } from './scheduler/tick';
 
@@ -20,8 +21,10 @@ const options = {
     port: PORT,
     routes(app: express.Express) {
         app.use('/announcements', announcementRoutes);
-        // No /internal: nothing calls this service. Week 4's Broadcast Service adds
-        // PATCH /internal/announcements/:id/delivery when there is a caller for it (plan §D7).
+        // Service-to-service only: the gateway refuses /internal from the edge and the router
+        // mounts requireServiceToken. One caller — the Notification Service's delivery writeback
+        // (be2-broadcast-service-plan.md §6), which is what plan D7 was waiting for.
+        app.use('/internal', internalRoutes);
     },
     async onReady() {
         // Author snapshot refresh.

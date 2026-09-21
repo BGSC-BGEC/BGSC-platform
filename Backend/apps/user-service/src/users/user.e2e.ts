@@ -5,6 +5,7 @@
  *   npx ts-node src/users/user.e2e.ts
  */
 import assert from 'assert';
+import { randomUUID } from 'crypto';
 import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import { Server } from 'http';
@@ -318,7 +319,9 @@ async function main(): Promise<void> {
     assert.strictEqual(snaps.body.snapshots.length, 2, 'bulk snapshot returns both');
     assert.deepStrictEqual(
         Object.keys(snaps.body.snapshots[0]).sort(),
-        ['avatar_url', 'display_name', 'user_id'],
+        // `deleted` joined the shape on Sep 27 (relationships.md §4): it is the only signal a
+        // client has that the account behind an embedded name is gone.
+        ['avatar_url', 'deleted', 'display_name', 'user_id'],
         'snapshot shape matches what six collections embed');
 
     // ---- pagination: ties and nulls ---------------------------------------
@@ -510,6 +513,41 @@ async function main(): Promise<void> {
         UserRole.USER,
         'the role change did NOT land when the audit row could not be written'
     );
+
+    // ---- a token outlives the authority it was issued with -------------------
+    // The most consequential write on the platform was gated on the TOKEN's role claim, which stays
+    // valid for up to fifteen minutes after the database says otherwise — so a coordinator who had
+    // just been suspended could still promote accounts. `requireActiveUser` ranks the live document.
+    // (Whole-backend audit, Sep 27.)
+    const pawn = await User.create({
+        _id: randomUUID(),
+        email: `pawn_${Date.now()}@bgsc.test`,
+        username: `pawn_${Date.now()}`,
+        role: UserRole.USER,
+        profile: { full_name: 'Pawn' },
+    });
+
+    await User.updateOne({ _id: coord._id }, { $set: { status: UserStatus.SUSPENDED } });
+    const suspendedWrite = await call('PATCH', `/users/${pawn._id}/role`, {
+        as: coordT, // still a perfectly valid coordinator token
+        body: { role: 'core', reason: 'should not land' },
+    });
+    assert.strictEqual(suspendedWrite.status, 401, 'a suspended coordinator cannot change a role');
+
+    await User.updateOne({ _id: coord._id }, { $set: { role: UserRole.MEMBER, status: UserStatus.ACTIVE } });
+    const demotedWrite = await call('PATCH', `/users/${pawn._id}/status`, {
+        as: coordT,
+        body: { status: 'suspended', reason: 'should not land' },
+    });
+    assert.strictEqual(demotedWrite.status, 403, 'nor can a demoted one suspend an account');
+
+    assert.strictEqual(
+        (await User.findById(pawn._id))!.role,
+        UserRole.USER,
+        'and neither write touched the target'
+    );
+    await User.updateOne({ _id: coord._id }, { $set: { role: UserRole.COORDINATOR } });
+    console.log('  ok  role and status writes rank the live user, not the token claim');
 
     // search degrades instead of 500ing when the text index is absent
     await User.collection.dropIndexes().catch(() => undefined);

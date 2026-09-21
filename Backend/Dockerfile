@@ -18,6 +18,9 @@ COPY apps/announcement-service/package.json ./apps/announcement-service/
 COPY apps/event-service/package.json ./apps/event-service/
 COPY apps/points-service/package.json ./apps/points-service/
 COPY apps/challenge-service/package.json ./apps/challenge-service/
+COPY apps/notification-service/package.json ./apps/notification-service/
+COPY apps/feedback-service/package.json ./apps/feedback-service/
+COPY apps/bracket-service/package.json ./apps/bracket-service/
 RUN npm ci --workspaces --include-workspace-root
 
 COPY tsconfig.base.json tsconfig.json ./
@@ -57,6 +60,12 @@ COPY --from=builder --chown=app:app /app/apps/points-service/dist ./apps/points-
 COPY --from=builder --chown=app:app /app/apps/points-service/package.json ./apps/points-service/package.json
 COPY --from=builder --chown=app:app /app/apps/challenge-service/dist ./apps/challenge-service/dist
 COPY --from=builder --chown=app:app /app/apps/challenge-service/package.json ./apps/challenge-service/package.json
+COPY --from=builder --chown=app:app /app/apps/notification-service/dist ./apps/notification-service/dist
+COPY --from=builder --chown=app:app /app/apps/notification-service/package.json ./apps/notification-service/package.json
+COPY --from=builder --chown=app:app /app/apps/feedback-service/dist ./apps/feedback-service/dist
+COPY --from=builder --chown=app:app /app/apps/feedback-service/package.json ./apps/feedback-service/package.json
+COPY --from=builder --chown=app:app /app/apps/bracket-service/dist ./apps/bracket-service/dist
+COPY --from=builder --chown=app:app /app/apps/bracket-service/package.json ./apps/bracket-service/package.json
 
 # Avatar uploads land here; compose mounts a volume so they survive a restart.
 RUN mkdir -p /app/uploads && chown -R app:app /app/uploads

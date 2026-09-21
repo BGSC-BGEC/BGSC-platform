@@ -129,6 +129,8 @@ const AnnouncementSchema = new Schema<IAnnouncement>(
             display_name: { type: String, required: true },
             role_label: { type: String, required: true },
             avatar_url: { type: String, default: null },
+            // Anonymized on UserDeleted, like every other display snapshot (relationships.md §4).
+            deleted: { type: Boolean, default: false },
         },
 
         status: { type: String, enum: ANNOUNCEMENT_STATUS, default: 'draft' },
@@ -195,7 +197,17 @@ AnnouncementSchema.pre('validate', function (this: IAnnouncement) {
 
 // audience.min_role is filtered in the query (`$in` over the viewer's allowed roles) but is not an
 // index key: a 4-month window is at most a few hundred live docs, so the status/published_at scan does the work.
-AnnouncementSchema.index({ status: 1, published_at: -1 }); // feed
+/**
+ * Keyset pagination sorts on `(field, _id)`, so the tiebreaker has to be IN the index or Mongo
+ * fetches the whole match and sorts it in memory — correct, invisible at a few hundred rows, and a
+ * 32MB sort abort at scale. Measured with `explain()` during the whole-backend audit (Sep 27):
+ * before this, the plan was `SORT <- FETCH <- IXSCAN`.
+ *
+ * Each of these supersedes the same index without `_id`; an existing deployment keeps the old one
+ * until it is dropped by hand (`adding-a-service.md §9` — adding an index is safe, altering one is
+ * a migration).
+ */
+AnnouncementSchema.index({ status: 1, published_at: -1, _id: -1 }); // feed, keyset-ordered
 AnnouncementSchema.index({ status: 1, categories: 1, published_at: -1 }); // category chips
 AnnouncementSchema.index({ status: 1, 'audience.event_id': 1, published_at: -1 }); // event detail
 AnnouncementSchema.index({ 'author.user_id': 1, status: 1, published_at: -1 }); // "What Our Heads Have to Say"

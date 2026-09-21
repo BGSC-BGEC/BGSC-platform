@@ -34,6 +34,8 @@ export interface ITeam extends Document<string> {
     members: {
         user_id: string;
         display_name: string;
+        /** Raised when the account behind the member is deleted (relationships.md §4). */
+        deleted?: boolean;
         avatar_url: string | null;
         registration_id: string | null;
         joined_at: Date;
@@ -69,6 +71,7 @@ const MemberSchema = new Schema(
     {
         user_id: { type: String, required: true },
         display_name: { type: String, required: true },
+        deleted: { type: Boolean, default: false },
         avatar_url: { type: String, default: null },
         // Required for event owners (team groups registrations); null for challenge owners, which have no form.
         registration_id: { type: String, default: null },

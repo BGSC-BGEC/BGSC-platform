@@ -544,6 +544,45 @@ for why both exist.
   Note this is the index half only. The stale-`dist` trap in §2.2 is a different animal: a database
   wipe does nothing for it, because the stale artefact is `packages/shared/dist`, not data. That one
   is handled by the root `preselfcheck` / `pree2e` hooks.
+- **mongod needs a raised `nofile` limit, or the test suite kills it (found Sep 26, 2026).**
+  WiredTiger opens a file per collection and per index, and every selfcheck and e2e in this repo
+  creates a scratch database and drops it — thousands of files churned per full run. Docker's
+  default soft limit (1024-2048) is not enough: mongod hits `Too many open files`, WiredTiger
+  panics, and the process **aborts**:
+
+  ```
+  WT_PANIC: WiredTiger library panic ... __posix_directory_sync: Too many open files
+  Fatal assertion 50853 ... Got signal: 6 (Aborted).
+  ```
+
+  What you actually see is a random `MongoNetworkError: connection N to [::1]:27017 closed` in
+  whichever selfcheck happened to be running — a different one each time, which reads exactly like
+  test flakiness. It is not; the database died under it, restarted, and logged
+  `Detected unclean shutdown`. `docker-compose.yml` now sets `nofile` to 64000 on the mongodb
+  service (MongoDB's own documented minimum). If you run mongod some other way, raise it there too:
+  `docker inspect backend-mongodb-1` will not tell you, but
+  `docker compose exec mongodb sh -c 'cat /proc/1/limits'` will.
+- **A computed event name is invisible to a `publish('` search (found Sep 27, 2026).** Most
+  services publish with a literal — `publish('EventCompleted', …)` — but `points-service` maps a
+  transaction type to its event name and publishes `EVENT_FOR[tx.type]`. Grepping for `publish('` to
+  find out what a service emits therefore reported that the Points Service emits **nothing**, and a
+  Week-4 feature was dropped on that false premise. When you need the real producer list, grep for
+  `publish(` without the quote, and read `relationships.md §6` — which was right.
+- **A keyset sort needs `_id` IN the index, or Mongo sorts the whole match in memory.** Every list
+  in this repo sorts on `(field, _id)` — the tiebreaker is what stops rows straddling a page
+  boundary — and an index of `{ status: 1, published_at: -1 }` cannot serve a sort of
+  `{ published_at: -1, _id: -1 }`. The query is still *correct*, so nothing fails: it is a
+  `SORT <- FETCH <- IXSCAN` that works at a few hundred rows and aborts at 32MB. Three services had
+  it (announcement, challenge, feedback), found Sep 27 by measuring rather than reading. Check a new
+  list endpoint the same way — seed a scratch DB with a couple of thousand rows and ask the planner:
+
+  ```ts
+  const plan = await Model.find(filter).sort(sortObj).limit(20).explain('queryPlanner');
+  console.log(JSON.stringify(plan.queryPlanner.winningPlan, null, 2));   // want no SORT stage
+  ```
+
+  A filter key that sits *between* the filter and the sort breaks it too: `{ status, severity,
+  created_at }` cannot order a query that filters on `status` alone.
 - **Mongo is standalone**: no multi-document transactions. Use conditional atomic updates
   (`relationships.md` §5).
 - **`req.query` is a getter in Express 5.** `validate` writes the parsed value through

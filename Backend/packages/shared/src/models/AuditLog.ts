@@ -26,6 +26,10 @@ export const AUDIT_TARGET_TYPE = [
     'challenge',
     'announcement',
     'auction_lot',
+    // Week 4 Sunday: a triage decision on someone's complaint, and a score that decides a
+    // tournament, are both human acts with consequences — the two tests this list applies.
+    'feedback_ticket',
+    'match',
 ] as const;
 export type AuditTargetType = (typeof AUDIT_TARGET_TYPE)[number];
 

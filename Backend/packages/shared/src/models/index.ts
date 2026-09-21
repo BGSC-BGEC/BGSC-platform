@@ -8,4 +8,7 @@ export * from './Points';
 export * from './Leaderboard';
 export * from './Challenge';
 export * from './Announcement';
+export * from './Notification';
+export * from './Feedback';
+export * from './Bracket';
 export * from './Strava';

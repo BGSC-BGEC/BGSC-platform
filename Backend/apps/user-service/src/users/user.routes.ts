@@ -5,6 +5,7 @@ import {
     UserRole,
     optionalAuth,
     requireAuth,
+    requireActiveUser,
     requireRole,
     requireServiceToken,
     validate,
@@ -65,18 +66,22 @@ userRoutes.get(
     c.auditForUser
 );
 
+// `requireActiveUser`, not `requireRole`: changing somebody's role is the most consequential write
+// on the platform, and a token outlives a demotion or a suspension by up to fifteen minutes. The
+// live document decides (adding-a-service.md §6.2; whole-backend audit, Sep 27).
 userRoutes.patch(
     '/:ref/role',
     requireAuth,
-    requireRole(UserRole.COORDINATOR),
+    requireActiveUser(UserRole.COORDINATOR),
     validate({ params: RefParams, body: ChangeRoleSchema }),
     c.changeRole
 );
 
+// Same reasoning: suspending an account is not a write to hand to a suspended administrator.
 userRoutes.patch(
     '/:ref/status',
     requireAuth,
-    requireRole(UserRole.COORDINATOR),
+    requireActiveUser(UserRole.COORDINATOR),
     validate({ params: RefParams, body: ChangeStatusSchema }),
     c.changeStatus
 );

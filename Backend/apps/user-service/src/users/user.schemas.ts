@@ -21,7 +21,12 @@ export const UpdateProfileSchema = z
         interests: z.array(z.string().trim().min(1).max(40)).max(30).optional(),
         social_links: z
             .object({
-                strava_id: z.string().trim().max(64).nullable().optional(),
+                // `strava_id` is deliberately NOT here. It records a *verified* OAuth connection and
+                // is written by the Challenge Service's Strava flow (strava.service.ts), which also
+                // clears it on disconnect. Accepting it from a profile PATCH gave the field two
+                // writers with different standards of proof — anyone could paste an athlete id and
+                // wear the badge. The other three are self-declared handles that nothing verifies,
+                // so they stay editable. (Whole-platform audit, Sep 27.)
                 instagram: z.string().trim().max(64).nullable().optional(),
                 linkedin: z.string().trim().max(128).nullable().optional(),
                 steam_id: z.string().trim().max(64).nullable().optional(),

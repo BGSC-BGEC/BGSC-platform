@@ -1,4 +1,4 @@
-import { UserRole, requireAuth, requireRole, validate } from '@bgsc/shared';
+import { UserRole, requireActiveUser, requireAuth, requireRole, validate } from '@bgsc/shared';
 import { Router } from 'express';
 import * as controller from './form.controller';
 import {
@@ -12,7 +12,7 @@ import {
 export const formRoutes = Router();
 
 // POST /forms - create form (core+)
-formRoutes.post('/', requireAuth, requireRole(UserRole.CORE), validate({ body: CreateFormSchema }), controller.createFormHandler);
+formRoutes.post('/', requireAuth, requireActiveUser(UserRole.CORE), validate({ body: CreateFormSchema }), controller.createFormHandler);
 
 // GET /forms - list forms (any authed, with filters)
 formRoutes.get('/', requireAuth, validate({ query: ListFormsQuery }), controller.listFormsHandler);
@@ -30,10 +30,10 @@ formRoutes.get(
 formRoutes.get('/:id', requireAuth, validate({ params: FormIdParams }), controller.getFormHandler);
 
 // PATCH /forms/:id - update form (core+)
-formRoutes.patch('/:id', requireAuth, requireRole(UserRole.CORE), validate({ params: FormIdParams, body: UpdateFormSchema }), controller.updateFormHandler);
+formRoutes.patch('/:id', requireAuth, requireActiveUser(UserRole.CORE), validate({ params: FormIdParams, body: UpdateFormSchema }), controller.updateFormHandler);
 
 // POST /forms/:id/publish - publish form (core+)
-formRoutes.post('/:id/publish', requireAuth, requireRole(UserRole.CORE), validate({ params: FormIdParams }), controller.publishFormHandler);
+formRoutes.post('/:id/publish', requireAuth, requireActiveUser(UserRole.CORE), validate({ params: FormIdParams }), controller.publishFormHandler);
 
 // DELETE /forms/:id - archive form (coordinator+)
-formRoutes.delete('/:id', requireAuth, requireRole(UserRole.COORDINATOR), validate({ params: FormIdParams }), controller.archiveFormHandler);
+formRoutes.delete('/:id', requireAuth, requireActiveUser(UserRole.COORDINATOR), validate({ params: FormIdParams }), controller.archiveFormHandler);

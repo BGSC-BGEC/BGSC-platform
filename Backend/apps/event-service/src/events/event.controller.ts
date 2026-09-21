@@ -3,8 +3,16 @@ import { wrap, ServiceError } from '@bgsc/shared';
 import * as svc from './event.service';
 import { putObject, sniffImage, IMAGE_MAX_BYTES } from '../storage/storage';
 
+/**
+ * The actor for a guarded write: the document `requireActiveUser` loaded, not the token's claim —
+ * the claim stays valid for up to fifteen minutes after a demotion (whole-backend audit, Sep 27).
+ * Falls back to the claim on routes that only mount `requireAuth`.
+ */
+const writeActor = (req: Request) =>
+    req.actor ? { id: req.actor._id, role: req.actor.role } : req.user!;
+
 export const create = wrap(async (req: Request, res: Response) => {
-    const actor = req.user!;
+    const actor = writeActor(req);
     const event = await svc.createEvent(actor, req.body);
     res.status(201).json(event);
 });
@@ -23,21 +31,21 @@ export const get = wrap(async (req: Request, res: Response) => {
 });
 
 export const update = wrap(async (req: Request, res: Response) => {
-    const actor = req.user!;
+    const actor = writeActor(req);
     const ref = (req.params as Record<string, string>).ref;
     const updated = await svc.updateEvent(ref, actor, req.body);
     res.json(updated);
 });
 
 export const remove = wrap(async (req: Request, res: Response) => {
-    const actor = req.user!;
+    const actor = writeActor(req);
     const ref = (req.params as Record<string, string>).ref;
     const result = await svc.deleteEvent(ref, actor);
     res.json(result);
 });
 
 export const uploadMedia = wrap(async (req: Request, res: Response) => {
-    const actor = req.user!;
+    const actor = writeActor(req);
     const ref = (req.params as Record<string, string>).ref;
     const event = await svc.findByRef(ref, actor);
 
@@ -101,7 +109,7 @@ export const waitlist = wrap(async (req: Request, res: Response) => {
 export const promoteWaitlist = wrap(async (req: Request, res: Response) => {
     const ref = (req.params as Record<string, string>).ref;
     const registrationId = (req.params as Record<string, string>).registrationId;
-    const actor = req.user!;
+    const actor = writeActor(req);
     const adminOverride = req.body?.admin_override ?? false;
     const result = await svc.promoteWaitlistedParticipant(ref, registrationId, actor, adminOverride);
     res.json(result);
@@ -116,10 +124,12 @@ export const getAttendance = wrap(async (req: Request, res: Response) => {
 
 export const recordAttendance = wrap(async (req: Request, res: Response) => {
     const ref = (req.params as Record<string, string>).ref;
-    const actor = req.user!;
-    const attendances = Array.isArray(req.body.attendances)
-        ? req.body.attendances
-        : [req.body];
+    const actor = writeActor(req);
+    // The body is `{ attendances: [...] }`, now enforced by the route's schema. The old fallback
+    // wrapped a bare object as a single item, but `SingleAttendanceSchema` carries no
+    // `registration_id`, so that shape matched no registration and silently recorded nothing —
+    // removing it takes away a path that never worked. (Whole-backend audit, Sep 27.)
+    const attendances = req.body.attendances as { registration_id: string; attended: boolean; note?: string }[];
     const result = await svc.recordEventAttendance(ref, attendances, actor);
     res.json(result);
 });
@@ -132,7 +142,7 @@ export const listCaptains = wrap(async (req: Request, res: Response) => {
 
 export const addCaptain = wrap(async (req: Request, res: Response) => {
     const ref = (req.params as Record<string, string>).ref;
-    const actor = req.user!;
+    const actor = writeActor(req);
     const result = await svc.addEventCaptain(ref, req.body.user_id, actor);
     res.json(result);
 });
@@ -140,7 +150,7 @@ export const addCaptain = wrap(async (req: Request, res: Response) => {
 export const removeCaptain = wrap(async (req: Request, res: Response) => {
     const ref = (req.params as Record<string, string>).ref;
     const userId = (req.params as Record<string, string>).userId;
-    const actor = req.user!;
+    const actor = writeActor(req);
     const result = await svc.removeEventCaptain(ref, userId, actor);
     res.json(result);
 });

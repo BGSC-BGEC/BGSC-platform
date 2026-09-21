@@ -354,7 +354,7 @@
   - Bid history tracking
   - Auto-close on deadline
 
-- [ ] **BE-2: Points System Service** (8h)
+- [x] **BE-2: Points System Service** (8h)
   - Points allocation rules engine
   - Points transaction history
   - Points earning opportunities
@@ -372,7 +372,7 @@
   - Top performers queries
   - Leaderboard caching for performance
 
-- [ ] **BE-2: Challenge System & Strava Integration** (8h)
+- [x] **BE-2: Challenge System & Strava Integration** (8h)
   - Challenge creation and management
   - Challenge types (individual, team)
   - Challenge participation endpoints
@@ -472,7 +472,7 @@
   - Image compression and optimization
   - Media metadata and tagging
 
-- [ ] **BE-2: Broadcast & WhatsApp Integration** (8h)
+- [x] **BE-2: Broadcast & WhatsApp Integration** (8h)
   - Broadcast message service (push announcements)
   - WhatsApp Business API integration
   - Message templating system
@@ -491,7 +491,7 @@
   - Hall of Fame categories
   - Achievement badges
 
-- [ ] **BE-2: Feedback & Tournament Bracket Service** (8h)
+- [x] **BE-2: Feedback & Tournament Bracket Service** (8h)
   - Feedback submission endpoint
   - Contact us form endpoint
   - Feedback categorization (bug, suggestion, general)

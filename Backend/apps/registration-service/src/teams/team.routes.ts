@@ -1,4 +1,4 @@
-import { UserRole, requireAuth, requireRole, validate } from '@bgsc/shared';
+import { UserRole, requireActiveUser, requireAuth, requireRole, validate } from '@bgsc/shared';
 import { Router } from 'express';
 import * as controller from './team.controller';
 import {
@@ -36,7 +36,7 @@ teamRoutes.delete(
 );
 
 // PATCH /teams/:id/lock - lock roster (core+)
-teamRoutes.patch('/:id/lock', requireAuth, requireRole(UserRole.CORE), validate({ params: TeamIdParams }), controller.lockTeamHandler);
+teamRoutes.patch('/:id/lock', requireAuth, requireActiveUser(UserRole.CORE), validate({ params: TeamIdParams }), controller.lockTeamHandler);
 
 // DELETE /teams/:id - disband team (captain or core+)
 teamRoutes.delete('/:id', requireAuth, validate({ params: TeamIdParams, body: RemoveMemberSchema }), controller.disbandTeamHandler);

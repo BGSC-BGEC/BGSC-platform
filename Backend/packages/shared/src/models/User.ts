@@ -247,5 +247,8 @@ export function userSnapshotOf(user: IUser): UserSnapshot {
         user_id: user._id,
         display_name: user.profile?.full_name ?? user.username,
         avatar_url: user.profile?.avatar_url ?? null,
+        // Explicit rather than defaulted: a snapshot taken of a live account says so, and the
+        // `UserDeleted` consumers are the only thing that ever flips it.
+        deleted: false,
     };
 }

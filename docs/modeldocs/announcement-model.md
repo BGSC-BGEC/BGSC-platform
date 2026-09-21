@@ -163,7 +163,17 @@ AnnouncementDeleted     { announcement_id, deleted_by }
 AnnouncementDelivered   { announcement_id, channel: 'whatsapp' | 'push', category | null, status }
 ```
 
-Week 4 Broadcast/WhatsApp service subscribes to `AnnouncementPublished`, writes back into `delivery.*` via Announcement Service.
+**Shipped Sep 26, 2026 (Week 4 Saturday).** The Notification Service (:3010) subscribes to
+`AnnouncementPublished`, fans out in-app notifications to the resolved audience, sends one WhatsApp
+message per category, and writes the outcome back through
+`PATCH /internal/announcements/:id/delivery` — the route that closes plan D7. `AnnouncementDelivered`
+is emitted **by this service** on that writeback, one event per channel, because the owner of a
+collection emits the events about it.
+
+One rule that belongs here rather than only in the broadcaster: **an announcement whose
+`audience.min_role` is above `user`, or which is scoped to an event, is never sent to a WhatsApp
+group.** The `teams` tag raises `min_role` to `core` (§2.3), and a community group is a public
+destination — see `notification-model.md §4.1`.
 
 ## 6. Read patterns
 

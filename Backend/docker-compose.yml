@@ -26,6 +26,15 @@ services:
       MONGO_INITDB_DATABASE: bgsc_dev
     volumes:
       - mongodb_data:/data/db
+    # mongod opens a file per collection and per index, and the scratch databases the test suite
+    # creates and drops churn through thousands of them. Docker's default soft limit of 1024-2048
+    # is not enough: WiredTiger hits EMFILE ("Too many open files"), panics, and mongod ABORTS —
+    # which reads as a random "MongoNetworkError: connection closed" in whichever selfcheck was
+    # running, and leaves an unclean shutdown behind. 64000 is MongoDB's own documented minimum.
+    ulimits:
+      nofile:
+        soft: 64000
+        hard: 64000
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
@@ -73,6 +82,8 @@ services:
       CHALLENGE_SERVICE_URL: http://challenge-service:3008
       MEDIA_SERVICE_URL: http://media-service:3009
       NOTIFICATION_SERVICE_URL: http://notification-service:3010
+      FEEDBACK_SERVICE_URL: http://feedback-service:3011
+      BRACKET_SERVICE_URL: http://bracket-service:3012
     depends_on:
       auth-service: { condition: service_healthy }
       user-service: { condition: service_healthy }
@@ -81,6 +92,9 @@ services:
       announcement-service: { condition: service_healthy }
       points-service: { condition: service_healthy }
       challenge-service: { condition: service_healthy }
+      notification-service: { condition: service_healthy }
+      feedback-service: { condition: service_healthy }
+      bracket-service: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
@@ -292,6 +306,102 @@ services:
       redis: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3008/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  notification-service:
+    build: { context: ., dockerfile: Dockerfile }
+    image: bgsc-backend:local
+    restart: unless-stopped
+    command: ["node", "apps/notification-service/dist/index.js"]
+    # No host port: reachable only through the gateway and the internal network.
+    expose:
+      - "3010"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3010
+      MONGO_URI: mongodb://bgsc_admin:bgsc_password@mongodb:27017/bgsc_dev?authSource=admin
+      # Without this the broadcast hears nothing: AnnouncementPublished is published by another
+      # process, and publish() stays in-process when REDIS_URL is unset.
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:8081}
+      # The delivery writeback — the only service this one calls.
+      ANNOUNCEMENT_SERVICE_URL: http://announcement-service:3005
+      # WhatsApp. `:-` and not `:?`: the three platform secrets are required to boot, but an
+      # unregistered WhatsApp Business account means every dispatch resolves 'skipped', not a
+      # reason the stack cannot start.
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+      WHATSAPP_API_VERSION: ${WHATSAPP_API_VERSION:-v21.0}
+      WHATSAPP_API_BASE: ${WHATSAPP_API_BASE:-https://graph.facebook.com}
+      WHATSAPP_GROUP_MAP: ${WHATSAPP_GROUP_MAP:-}
+      WHATSAPP_RATE_LIMIT_PER_HOUR: ${WHATSAPP_RATE_LIMIT_PER_HOUR:-1}
+    depends_on:
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3010/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  feedback-service:
+    build: { context: ., dockerfile: Dockerfile }
+    image: bgsc-backend:local
+    restart: unless-stopped
+    command: ["node", "apps/feedback-service/dist/index.js"]
+    # No host port: reachable only through the gateway and the internal network.
+    expose:
+      - "3011"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3011
+      MONGO_URI: mongodb://bgsc_admin:bgsc_password@mongodb:27017/bgsc_dev?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:8081}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    depends_on:
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3011/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  bracket-service:
+    build: { context: ., dockerfile: Dockerfile }
+    image: bgsc-backend:local
+    restart: unless-stopped
+    command: ["node", "apps/bracket-service/dist/index.js"]
+    # No host port: reachable only through the gateway and the internal network.
+    expose:
+      - "3012"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3012
+      MONGO_URI: mongodb://bgsc_admin:bgsc_password@mongodb:27017/bgsc_dev?authSource=admin
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:8081}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+    depends_on:
+      mongodb: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3012/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5

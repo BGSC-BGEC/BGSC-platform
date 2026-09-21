@@ -34,10 +34,13 @@ interface Res { status: number; body: any }
 async function call(
     method: string,
     path: string,
-    opts: { as?: string; body?: unknown } = {}
+    opts: { as?: string; body?: unknown; service?: boolean; badService?: boolean } = {}
 ): Promise<Res> {
     const headers: Record<string, string> = {};
     if (opts.as) headers.authorization = `Bearer ${opts.as}`;
+    // The internal delivery writeback carries a service token, never a user session.
+    if (opts.service) headers['x-internal-token'] = config.internalToken;
+    if (opts.badService) headers['x-internal-token'] = 'not-the-token';
     // fetch() sets text/plain for string bodies; express.json() needs application/json to parse.
     if (opts.body !== undefined) headers['content-type'] = 'application/json';
     const r = await fetch(base + path, {
@@ -500,6 +503,102 @@ async function main(): Promise<void> {
         });
         assert.strictEqual(demoted.status, 403, 'the live role is ranked, not the token claim');
         console.log('✓ demoted user with a core token → 403');
+
+        // ---- 21. the delivery writeback (Week 4 broadcast, plan D7) ----------
+        console.log('21. Internal delivery writeback...');
+        const pub = await call('POST', '/announcements', {
+            as: founderTok,
+            body: { title: 'Broadcast me', body: 'body', categories: ['bgec'] },
+        });
+        const pubId = pub.body._id as string;
+        // `body: {}` and not an absent body: without a content-type express leaves `req.body`
+        // undefined, and the publish schema is an object — the route 422s before the service runs.
+        const published = await call('POST', `/announcements/${pubId}/publish`, { as: founderTok, body: {} });
+        assert.strictEqual(published.status, 200, `publish failed: ${JSON.stringify(published.body)}`);
+
+        const deliveryBody = {
+            whatsapp: [{ category: 'bgec', group_id: 'dest-1', status: 'sent', message_id: 'wamid.1' }],
+            push: { status: 'skipped', sent_count: null },
+        };
+
+        assert.strictEqual(
+            (await call('PATCH', `/internal/announcements/${pubId}/delivery`, { body: deliveryBody })).status,
+            401,
+            'no service token → 401'
+        );
+        assert.strictEqual(
+            (await call('PATCH', `/internal/announcements/${pubId}/delivery`, { body: deliveryBody, badService: true }))
+                .status,
+            401,
+            'a wrong service token → 401'
+        );
+        assert.strictEqual(
+            (await call('PATCH', `/internal/announcements/${pubId}/delivery`, { body: deliveryBody, as: founderTok }))
+                .status,
+            401,
+            'and a founder session is not a service token either'
+        );
+
+        const delivered: string[] = [];
+        subscribe('AnnouncementDelivered', (e) => delivered.push((e.payload as { channel: string }).channel));
+
+        const wrote = await call('PATCH', `/internal/announcements/${pubId}/delivery`, {
+            body: deliveryBody,
+            service: true,
+        });
+        assert.strictEqual(wrote.status, 200, 'with the token it writes');
+        assert.strictEqual(wrote.body.delivery.whatsapp.per_category.length, 1, 'one row per category');
+        assert.strictEqual(wrote.body.delivery.whatsapp.per_category[0].status, 'sent', 'carrying the outcome');
+        assert.strictEqual(wrote.body.delivery.push.status, 'skipped', 'and the push resolution');
+        assert.deepStrictEqual(delivered, ['whatsapp', 'push'], 'AnnouncementDelivered is emitted per channel');
+
+        // A second writeback for the same category updates in place: the composer must never see
+        // the same tag twice, and a retried writeback is the normal case, not an error.
+        const again = await call('PATCH', `/internal/announcements/${pubId}/delivery`, {
+            body: { whatsapp: [{ category: 'bgec', group_id: 'dest-1', status: 'failed', error: 'http 500' }] },
+            service: true,
+        });
+        assert.strictEqual(again.body.delivery.whatsapp.per_category.length, 1, 'still one row');
+        assert.strictEqual(again.body.delivery.whatsapp.per_category[0].status, 'failed', 'updated in place');
+
+        const wrongCategory = await call('PATCH', `/internal/announcements/${pubId}/delivery`, {
+            body: { whatsapp: [{ category: 'deuce', group_id: 'x', status: 'sent' }] },
+            service: true,
+        });
+        assert.strictEqual(wrongCategory.status, 422, 'a category not on the announcement is a 422');
+        assert.strictEqual(wrongCategory.body.error, 'category_not_on_announcement', 'not a 500 from the model hook');
+
+        const stillOne = await Announcement.findById(pubId).lean();
+        assert.strictEqual(
+            stillOne!.delivery.whatsapp.per_category.length,
+            1,
+            'and the refusal wrote nothing at all'
+        );
+
+        const draftForDelivery = await call('POST', '/announcements', {
+            as: founderTok,
+            body: { title: 'Unpublished', body: 'body', categories: ['bgec'] },
+        });
+        const draftDelivery = await call('PATCH', `/internal/announcements/${draftForDelivery.body._id}/delivery`, {
+            body: deliveryBody,
+            service: true,
+        });
+        assert.strictEqual(draftDelivery.status, 409, 'a draft has had no broadcast to report');
+        assert.strictEqual(draftDelivery.body.error, 'not_published');
+
+        assert.strictEqual(
+            (await call('PATCH', `/internal/announcements/${uuid()}/delivery`, { body: deliveryBody, service: true }))
+                .status,
+            404,
+            'and an unknown announcement is a 404'
+        );
+
+        const emptyDelivery = await call('PATCH', `/internal/announcements/${pubId}/delivery`, {
+            body: {},
+            service: true,
+        });
+        assert.strictEqual(emptyDelivery.status, 422, 'a body with nothing to record is refused');
+        console.log('✓ delivery writeback: token-gated, idempotent per category, refuses cleanly');
 
         console.log('\n✅ All announcement e2e cases passed!');
     } finally {

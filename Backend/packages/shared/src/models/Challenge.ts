@@ -179,6 +179,9 @@ ChallengeSchema.pre('validate', function (this: IChallenge) {
 });
 
 ChallengeSchema.index({ status: 1, domain: 1, difficulty: 1 }); // challenge browser filters
+// The catalog's own order. Without it the planner picked the scheduler's `window.closes_at` index
+// and sorted in memory (audit, Sep 27).
+ChallengeSchema.index({ status: 1, created_at: -1, _id: -1 }); // catalog page, keyset-ordered
 ChallengeSchema.index({ status: 1, 'window.closes_at': 1 }); // scheduler: complete expired
 ChallengeSchema.index({ tags: 1, status: 1 });
 ChallengeSchema.index({ created_by: 1 });
@@ -265,6 +268,7 @@ const ChallengeParticipationSchema = new Schema<IChallengeParticipation>(
             type: { type: String, enum: ['user', 'team'], required: true },
             id: { type: String, required: true },
             display_name: { type: String, required: true },
+            deleted: { type: Boolean, default: false },
             avatar_url: { type: String, default: null },
         },
         // Team: all members at acceptance. User: [user_id]. Points fan out to exactly these.
