@@ -20,6 +20,45 @@ function findEnvFile(from: string): string | undefined {
 
 dotenv.config({ path: findEnvFile(__dirname) });
 
+/** A positive integer, or the fallback. NaN and zero both mean "the value was not usable". */
+function positiveIntOr(raw: string | undefined, fallback: number): number {
+  const n = parseInt(raw ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/**
+ * `WHATSAPP_GROUP_MAP` is a JSON object of `{ "<announcement category>": "<destination>" }`.
+ *
+ * A typo here is a deployer error, not a runtime condition: an unparseable map that degraded to
+ * `{}` would leave every broadcast resolving `skipped / no_group_mapped` with nothing anywhere
+ * saying why. Blank is the legitimate "nothing mapped yet" and is not an error.
+ *
+ * Blast radius, deliberately accepted: this module is shared, so a malformed value refuses to boot
+ * every service that reads it — in compose only notification-service is given the variable, but a
+ * developer's single root `.env` is read by all of them. The message names the variable, and a
+ * loud stop beats a broadcast system that silently sends nothing.
+ */
+function parseGroupMap(raw: string | undefined): Record<string, string> {
+  if (!raw || raw.trim() === '') return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('WHATSAPP_GROUP_MAP is not valid JSON; expected {"<category>":"<destination>"}');
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('WHATSAPP_GROUP_MAP must be a JSON object of category -> destination');
+  }
+  const map: Record<string, string> = {};
+  for (const [category, destination] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof destination !== 'string' || destination.trim() === '') {
+      throw new Error(`WHATSAPP_GROUP_MAP['${category}'] must be a non-empty string destination`);
+    }
+    map[category] = destination.trim();
+  }
+  return map;
+}
+
 export const config = {
   /** Overridden per service; each passes its own port to startService(). */
   port: parseInt(process.env.PORT || '3000', 10),
@@ -75,6 +114,47 @@ export const config = {
     tokenKey: process.env.STRAVA_TOKEN_ENCRYPTION_KEY || '',
   },
 
+  /**
+   * WhatsApp Business (Cloud) API — announcement broadcast (Spec §9.4, §6.4).
+   *
+   * Blank `accessToken` or `phoneNumberId` means every dispatch row resolves `skipped` with
+   * `not_configured` and no HTTP call is made, exactly as the Strava block above turns every
+   * /strava route into a 503 when unconfigured. This repo ships in that state: no WhatsApp
+   * Business account is registered.
+   *
+   * `groupMap` maps an announcement category to the destination that category broadcasts to.
+   * The Cloud API addresses phone numbers, not WhatsApp groups (be2-broadcast-service-plan.md
+   * §0.3), so the value is an opaque destination string the provider hands to the API — swap the
+   * provider, keep the map.
+   */
+  whatsapp: {
+    accessToken: process.env.WHATSAPP_ACCESS_TOKEN || '',
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+    apiVersion: process.env.WHATSAPP_API_VERSION || 'v21.0',
+    /**
+     * The Graph API host. Overridable because Meta publishes regional endpoints, and because a
+     * deployment that wants to put the send path behind its own egress proxy should not have to
+     * fork the provider — which also makes the send path runnable against a local stub instead of
+     * only against a mocked `fetch`.
+     */
+    apiBase: (process.env.WHATSAPP_API_BASE || 'https://graph.facebook.com').replace(/\/+$/, ''),
+    /**
+     * Parsed once, here, because a malformed map must stop the process rather than turn every
+     * broadcast into a silent `skipped` that nobody notices for a month. Blank is fine and means
+     * "no categories mapped yet".
+     */
+    groupMap: parseGroupMap(process.env.WHATSAPP_GROUP_MAP),
+    /**
+     * Spec §9.4: max 1 announcement per tag per hour.
+     *
+     * Sanitized rather than `parseInt`ed straight: a typo would otherwise produce NaN, and every
+     * comparison against NaN is false — so `recent.length < rate` would never pass and the
+     * platform would rate-limit every broadcast forever, silently. A limiter that fails closed on
+     * a typo is worse than one that falls back to the Spec's own default.
+     */
+    ratePerHour: positiveIntOr(process.env.WHATSAPP_RATE_LIMIT_PER_HOUR, 1),
+  },
+
   /** Port this process listens on. Each service overrides via its own PORT. */
   gatewayPort: parseInt(process.env.GATEWAY_PORT || '3000', 10),
 
@@ -94,6 +174,8 @@ export const config = {
     challenge:    process.env.CHALLENGE_SERVICE_URL    || 'http://localhost:3008',
     media:        process.env.MEDIA_SERVICE_URL        || 'http://localhost:3009',
     notification: process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:3010',
+    feedback:     process.env.FEEDBACK_SERVICE_URL     || 'http://localhost:3011',
+    bracket:      process.env.BRACKET_SERVICE_URL      || 'http://localhost:3012',
   },
 
   /** Cross-process event bus. Absent => the in-process emitter only (single-service dev). */

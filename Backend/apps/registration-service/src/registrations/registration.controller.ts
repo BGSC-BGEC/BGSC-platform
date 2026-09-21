@@ -13,7 +13,15 @@ import {
  * May act on someone else's registration. Ranked against the shared ladder rather than a literal
  * list of role names, so inserting a role below `core` cannot silently widen this.
  */
-const isAdmin = (req: Request) => rankOf(req.user!.role) >= rankOf(UserRole.CORE);
+/**
+ * Sees admin_only fields, and decides admin-only branches.
+ *
+ * Prefers the document `requireActiveUser` loaded over the token's claim: the claim stays valid for
+ * up to fifteen minutes after a demotion or a suspension. Routes that only mount `requireAuth` have
+ * no live document to read, and fall back to the claim — those are reads, where a stale answer is
+ * not a damage path (adding-a-service.md §6.2; whole-backend audit, Sep 27).
+ */
+const isAdmin = (req: Request) => rankOf((req.actor?.role ?? req.user!.role) as UserRole) >= rankOf(UserRole.CORE);
 
 export async function submitRegistrationHandler(req: Request, res: Response, next: NextFunction) {
     try {

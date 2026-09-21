@@ -1,4 +1,4 @@
-import { UserRole, requireAuth, requireRole, validate } from '@bgsc/shared';
+import { UserRole, requireActiveUser, requireAuth, requireRole, validate } from '@bgsc/shared';
 import { Router, raw } from 'express';
 import { ACCEPTED_MIMES, FILE_MAX_BYTES } from '../storage/storage';
 import { uploadFileHandler } from './upload';
@@ -52,7 +52,7 @@ registrationRoutes.get('/:id', requireAuth, validate({ params: IdParams }), cont
 registrationRoutes.patch(
     '/:id/captain-application',
     requireAuth,
-    requireRole(UserRole.CORE),
+    requireActiveUser(UserRole.CORE),
     validate({ params: IdParams, body: UpdateCaptainApplicationSchema }),
     controller.updateCaptainApplicationHandler
 );
@@ -61,7 +61,7 @@ registrationRoutes.patch(
 registrationRoutes.patch(
     '/:id/status',
     requireAuth,
-    requireRole(UserRole.CORE),
+    requireActiveUser(UserRole.CORE),
     validate({ params: IdParams, body: UpdateStatusSchema }),
     controller.updateStatusHandler
 );

@@ -1,4 +1,4 @@
-import { Announcement, User, subscribe, userSnapshotOf } from '@bgsc/shared';
+import { Announcement, User, anonymizedSnapshot, subscribe, userSnapshotOf } from '@bgsc/shared';
 
 /**
  * Event bus consumers.
@@ -12,6 +12,10 @@ import { Announcement, User, subscribe, userSnapshotOf } from '@bgsc/shared';
 export function initializeConsumers(): void {
     subscribe('UserProfileUpdated', (event) => {
         void handleUserProfileUpdated(event.payload as unknown as ProfileUpdatedPayload);
+    });
+
+    subscribe('UserDeleted', (event) => {
+        void handleUserDeleted(event.payload as unknown as { user_id: string });
     });
 
     console.log('[announcement-service] Event consumers initialized');
@@ -55,5 +59,23 @@ async function handleUserProfileUpdated(payload: ProfileUpdatedPayload): Promise
         );
     } catch (err) {
         console.error(`[announcement-service] Snapshot refresh failed for ${user_id}:`, err);
+    }
+}
+
+/**
+ * A deleted coordinator's name comes off the announcements they signed.
+ *
+ * `role_label` stays: Spec §5.2 makes attribution historical, and "Coordinator" is a statement
+ * about the office, not about the person. What goes is the name and the avatar — the display copy
+ * the client would otherwise print (relationships.md §4).
+ */
+async function handleUserDeleted(payload: { user_id: string }): Promise<void> {
+    const { user_id } = payload;
+    if (!user_id) return;
+
+    try {
+        await Announcement.updateMany({ 'author.user_id': user_id }, { $set: anonymizedSnapshot('author.') });
+    } catch (err) {
+        console.error(`[announcement-service] anonymization failed for ${user_id}:`, err);
     }
 }

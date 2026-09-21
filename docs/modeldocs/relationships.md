@@ -19,11 +19,19 @@ One writer per collection. Everyone else reads by ID or reacts to events.
 | `point_transactions`, `point_rules` | Points Service | Leaderboard (global rebuild) |
 | `users.points_balance` | **Points Service only** (cross-service write, agreed exception) | all |
 | `users.announcements.{last_seen_at, read_ids}` | **Announcement Service only** (same exception) | Announcement |
+| `users.profile.social_links.strava_id` | **Challenge Service only** (third exception, written down Sep 27) | all (display) |
 | `leaderboard_entries`, `leaderboard_snapshots` | Leaderboard Service | Event, Profile |
 | `challenges`, `challenge_participations` | Challenge Service | Points, Hall of Fame (W4) |
-| `announcements` | Announcement Service | Broadcast (W4) |
+| `announcements` | Announcement Service | Notification Service (broadcast) |
+| `notifications`, `notification_dispatches`, `notification_preferences` | Notification Service | — (no other reader today) |
+| `feedback_tickets`, `feedback_throttle` | Feedback Service | — |
+| `brackets`, `matches` | Bracket Service | Leaderboard (W3, unbuilt), Hall of Fame (W4, BE-1) |
+| `events.bracket` | **nobody** — the slot stays null by decision (be2-feedback-bracket-plan.md D3) | — |
+| `users.settings.notifications` | **User/Auth Service** (global channel switch; read-only to Notification Service) | Notification Service |
 
-The two `users.*` exceptions exist because BE-1 owns the User doc but the values are entirely derived from BE-2 domains. Alternative is an internal endpoint on User Service; **decide with BE-1 today**, both models work.
+The `users.*` exceptions exist because BE-1 owns the User doc but the values are entirely derived from BE-2 domains.
+
+**The third one was found by audit, not by design.** `challenge-service/src/strava/strava.service.ts` has been writing `profile.social_links.strava_id` since Week 3 without this table saying so — and, worse, `PATCH /users/me` accepted the same field from any client, so a user could paste an athlete id and wear a Strava badge nobody verified. The field records a *verified OAuth connection*, so it now has one writer: the field was removed from `UpdateProfileSchema` (Sep 27) and the Strava flow owns it. The other three social links stay client-editable, because nothing verifies them either way. Alternative is an internal endpoint on User Service; **decide with BE-1 today**, both models work.
 
 ## 2. Reference graph
 
@@ -65,7 +73,7 @@ Arrows = "stores the ID of". Never resolved by join; resolved by a second read o
 | From | Field | To | Cardinality | On target delete |
 |---|---|---|---|---|
 | `events` | `registration.form_id` | `form_definitions` | 1 → 1 | forbid (form archived, not deleted) |
-| `events` | `created_by`, `core_admins[]`, `contacts[].user_id`, `auction.captain_user_ids[]` | `users` | N → 1 | keep ID; UI shows "deleted user" |
+| `events` | `created_by`, `core_admins[]`, `contacts[].user_id`, `auction.captain_user_ids[]` | `users` | N → 1 | keep the ID, erase the display copy (§4.1) |
 | `auction_lots` | `event_id` | `events` | N → 1 | cascade (event cancel drops lots) |
 | `auction_lots` | `registration_id` | `form_submissions` | 1 → 1 | forbid while `on_block`/`sold` |
 | `auction_lots` | `sold_to_team_id`, `bids[].team_id` | `teams` | N → 1 | keep |
@@ -92,12 +100,33 @@ Stored copies of another service's data, accepted stale:
 
 | Snapshot | Where | Refreshed by |
 |---|---|---|
-| `{ user_id, display_name, avatar_url }` | `form_submissions.user`, `teams.members[]`, `leaderboard_entries.participant`, `challenge_participations.participant`, `announcements.author`, `auction_lots.player`, `events.contacts[]` | consuming `UserProfileUpdated { user_id, changed_fields }` → `updateMany` where `display_name`/`avatar_url` changed. Best-effort. |
+| `{ user_id, display_name, avatar_url, deleted }` | `form_submissions.user`, `teams.members[]`, `leaderboard_entries.participant`, `challenge_participations.participant`, `announcements.author`, `auction_lots.player`, `events.contacts[]`, `feedback_tickets.reporter`, `brackets.participants[]`, `matches.a/b` | **renamed** by `UserProfileUpdated { user_id, changed_fields }` → `updateMany` where `display_name`/`avatar_url` changed; **erased** by `UserDeleted` → `anonymizedSnapshot()`. Both best-effort. |
 | `challenge_snapshot { title, difficulty, award_points }` | `challenge_participations` | never (historical: what it was worth when accepted) |
 | `owner` on `form_submissions` | copied from `form_definitions.owner` | never (immutable) |
 | `events.counts`, `challenges.counts` | own collections | `$inc` in same write as the cause; nightly recount |
 
 Rule: a snapshot is for **display**. Authorization and money never read a snapshot; they re-fetch by ID.
+
+### 4.1 A deleted account (settled Sep 27, 2026)
+
+`§3` used to say "keep ID; UI shows 'deleted user'". **The UI cannot do that**, and the audit that
+looked found out why: a snapshot carried no deletion signal, and `GET /users/:ref` filters deleted
+accounts and answers 404 — so a client holding a roster had the person's real name, no way to learn
+the account was gone, and nothing to render instead. Meanwhile the name kept leaving the API.
+
+Both halves are now in place, and they are complementary:
+
+1. **The copy is erased, server-side.** Every service that embeds a snapshot consumes `UserDeleted`
+   and applies `anonymizedSnapshot(prefix)` from `@bgsc/shared` — one definition of what anonymized
+   means, so ten collections cannot disagree: `display_name` becomes `Deleted user`, `avatar_url`
+   becomes null, `deleted` becomes true. Challenge Service had been doing this alone since Week 3;
+   registration, announcement, feedback, bracket and event joined it.
+2. **The signal is carried**, so the client renders a deliberate "deleted user" rather than a name
+   it should not print or a blank it cannot explain.
+
+`user_id` is **kept** in every case: it is a reference, not a display, and the rosters, ledger rows
+and fixtures that point at it still have to resolve. Results, seeds, purses and audit rows are
+untouched — what is erased is the name, not the history.
 
 ## 5. Cross-service write flows (the ones that must not double-count)
 
@@ -121,6 +150,11 @@ Mobile ─POST /events/:id/register─▶ Registration Service
 Duplicate is the common failure and costs nothing to roll back because it happens before any cross-service write.
 
 ### 5.2 Complete event
+
+> **As built (Sep 27 audit):** `EventCompleted` carries `{ event_id }` only, and **nothing consumes
+> it**. Podium points are awarded by an admin through `POST /points/award { user_id, event_id, place }`
+> (points plan §2), not by this fan-out; Leaderboard and Hall of Fame are unbuilt. The flow below is
+> the design, kept because it is where those consumers will attach.
 
 ```
 Web Console ─PATCH /events/:id/complete { winners }─▶ Event Service
@@ -159,7 +193,10 @@ Web Console ─POST /auction/lots/:id/close─▶ Event Service
 | Points | `PointsEarned/Spent/Refunded/Adjusted/Expired` | Notification, Audit, Leaderboard (global rebuild trigger), User (balance display invalidation) |
 | Leaderboard | `LeaderboardUpdated`, `LeaderboardInvestmentMade`, `LeaderboardFrozen` | Notification, Event (detail cache) |
 | Challenge | `ChallengeCreated/Updated/Accepted/Submitted/Completed/Rejected/Expired`, `ChallengeLegendAchieved` | Points, Hall of Fame, Notification |
-| Announcement | `AnnouncementPublished/Scheduled/Updated/Archived/Deleted/Delivered` | Notification, Broadcast (W4), Search |
+| Announcement | `AnnouncementPublished/Scheduled/Updated/Archived/Deleted/Delivered` | Notification, Search |
+| Feedback | `FeedbackSubmitted`, `FeedbackStatusChanged` | Notification (staff notice) |
+| Bracket | `BracketGenerated`, `MatchScheduled`, `MatchCompleted`, `BracketCompleted` | Leaderboard (`stats`), Hall of Fame, Notification |
+| Notification | *(none)* — it is a terminal consumer. Consumes `AnnouncementPublished/Updated/Deleted`, `RegistrationConfirmed/Waitlisted`, `ChallengeCompleted/Rejected`, `EventCancelled` | — |
 
 Envelope (all events): `{ message_id: uuid, type, occurred_at, producer, schema_version: 1, payload }`. `message_id`, not `event_id`, so it never collides with the Event entity's id inside payloads. Consumers dedupe on `message_id`; Points additionally dedupes on its own `idempotency_key`.
 
@@ -180,6 +217,7 @@ Envelope (all events): `{ message_id: uuid, type, occurred_at, producer, schema_
 
 1. DB vendor (Mongo assumed here). Transactions available? Decides §5.1 compensation vs txn.
 2. Who writes `users.points_balance` and `users.announcements.*` — direct write or internal endpoint. **Settled Sep 13, 2026 for `users.announcements.*`: direct write by Announcement Service** (be2-announcement-service-plan.md D2). `users.points_balance` still open.
+   **No third exception was added on Sep 26, 2026:** notification preferences live in the Notification Service's own `notification_preferences` collection rather than extending `users.settings.notifications`, which `PATCH /users/me/settings` already writes. The global channel switch stays User Service's; per-category granularity is the Notification Service's (be2-broadcast-service-plan.md D8).
 3. Shared `UserSnapshot` shape `{ user_id, display_name, avatar_url }` — confirm field names against BE-1's User model.
 4. Role enum spelling (`guest|user|member|core|coordinator|founder`) used in `announcements.audience.min_role` and RBAC guards.
 5. `UserProfileUpdated` payload includes `changed_fields` so snapshot refresh is cheap.

@@ -18,6 +18,16 @@ import {
 const viewerOf = (req: Request): Viewer | undefined =>
     req.user ? { id: req.user.id, role: req.user.role } : undefined;
 
+/**
+ * The actor for a role or status change: the document `requireActiveUser` just loaded, never the
+ * token's claim. The claim is what a demoted administrator still carries around for fifteen
+ * minutes; the document is what they actually are.
+ */
+const liveActorOf = (req: Request): { id: string; role: UserRole } => ({
+    id: req.actor!._id,
+    role: req.actor!.role,
+});
+
 export const getMe = wrap(async (req, res) => {
     // Deleted-inclusive on purpose: an owner must be able to see their own pending deletion,
     // otherwise the client has no way to know a restore is available.
@@ -173,7 +183,7 @@ export const changeRole = wrap(async (req, res) => {
 
     // A ServiceError propagates to the error handler in index.ts, which maps it to its status.
     const { role, reason } = req.body as { role: UserRole; reason: string };
-    const updated = await svc.changeRole(target, role, req.user!, reason);
+    const updated = await svc.changeRole(target, role, liveActorOf(req), reason);
     res.json(serializeUser(updated, viewerOf(req)));
 });
 
@@ -182,7 +192,7 @@ export const changeStatus = wrap(async (req, res) => {
     if (!target) return void res.status(404).json({ error: 'not_found' });
 
     const { status, reason } = req.body as { status: UserStatus; reason: string };
-    const updated = await svc.changeStatus(target, status, req.user!, reason);
+    const updated = await svc.changeStatus(target, status, liveActorOf(req), reason);
     res.json(serializeUser(updated, viewerOf(req)));
 });
 

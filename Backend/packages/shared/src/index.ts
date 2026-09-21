@@ -10,6 +10,7 @@ export * from './config/db';
 export * from './models';
 export * from './middleware/requireAuth';
 export * from './middleware/requireRole';
+export * from './middleware/requireActiveUser';
 export * from './middleware/requireServiceToken';
 export * from './middleware/validate';
 export * from './middleware/wrap';

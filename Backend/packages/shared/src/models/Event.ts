@@ -139,6 +139,7 @@ const ContactSchema = new Schema(
     {
         user_id: { type: String, required: true },
         display_name: { type: String, required: true },
+        deleted: { type: Boolean, default: false },
         role_label: { type: String, required: true },
         contact: { type: String, default: null },
     },

@@ -66,6 +66,14 @@ async function main(): Promise<void> {
     // Two ROUTES keys, one container: /strava is served by challenge-service, so a 503 here would
     // mean the second routing row never went live while the first did.
     check('GET  /strava/activities -> challenge-service', await status('GET', '/strava/activities'), 401);
+    // Added when notification-service went live: a service in LIVE_SERVICES drops out of the 503
+    // loop below, so without a line here the prefix would be asserted by nothing at all.
+    check('GET  /notifications -> notification-service', await status('GET', '/notifications'), 401);
+    // The staff inbox needs a session; submission deliberately does not (Spec §5.12 is public), so
+    // the 401 here is the inbox answering, which is exactly what should be asserted.
+    check('GET  /feedback      -> feedback-service', await status('GET', '/feedback'), 401);
+    // A spectator read with no event: the service answers 422, which proves it was reached.
+    check('GET  /matches       -> bracket-service', await status('GET', '/matches'), 422);
 
     console.log('\n-- services that do not exist yet answer, rather than hang --');
     for (const [key, route] of Object.entries(ROUTES)) {
@@ -83,6 +91,13 @@ async function main(): Promise<void> {
     // The Challenge Service's team lock: reachable by challenge-service over the internal network,
     // never by a client that happens to know the path.
     check('POST /internal/teams/x/lock', await status('POST', '/internal/teams/x/lock', auth), 404);
+    // The Announcement Service's delivery writeback: reachable by notification-service over the
+    // internal network, never by a client that happens to know the path.
+    check(
+        'PATCH /internal/announcements/x/delivery',
+        await status('PATCH', '/internal/announcements/x/delivery', auth),
+        404
+    );
     check(
         'GET /internal/* even with a valid service token',
         await status('GET', '/internal/users/snapshot?ids=x', {
@@ -97,6 +112,9 @@ async function main(): Promise<void> {
     check('GET /challengesfoo', await status('GET', '/challengesfoo', auth), 404);
     check('GET /stravafoo', await status('GET', '/stravafoo', auth), 404);
     check('GET /formsfoo', await status('GET', '/formsfoo', auth), 404);
+    check('GET /notificationsfoo', await status('GET', '/notificationsfoo', auth), 404);
+    check('GET /feedbackfoo', await status('GET', '/feedbackfoo', auth), 404);
+    check('GET /bracketsfoo', await status('GET', '/bracketsfoo', auth), 404);
     check('GET /nope', await status('GET', '/nope', auth), 404);
 
     console.log('\n-- uploads reach the service that stores them, not the unbuilt media service --');

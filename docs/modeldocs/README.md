@@ -30,6 +30,9 @@ Legacy code/docs are **not** a source.
 | [leaderboard-model.md](leaderboard-model.md) | `leaderboard_entries` + leaderboard config embedded in `events` | §5.6, §5.15.3, §4.1 Event.points_pool |
 | [challenge-model.md](challenge-model.md) | `challenges`, `challenge_participations` | §4.1 Challenge, §5.7, §5.15 "Challenge Creation" |
 | [announcement-model.md](announcement-model.md) | `announcements` | §4.1 Announcement, §5.2 Tab 2, §6.4, §9.4, §15.3 |
+| [notification-model.md](notification-model.md) | `notifications`, `notification_dispatches`, `notification_preferences` | §4.1 Notification, §9.4 WhatsApp, §10 Notification System (added Week 4 Saturday) |
+| [feedback-model.md](feedback-model.md) | `feedback_tickets`, `feedback_throttle` | §4.1 FeedbackTicket, §5.12 Feedback & Contact Us (added Week 4 Sunday) |
+| [bracket-model.md](bracket-model.md) | `brackets`, `matches` | §4.1 Match, §5.5 Spectator Bracket View, §5.15.2 Bracket Generator (added Week 4 Sunday) |
 | [strava-model.md](strava-model.md) | `strava_credentials`, `strava_activities` | §9.1 Strava, §12.4 Integration Settings (added Week 3 Sunday — see the gap note below) |
 | [relationships.md](relationships.md) | — | How everything references everything; write ownership; event flow |
 
@@ -39,9 +42,10 @@ From `MVP_Timeline_Plan_Updated.md` "MVP Scope Summary":
 
 - **In:** events (incl. auction), registration (common), points, leaderboard, challenges, announcements.
 - **Out:** sponsors, social feed, friends, store, unions. Sponsor hooks appear as **placeholders only** (`events.points_pool.sponsor_bonus`, `point_transactions.source: 'sponsor'`) so the schema does not need a migration when sponsors return (see `ARCHITECTURE_REVIEW_MEETING.md` §5).
-- Tournament brackets / `matches` are Week 4 and **not designed here**; the `events` doc reserves a `bracket` slot.
+- Tournament brackets / `matches` were Week 4 and are designed in [bracket-model.md](bracket-model.md). The `events.bracket` slot stays **null**: the bracket lives in its own collection rather than inside a document the Event Service owns (be2-feedback-bracket-plan.md D3).
 
 ## Plan gaps found while designing
 
 - **Strava had no model at all.** `MVP_Timeline_Plan_Updated.md:381-382` asks BE-2 for "Strava OAuth integration (basic)" and a "Strava activity sync endpoint" in Week 3, and `docs/SystemDesignDocs/strava-integration.md` designs it — for TypeORM on Postgres with NestJS and BullMQ, none of which this repo uses. Redesigned for this stack as `strava-model.md`, owned by the Challenge Service. Note that **Spec §14's scope table (line 2597) excludes Strava from the MVP** while the plan asks for it; the plan is the task source and wins, which is why the scope stops exactly where its two lines stop. Decision: Sep 20, 2026.
+- **Notification/broadcast had no model either, and the same Spec-vs-plan conflict as Strava.** `MVP_Timeline_Plan_Updated.md:474-481` gives BE-2 the broadcast service, the WhatsApp Business API, templating, preferences, delivery tracking and notification history on Week 4 Saturday, while **Spec §14's scope table (line 2601) lists WhatsApp API as out of MVP** ("manual announcement copy-paste"). Same precedence as Strava: the plan is the task source and wins, and the scope stops where its lines stop. Designed as `notification-model.md`, owned by the Notification Service. One thing Spec §9.4 asks for is not implementable as written — the WhatsApp Cloud API addresses phone numbers and has no public endpoint for posting into a group — so a category maps to an *opaque destination* the provider hands to the API. Decision: Sep 26, 2026.
 - **Team model has no owner in the plan.** Spec §4.1 defines `Team` as its own entity and §5.15.4 auction (Week 3) cannot work without rosters and purses, but `MVP_Timeline_Plan_Updated.md` assigns no team task to anyone. Designed here as `team-model.md`, owned by Registration Service, generalized to events + challenges (Spec §5.7). Decision: Sep 5, 2026.

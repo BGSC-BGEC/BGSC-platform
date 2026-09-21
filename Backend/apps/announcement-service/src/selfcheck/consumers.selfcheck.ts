@@ -112,6 +112,19 @@ async function main(): Promise<void> {
     assert(!afterSuspend.some((h) => h.coordinator.user_id === lonely._id), 'a suspended coordinator leaves the strip');
     console.log('✓ every current coordinator gets a slot, posted or not');
 
+    // A deleted coordinator keeps their office on the record and loses their name.
+    const signed = await Announcement.findOne({ 'author.user_id': author._id }).lean();
+    assert(signed, 'the author has an announcement to be erased from');
+    publish('UserDeleted', 'user-service', { user_id: author._id });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const erased = await Announcement.findOne({ _id: signed!._id }).lean();
+    assert(erased!.author.display_name === 'Deleted user', 'the byline loses the name');
+    assert(erased!.author.avatar_url === null, 'and the avatar');
+    assert((erased!.author as { deleted?: boolean }).deleted === true, 'raising the flag the UI reads');
+    assert(erased!.author.role_label === signed!.author.role_label, 'the office stays: attribution is historical');
+    console.log('✓ a deleted coordinator keeps the role label and loses the name');
+
     await closeScratchDb();
     console.log('\n✅ All consumer selfchecks passed!');
 }

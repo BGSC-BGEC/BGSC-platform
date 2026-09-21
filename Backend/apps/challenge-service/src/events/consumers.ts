@@ -1,4 +1,4 @@
-import { ChallengeParticipation, DomainEvent, User, subscribe } from '@bgsc/shared';
+import { ChallengeParticipation, DomainEvent, User, anonymizedSnapshot, subscribe } from '@bgsc/shared';
 
 /**
  * This service consumes two user events and nothing else.
@@ -57,9 +57,12 @@ async function refreshSnapshot(p: ProfileUpdatedPayload): Promise<void> {
  * the person is removed.
  */
 async function anonymize(p: { user_id: string }): Promise<void> {
+    // The wording and the flag come from `@bgsc/shared` now: six collections erase a display
+    // snapshot on this event, and they cannot be allowed to disagree about what that means
+    // (relationships.md §4).
     await ChallengeParticipation.updateMany(
         { 'participant.type': 'user', 'participant.id': p.user_id },
-        { $set: { 'participant.display_name': 'Deleted user', 'participant.avatar_url': null } }
+        { $set: anonymizedSnapshot('participant.') }
     );
 }
 

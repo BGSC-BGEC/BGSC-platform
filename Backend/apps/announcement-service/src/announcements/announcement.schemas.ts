@@ -1,4 +1,10 @@
-import { ANNOUNCEMENT_CATEGORY, ANNOUNCEMENT_PRIORITY, ANNOUNCEMENT_STATUS, ROLE_RANK } from '@bgsc/shared';
+import {
+    ANNOUNCEMENT_CATEGORY,
+    ANNOUNCEMENT_PRIORITY,
+    ANNOUNCEMENT_STATUS,
+    DELIVERY_STATUS,
+    ROLE_RANK,
+} from '@bgsc/shared';
 import { z } from 'zod';
 
 /**
@@ -112,7 +118,48 @@ export const ListAnnouncementsQuery = z.object({
 
 export const IdParams = z.object({ id: z.string().uuid() });
 
+/**
+ * Delivery writeback from the Notification Service (`PATCH /internal/announcements/:id/delivery`,
+ * be2-broadcast-service-plan.md §6). Service-to-service only — the route mounts
+ * `requireServiceToken` and the gateway refuses `/internal/*` at the edge.
+ *
+ * Every field is the caller's OUTCOME, never an instruction: there is no way to ask this service
+ * to send anything, so a leaked internal token cannot be turned into a broadcast.
+ */
+const DeliveryRow = z.object({
+    category: z.enum(ANNOUNCEMENT_CATEGORY),
+    // Not validated as a phone number or a group id: the destination is opaque to this service by
+    // design (plan D3), and pinning a format here would break the day a provider changes shape.
+    group_id: z.string().trim().min(1).max(200),
+    status: z.enum(DELIVERY_STATUS),
+    message_id: z.string().trim().max(200).nullish(),
+    attempted_at: z.coerce.date().nullish(),
+    error: z.string().trim().max(300).nullish(),
+});
+
+export const RecordDeliverySchema = z
+    .object({
+        whatsapp: z
+            .array(DeliveryRow)
+            .max(ANNOUNCEMENT_CATEGORY.length)
+            // One row per category. Two rows for the same tag in one body is a caller bug, and
+            // applying both would leave whichever landed second as the record.
+            .refine(
+                (rows) => new Set(rows.map((r) => r.category)).size === rows.length,
+                { message: 'duplicate category' }
+            )
+            .optional(),
+        push: z
+            .object({
+                status: z.enum(DELIVERY_STATUS),
+                sent_count: z.number().int().min(0).nullish(),
+            })
+            .optional(),
+    })
+    .refine((v) => v.whatsapp !== undefined || v.push !== undefined, { message: 'nothing to record' });
+
 export type CreateAnnouncementInput = z.infer<typeof CreateAnnouncementSchema>;
 export type UpdateAnnouncementInput = z.infer<typeof UpdateAnnouncementSchema>;
 export type PublishAnnouncementInput = z.infer<typeof PublishAnnouncementSchema>;
 export type ListAnnouncementsInput = z.infer<typeof ListAnnouncementsQuery>;
+export type RecordDeliveryInput = z.infer<typeof RecordDeliverySchema>;

@@ -114,7 +114,10 @@ for (const secret of ['HASH', 'RT', 'PR']) {
 const snap = snapshotOf(mk());
 assert.deepStrictEqual(
     snap,
-    { user_id: 'u-1', display_name: 'Ana R', avatar_url: '/uploads/a.png' },
+    // `deleted` joined the shape on Sep 27: a snapshot carries no other signal that the account
+    // behind it is gone, and `GET /users/:ref` 404s for a deleted one — so the six collections that
+    // embed this are what the UI reads "deleted user" from (relationships.md §4).
+    { user_id: 'u-1', display_name: 'Ana R', avatar_url: '/uploads/a.png', deleted: false },
     'snapshot matches the shape six collections embed'
 );
 assert.strictEqual(

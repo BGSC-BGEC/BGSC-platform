@@ -49,6 +49,9 @@ Backend/
   apps/announcement-service/   :3005  BE-2
   apps/points-service/         :3006  BE-2
   apps/challenge-service/      :3008  BE-2   (also serves /strava)
+  apps/notification-service/   :3010  BE-2
+  apps/feedback-service/       :3011  BE-2
+  apps/bracket-service/        :3012  BE-2
 ```
 
 | Port | Service | Owner · week | Status |
@@ -63,7 +66,9 @@ Backend/
 | 3007 | leaderboard-service | BE-1 · W3 | not built |
 | 3008 | challenge-service | BE-2 · W3 | live — serves `/challenges` **and** `/strava` |
 | 3009 | media-service | BE-1 · W4 | not built |
-| 3010 | notification-service | W4 | not built |
+| 3010 | notification-service | BE-2 · W4 | live — inbox, announcement broadcast, WhatsApp |
+| 3011 | feedback-service | BE-2 · W4 | live — `/feedback`, `/contact` |
+| 3012 | bracket-service | BE-2 · W4 | live — `/brackets`, `/matches` |
 
 Unbuilt services answer `503` through the gateway naming their owner and week, so a call to
 `/events` today tells you who is writing it rather than hanging.

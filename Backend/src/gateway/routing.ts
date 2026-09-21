@@ -18,7 +18,14 @@ export interface Route {
 export const ROUTES: Record<string, Route> = {
     auth: { prefixes: ['/auth', '/account'], target: config.services.auth, owner: 'BE-1 · W1' },
     user: { prefixes: ['/users', '/uploads/avatars'], target: config.services.user, owner: 'BE-2 · W1' },
-    event: { prefixes: ['/events', '/auction', '/uploads/events'], target: config.services.event, owner: 'BE-1 · W2' },
+    event: { prefixes: ['/events', '/uploads/events'], target: config.services.event, owner: 'BE-1 · W2' },
+    // `/auction` is the Event Service's, but that service mounts no auction router yet: the feature
+    // is BE-1's Week 3 task and is not built. Left on the `event` row it reached a live service and
+    // came back as that service's own 404 — indistinguishable from "no such auction". Its own key,
+    // kept OUT of LIVE_SERVICES, makes it answer 503 naming the owner and the week, which is what
+    // the gateway already promises for everything unbuilt. Fold it back into `event` the day the
+    // auction router is mounted. (Whole-platform audit, Sep 27.)
+    auction: { prefixes: ['/auction'], target: config.services.event, owner: 'BE-1 · W3' },
     registration: {
         prefixes: ['/forms', '/registrations', '/teams', '/uploads/registrations'],
         target: config.services.registration,
@@ -38,7 +45,11 @@ export const ROUTES: Record<string, Route> = {
     // the API hands out 503s at the edge, because media-service does not exist until Week 4.
     // Delete those two prefixes when Media Service takes the whole tree over.
     media: { prefixes: ['/media', '/uploads'], target: config.services.media, owner: 'BE-1 · W4' },
-    notification: { prefixes: ['/notifications'], target: config.services.notification, owner: 'W4' },
+    notification: { prefixes: ['/notifications'], target: config.services.notification, owner: 'BE-2 · W4' },
+    feedback: { prefixes: ['/feedback', '/contact'], target: config.services.feedback, owner: 'BE-2 · W4' },
+    // Two prefixes, one container: a bracket is a plan and a match is a fixture, and both belong to
+    // the same service (be2-feedback-bracket-plan.md §6).
+    bracket: { prefixes: ['/brackets', '/matches'], target: config.services.bracket, owner: 'BE-2 · W4' },
 };
 
 /** Services that actually exist today. Everything else 503s with a clear reason, not a hang. */
@@ -52,6 +63,9 @@ export const LIVE_SERVICES = new Set([
     'challenge',
     // Same container as `challenge`; live or not live together, always.
     'strava',
+    'notification',
+    'feedback',
+    'bracket',
 ]);
 
 /**

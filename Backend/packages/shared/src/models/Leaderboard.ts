@@ -54,6 +54,7 @@ const ParticipantSchema = new Schema(
         type: { type: String, enum: PARTICIPANT_TYPE, required: true },
         id: { type: String, required: true }, // user_id or teams._id
         display_name: { type: String, required: true }, // snapshot
+        deleted: { type: Boolean, default: false },
         avatar_url: { type: String, default: null }, // snapshot
     },
     { _id: false }

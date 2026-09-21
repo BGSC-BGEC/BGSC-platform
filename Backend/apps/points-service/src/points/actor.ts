@@ -19,25 +19,13 @@ import { Actor } from './points.service';
  * stale token mints points, so the 15-minute window between a demotion and a token's expiry is not
  * one to leave open.
  */
-export function requireActiveUser(floor: UserRole = UserRole.GUEST) {
-    const min = rankOf(floor);
-    if (min < 0) throw new Error(`requireActiveUser: unknown role '${floor}'`);
-
-    return function (req: Request, res: Response, next: NextFunction): void {
-        User.findById(req.user!.id)
-            .select('_id status role username profile.full_name profile.avatar_url')
-            .then((user) => {
-                if (!user || user.status !== UserStatus.ACTIVE) {
-                    return void res.status(401).json({ error: 'unauthorized' });
-                }
-                if (rankOf(user.role) < min) return void res.status(403).json({ error: 'forbidden' });
-
-                res.locals.user = user;
-                res.locals.actor = { id: user._id, ip: req.ip ?? null } satisfies Actor;
-                next();
-            }, next);
-    };
-}
 
 export const userOf = (res: Response): IUser => res.locals.user;
 export const actorOf = (res: Response): Actor => res.locals.actor;
+
+/**
+ * The guard itself now lives in `@bgsc/shared` — it was five copies and three implementations
+ * before the Sep 27 audit. Re-exported here so this service's routes keep importing it from the
+ * file that also holds their service-specific helpers.
+ */
+export { requireActiveUser } from '@bgsc/shared';

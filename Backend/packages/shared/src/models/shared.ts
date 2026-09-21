@@ -18,11 +18,18 @@ export const timestamps = {
 /**
  * Display-only copy of another service's user (relationships.md §4).
  * Accepted stale. Never read for authorization or points math — those re-fetch by ID.
+ *
+ * `deleted` is the signal a client cannot otherwise get: `GET /users/:ref` filters deleted accounts
+ * out and answers 404, so a roster or a participant list holding a name has no way to discover that
+ * the person behind it is gone. Services anonymize the *copy* on `UserDeleted` (below) and set this
+ * flag, so the UI can render "deleted user" deliberately rather than showing a name it should not,
+ * or a blank it cannot explain.
  */
 export interface UserSnapshot {
     user_id: string;
     display_name: string;
     avatar_url: string | null;
+    deleted?: boolean;
 }
 
 export const UserSnapshotSchema = new Schema<UserSnapshot>(
@@ -30,9 +37,30 @@ export const UserSnapshotSchema = new Schema<UserSnapshot>(
         user_id: { type: String, required: true },
         display_name: { type: String, required: true },
         avatar_url: { type: String, default: null },
+        deleted: { type: Boolean, default: false },
     },
     { _id: false }
 );
+
+/** What a snapshot reads as once the account behind it is gone. */
+export const DELETED_DISPLAY_NAME = 'Deleted user';
+
+/**
+ * The `$set` that erases one display snapshot, wherever it is embedded.
+ *
+ * `prefix` is the path to the snapshot object, with its trailing dot — `'user.'`,
+ * `'reporter.'`, `'author.'`, or an array-filter path like `'members.$[m].'`. One definition so the
+ * six collections that hold a snapshot cannot disagree about what "anonymized" means: the name is
+ * replaced, the avatar dropped, the flag raised. `user_id` stays — it is a reference, not a
+ * display, and the ledger rows and rosters that point at it still have to resolve.
+ */
+export function anonymizedSnapshot(prefix = ''): Record<string, unknown> {
+    return {
+        [`${prefix}display_name`]: DELETED_DISPLAY_NAME,
+        [`${prefix}avatar_url`]: null,
+        [`${prefix}deleted`]: true,
+    };
+}
 
 /** Polymorphic owner ref used by teams and form_definitions/form_submissions. */
 export const OWNER_TYPE = ['event', 'challenge'] as const;

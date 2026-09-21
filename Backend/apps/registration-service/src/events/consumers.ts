@@ -1,11 +1,20 @@
-import { FormSubmission, Team, User, publish, subscribe, userSnapshotOf } from '@bgsc/shared';
+import {
+    FormSubmission,
+    Team,
+    User,
+    anonymizedSnapshot,
+    publish,
+    subscribe,
+    userSnapshotOf,
+} from '@bgsc/shared';
 import { transition } from '../registrations/registration.service';
 import { reserveSeat } from '../clients/event-client';
 
 /**
  * Event bus consumers:
  *  - a released seat pulls the next person off the waitlist (plan §5.2 / §D6);
- *  - a changed profile rewrites the user snapshots this service owns (relationships.md §4).
+ *  - a changed profile rewrites the user snapshots this service owns (relationships.md §4);
+ *  - a deleted account erases them.
  */
 
 export function initializeConsumers(): void {
@@ -15,6 +24,10 @@ export function initializeConsumers(): void {
 
     subscribe('UserProfileUpdated', (event) => {
         void handleUserProfileUpdated(event.payload as unknown as ProfileUpdatedPayload);
+    });
+
+    subscribe('UserDeleted', (event) => {
+        void handleUserDeleted(event.payload as unknown as { user_id: string });
     });
 
     console.log('[registration-service] Event consumers initialized');
@@ -112,5 +125,34 @@ async function handleRegistrationCancelled(payload: CancelledPayload): Promise<v
     } catch (err) {
         // Non-fatal: the seat is free and an admin can still confirm by hand.
         console.error('[registration-service] Waitlist promotion failed:', err);
+    }
+}
+
+/**
+ * A deleted account's name comes off every roster and participant list this service owns.
+ *
+ * The alternative — leaving the name and expecting the client to render "deleted user" — cannot be
+ * implemented: a snapshot carries no deletion signal and `GET /users/:ref` answers 404 for a
+ * deleted account, so the client has nothing to go on and the real name keeps leaving the API.
+ * The copy is erased here and `deleted: true` is what the UI renders from (relationships.md §4).
+ *
+ * `user_id` is deliberately kept: it is a reference, and the rosters and registrations that point
+ * at it still have to resolve.
+ */
+async function handleUserDeleted(payload: { user_id: string }): Promise<void> {
+    const { user_id } = payload;
+    if (!user_id) return;
+
+    try {
+        await Promise.all([
+            FormSubmission.updateMany({ 'user.user_id': user_id }, { $set: anonymizedSnapshot('user.') }),
+            Team.updateMany(
+                { 'members.user_id': user_id },
+                { $set: anonymizedSnapshot('members.$[m].') },
+                { arrayFilters: [{ 'm.user_id': user_id }] }
+            ),
+        ]);
+    } catch (err) {
+        console.error(`[registration-service] anonymization failed for ${user_id}:`, err);
     }
 }

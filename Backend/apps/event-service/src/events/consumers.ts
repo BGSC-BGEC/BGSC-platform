@@ -1,10 +1,16 @@
-import { Event, subscribe, User, userSnapshotOf } from '@bgsc/shared';
+import { AuctionLot, Event, anonymizedSnapshot, subscribe, User, userSnapshotOf } from '@bgsc/shared';
 
 /**
  * Event-service domain event consumers:
  * 1. CaptainApproved: When Core approves a captain request in registration-service,
  *    add the user_id to event.auction.captain_user_ids (Spec §5.5, event-model.md §3).
  * 2. UserProfileUpdated: Refresh contact snapshots in event.contacts.
+ * 3. UserDeleted: erase those same snapshots, and the player name on any auction lot.
+ *
+ * (3) was added by the whole-backend audit on Sep 27: five services held a display copy of a user
+ * and only one erased it on deletion, while the documented policy said the UI would render
+ * "deleted user" — which it cannot, because a snapshot carries no deletion signal and
+ * `GET /users/:ref` answers 404 for a deleted account (relationships.md §4).
  */
 
 interface CaptainApprovedPayload {
@@ -26,6 +32,10 @@ export function initializeConsumers(): void {
 
     subscribe('UserProfileUpdated', (event) => {
         void handleUserProfileUpdated(event.payload as unknown as ProfileUpdatedPayload);
+    });
+
+    subscribe('UserDeleted', (event) => {
+        void handleUserDeleted(event.payload as unknown as { user_id: string });
     });
 
     console.log('[event-service] Event consumers initialized');
@@ -94,5 +104,29 @@ async function handleUserProfileUpdated(payload: ProfileUpdatedPayload): Promise
         );
     } catch (err) {
         console.error(`[event-service] Failed to update contact snapshot for user ${user_id}:`, err);
+    }
+}
+
+/**
+ * A deleted account's name comes off the contact strip and off any auction lot it was sold on.
+ *
+ * The lot's `sold_amount`, its team and its bid history are untouched: a purse was spent and the
+ * ledger says so. What goes is the name a client would print.
+ */
+async function handleUserDeleted(payload: { user_id: string }): Promise<void> {
+    const { user_id } = payload;
+    if (!user_id) return;
+
+    try {
+        await Promise.all([
+            Event.updateMany(
+                { 'contacts.user_id': user_id },
+                { $set: anonymizedSnapshot('contacts.$[c].') },
+                { arrayFilters: [{ 'c.user_id': user_id }] }
+            ),
+            AuctionLot.updateMany({ 'player.user_id': user_id }, { $set: anonymizedSnapshot('player.') }),
+        ]);
+    } catch (err) {
+        console.error(`[event-service] anonymization failed for ${user_id}:`, err);
     }
 }
