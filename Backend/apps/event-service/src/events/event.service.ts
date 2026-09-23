@@ -856,14 +856,15 @@ export async function addEventCaptain(
             min_bid_increment: 100,
             bid_timer_seconds: 5,
             oc_override_quota: 3 / 7,
+            oc_captain_override_quota: 3 / 7,
             status: 'not_started',
             captain_user_ids: [],
             purse_per_team: null,
         };
     }
 
-    if (!event.auction.captain_user_ids.includes(userId)) {
-        event.auction.captain_user_ids.push(userId);
+    if (!event.auction!.captain_user_ids.includes(userId)) {
+        event.auction!.captain_user_ids.push(userId);
         await event.save();
         publish('CaptainApproved', PRODUCER, {
             event_id: event._id,

@@ -61,6 +61,9 @@ export interface ITeam extends Document<string> {
         purse_total: number;
         purse_spent: number;
         version: number;
+        is_overridden?: boolean;
+        override_reason?: string | null;
+        overridden_by?: string | null;
     } | null;
 
     created_at: Date;
@@ -121,6 +124,9 @@ const TeamSchema = new Schema<ITeam>(
                     purse_total: { type: Number, required: true, min: 0 },
                     purse_spent: { type: Number, default: 0, min: 0 },
                     version: { type: Number, default: 0 }, // optimistic lock for concurrent purse debits
+                    is_overridden: { type: Boolean, default: false },
+                    override_reason: { type: String, default: null },
+                    overridden_by: { type: String, default: null },
                 },
                 { _id: false }
             ),

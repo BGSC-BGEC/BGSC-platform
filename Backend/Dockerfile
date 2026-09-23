@@ -17,6 +17,7 @@ COPY apps/registration-service/package.json ./apps/registration-service/
 COPY apps/announcement-service/package.json ./apps/announcement-service/
 COPY apps/event-service/package.json ./apps/event-service/
 COPY apps/points-service/package.json ./apps/points-service/
+COPY apps/leaderboard-service/package.json ./apps/leaderboard-service/
 COPY apps/challenge-service/package.json ./apps/challenge-service/
 COPY apps/notification-service/package.json ./apps/notification-service/
 COPY apps/feedback-service/package.json ./apps/feedback-service/
@@ -58,6 +59,8 @@ COPY --from=builder --chown=app:app /app/apps/event-service/dist ./apps/event-se
 COPY --from=builder --chown=app:app /app/apps/event-service/package.json ./apps/event-service/package.json
 COPY --from=builder --chown=app:app /app/apps/points-service/dist ./apps/points-service/dist
 COPY --from=builder --chown=app:app /app/apps/points-service/package.json ./apps/points-service/package.json
+COPY --from=builder --chown=app:app /app/apps/leaderboard-service/dist ./apps/leaderboard-service/dist
+COPY --from=builder --chown=app:app /app/apps/leaderboard-service/package.json ./apps/leaderboard-service/package.json
 COPY --from=builder --chown=app:app /app/apps/challenge-service/dist ./apps/challenge-service/dist
 COPY --from=builder --chown=app:app /app/apps/challenge-service/package.json ./apps/challenge-service/package.json
 COPY --from=builder --chown=app:app /app/apps/notification-service/dist ./apps/notification-service/dist

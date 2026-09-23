@@ -101,6 +101,7 @@ export const CreateEventSchema = z.object({
         min_bid_increment: z.number().positive().default(100),
         bid_timer_seconds: z.number().int().positive().default(5),
         oc_override_quota: z.number().min(0).max(3 / 7).default(3 / 7),
+        oc_captain_override_quota: z.number().min(0).max(1).default(3 / 7),
         status: z.enum(['not_started', 'live', 'paused', 'finished']).default('not_started'),
         captain_user_ids: z.array(z.string()).default([]),
         purse_per_team: z.number().positive().nullable().default(null),

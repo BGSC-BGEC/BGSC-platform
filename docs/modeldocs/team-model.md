@@ -46,11 +46,14 @@ Spec §5.7 says challenge teams follow "the structure of teamed events". So one 
 
   status: 'forming' | 'complete' | 'locked' | 'disbanded',
 
-  // auction leagues only (Spec §5.15.4 "captain wallets and rosters"); set on AuctionStarted from events.auction.purse_per_team
+  // auction leagues only (Spec §5.15.4 "captain wallets and rosters"); auto-allocated via K-multiplier on start or overridden by OC
   auction: {
     purse_total: number,
     purse_spent: number,             // purse_remaining = total - spent, computed on read
-    version: number                  // optimistic lock for concurrent bids
+    version: number,                 // optimistic lock for concurrent bids
+    is_overridden: boolean,          // true if OC manually adjusted captain purse within oc_captain_override_quota
+    override_reason: string | null,  // reason for OC budget override
+    overridden_by: string | null     // user_id of OC member who applied the override
   } | null,
 
   created_at: Date,

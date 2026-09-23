@@ -19,12 +19,6 @@ export const ROUTES: Record<string, Route> = {
     auth: { prefixes: ['/auth', '/account'], target: config.services.auth, owner: 'BE-1 · W1' },
     user: { prefixes: ['/users', '/uploads/avatars'], target: config.services.user, owner: 'BE-2 · W1' },
     event: { prefixes: ['/events', '/uploads/events'], target: config.services.event, owner: 'BE-1 · W2' },
-    // `/auction` is the Event Service's, but that service mounts no auction router yet: the feature
-    // is BE-1's Week 3 task and is not built. Left on the `event` row it reached a live service and
-    // came back as that service's own 404 — indistinguishable from "no such auction". Its own key,
-    // kept OUT of LIVE_SERVICES, makes it answer 503 naming the owner and the week, which is what
-    // the gateway already promises for everything unbuilt. Fold it back into `event` the day the
-    // auction router is mounted. (Whole-platform audit, Sep 27.)
     auction: { prefixes: ['/auction'], target: config.services.event, owner: 'BE-1 · W3' },
     registration: {
         prefixes: ['/forms', '/registrations', '/teams', '/uploads/registrations'],
@@ -59,7 +53,9 @@ export const LIVE_SERVICES = new Set([
     'registration',
     'announcement',
     'event',
+    'auction',
     'points',
+    'leaderboard',
     'challenge',
     // Same container as `challenge`; live or not live together, always.
     'strava',

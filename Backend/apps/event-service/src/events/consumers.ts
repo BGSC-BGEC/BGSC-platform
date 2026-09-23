@@ -51,10 +51,13 @@ async function handleCaptainApproved(payload: CaptainApprovedPayload): Promise<v
 
         // If auction block exists, add to captain_user_ids
         if (ev.auction) {
-            await Event.updateOne(
-                { _id: event_id, 'auction.captain_user_ids': { $ne: user_id } },
-                { $addToSet: { 'auction.captain_user_ids': user_id } }
-            );
+            // Only add captain if auction hasn't reached a terminal state
+            if (!['paused', 'finished'].includes(ev.auction.status)) {
+                await Event.updateOne(
+                    { _id: event_id, 'auction.captain_user_ids': { $ne: user_id } },
+                    { $addToSet: { 'auction.captain_user_ids': user_id } }
+                );
+            }
         } else if (ev.type === 'ALL' || ev.type === 'LE') {
             // Initialize default auction block if missing on auction/league event
             await Event.updateOne(

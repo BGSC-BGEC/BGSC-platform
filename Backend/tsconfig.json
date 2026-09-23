@@ -9,6 +9,7 @@
         { "path": "./apps/announcement-service" },
         { "path": "./apps/event-service" },
         { "path": "./apps/points-service" },
+        { "path": "./apps/leaderboard-service" },
         { "path": "./apps/challenge-service" },
         { "path": "./apps/notification-service" },
         { "path": "./apps/feedback-service" },

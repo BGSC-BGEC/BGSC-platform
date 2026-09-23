@@ -132,6 +132,8 @@ PointTransactionSchema.index({ idempotency_key: 1 }, { unique: true });
 // it). The two-key prefix still serves every `user_id`-only read.
 PointTransactionSchema.index({ user_id: 1, created_at: -1, _id: -1 });
 PointTransactionSchema.index({ user_id: 1, source: 1 }); // breakdown by source
+PointTransactionSchema.index({ type: 1, source: 1, created_at: -1 }); // global leaderboard aggregations
+PointTransactionSchema.index({ type: 1, created_at: -1 }); // unconstrained global leaderboard
 PointTransactionSchema.index({ 'reference.type': 1, 'reference.id': 1 }); // "all points for event X"; refunds on cancel
 PointTransactionSchema.index({ expires_at: 1 }, { partialFilterExpression: { expires_at: { $type: 'date' } } });
 

@@ -108,6 +108,7 @@ async function main(): Promise<void> {
         'a teamed ALL event with an auction'
     );
     assert.strictEqual(auctionEvent.auction!.oc_override_quota, 3 / 7, 'oc_override_quota defaults to the 3/7 ceiling');
+    assert.strictEqual(auctionEvent.auction!.oc_captain_override_quota, 3 / 7, 'oc_captain_override_quota defaults to the 3/7 ceiling');
 
     await rejects(
         new Event({
@@ -217,6 +218,25 @@ async function main(): Promise<void> {
         'a team with an auction purse'
     );
     assert.strictEqual((auctionTeam as unknown as { purse_remaining: number }).purse_remaining, 750, 'purse_remaining is derived');
+    assert.strictEqual(auctionTeam.auction!.is_overridden, false, 'is_overridden defaults to false');
+
+    const overriddenTeam = await ok(
+        new Team({
+            ...team().toObject(),
+            _id: undefined,
+            auction: {
+                purse_total: 1500,
+                purse_spent: 0,
+                is_overridden: true,
+                override_reason: 'Top tier seed',
+                overridden_by: 'admin-1',
+            },
+        }),
+        'a team with an overridden auction purse'
+    );
+    assert.strictEqual(overriddenTeam.auction!.is_overridden, true, 'is_overridden is preserved');
+    assert.strictEqual(overriddenTeam.auction!.override_reason, 'Top tier seed', 'override_reason is preserved');
+    assert.strictEqual(overriddenTeam.auction!.overridden_by, 'admin-1', 'overridden_by is preserved');
 
     await rejects(
         new Team({ ...team().toObject(), _id: undefined, auction: { purse_total: 100, purse_spent: 500 } }),

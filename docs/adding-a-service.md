@@ -5,9 +5,9 @@ Every domain service in `Backend/apps/` is built the same way: one workspace pac
 The service-specific code is small; what gets missed is the wiring around it, because none of it
 lives in the service's own directory.
 
-This doc is the checklist and the templates. Verified against the tree on Sep 13, 2026 with
-five services built (auth, user, registration, announcement, event). Copy from `event-service`
-or `registration-service` when in doubt — they are the most recent.
+This doc is the checklist and the templates. Verified against the tree on Sep 20, 2026 with
+eleven live services built (auth, user, event, registration, announcement, points, leaderboard, challenge/strava, notification, feedback, bracket). Copy from `points-service`
+or `challenge-service` when in doubt — they are the most recent.
 
 Related: `local-dev-guide.md` (running things), `handoff-to-be1.md` §2, §4, §5 (token contract,
 middleware reference, error envelope), `typescript-toolchain.md` (why TypeScript is pinned to 6.x).
@@ -278,7 +278,7 @@ Notes:
 `Backend/src/gateway/routing.ts`:
 
 ```ts
-export const LIVE_SERVICES = new Set(['auth', 'user', 'registration', 'announcement', '<key>']);
+export const LIVE_SERVICES = new Set(['auth', 'user', 'registration', 'announcement', 'event', 'auction', 'points', 'leaderboard', 'challenge', 'strava', 'notification', 'feedback', 'bracket', '<key>']);
 ```
 
 That is the whole gateway change for a planned service. The `ROUTES` row (prefixes, target, owner)

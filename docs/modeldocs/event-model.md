@@ -104,10 +104,11 @@ Things that grow unbounded (registrations, teams, bids, scores) live in their ow
     k_multiplier: number,               // Purse Pool = K * sum(base prices)
     min_bid_increment: number,
     bid_timer_seconds: number,          // default 5
-    oc_override_quota: number,          // default 3/7 = 0.4286
+    oc_override_quota: number,          // default 3/7 = 0.4286 (lot price override ceiling)
+    oc_captain_override_quota: number,  // default 3/7 = 0.4286 (captain purse override ceiling)
     status: 'not_started' | 'live' | 'paused' | 'finished',
     captain_user_ids: string[],         // approved captains
-    purse_per_team: number | null       // computed when auction starts
+    purse_per_team: number | null       // computed when auction starts: floor(Purse Pool / N_teams)
   } | null,
 
   bracket: null,                        // reserved for Week 4 (matches / bracket engine)

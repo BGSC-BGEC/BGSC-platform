@@ -1,6 +1,7 @@
 import { createServiceApp, startService } from '@bgsc/shared';
 import express from 'express';
 import { eventRoutes } from './events/event.routes';
+import { auctionRoutes } from './auction/auction.routes';
 import { internalRoutes } from './internal/internal.routes';
 import { initializeConsumers } from './events/consumers';
 import { UPLOAD_DIR } from './storage/storage';
@@ -19,6 +20,7 @@ const options = {
         app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '1h', index: false, dotfiles: 'deny' }));
 
         app.use('/events', eventRoutes);
+        app.use('/auction', auctionRoutes);
         // Inter-service routes protected by requireServiceToken
         app.use('/internal', internalRoutes);
     },

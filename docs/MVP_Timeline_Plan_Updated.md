@@ -344,7 +344,7 @@
 #### Backend (BE-1 & BE-2)
 
 **Saturday Sep 19 (8h):**
-- [ ] **BE-1: Auction Service** (8h)
+- [x] **BE-1: Auction Service** (8h)
   - Auction creation for events
   - Bidding system (polling-based for MVP)
   - Auction rules and constraints
@@ -364,7 +364,7 @@
   - Points validity/expiry logic
 
 **Sunday Sep 20 (8h):**
-- [ ] **BE-1: Leaderboard Service** (8h)
+- [x] **BE-1: Leaderboard Service** (8h)
   - Leaderboard calculation logic
   - Leaderboard filtering (by event, category, time period)
   - Global and event-specific leaderboards

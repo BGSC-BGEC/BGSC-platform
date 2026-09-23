@@ -107,6 +107,7 @@ export interface IEvent extends Document<string> {
         min_bid_increment: number;
         bid_timer_seconds: number;
         oc_override_quota: number;
+        oc_captain_override_quota: number;
         status: AuctionStatus;
         captain_user_ids: string[];
         purse_per_team: number | null;
@@ -245,6 +246,7 @@ const EventSchema = new Schema<IEvent>(
                     min_bid_increment: { type: Number, required: true, min: 1 },
                     bid_timer_seconds: { type: Number, default: 5, min: 1 },
                     oc_override_quota: { type: Number, default: OC_OVERRIDE_QUOTA_MAX, min: 0 },
+                    oc_captain_override_quota: { type: Number, default: OC_OVERRIDE_QUOTA_MAX, min: 0, max: 1 },
                     status: { type: String, enum: AUCTION_STATUS, default: 'not_started' },
                     captain_user_ids: { type: [String], default: [] },
                     purse_per_team: { type: Number, default: null, min: 0 },

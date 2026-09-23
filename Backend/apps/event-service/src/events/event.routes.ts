@@ -1,6 +1,7 @@
 import { Router, raw } from 'express';
 import { requireActiveUser, requireAuth, optionalAuth, requireRole, validate, UserRole } from '@bgsc/shared';
 import * as c from './event.controller';
+import { eventAuctionRoutes } from '../auction/auction.routes';
 import {
     CreateEventSchema,
     ManageCaptainSchema,
@@ -60,6 +61,9 @@ eventRoutes.post(
     c.addCaptain
 );
 eventRoutes.delete('/:ref/captains/:userId', requireAuth, requireActiveUser(UserRole.CORE), c.removeCaptain);
+
+// Auction Sub-routes (:ref/auction/*)
+eventRoutes.use('/:ref/auction', eventAuctionRoutes);
 
 // Management (Core / Admin)
 // Writes rank the LIVE user document, not the token's role claim: a token outlives a demotion or a

@@ -48,6 +48,7 @@ Backend/
   apps/registration-service/   :3004  BE-2
   apps/announcement-service/   :3005  BE-2
   apps/points-service/         :3006  BE-2
+  apps/leaderboard-service/    :3007  BE-1
   apps/challenge-service/      :3008  BE-2   (also serves /strava)
   apps/notification-service/   :3010  BE-2
   apps/feedback-service/       :3011  BE-2
@@ -59,11 +60,11 @@ Backend/
 | 3000 | gateway | — | live |
 | 3001 | auth-service | BE-1 · W1 | live |
 | 3002 | user-service | BE-2 · W1 | live |
-| 3003 | event-service | BE-1 · W2 | live |
+| 3003 | event-service | BE-1 · W2 | live — serves `/events` **and** `/auction` (BE-1 · W3) |
 | 3004 | registration-service | BE-2 · W2 | live |
 | 3005 | announcement-service | BE-2 · W2 | live |
 | 3006 | points-service | BE-2 · W3 | live |
-| 3007 | leaderboard-service | BE-1 · W3 | not built |
+| 3007 | leaderboard-service | BE-1 · W3 | live — event standings, global rank, points investment |
 | 3008 | challenge-service | BE-2 · W3 | live — serves `/challenges` **and** `/strava` |
 | 3009 | media-service | BE-1 · W4 | not built |
 | 3010 | notification-service | BE-2 · W4 | live — inbox, announcement broadcast, WhatsApp |
