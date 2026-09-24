@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react'
+import { Download } from 'lucide-react'
 import type { User } from '../types/user'
 import { userService } from '../services/userService'
 import { UserTable } from '../components/users/UserTable'
@@ -91,6 +92,54 @@ useEffect(() => {
     setStatusFilter('all')
     }
 
+    const handleExportCSV = () => {
+        
+        const headers = [
+          'ID',
+          'Name',
+          'Username',
+          'Email',
+          'Phone',
+          'Role',
+          'Status',
+          'Points Balance',
+          'Join Date',
+        ]
+
+        const escapeCSV = (value: unknown): string => {
+          const str = value === null || value === undefined ? '' : String(value)
+          return `"${str.replace(/"/g, '""')}"`
+        }
+
+        const rows = filteredUsers.map((user) => [
+          escapeCSV(user.id),
+          escapeCSV(user.name),
+          escapeCSV(user.username),
+          escapeCSV(user.email),
+          escapeCSV(user.phone),
+          escapeCSV(user.role),
+          escapeCSV(user.status),
+          escapeCSV(user.pointsBalance),
+          escapeCSV(user.joinDate),
+        ])
+
+        const csvContent = [
+          headers.map(escapeCSV).join(','),
+          ...rows.map((row) => row.join(',')),
+        ].join('\n')
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        const dateStr = new Date().toISOString().split('T')[0]
+
+        link.href = url
+        link.setAttribute('download', `users-export-${dateStr}.csv`)
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        URL.revokeObjectURL(url)
+      }
     return (
     <div className="space-y-6">
         {/* Top Banner / Header */}
@@ -104,8 +153,19 @@ useEffect(() => {
             Manage club athletes, coordinators, and member access permissions.
             </p>
         </div>
-        <div className="mt-2 sm:mt-0 text-sm font-bold text-black">
-            Total Members: {users.length}
+        <div className="mt-2 sm:mt-0 flex items-center gap-3">
+            <span className="text-sm font-bold text-black">
+                Total Members: {users.length}
+            </span>
+            <button
+                type="button"
+                onClick={handleExportCSV}
+                disabled={filteredUsers.length === 0}
+                className="border border-black text-black bg-white hover:bg-black hover:text-white transition-colors px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded disabled:opacity-50 cursor-pointer flex items- center gap-1.5"
+            >
+                <Download className="w-3.5 h-3.5" />
+                Export CSV
+            </button>
         </div>
         </div>
 
