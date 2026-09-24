@@ -161,7 +161,7 @@ useEffect(() => {
                 type="button"
                 onClick={handleExportCSV}
                 disabled={filteredUsers.length === 0}
-                className="border border-black text-black bg-white hover:bg-black hover:text-white transition-colors px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded disabled:opacity-50 cursor-pointer flex items- center gap-1.5"
+                className="border border-black text-black bg-white hover:bg-black hover:text-white transition-colors px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded disabled:opacity-50 cursor-pointer flex items-center gap-1.5"
             >
                 <Download className="w-3.5 h-3.5" />
                 Export CSV
