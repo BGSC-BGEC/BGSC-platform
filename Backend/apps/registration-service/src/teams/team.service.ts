@@ -445,15 +445,49 @@ export async function debitPurse(teamId: string, amount: number): Promise<ITeam>
         throw new ServiceError(400, 'not_auction_team');
     }
 
-    const remaining = team.auction.purse_total - team.auction.purse_spent;
-    if (remaining < amount) {
+    const updated = await Team.findOneAndUpdate(
+        {
+            _id: teamId,
+            'auction.purse_spent': { $lte: team.auction.purse_total - amount },
+        },
+        {
+            $inc: { 'auction.purse_spent': amount, 'auction.version': 1 },
+        },
+        { returnDocument: 'after' }
+    );
+
+    if (!updated) {
         throw new ServiceError(400, 'insufficient_purse');
     }
 
-    team.auction.purse_spent += amount;
-    await team.save();
+    return updated;
+}
 
-    return team;
+export async function refundPurse(teamId: string, amount: number): Promise<ITeam> {
+    const team = await getTeam(teamId);
+
+    if (!team.auction) {
+        throw new ServiceError(400, 'not_auction_team');
+    }
+
+    const updated = await Team.findOneAndUpdate(
+        { _id: teamId },
+        {
+            $inc: { 'auction.purse_spent': -amount, 'auction.version': 1 },
+        },
+        { returnDocument: 'after' }
+    );
+
+    if (!updated) {
+        throw new ServiceError(404, 'team_not_found');
+    }
+
+    if (updated.auction && updated.auction.purse_spent < 0) {
+        updated.auction.purse_spent = 0;
+        await updated.save();
+    }
+
+    return updated;
 }
 
 export async function getTeamSnapshots(teamIds: string[]): Promise<any[]> {

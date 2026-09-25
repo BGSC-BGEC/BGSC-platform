@@ -82,9 +82,20 @@ export const RulePatchBody = z
     })
     .refine((b) => Object.keys(b).length > 0, 'at least one field must be present');
 
+export const RefundBody = z.object({
+    user_id: UserId,
+    amount: z.number().int().min(1).max(ADJUST_LIMIT),
+    reference: z.object({
+        type: z.literal('leaderboard_entry'),
+        id: z.string().uuid(),
+    }),
+    request_id: UserId,
+});
+
 export type HistoryQueryInput = z.infer<typeof HistoryQuery>;
 export type EventLedgerQueryInput = z.infer<typeof EventLedgerQuery>;
 export type AdjustBodyInput = z.infer<typeof AdjustBody>;
 export type AwardBodyInput = z.infer<typeof AwardBody>;
 export type SpendBodyInput = z.infer<typeof SpendBody>;
+export type RefundBodyInput = z.infer<typeof RefundBody>;
 export type RulePatchBodyInput = z.infer<typeof RulePatchBody>;

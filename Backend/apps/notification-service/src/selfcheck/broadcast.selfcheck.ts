@@ -369,6 +369,36 @@ async function main(): Promise<void> {
     assert.ok(!cancelledIds.has(deletedUser._id), 'and a deleted account is never a recipient of any fan-out');
     console.log('✓ waitlist, challenge and cancellation triggers all reach exactly their people');
 
+    /* ---- feedback tickets (staff fan-out) -------------------------------- */
+    const ticketId = 'ticket-123';
+    await handlers.onFeedbackSubmitted({
+        ticket_id: ticketId,
+        ticket_no: 'TICK-42',
+        kind: 'bug',
+        category: 'app',
+        subject: 'Cannot login with OAuth',
+    });
+    const staffNotifs = await Notification.find({ dedupe_key: dedupe.feedbackSubmitted(ticketId) }).lean();
+    assert.ok(staffNotifs.length > 0, 'feedback ticket fans out to staff');
+    assert.ok(staffNotifs.every((n) => n.category === 'system'), 'under system category');
+    assert.ok(staffNotifs[0].title.includes('TICK-42'), 'contains ticket number');
+    assert.ok(staffNotifs[0].body.includes('Cannot login with OAuth'), 'contains subject');
+
+    // Replay assertion
+    await handlers.onFeedbackSubmitted({
+        ticket_id: ticketId,
+        ticket_no: 'TICK-42',
+        kind: 'bug',
+        category: 'app',
+        subject: 'Cannot login with OAuth',
+    });
+    assert.strictEqual(
+        await Notification.countDocuments({ dedupe_key: dedupe.feedbackSubmitted(ticketId) }),
+        staffNotifs.length,
+        'replay does not duplicate feedback notifications'
+    );
+    console.log('✓ feedback ticket fan-out reaches staff and dedupes properly');
+
     await closeScratchDb();
     console.log('\nbroadcast selfcheck: all checks passed');
 }

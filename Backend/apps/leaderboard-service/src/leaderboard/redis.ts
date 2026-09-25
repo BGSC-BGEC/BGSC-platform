@@ -13,6 +13,8 @@ export async function getRedisClient(): Promise<Redis | null> {
             maxRetriesPerRequest: 1,
             lazyConnect: true,
             connectTimeout: 2000,
+            retryStrategy: () => null,
+            enableOfflineQueue: false,
         });
 
         client.on('connect', () => {

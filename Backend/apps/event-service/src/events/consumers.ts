@@ -25,6 +25,14 @@ interface ProfileUpdatedPayload {
     changed_fields?: string[];
 }
 
+interface RegistrationCancelledPayload {
+    registration_id: string;
+    owner?: { type: string; id: string };
+    user_id: string;
+    freed_seat: boolean;
+    reason: string;
+}
+
 export function initializeConsumers(): void {
     subscribe('CaptainApproved', (event) => {
         void handleCaptainApproved(event.payload as unknown as CaptainApprovedPayload);
@@ -36,6 +44,10 @@ export function initializeConsumers(): void {
 
     subscribe('UserDeleted', (event) => {
         void handleUserDeleted(event.payload as unknown as { user_id: string });
+    });
+
+    subscribe('RegistrationCancelled', (event) => {
+        void handleRegistrationCancelled(event.payload as unknown as RegistrationCancelledPayload);
     });
 
     console.log('[event-service] Event consumers initialized');
@@ -131,5 +143,23 @@ async function handleUserDeleted(payload: { user_id: string }): Promise<void> {
         ]);
     } catch (err) {
         console.error(`[event-service] anonymization failed for ${user_id}:`, err);
+    }
+}
+
+/**
+ * When a registration is cancelled with freed_seat === false, it was a waitlisted registration.
+ * Decrement counts.registrations_waitlisted so waitlist count does not drift.
+ */
+async function handleRegistrationCancelled(payload: RegistrationCancelledPayload): Promise<void> {
+    if (!payload.owner || payload.owner.type !== 'event' || !payload.owner.id) return;
+    if (!payload.freed_seat) {
+        try {
+            await Event.updateOne(
+                { _id: payload.owner.id, 'counts.registrations_waitlisted': { $gt: 0 } },
+                { $inc: { 'counts.registrations_waitlisted': -1 } }
+            );
+        } catch (err) {
+            console.error(`[event-service] failed to decrement waitlist count for event ${payload.owner.id}:`, err);
+        }
     }
 }

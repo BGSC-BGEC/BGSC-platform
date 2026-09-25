@@ -80,7 +80,7 @@ async function claimSlot(challenge_id: string, cap: number | null): Promise<void
 }
 
 const releaseSlot = (challenge_id: string): Promise<unknown> =>
-    Challenge.updateOne({ _id: challenge_id }, { $inc: { 'counts.accepted': -1 } }).catch((err) =>
+    Challenge.updateOne({ _id: challenge_id, 'counts.accepted': { $gt: 0 } }, { $inc: { 'counts.accepted': -1 } }).catch((err) =>
         console.error(`[${PRODUCER}] failed to release a slot on ${challenge_id}:`, err)
     );
 
@@ -515,7 +515,7 @@ export async function withdraw(id: string, reason: string | null, actor: Actor):
     // back. Expiry deliberately does NOT return it (D18): the participant took their attempt and
     // ran out of time. `counts.submitted` and `counts.approved` are cumulative totals and are never
     // decremented — they answer "how many ever got that far", which a withdrawal does not unmake.
-    await Challenge.updateOne({ _id: existing.challenge_id }, { $inc: { 'counts.accepted': -1 } });
+    await Challenge.updateOne({ _id: existing.challenge_id, 'counts.accepted': { $gt: 0 } }, { $inc: { 'counts.accepted': -1 } });
     await recordAudit({
         actor_id: actor.id,
         action: 'challenge.withdrawn',

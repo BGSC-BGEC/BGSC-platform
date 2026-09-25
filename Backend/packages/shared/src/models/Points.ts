@@ -213,6 +213,7 @@ export const idempotencyKey = {
     eventCancelRefund: (tx_id: string) => `event.cancel.refund:${tx_id}`,
     challengeCompleted: (participation_id: string, user_id: string) => `challenge.completed:${participation_id}:${user_id}`,
     leaderboardInvestment: (request_id: string) => `leaderboard.investment:${request_id}`,
+    leaderboardInvestmentRefund: (request_id: string) => `leaderboard.investment.refund:${request_id}`,
     adminAdjust: (request_uuid: string) => `admin:${request_uuid}`,
     /** The expiry sweep's marker: an 'expire' row referencing the credit is what makes it done. */
     expire: (tx_id: string) => `expire:${tx_id}`,

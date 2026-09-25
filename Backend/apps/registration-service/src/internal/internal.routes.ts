@@ -55,6 +55,22 @@ internalRoutes.post('/teams/:id/debit-purse', async (req: Request, res: Response
     }
 });
 
+// POST /internal/teams/:id/refund-purse - refund team purse (called by Event Service for auction compensation)
+internalRoutes.post('/teams/:id/refund-purse', async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const teamId = req.params.id as string;
+        const amount = typeof req.body?.amount === 'number' ? req.body.amount : 0;
+        if (!amount || amount <= 0) {
+            throw new ServiceError(400, 'invalid_amount');
+        }
+
+        const team = await teamService.refundPurse(teamId, amount);
+        res.json(team);
+    } catch (err) {
+        next(err);
+    }
+});
+
 // POST /internal/teams/:id/add-member - add member to team (called by Event Service for auction)
 internalRoutes.post('/teams/:id/add-member', async (req: Request, res: Response, next: NextFunction) => {
     try {

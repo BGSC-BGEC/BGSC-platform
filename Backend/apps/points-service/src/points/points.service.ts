@@ -395,3 +395,21 @@ export async function spendForInvestment(input: SpendInput): Promise<{ tx: IPoin
         actor: { type: 'user', user_id: input.user_id },
     });
 }
+
+export async function refundForInvestment(input: SpendInput): Promise<{ tx: IPointTransaction; replayed: boolean }> {
+    const entry = await LeaderboardEntry.findById(input.reference.id).select('participant');
+    if (!entry) throw new ServiceError(404, 'leaderboard_entry_not_found');
+
+    return record({
+        user_id: input.user_id,
+        amount: signed('refund', input.amount),
+        type: 'refund',
+        source: 'leaderboard',
+        reason: 'leaderboard.investment',
+        reference: input.reference,
+        idempotency_key: idempotencyKey.leaderboardInvestmentRefund(input.request_id),
+        actor: { type: 'system', user_id: null },
+        note: 'refund: leaderboard_investment',
+    });
+}
+

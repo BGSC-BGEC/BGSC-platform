@@ -50,6 +50,7 @@ Backend/
   apps/points-service/         :3006  BE-2
   apps/leaderboard-service/    :3007  BE-1
   apps/challenge-service/      :3008  BE-2   (also serves /strava)
+  apps/media-service/          :3009  BE-1   (also serves /uploads)
   apps/notification-service/   :3010  BE-2
   apps/feedback-service/       :3011  BE-2
   apps/bracket-service/        :3012  BE-2
@@ -64,9 +65,9 @@ Backend/
 | 3004 | registration-service | BE-2 · W2 | live |
 | 3005 | announcement-service | BE-2 · W2 | live |
 | 3006 | points-service | BE-2 · W3 | live |
-| 3007 | leaderboard-service | BE-1 · W3 | live — event standings, global rank, points investment |
+| 3007 | leaderboard-service | BE-1 · W3/W4 | live — event standings, global rank, points investment, `/hall-of-fame` |
 | 3008 | challenge-service | BE-2 · W3 | live — serves `/challenges` **and** `/strava` |
-| 3009 | media-service | BE-1 · W4 | not built |
+| 3009 | media-service | BE-1 · W4 | live — asset upload, albums, moderation, unified `/uploads` delivery |
 | 3010 | notification-service | BE-2 · W4 | live — inbox, announcement broadcast, WhatsApp |
 | 3011 | feedback-service | BE-2 · W4 | live — `/feedback`, `/contact` |
 | 3012 | bracket-service | BE-2 · W4 | live — `/brackets`, `/matches` |

@@ -9,6 +9,7 @@ import {
     dedupe,
     deliverAnnouncement,
     fanOutToRegistrants,
+    fanOutToStaff,
     refreshAnnouncementCards,
 } from '../broadcast/broadcast';
 import { renderMessage } from '../broadcast/templates';
@@ -319,6 +320,33 @@ async function onChallengeRejected(p: ChallengeRejectedPayload): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ *
+ * Feedback (Staff notice for submitted tickets)
+ * ------------------------------------------------------------------ */
+
+interface FeedbackSubmittedPayload extends Record<string, unknown> {
+    ticket_id: string;
+    ticket_no: string;
+    kind: string;
+    category: string;
+    subject?: string;
+}
+
+async function onFeedbackSubmitted(p: FeedbackSubmittedPayload): Promise<void> {
+    if (!p.ticket_id || !p.ticket_no) return;
+
+    await fanOutToStaff(
+        renderMessage('feedback.submitted', {
+            kind: p.kind ? p.kind.toUpperCase() : 'Feedback',
+            ticket_no: p.ticket_no,
+            subject: p.subject || 'New support ticket',
+            category: p.category || 'general',
+        }),
+        dedupe.feedbackSubmitted(p.ticket_id),
+        { ticket_id: p.ticket_id, ticket_no: p.ticket_no, kind: p.kind }
+    );
+}
+
+/* ------------------------------------------------------------------ *
  * Wiring
  * ------------------------------------------------------------------ */
 
@@ -340,6 +368,7 @@ export function initializeConsumers(): void {
     subscribe('PointsEarned', safe('points credit notice', onPointsEarned));
     subscribe('ChallengeCompleted', safe('challenge approval notice', onChallengeCompleted));
     subscribe('ChallengeRejected', safe('challenge rejection notice', onChallengeRejected));
+    subscribe('FeedbackSubmitted', safe('feedback ticket notice', onFeedbackSubmitted));
 
     console.log('[notification-service] Event consumers initialized');
 }
@@ -356,4 +385,6 @@ export const handlers = {
     onPointsEarned,
     onChallengeCompleted,
     onChallengeRejected,
+    onFeedbackSubmitted,
 };
+

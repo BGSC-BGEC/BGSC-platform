@@ -463,7 +463,7 @@
 #### Backend (BE-1 & BE-2)
 
 **Saturday Sep 26 (8h):**
-- [ ] **BE-1: Media Service** (8h)
+- [x] **BE-1: Media Service** (8h)
   - Media upload (images, videos)
   - Media gallery management
   - Media categorization (events, general, hall of fame)
@@ -482,7 +482,7 @@
   - User notification history
 
 **Sunday Sep 27 (8h):**
-- [ ] **BE-1: Hall of Fame Service** (8h)
+- [x] **BE-1: Hall of Fame Service** (8h)
   - Hall of Fame entries CRUD
   - Achievements and accolades management
   - Featured members selection

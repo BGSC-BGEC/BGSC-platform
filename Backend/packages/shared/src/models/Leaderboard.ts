@@ -20,6 +20,7 @@ export interface ILeaderboardEntry extends Document<string> {
         id: string;
         display_name: string;
         avatar_url: string | null;
+        deleted?: boolean;
     };
     registration_id: string | null;
 

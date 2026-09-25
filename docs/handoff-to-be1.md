@@ -258,7 +258,7 @@ router.patch('/users/:ref/role',
 
 ## 4.3 One thing your login must allow
 
-A soft-deleted user has 30 days to change their mind (`POST /users/me/restore`, Spec §11.2.1).
+A soft-deleted user has 45 days to change their mind (`POST /users/me/restore`, Spec §11.2.1).
 They can only reach that endpoint with a valid access token — so **login must still authenticate a
 user whose `status` is `deleted` and whose `deleted_at` is set**, at least while
 `deletion.restorable_until` is in the future.

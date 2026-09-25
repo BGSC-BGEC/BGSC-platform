@@ -366,6 +366,50 @@ async function main() {
     assert(!wrongOwner, 'A team for a challenge that does not exist must be refused');
     console.log('✓ A team cannot be created for a challenge that is not there');
 
+    console.log('15. Testing atomic debitPurse and refundPurse...');
+    const auctionTeam = await Team.create({
+        _id: uuid(),
+        owner: { type: 'event', id: eventId },
+        name: 'Purse Test Team',
+        captain_user_id: captain._id,
+        size_min: 1,
+        size_max: 5,
+        invite_code: 'PURSE123',
+        members: [{
+            user_id: captain._id,
+            display_name: 'Captain',
+            avatar_url: null,
+            registration_id: captainReg._id,
+            joined_at: new Date(),
+            acquired_via: 'created',
+        }],
+        status: 'forming',
+        auction: {
+            purse_total: 1000,
+            purse_spent: 0,
+            version: 0,
+            is_overridden: false,
+            override_reason: null,
+            overridden_by: null,
+        },
+    });
+
+    const debited = await teamService.debitPurse(auctionTeam._id, 350);
+    assert.strictEqual(debited.auction?.purse_spent, 350, 'Purse spent incremented to 350');
+
+    await assert.rejects(
+        () => teamService.debitPurse(auctionTeam._id, 700),
+        (err: any) => err.code === 'insufficient_purse',
+        'Overdrafting purse is refused'
+    );
+
+    const refunded = await teamService.refundPurse(auctionTeam._id, 200);
+    assert.strictEqual(refunded.auction?.purse_spent, 150, 'Purse spent decremented to 150');
+
+    const refundedAll = await teamService.refundPurse(auctionTeam._id, 500);
+    assert.strictEqual(refundedAll.auction?.purse_spent, 0, 'Purse spent floors at 0');
+    console.log('✓ Atomic debitPurse and refundPurse verified');
+
     // Cleanup
     await Team.deleteMany({ 'owner.id': challengeId });
     await Challenge.deleteOne({ _id: challengeId });

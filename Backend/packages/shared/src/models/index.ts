@@ -12,3 +12,6 @@ export * from './Notification';
 export * from './Feedback';
 export * from './Bracket';
 export * from './Strava';
+export * from './Media';
+export * from './HallOfFame';
+

@@ -108,6 +108,54 @@ export async function debitPoints(
     }
 }
 
+async function refundPoints(userId: string, amount: number, entryId: string, requestId: string): Promise<void> {
+    const pointsUrl = `${config.services.points}/internal/points/refund`;
+    try {
+        const res = await fetch(pointsUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Internal-Token': config.internalToken,
+                'x-service-token': config.internalToken,
+            },
+            body: JSON.stringify({
+                user_id: userId,
+                amount,
+                reference: { type: 'leaderboard_entry', id: entryId },
+                request_id: requestId,
+            }),
+        });
+        if (res.ok) return;
+    } catch {
+        // Fallback: direct DB write if Points Service is in-process or unreachable in test
+    }
+
+    try {
+        const updated = await User.findOneAndUpdate(
+            { _id: userId },
+            { $inc: { points_balance: amount } },
+            { returnDocument: 'after' }
+        );
+        if (updated) {
+            await PointTransaction.create({
+                _id: uuid(),
+                user_id: userId,
+                amount: amount,
+                type: 'refund',
+                source: 'leaderboard',
+                reason: 'leaderboard.investment',
+                reference: { type: 'leaderboard_entry', id: entryId },
+                idempotency_key: `leaderboard.investment.refund:${requestId}`,
+                balance_after: updated.points_balance ?? 0,
+                actor: { type: 'system', user_id: 'system' },
+            }).catch(() => {});
+        }
+    } catch (err) {
+        console.error(`[leaderboard-service] failed to refund points for user ${userId}:`, err);
+    }
+}
+
+
 /**
  * Recompute normalization, final scores, and ranks for all entries of an event.
  * Saves entries, captures a snapshot, prunes snapshots > 20, and refreshes Redis cache.
@@ -727,41 +775,46 @@ export async function investPoints(ref: string, actor: Actor, amount: number) {
         const requestId = uuid();
         await debitPoints(actor.id, amount, freshEntry._id, requestId);
 
-        // Atomic OCC update with retry
+        // Atomic OCC update with retry and compensation on failure
         let currentEntry = freshEntry;
         let updatedEntry: ILeaderboardEntry | null = null;
-        while (!updatedEntry) {
-            updatedEntry = await LeaderboardEntry.findOneAndUpdate(
-                { _id: currentEntry._id, version: currentEntry.version },
-                { $inc: { invested_points: amount, version: 1 } },
-                { returnDocument: 'after' }
-            );
-            if (!updatedEntry) {
-                const reloaded = await LeaderboardEntry.findById(currentEntry._id);
-                if (!reloaded) throw new ServiceError(404, 'entry_not_found');
-                currentEntry = reloaded;
+        try {
+            while (!updatedEntry) {
+                updatedEntry = await LeaderboardEntry.findOneAndUpdate(
+                    { _id: currentEntry._id, version: currentEntry.version },
+                    { $inc: { invested_points: amount, version: 1 } },
+                    { returnDocument: 'after' }
+                );
+                if (!updatedEntry) {
+                    const reloaded = await LeaderboardEntry.findById(currentEntry._id);
+                    if (!reloaded) throw new ServiceError(404, 'entry_not_found');
+                    currentEntry = reloaded;
+                }
             }
+
+            const priorRank = currentEntry.rank;
+            const { allEntries } = await recomputeEventRanks(event._id, 'investment');
+            const refreshed = allEntries.find((e) => e._id === updatedEntry?._id);
+            const newRank = refreshed?.rank ?? null;
+
+            publish('LeaderboardInvestmentMade', 'leaderboard-service', {
+                event_id: event._id,
+                user_id: actor.id,
+                amount,
+                previous_rank: priorRank,
+                new_rank: newRank,
+            });
+
+            return {
+                success: true,
+                entry: refreshed,
+                previous_rank: priorRank,
+                new_rank: newRank,
+            };
+        } catch (occErr) {
+            await refundPoints(actor.id, amount, freshEntry._id, requestId);
+            throw occErr;
         }
-
-        const priorRank = currentEntry.rank;
-        const { allEntries } = await recomputeEventRanks(event._id, 'investment');
-        const refreshed = allEntries.find((e) => e._id === updatedEntry?._id);
-        const newRank = refreshed?.rank ?? null;
-
-        publish('LeaderboardInvestmentMade', 'leaderboard-service', {
-            event_id: event._id,
-            user_id: actor.id,
-            amount,
-            previous_rank: priorRank,
-            new_rank: newRank,
-        });
-
-        return {
-            success: true,
-            entry: refreshed,
-            previous_rank: priorRank,
-            new_rank: newRank,
-        };
     } finally {
         await releaseEntryLock(entry._id, lockId);
     }

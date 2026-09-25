@@ -33,6 +33,7 @@ Legacy code/docs are **not** a source.
 | [notification-model.md](notification-model.md) | `notifications`, `notification_dispatches`, `notification_preferences` | §4.1 Notification, §9.4 WhatsApp, §10 Notification System (added Week 4 Saturday) |
 | [feedback-model.md](feedback-model.md) | `feedback_tickets`, `feedback_throttle` | §4.1 FeedbackTicket, §5.12 Feedback & Contact Us (added Week 4 Sunday) |
 | [bracket-model.md](bracket-model.md) | `brackets`, `matches` | §4.1 Match, §5.5 Spectator Bracket View, §5.15.2 Bracket Generator (added Week 4 Sunday) |
+| [media-model.md](media-model.md) | `media`, `media_albums` | §2.1 Media Service (:3009), §5.11 Media Page, §15.1 Media Uploads (added Week 4 Saturday) |
 | [strava-model.md](strava-model.md) | `strava_credentials`, `strava_activities` | §9.1 Strava, §12.4 Integration Settings (added Week 3 Sunday — see the gap note below) |
 | [relationships.md](relationships.md) | — | How everything references everything; write ownership; event flow |
 

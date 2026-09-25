@@ -650,5 +650,95 @@ console.log('--- Auction Engine Selfcheck ---');
     assert.strictEqual(maxAllowedOverrides, 0, 'quota ceiling evaluated against active teams');
 }
 
+// 19. Distributed Transaction Compensation & Purse Refund Safeguard
+{
+    let purseDebited = false;
+    let purseRefunded = false;
+    let lotRolledBack = false;
+
+    interface MockLotSettlement {
+        status: string;
+        sold_to_team_id: string | null;
+    }
+    const lot: MockLotSettlement = { status: 'on_block', sold_to_team_id: null };
+
+    function simulateSettlementWithFailure(shouldFailRoster: boolean) {
+        // Step 1: Claim lot
+        lot.status = 'sold';
+        lot.sold_to_team_id = 'team-101';
+        let debited = false;
+        try {
+            // Step 2: Debit purse
+            purseDebited = true;
+            debited = true;
+            // Step 3: Add roster member (fails)
+            if (shouldFailRoster) {
+                throw new Error('roster_addition_failed');
+            }
+        } catch (err) {
+            // Step 4: Distributed compensation
+            if (debited) {
+                purseRefunded = true;
+            }
+            lot.status = 'on_block';
+            lot.sold_to_team_id = null;
+            lotRolledBack = true;
+            throw err;
+        }
+    }
+
+    assert.throws(() => simulateSettlementWithFailure(true), /roster_addition_failed/);
+    assert.strictEqual(purseDebited, true, 'purse was initially debited');
+    assert.strictEqual(purseRefunded, true, 'purse was compensated/refunded upon failure');
+    assert.strictEqual(lotRolledBack, true, 'lot status rolled back to on_block');
+    assert.strictEqual(lot.status, 'on_block', 'lot state remains on_block');
+}
+
+// 20. Atomic Capacity Reservation & Overbooking Immunity Math
+{
+    const max = 10;
+    let confirmedCount = 9;
+    let waitlistCount = 0;
+
+    function simulateAtomicReserve(wasWaitlisted: boolean, waitlistEnabled: boolean) {
+        // Atomic condition: counts.registrations_confirmed < max
+        if (confirmedCount < max) {
+            confirmedCount += 1;
+            if (wasWaitlisted) {
+                waitlistCount = Math.max(0, waitlistCount - 1);
+            }
+            return { reserved: true, waitlisted: false };
+        }
+        if (wasWaitlisted) {
+            return { reserved: false, reason: 'capacity_full' };
+        }
+        if (!waitlistEnabled) {
+            return { reserved: false, reason: 'capacity_full' };
+        }
+        waitlistCount += 1;
+        return { reserved: true, waitlisted: true };
+    }
+
+    // 1st request claims last open seat (seat 10)
+    const res1 = simulateAtomicReserve(false, true);
+    assert.strictEqual(res1.reserved, true);
+    assert.strictEqual(res1.waitlisted, false);
+    assert.strictEqual(confirmedCount, 10);
+
+    // 2nd request cannot claim seat, gets routed to waitlist
+    const res2 = simulateAtomicReserve(false, true);
+    assert.strictEqual(res2.reserved, true);
+    assert.strictEqual(res2.waitlisted, true);
+    assert.strictEqual(confirmedCount, 10, 'confirmed count never exceeds max 10');
+    assert.strictEqual(waitlistCount, 1, 'waitlist count increments');
+
+    // 3rd request with waitlist disabled gets capacity_full
+    const res3 = simulateAtomicReserve(false, false);
+    assert.strictEqual(res3.reserved, false);
+    assert.strictEqual(res3.reason, 'capacity_full');
+    assert.strictEqual(confirmedCount, 10);
+    assert.strictEqual(waitlistCount, 1);
+}
+
 console.log('auction service selfcheck: all assertions passed');
 

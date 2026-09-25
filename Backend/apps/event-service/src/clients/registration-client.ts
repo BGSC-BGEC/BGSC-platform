@@ -43,6 +43,37 @@ export async function debitTeamPurse(teamId: string, amount: number): Promise<bo
     return Boolean(updated);
 }
 
+export async function refundTeamPurse(teamId: string, amount: number): Promise<boolean> {
+    try {
+        const res = await fetch(`${config.services.registration}/internal/teams/${teamId}/refund-purse`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Internal-Token': config.internalToken,
+            },
+            body: JSON.stringify({ amount }),
+            signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+        if (res.ok) return true;
+        console.warn(`[event-service] registration service refund-purse responded ${res.status}, falling back to atomic DB update`);
+    } catch {
+        // Fallback to direct DB update
+    }
+
+    const updated = await Team.findOneAndUpdate(
+        { _id: teamId },
+        {
+            $inc: { 'auction.purse_spent': -amount, 'auction.version': 1 },
+        },
+        { returnDocument: 'after' }
+    );
+    if (updated?.auction && updated.auction.purse_spent < 0) {
+        updated.auction.purse_spent = 0;
+        await updated.save();
+    }
+    return Boolean(updated);
+}
+
 export async function addAuctionTeamMember(
     teamId: string,
     userId: string,

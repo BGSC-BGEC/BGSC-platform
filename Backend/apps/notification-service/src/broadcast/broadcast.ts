@@ -4,6 +4,7 @@ import {
     IAnnouncement,
     REGISTERED_STATUS,
     ROLE_RANK,
+    RoleName,
     User,
     UserStatus,
     roleRank,
@@ -32,6 +33,7 @@ export const dedupe = {
     eventCancelled: (eventId: string) => `event.cancelled:${eventId}`,
     // The ledger row, not the user: one card per credit, and the row is already idempotent.
     pointsEarned: (transactionId: string) => `points.earned:${transactionId}`,
+    feedbackSubmitted: (ticketId: string) => `feedback.submitted:${ticketId}`,
 };
 
 /** The card body is a teaser, not the announcement. The full text is one tap away. */
@@ -171,3 +173,35 @@ export async function fanOutToRegistrants(
 
     return createMany(rows);
 }
+
+/**
+ * Send one message to all active staff members at or above a given role floor.
+ * Defaults to 'core' floor for system notices like feedback tickets.
+ */
+export async function fanOutToStaff(
+    message: RenderedMessage,
+    dedupeKey: string,
+    data: Record<string, unknown>,
+    minRoleFloor: RoleName = 'core'
+): Promise<number> {
+    const floor = Math.max(0, roleRank(minRoleFloor));
+    const filter: Record<string, unknown> = {
+        role: { $in: ROLE_RANK.slice(floor) },
+        status: UserStatus.ACTIVE,
+        deleted_at: null,
+    };
+    const [users, muted] = await Promise.all([
+        User.find(filter)
+            .select('_id')
+            .lean<{ _id: string }[]>(),
+        mutedUserIds(message.category),
+    ]);
+
+    const rows: NotificationInput[] = users
+        .map((u) => u._id)
+        .filter((id) => !muted.has(id))
+        .map((user_id) => ({ user_id, ...message, data, dedupe_key: dedupeKey }));
+
+    return createMany(rows);
+}
+

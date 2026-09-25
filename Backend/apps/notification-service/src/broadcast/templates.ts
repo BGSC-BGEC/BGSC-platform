@@ -68,6 +68,11 @@ export const TEMPLATES = {
         title: 'Cancelled: {{event_title}}',
         body: '{{event_title}} has been cancelled. Any points awarded for it are reversed automatically.',
     },
+    'feedback.submitted': {
+        category: 'system',
+        title: 'New {{kind}}: {{ticket_no}}',
+        body: '{{subject}} ({{category}})',
+    },
 } as const satisfies Record<string, Template>;
 
 export type TemplateKey = keyof typeof TEMPLATES;

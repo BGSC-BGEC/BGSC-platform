@@ -292,21 +292,24 @@ export async function updateEvent(
     });
 
     // Check status transition validity
+    let statusTransition: string | null = null;
     if (input.status && input.status !== event.status) {
         if (event.status === 'cancelled' || event.status === 'past') {
             throw new ServiceError(409, 'event_is_terminal');
         }
-        if (input.status === 'cancelled') {
-            publish('EventCancelled', PRODUCER, { event_id: event._id });
-        } else if (input.status === 'ongoing') {
-            publish('EventStarted', PRODUCER, { event_id: event._id });
-        } else if (input.status === 'past') {
-            publish('EventCompleted', PRODUCER, { event_id: event._id });
-        }
+        statusTransition = input.status;
     }
 
     Object.assign(event, input);
     await event.save();
+
+    if (statusTransition === 'cancelled') {
+        publish('EventCancelled', PRODUCER, { event_id: event._id });
+    } else if (statusTransition === 'ongoing') {
+        publish('EventStarted', PRODUCER, { event_id: event._id });
+    } else if (statusTransition === 'past') {
+        publish('EventCompleted', PRODUCER, { event_id: event._id });
+    }
 
     publish('EventUpdated', PRODUCER, { event_id: event._id });
     return event;
@@ -351,22 +354,43 @@ export async function reserveSeat(
     }
 
     const max = event.registration.max_participants;
-    const current = event.counts.registrations_confirmed;
 
     // Check if this was a waitlist promotion
     const existingSub = await FormSubmission.findById(registrationId);
     const wasWaitlisted = existingSub && existingSub.status === 'waitlisted';
 
-    if (max !== null && current >= max) {
-        if (!event.registration.waitlist_enabled) {
-            return { reserved: false, reason: 'capacity_full' };
+    if (max !== null) {
+        const updated = await Event.findOneAndUpdate(
+            {
+                _id: eventId,
+                'counts.registrations_confirmed': { $lt: max },
+            },
+            { $inc: { 'counts.registrations_confirmed': 1 } },
+            { returnDocument: 'after' }
+        );
+
+        if (!updated) {
+            if (wasWaitlisted) {
+                return { reserved: false, reason: 'capacity_full' };
+            }
+            if (!event.registration.waitlist_enabled) {
+                return { reserved: false, reason: 'capacity_full' };
+            }
+            // Waitlist enabled -> seat reserved on waitlist
+            await Event.updateOne({ _id: eventId }, { $inc: { 'counts.registrations_waitlisted': 1 } });
+            return { reserved: true, waitlisted: true };
         }
-        // Waitlist enabled -> seat reserved on waitlist
-        await Event.updateOne({ _id: eventId }, { $inc: { 'counts.registrations_waitlisted': 1 } });
-        return { reserved: true, waitlisted: true };
+
+        if (wasWaitlisted) {
+            await Event.updateOne(
+                { _id: eventId, 'counts.registrations_waitlisted': { $gt: 0 } },
+                { $inc: { 'counts.registrations_waitlisted': -1 } }
+            );
+        }
+        return { reserved: true, waitlisted: false };
     }
 
-    // Capacity available
+    // Capacity unlimited
     await Event.updateOne({ _id: eventId }, { $inc: { 'counts.registrations_confirmed': 1 } });
     if (wasWaitlisted) {
         await Event.updateOne(
@@ -727,8 +751,8 @@ export async function promoteWaitlistedParticipant(
     });
     await sub.save();
 
-    await Event.updateOne(
-        { _id: event._id },
+    const updatedWithWaitlist = await Event.findOneAndUpdate(
+        { _id: event._id, 'counts.registrations_waitlisted': { $gt: 0 } },
         {
             $inc: {
                 'counts.registrations_confirmed': 1,
@@ -736,6 +760,15 @@ export async function promoteWaitlistedParticipant(
             },
         }
     );
+    if (!updatedWithWaitlist) {
+        await Event.updateOne(
+            { _id: event._id },
+            {
+                $inc: { 'counts.registrations_confirmed': 1 },
+                $set: { 'counts.registrations_waitlisted': 0 },
+            }
+        );
+    }
 
     publish('RegistrationConfirmed', PRODUCER, {
         registration_id: sub._id,

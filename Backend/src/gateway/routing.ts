@@ -17,11 +17,11 @@ export interface Route {
 
 export const ROUTES: Record<string, Route> = {
     auth: { prefixes: ['/auth', '/account'], target: config.services.auth, owner: 'BE-1 · W1' },
-    user: { prefixes: ['/users', '/uploads/avatars'], target: config.services.user, owner: 'BE-2 · W1' },
-    event: { prefixes: ['/events', '/uploads/events'], target: config.services.event, owner: 'BE-1 · W2' },
+    user: { prefixes: ['/users'], target: config.services.user, owner: 'BE-2 · W1' },
+    event: { prefixes: ['/events'], target: config.services.event, owner: 'BE-1 · W2' },
     auction: { prefixes: ['/auction'], target: config.services.event, owner: 'BE-1 · W3' },
     registration: {
-        prefixes: ['/forms', '/registrations', '/teams', '/uploads/registrations'],
+        prefixes: ['/forms', '/registrations', '/teams'],
         target: config.services.registration,
         owner: 'BE-2 · W2',
     },
@@ -34,16 +34,15 @@ export const ROUTES: Record<string, Route> = {
     // is a deployment nobody wants to operate (be2-challenge-service-plan.md D1). Two keys, one
     // target — `target` is what the proxy dials, so nothing else here cares.
     strava: { prefixes: ['/strava'], target: config.services.challenge, owner: 'BE-2 · W3' },
-    // '/uploads' stays here as the catch-all, but the two services that serve their own files
-    // today claim their subtrees above and win by declaration order — otherwise every avatar URL
-    // the API hands out 503s at the edge, because media-service does not exist until Week 4.
-    // Delete those two prefixes when Media Service takes the whole tree over.
+    // In Week 4, Media Service consolidates storage ownership and serves all /uploads (*.jpg, *.png, *.webp, *.mp4, *.webm)
+    // alongside gallery routes /media.
     media: { prefixes: ['/media', '/uploads'], target: config.services.media, owner: 'BE-1 · W4' },
     notification: { prefixes: ['/notifications'], target: config.services.notification, owner: 'BE-2 · W4' },
     feedback: { prefixes: ['/feedback', '/contact'], target: config.services.feedback, owner: 'BE-2 · W4' },
     // Two prefixes, one container: a bracket is a plan and a match is a fixture, and both belong to
     // the same service (be2-feedback-bracket-plan.md §6).
     bracket: { prefixes: ['/brackets', '/matches'], target: config.services.bracket, owner: 'BE-2 · W4' },
+    hallOfFame: { prefixes: ['/hall-of-fame'], target: config.services.leaderboard, owner: 'BE-1 · W4' },
 };
 
 /** Services that actually exist today. Everything else 503s with a clear reason, not a hang. */
@@ -59,9 +58,11 @@ export const LIVE_SERVICES = new Set([
     'challenge',
     // Same container as `challenge`; live or not live together, always.
     'strava',
+    'media',
     'notification',
     'feedback',
     'bracket',
+    'hallOfFame',
 ]);
 
 /**

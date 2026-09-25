@@ -2,6 +2,7 @@ import { createServiceApp, startService } from '@bgsc/shared';
 import express from 'express';
 import { initializeConsumers } from './events/consumers';
 import { leaderboardRoutes } from './leaderboard/leaderboard.routes';
+import { hallOfFameRouter } from './hall-of-fame/hallOfFame.routes';
 
 /**
  * Leaderboard Service — :3007.
@@ -17,6 +18,7 @@ const options = {
     port: PORT,
     routes(app: express.Express) {
         app.use('/leaderboards', leaderboardRoutes);
+        app.use('/hall-of-fame', hallOfFameRouter);
     },
     async onReady() {
         initializeConsumers();

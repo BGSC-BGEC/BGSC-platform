@@ -261,6 +261,27 @@ async function onUserProfileUpdated(p: UserProfileUpdatedPayload): Promise<void>
             },
         }
     );
+
+    const { HallOfFameEntry } = await import('@bgsc/shared');
+    await HallOfFameEntry.updateMany(
+        { 'honoree.id': p.user_id, 'honoree.type': 'user' },
+        {
+            $set: {
+                'honoree.display_name': user.profile?.full_name || user.username,
+                'honoree.avatar_url': user.profile?.avatar_url || null,
+            },
+        }
+    );
+    await HallOfFameEntry.updateMany(
+        { 'members.user_id': p.user_id },
+        {
+            $set: {
+                'members.$[elem].display_name': user.profile?.full_name || user.username,
+                'members.$[elem].avatar_url': user.profile?.avatar_url || null,
+            },
+        },
+        { arrayFilters: [{ 'elem.user_id': p.user_id }] }
+    ).catch(() => {});
 }
 
 /* ------------------------------------------------------------------ *
@@ -282,6 +303,72 @@ async function onUserDeleted(p: UserDeletedPayload): Promise<void> {
             },
         }
     );
+
+    const { HallOfFameEntry } = await import('@bgsc/shared');
+    await HallOfFameEntry.updateMany(
+        { 'honoree.id': p.user_id, 'honoree.type': 'user' },
+        {
+            $set: {
+                'honoree.display_name': 'Deleted User',
+                'honoree.avatar_url': null,
+            },
+        }
+    );
+    await HallOfFameEntry.updateMany(
+        { 'members.user_id': p.user_id },
+        {
+            $set: {
+                'members.$[elem].display_name': 'Deleted User',
+                'members.$[elem].avatar_url': null,
+            },
+        },
+        { arrayFilters: [{ 'elem.user_id': p.user_id }] }
+    ).catch(() => {});
+}
+
+/* ------------------------------------------------------------------ *
+ * UserRestored
+ * ------------------------------------------------------------------ */
+
+export interface UserRestoredPayload extends Record<string, unknown> {
+    user_id: string;
+}
+
+async function onUserRestored(p: UserRestoredPayload): Promise<void> {
+    const user = await User.findById(p.user_id);
+    if (!user) return;
+
+    await LeaderboardEntry.updateMany(
+        { 'participant.id': p.user_id, 'participant.type': 'user' },
+        {
+            $set: {
+                'participant.display_name': user.profile?.full_name || user.username,
+                'participant.avatar_url': user.profile?.avatar_url || null,
+                'participant.deleted': false,
+            },
+        }
+    );
+
+    const { HallOfFameEntry } = await import('@bgsc/shared');
+    await HallOfFameEntry.updateMany(
+        { 'honoree.id': p.user_id, 'honoree.type': 'user' },
+        {
+            $set: {
+                'honoree.display_name': user.profile?.full_name || user.username,
+                'honoree.avatar_url': user.profile?.avatar_url || null,
+            },
+        }
+    );
+    await HallOfFameEntry.updateMany(
+        { 'members.user_id': p.user_id },
+        {
+            $set: {
+                'members.$[elem].display_name': user.profile?.full_name || user.username,
+                'members.$[elem].avatar_url': user.profile?.avatar_url || null,
+            },
+        },
+        { arrayFilters: [{ 'elem.user_id': p.user_id }] }
+    ).catch(() => {});
 }
 
 export function initializeConsumers(): void {
@@ -294,6 +381,8 @@ export function initializeConsumers(): void {
     subscribe('EventCancelled', safe('event cancelled', onEventCancelled));
     subscribe('UserProfileUpdated', safe('user profile updated', onUserProfileUpdated));
     subscribe('UserDeleted', safe('user deleted', onUserDeleted));
+    subscribe('UserRestored', safe('user restored', onUserRestored));
+    subscribe('ChallengeLegendAchieved', safe('challenge legend achieved', onChallengeLegendAchieved));
 }
 
 export const handlers = {
@@ -305,4 +394,126 @@ export const handlers = {
     onEventCancelled,
     onUserProfileUpdated,
     onUserDeleted,
+    onUserRestored,
+    onChallengeLegendAchieved,
 };
+
+/* ------------------------------------------------------------------ *
+ * ChallengeLegendAchieved
+ * ------------------------------------------------------------------ */
+
+export interface ChallengeLegendAchievedPayload extends Record<string, unknown> {
+    challenge_id: string;
+    participation_id?: string;
+    participant_id?: string;
+    participant_type?: 'user' | 'team';
+    member_user_ids?: string[];
+}
+
+async function onChallengeLegendAchieved(p: ChallengeLegendAchievedPayload): Promise<void> {
+    const { Challenge, ChallengeParticipation, User, Team, HallOfFameEntry } = await import('@bgsc/shared');
+    const challenge = await Challenge.findById(p.challenge_id).lean();
+    if (!challenge) return;
+
+    let honoree: { type: 'user' | 'team'; id: string; display_name: string; avatar_url: string | null } | null = null;
+    let members: Array<{ user_id: string; display_name: string; avatar_url: string | null }> | undefined = undefined;
+
+    if (p.participation_id) {
+        const participation = await ChallengeParticipation.findById(p.participation_id).lean();
+        if (participation) {
+            honoree = {
+                type: participation.participant.type,
+                id: participation.participant.id,
+                display_name: participation.participant.display_name,
+                avatar_url: participation.participant.avatar_url || null,
+            };
+            if (participation.participant.type === 'team' && participation.member_user_ids?.length) {
+                const users = await User.find({ _id: { $in: participation.member_user_ids } }).lean();
+                members = users.map((u) => ({
+                    user_id: u._id,
+                    display_name: u.profile?.full_name || u.username,
+                    avatar_url: u.profile?.avatar_url || null,
+                }));
+            }
+        }
+    }
+
+    if (!honoree) {
+        if (p.participant_type === 'team') {
+            const team = await Team.findById(p.participant_id).lean();
+            if (!team) return;
+            honoree = {
+                type: 'team',
+                id: team._id,
+                display_name: team.name,
+                avatar_url: team.logo_url || null,
+            };
+        } else if (p.participant_id) {
+            const user = await User.findById(p.participant_id).lean();
+            if (!user) return;
+            honoree = {
+                type: 'user',
+                id: user._id,
+                display_name: user.profile?.full_name || user.username,
+                avatar_url: user.profile?.avatar_url || null,
+            };
+        }
+    }
+
+    if (!honoree) return;
+
+    const title = `${honoree.display_name} - ${challenge.title}`;
+    const year = new Date().getFullYear();
+    const baseSlug = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${year}`;
+    let slug = baseSlug;
+    let suffix = 1;
+
+    while (true) {
+        const existing = await HallOfFameEntry.findOne({ slug, deleted_at: null }).lean();
+        if (!existing) break;
+        slug = `${baseSlug}-${suffix}`;
+        suffix++;
+    }
+
+    const entryId = uuid();
+    const createdOrExisting = await HallOfFameEntry.findOneAndUpdate(
+        {
+            category: 'challenge_legend',
+            'honoree.id': honoree.id,
+            'source.id': challenge._id,
+            deleted_at: null,
+        },
+        {
+            $setOnInsert: {
+                _id: entryId,
+                slug,
+                category: 'challenge_legend',
+                title: `${honoree.display_name} - ${challenge.title}`,
+                description: `Completed legend challenge: ${challenge.title}`,
+                honoree,
+                members,
+                source: {
+                    type: 'challenge',
+                    id: challenge._id,
+                    title: challenge.title,
+                },
+                achievement: {
+                    year,
+                    award_points: challenge.award_points,
+                    difficulty: 'legend',
+                },
+                created_by: 'system',
+                featured: false,
+                tags: ['challenge_legend'],
+            },
+        },
+        { upsert: true, returnDocument: 'after' }
+    );
+
+    if (p.participation_id && createdOrExisting) {
+        await ChallengeParticipation.updateOne(
+            { _id: p.participation_id },
+            { $set: { 'reward.hall_of_fame_entry_id': createdOrExisting._id } }
+        ).catch(() => {});
+    }
+}

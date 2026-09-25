@@ -5,9 +5,9 @@ Every domain service in `Backend/apps/` is built the same way: one workspace pac
 The service-specific code is small; what gets missed is the wiring around it, because none of it
 lives in the service's own directory.
 
-This doc is the checklist and the templates. Verified against the tree on Sep 20, 2026 with
-eleven live services built (auth, user, event, registration, announcement, points, leaderboard, challenge/strava, notification, feedback, bracket). Copy from `points-service`
-or `challenge-service` when in doubt — they are the most recent.
+This doc is the checklist and the templates. Verified against the tree on Sep 26, 2026 with
+twelve live services built (auth, user, event, registration, announcement, points, leaderboard, challenge/strava, media, notification, feedback, bracket). Copy from `feedback-service`,
+`bracket-service`, or `media-service` when in doubt — they are the most recent.
 
 Related: `local-dev-guide.md` (running things), `handoff-to-be1.md` §2, §4, §5 (token contract,
 middleware reference, error envelope), `typescript-toolchain.md` (why TypeScript is pinned to 6.x).

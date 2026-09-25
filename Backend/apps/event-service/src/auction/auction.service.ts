@@ -12,7 +12,7 @@ import {
     userSnapshotOf,
 } from '@bgsc/shared';
 import { randomUUID } from 'crypto';
-import { addAuctionTeamMember, debitTeamPurse } from '../clients/registration-client';
+import { addAuctionTeamMember, debitTeamPurse, refundTeamPurse } from '../clients/registration-client';
 import {
     CreateLotsInput,
     OverrideCaptainBudgetInput,
@@ -607,15 +607,28 @@ export async function advanceLot(
     }
 
     if (isSold) {
+        const teamId = claimedLot.current_bidder!.team_id;
+        const amount = claimedLot.current_bid!;
+        let debited = false;
         try {
-            await debitTeamPurse(claimedLot.current_bidder!.team_id, claimedLot.current_bid!);
+            debited = await debitTeamPurse(teamId, amount);
+            if (!debited) {
+                throw new ServiceError(422, 'insufficient_purse_at_settlement');
+            }
             await addAuctionTeamMember(
-                claimedLot.current_bidder!.team_id,
+                teamId,
                 claimedLot.player.user_id,
                 claimedLot.registration_id,
                 claimedLot.player
             );
         } catch (err) {
+            if (debited) {
+                try {
+                    await refundTeamPurse(teamId, amount);
+                } catch (refundErr) {
+                    console.error(`[auction] compensation refund failed for team ${teamId}:`, refundErr);
+                }
+            }
             // Rollback lot status if debit/membership failed
             await AuctionLot.updateOne(
                 { _id: lotId },

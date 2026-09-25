@@ -17,6 +17,8 @@ import {
     Challenge,
     ChallengeParticipation,
     Announcement,
+    Media,
+    MediaAlbum,
     rawScore,
     normalize,
     isVisibleTo,
@@ -524,6 +526,59 @@ async function main(): Promise<void> {
     assert.ok(
         isVisibleTo({ status: 'published', audience: { min_role: 'guest', event_id: 'e1' } }, viewer('guest', ['e1'])),
         'an event-scoped post is visible to a registrant'
+    );
+
+    /* ------------------------------ media & media_albums ------------------------------ */
+
+    const validMedia = () =>
+        new Media({
+            uploader: { user_id: 'u-1', display_name: 'Alice', avatar_url: null },
+            url: '/uploads/media/2026/09/test.webp',
+            original_filename: 'test.webp',
+            mime_type: 'image/webp',
+            media_type: 'image',
+            size_bytes: 1024,
+            category: 'community',
+            tags: ['football', 'tournament'],
+        });
+
+    const m = await ok(validMedia(), 'a minimal valid media item');
+    assert.strictEqual(m.status, 'approved', 'default status is approved');
+    assert.strictEqual(m.views_count, 0, 'views_count defaults to 0');
+    assert.strictEqual(m.likes_count, 0, 'likes_count defaults to 0');
+
+    await rejects(
+        new Media({ ...validMedia().toObject(), _id: undefined, media_type: 'audio' as any }),
+        'is not a valid enum value',
+        'an invalid media_type'
+    );
+
+    await rejects(
+        new Media({ ...validMedia().toObject(), _id: undefined, size_bytes: -1 }),
+        'is less than minimum allowed value',
+        'a negative size_bytes'
+    );
+
+    await rejects(
+        new Media({ ...validMedia().toObject(), _id: undefined, uploader: undefined }),
+        'Path `uploader` is required',
+        'a media item missing uploader'
+    );
+
+    const albumWithoutSlug = new MediaAlbum({
+        title: 'Offside Football 2026 Finals!',
+        category: 'event',
+        created_by: 'u-1',
+    });
+    const a = await ok(albumWithoutSlug, 'album with auto-derived slug');
+    assert.strictEqual(a.slug, 'offside-football-2026-finals', 'slug derived correctly from title');
+    assert.strictEqual(a.media_count, 0, 'media_count defaults to 0');
+    assert.strictEqual(a.is_public, true, 'is_public defaults to true');
+
+    await rejects(
+        new MediaAlbum({ category: 'event', created_by: 'u-1' } as any),
+        'Path `title` is required',
+        'an album without title'
     );
 
     console.log('models selfcheck: all assertions passed');

@@ -244,6 +244,57 @@ async function main(): Promise<void> {
         pass('a lost compare-and-swap refuses rather than overwriting');
     }
 
+    section('refundForInvestment restores spent points and dedupes on idempotency key');
+    {
+        const user = await seedUser(50);
+        const entryId = uuid();
+        const { LeaderboardEntry } = await import('@bgsc/shared');
+        await LeaderboardEntry.create({
+            _id: entryId,
+            event_id: uuid(),
+            participant: { type: 'user', id: user._id, display_name: 'Test' },
+            registration_id: uuid(),
+            raw: {},
+            raw_score: 0,
+            normalized_score: 0,
+            invested_points: 20,
+            final_score: 20,
+            stats: { played: 0, won: 0, lost: 0, drawn: 0, round_reached: null, fails: null, eliminated: false },
+            rank: null,
+            previous_rank: null,
+            last_scored_at: null,
+            scored_by: null,
+            version: 0,
+        });
+
+        const reqId = uuid();
+        await spend(user._id, 20, idempotencyKey.leaderboardInvestment(reqId));
+        assert.strictEqual(await balanceOf(user._id), 30);
+
+        const { refundForInvestment } = await import('../points/points.service');
+        const { tx: refundTx, replayed: r1 } = await refundForInvestment({
+            user_id: user._id,
+            amount: 20,
+            reference: { type: 'leaderboard_entry', id: entryId },
+            request_id: reqId,
+        });
+        assert.strictEqual(r1, false);
+        assert.strictEqual(refundTx.type, 'refund');
+        assert.strictEqual(refundTx.amount, 20);
+        assert.strictEqual(await balanceOf(user._id), 50);
+
+        const { tx: refundTx2, replayed: r2 } = await refundForInvestment({
+            user_id: user._id,
+            amount: 20,
+            reference: { type: 'leaderboard_entry', id: entryId },
+            request_id: reqId,
+        });
+        assert.strictEqual(r2, true);
+        assert.strictEqual(refundTx2._id, refundTx._id);
+        assert.strictEqual(await balanceOf(user._id), 50);
+        pass('refundForInvestment compensates debited points and dedupes idempotently');
+    }
+
     await resetLedger();
     console.log('\nledger.selfcheck: all assertions passed.');
 }

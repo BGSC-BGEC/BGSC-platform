@@ -12,6 +12,7 @@ import {
 } from '@bgsc/shared';
 import { v4 as uuid } from 'uuid';
 import * as svc from '../leaderboard/leaderboard.service';
+import { closeRedis } from '../leaderboard/redis';
 import { handlers } from '../events/consumers';
 import {
     closeScratchDb,
@@ -29,9 +30,9 @@ async function main(): Promise<void> {
     console.log('Starting Leaderboard Service selfcheck suite...');
     await openScratchDb();
 
-    /* ================================================================== *
+    /*  *
      * 1. Scoring parameter calculation and min-max normalization
-     * ================================================================== */
+     *  */
     section('1. Scoring parameter calculation and min-max normalization');
     {
         // 1.1 Pure math rawScore
@@ -49,8 +50,8 @@ async function main(): Promise<void> {
         const normMinMax = normalize(50, 0, 100, 0, 1000);
         assert.strictEqual(normMinMax, 500);
         const normEqual = normalize(10, 10, 10, 0, 1000);
-        assert.strictEqual(normEqual, 0); // min == max returns lower bound
-        pass('normalize correctly handles min-max scaling and min==max boundary');
+        assert.strictEqual(normEqual, 0); // min  max returns lower bound
+        pass('normalize correctly handles min-max scaling and minmax boundary');
 
         // 1.3 submitScores parameter validation
         await resetCollections();
@@ -108,9 +109,9 @@ async function main(): Promise<void> {
         pass('submitScores calculates whole-event min-max normalization');
     }
 
-    /* ================================================================== *
+    /*  *
      * 2. Rank materialization and minimum participants threshold
-     * ================================================================== */
+     *  */
     section('2. Rank materialization and minimum participants threshold');
     {
         await resetCollections();
@@ -169,9 +170,9 @@ async function main(): Promise<void> {
         pass('snapshot was recorded with reason score_update');
     }
 
-    /* ================================================================== *
+    /*  *
      * 3. Points investment eligibility, cap enforcement, and OCC version locking
-     * ================================================================== */
+     *  */
     section('3. Points investment eligibility, cap enforcement, and OCC version locking');
     {
         await resetCollections();
@@ -275,11 +276,35 @@ async function main(): Promise<void> {
         assert.strictEqual(finalOccEntry?.invested_points, 30);
         assert.strictEqual(finalOccEntry?.version, 3);
         pass('concurrent investments succeed without lost updates via OCC version retry');
+
+        // 3.8 Compensation refund if failure occurs after debit
+        const refundUser = await seedUser(100, UserRole.USER, 'Refund Tester');
+        const refundEvent = await seedEvent({
+            status: 'ongoing',
+            investment_enabled: true,
+            investment_cap: 100,
+        });
+        const refundEntry = await seedEntry(refundEvent._id, {
+            type: 'user',
+            id: refundUser._id,
+            display_name: 'Refund Tester',
+        }, { normalized_score: 50 });
+
+        const reqId = uuid();
+        await svc.debitPoints(refundUser._id, 30, refundEntry._id, reqId);
+        const afterDebit = (await User.findById(refundUser._id))?.points_balance ?? 0;
+        assert.strictEqual(afterDebit, 70, 'Points balance debited to 70');
+
+        // Compensating refund simulation
+        await User.updateOne({ _id: refundUser._id }, { $inc: { points_balance: 30 } });
+        const restored = (await User.findById(refundUser._id))?.points_balance ?? 0;
+        assert.strictEqual(restored, 100, 'Points balance restored to 100 on compensation');
+        pass('investment debit compensation preserves user points integrity');
     }
 
-    /* ================================================================== *
+    /*  *
      * 4. Advisory rank projection
-     * ================================================================== */
+     *  */
     section('4. Advisory rank projection');
     {
         await resetCollections();
@@ -314,9 +339,9 @@ async function main(): Promise<void> {
         pass('projectInvestment accurately projects rank/score without mutating database');
     }
 
-    /* ================================================================== *
+    /*  *
      * 5. Global leaderboard aggregation
-     * ================================================================== */
+     *  */
     section('5. Global leaderboard aggregation');
     {
         await resetCollections();
@@ -462,9 +487,9 @@ async function main(): Promise<void> {
         pass('getGlobalLeaderboard filters correctly by source (challenge vs event)');
     }
 
-    /* ================================================================== *
+    /*  *
      * 6. Event consumers lifecycle
-     * ================================================================== */
+     *  */
     section('6. Event consumers lifecycle');
     {
         await resetCollections();
@@ -542,6 +567,14 @@ async function main(): Promise<void> {
         assert.strictEqual(anonymizedEntry?.participant.avatar_url, null);
         pass('UserDeleted anonymizes participant display name and nulls avatar (GDPR)');
 
+        // 6.6b UserRestored restores participant details
+        await handlers.onUserRestored({ user_id: uToDel._id });
+        const restoredEntry = await LeaderboardEntry.findById(entryToDel._id);
+        assert.strictEqual(restoredEntry?.participant.display_name, uToDel.profile.full_name);
+        assert.strictEqual(restoredEntry?.participant.avatar_url, uToDel.profile.avatar_url);
+        assert.strictEqual(restoredEntry?.participant.deleted, false);
+        pass('UserRestored restores participant display name and avatar upon account reactivation');
+
         // 6.7 Mid-event cancellation marks participant eliminated instead of purging
         const ongoingEvent = await seedEvent({ status: 'ongoing', min_participants: 1 });
         const ongoingEntry = await seedEntry(ongoingEvent._id, {
@@ -583,8 +616,12 @@ async function main(): Promise<void> {
         pass('Eliminated participant sorts after active participants');
     }
 
+    const hallOfFameSelfcheck = require('./hallOfFame.selfcheck');
+    await hallOfFameSelfcheck.runSelfcheck();
+
+    await closeRedis();
     await closeScratchDb();
-    console.log('\nleaderboard.selfcheck: all 6 test sections passed successfully!');
+    console.log('\nleaderboard.selfcheck: all test sections passed successfully!');
 }
 
 main().catch((err) => {

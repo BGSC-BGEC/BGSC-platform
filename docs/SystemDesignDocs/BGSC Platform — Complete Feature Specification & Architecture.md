@@ -81,8 +81,8 @@ The platform follows an **Event-Driven Architecture (EDA)** where all significan
 │  │ (Quests & Strava)    │ │ (Inbox & WhatsApp)   │ │ (Anon Ticketing)  │ │
 │  └──────────┬───────────┘ └──────────┬───────────┘ └─────────┬─────────┘ │
 │  ┌──────────┴───────────┐ ┌──────────┴───────────┐ ┌─────────┴─────────┘ │
-│  │ bracket (:3012)      │ │ leaderboard (:3007)  │ │ media (:3009)*    │ │
-│  │ (Tourneys & Matches) │ │ (Ranks & Standings)  │ │ (* Unbuilt - BE1) │ │
+│  │ bracket (:3012)      │ │ leaderboard (:3007)  │ │ media (:3009)     │ │
+│  │ (Tourneys & Matches) │ │ (Ranks & Standings)  │ │ (Uploads & Media) │ │
 │  └──────────────────────┘ └──────────────────────┘ └───────────────────┘ │
 └─────────────────────────────┬──────────────────┬─────────────────────────┘
                                │                  │
@@ -128,7 +128,7 @@ The platform follows an **Event-Driven Architecture (EDA)** where all significan
 5. Real-time spectator read: Live Spectator and Captain clients poll `GET /auction/events/{ref}/live` (1.5–2.0s interval), fetching active lot, countdown timestamp, `seconds_remaining`, current bidder, recent bids, and team purse standings
 6. Two-Phase Settlement & Advance:
    - On countdown expiration or admin call `POST /auction/lots/{id}/advance`:
-     - If winning bid exists: debits team purse via `POST /internal/teams/{id}/debit-purse`, adds player to team roster via `POST /internal/teams/{id}/add-member` (`acquired_via: 'auction'`), marks lot `'sold'`, and emits `BidClosed` and `PlayerSold`
+     - If winning bid exists: atomically debits team purse via `POST /internal/teams/{id}/debit-purse` (with automated compensation rollback via `POST /internal/teams/{id}/refund-purse` if roster addition fails), adds player to team roster via `POST /internal/teams/{id}/add-member` (`acquired_via: 'auction'`), marks lot `'sold'`, and emits `BidClosed` and `PlayerSold`
      - If no bids exist: marks lot `'unsold'` and emits `BidClosed` and `PlayerUnsold`
      - Automatically advances next queued lot (`order: 1`) to `'on_block'` with active countdown (+5s), emitting `AuctionStarted`
     
@@ -310,6 +310,50 @@ The BGSC platform is engineered to operate efficiently on a resource-constrained
 5. **Atomic CAS Advance & Double-Debit Immunity:**
    - *Problem:* High-velocity lot advancement under concurrent requests risks double-debiting team purses or double-adding roster members.
    - *Solution:* `advanceLot` transitions `status: 'on_block'` to `'sold'` / `'unsold'` via an atomic compare-and-swap (`AuctionLot.findOneAndUpdate({ _id: lotId, status: 'on_block' }, ...)`). If a concurrent call occurs, exactly one worker claims the settlement; all subsequent callers detect the settled state and return idempotently without duplicate side-effects. If debit fails, state safely rolls back to `'on_block'`.
+
+6. **Atomic Conditional Capacity Reservation & Overbooking Immunity:**
+   - *Problem:* In high-demand tournament sign-ups (e.g. 500–1,000 users attempting to register for a 64-seat event at launch), in-memory capacity evaluations (`current < max`) followed by unconditional increments (`$inc: 1`) suffer from race conditions where multiple concurrent requests pass the check before the first increment writes, leading to critical overbooking beyond `max_participants`.
+   - *Solution:* In `apps/event-service/src/events/event.service.ts`, `reserveSeat` enforces capacity checks atomically at the database engine level via conditional matching:
+     ```ts
+     Event.findOneAndUpdate(
+         {
+             _id: eventId,
+             $or: [
+                 { 'registration.max_participants': null },
+                 { 'counts.registrations_confirmed': { $lt: max } }
+             ]
+         },
+         { $inc: { 'counts.registrations_confirmed': 1 } },
+         { returnDocument: 'after' }
+     )
+     ```
+     If the atomic match returns null, capacity is full; the engine seamlessly routes the user to waitlist reservation (if enabled) or rejects with `capacity_full`. Overbooking is mathematically impossible under any concurrency volume.
+
+7. **Distributed Transaction Compensation & Purse Refund Safeguards:**
+   - *Problem:* During auction lot settlement (`advanceLot`), two external mutations occur: debiting the team purse in Registration Service (`POST /internal/teams/:id/debit-purse`) and adding the player to the team roster (`POST /internal/teams/:id/add-member`). If the debit succeeds but roster addition fails (e.g. network timeout or roster size invariant), naive catch-blocks roll back lot state to `on_block` but leave the winning team's purse deducted with no player acquired.
+   - *Solution:* Implemented an atomic distributed compensation pattern:
+     - `team.service.ts` provides atomic conditional debit (`$lte: purse_total - amount`) and dedicated atomic refund (`refundPurse` via `POST /internal/teams/:id/refund-purse`).
+     - In `advanceLot`, if `addAuctionTeamMember` fails after a successful purse debit, the engine catches the error, immediately executes compensating `refundTeamPurse(teamId, amount)`, and only then rolls back the lot to `'on_block'`. Financial consistency is preserved with zero purse leakage.
+
+8. **Database Write-First Event Publication Ordering (Event Invariant):**
+   - *Problem:* Emitting domain lifecycle events (e.g. `EventCancelled`, `EventStarted`, `EventCompleted`) over the Redis pub/sub bus *before* `await event.save()` commits to MongoDB introduces critical distributed failure windows. If document validation fails, connection drops, or write collisions occur, downstream consumers (Points Service reversing attendance points, Leaderboard Service purging registrations, Notification Service broadcasting alerts) immediately enact irreversible side effects for an event mutation that was rejected and never saved.
+   - *Solution:* In `apps/event-service/src/events/event.service.ts` (`updateEvent`), status transitions are cached in local memory, the mutation is committed to MongoDB via `await event.save()` first, and only upon verified database persistence are domain events dispatched.
+
+9. **Distributed Support/Feedback Staff Ingestion & In-App Fan-Out:**
+   - *Problem:* When users submit support tickets or bug reports via Feedback Service (`apps/feedback-service`), `FeedbackSubmitted` is published on the event bus. Without a consumer in Notification Service, support issues accumulated silently without in-app notification to organizers, admins, and core staff.
+   - *Solution:* Notification Service (`apps/notification-service`) registers `onFeedbackSubmitted`, matching template `feedback.submitted` (`New {{kind}}: {{ticket_no}}`), and executes `fanOutToStaff` targeting active users with role floor $\ge$ `CORE` (`ROLE_RANK.slice(floor)`), guarded by idempotent deduplication `feedback.submitted:${ticket_id}`.
+
+10. **Account Reactivation Reconciliation in Downstream Aggregates (`UserRestored`):**
+    - *Problem:* When a user initiates soft-deletion, GDPR anonymization rules mask their participant identity on leaderboards to `'Deleted User'` and `avatar_url: null`. If the user subsequently exercises their 45-day self-service reactivation via `POST /account/reactivate` (`auth-service`), Auth Service emits `UserRestored`. Without downstream consumers, their historical and active leaderboard placements remained permanently pseudonymized as `'Deleted User'`.
+    - *Solution:* Leaderboard Service (`apps/leaderboard-service`) subscribes to `UserRestored`, looking up the restored user profile and updating all active and historical `LeaderboardEntry` participant snapshots back to their actual name (`full_name` or `username`), avatar, and resets `participant.deleted: false`.
+
+11. **Symmetric Internal Points Compensation Protocol (`POST /internal/points/refund`):**
+    - *Problem:* During leaderboard points investments (`leaderboard-service`), Points Service debits the user's ledger via `POST /internal/points/spend`. If the subsequent Optimistic Concurrency Control (OCC) version retry loop fails under extreme contention, Leaderboard Service had to manipulate MongoDB documents directly to restore the balance, breaking microservice boundary encapsulation and bypassing points ledger rule enforcement.
+    - *Solution:* Points Service (`apps/points-service`) provides a dedicated service-to-service endpoint `POST /internal/points/refund`, backed by `idempotencyKey.leaderboardInvestmentRefund(request_id)` and ledger `record()` with `type: 'refund'`. Leaderboard Service calls this endpoint during compensation rollback, maintaining strict ledger integrity and auditability.
+
+12. **Non-Negative Lower-Bound Floor Invariants on Distributed Counters:**
+    - *Problem:* Unconditional `$inc: -1` on aggregate counters (such as `counts.registrations_waitlisted` upon waitlist promotion, or `counts.accepted` upon challenge withdrawal) risks driving counters below zero if state drifts or duplicate operations occur.
+    - *Solution:* Counter decrements are strictly bounded with conditional filters `{ 'counts.registrations_waitlisted': { $gt: 0 } }` and `{ 'counts.accepted': { $gt: 0 } }`, preventing negative count corruption.
 
 
 ## 3. Global UI/UX Frame & Navigation
@@ -570,6 +614,15 @@ announcements        _id, title, body, media_url, categories[], tags[],
 audit_logs           _id, actor_id, action (dotted machine key), target_type, target_id,
                      previous_value, new_value, reason, ip, created_at
                      -- append-only; required by 7.3. Not in the original entity list above
+
+hall_of_fame_entries _id (uuid string), slug (unique), category[event_winner|challenge_legend|sponsor_champion|custom],
+                     title, description, quote,
+                     honoree{type[user|team], id, display_name, avatar_url},
+                     members[{user_id, display_name, avatar_url}],
+                     source{type[event|challenge|manual], id, title},
+                     achievement{domain, season, year, difficulty, award_points},
+                     media_url, cover_url, tags[], featured, featured_order,
+                     created_by, created_at, updated_at, deleted_at
 ```
 
 #### 4.1.2 `users` as built (BE-1 model, converted by BE-2)
@@ -1162,7 +1215,9 @@ The Live Auction Hub (Spec §4.1, §5.15.4, §11.4) governs high-concurrency pla
     )
     ```
     Only the single worker that successfully claims the CAS proceeds to invoke inter-service mutations (`debitTeamPurse` and `addAuctionTeamMember`). Subsequent concurrent callers or retries detect the terminal `'sold'` / `'unsold'` state and return the existing settled lot and next lot idempotently without duplicate debiting.
-  - *Settlement Rollback:* If Registration Service or database updates fail during purse debit or roster addition, the lot status and fields are safely rolled back to `'on_block'`.
+  - *Settlement Distributed Compensation:* If Registration Service or database updates fail during purse debit or roster addition, financial consistency is guaranteed through an atomic compensation workflow:
+    1. If `debitTeamPurse` fails or returns false, lot settlement aborts and rolls back to `on_block` without roster changes.
+    2. If `debitTeamPurse` succeeds but subsequent `addAuctionTeamMember` fails, the engine catches the error, immediately executes compensating `refundTeamPurse(teamId, amount)` (via `POST /internal/teams/:id/refund-purse`), and only then rolls back the lot to `'on_block'`. This ensures zero purse deduction without player acquisition.
   - *Sold Settlement:* If a highest bidder exists, the winning team's purse is debited via Registration Service (`POST /internal/teams/:id/debit-purse` with atomic DB fallback), the player is added to the team roster (`POST /internal/teams/:id/add-member` with `acquired_via: 'auction'`), and domain events `BidClosed` and `PlayerSold` are published.
   - *Unsold Settlement:* If no bids were placed, the lot moves to `'unsold'`, and `BidClosed` and `PlayerUnsold` are published.
   - *Queue Advance:* The next queued lot (`order: 1`) automatically transitions to `'on_block'` with an active countdown timer, emitting `AuctionStarted`. If all lots are exhausted, `event.auction.status` transitions to `'finished'`.
@@ -1282,8 +1337,8 @@ The Leaderboard Service (`apps/leaderboard-service`, Port 3007) governs event pa
       )
       ```
     - Standings are immediately re-sorted, snapshot recorded, lock released in `finally`, and `LeaderboardInvestmentMade` emitted.
-  - *Non-Refundable Policy:* Invested points are non-refundable except upon event cancellation (`EventCancelled`), triggering an automated reversal sweep by Points Service.
-
+  - *Non-Refundable Policy & Distributed Compensation:* Invested points are non-refundable except upon event cancellation (`EventCancelled`) or in the event of an unexpected transient failure during entry version increment/recompute after points debit, which triggers an immediate automated compensation refund via `POST /internal/points/refund` (`idempotencyKey.leaderboardInvestmentRefund(request_id)`) restoring the user's points balance via the authoritative Points Service ledger.
+ 
 - **Advisory Investment Projection Engine:**
   - `GET /leaderboards/events/:eventRef/project?amount=X`: Read-only projection calculation. Computes the user's projected final score and projected rank if $X$ points were invested, enabling mobile clients to show real-time rank jump previews before committing points.
 
@@ -1308,6 +1363,7 @@ The Leaderboard Service (`apps/leaderboard-service`, Port 3007) governs event pa
     - `EventCancelled`: Cleans up leaderboard entries and snapshots.
     - `UserProfileUpdated`: Synchronizes participant snapshots (`display_name`, `avatar_url`).
     - `UserDeleted`: Anonymizes participant snapshots in `leaderboard_entries` (`display_name = 'Deleted User'`, `avatar_url = null`, `deleted = true`) per GDPR.
+    - `UserRestored`: Re-hydrates restored participant snapshots upon self-service account reactivation within the 45-day window, restoring original `display_name` and `avatar_url`, and resetting `deleted = false`.
 
 - **Comprehensive API Surface:**
   - `GET /leaderboards/global` — query global ranked performers (`?period=all|semester|month|week&domain=all|sports|esports|fitness|general&source=all|challenge|event&limit=50&page=1`).
@@ -1391,9 +1447,10 @@ The Points Service (`apps/points-service`, Port 3006) acts as the immutable fina
   - `ParticipantAttended` (emitted by Event Service): Idempotently credits attendance points (`key: event.attended:<event_id>:<user_id>`).
   - `ChallengeCompleted` (emitted by Challenge Service): Idempotently credits award points to all participant team members (`key: challenge.completed:<participation_id>:<user_id>`).
   - `RegistrationCancelled`: Automatically queries prior credits and issues offsetting negative `refund`/`adjust` transactions.
-- **Synchronous Internal Handshake (`/internal/points/debit`):**
+- **Synchronous Internal Handshake (`/internal/points/spend` & `/internal/points/refund`):**
   - Mounts `requireServiceToken` for service-to-service calls.
-  - Used by Leaderboard Service for points investment debits: performs an atomic conditional decrement (`points_balance >= amount`) and records an append-only `spend` transaction before confirming the user's investment.
+  - Used by Leaderboard Service for points investment debits: `POST /internal/points/spend` performs an atomic conditional decrement (`points_balance >= amount`) and records an append-only `spend` transaction before confirming the user's investment.
+  - Used for automated distributed compensation: `POST /internal/points/refund` provides an authoritative ledger refund path with deduplication key `idempotencyKey.leaderboardInvestmentRefund(request_id)` if downstream OCC retries or snapshot commits fail.
 - **Automated Expiry Sweeper (`scheduler/expiry.ts`):**
   - Background sweeper running every 60 minutes.
   - Queries positive transactions where `expires_at <= now` and remaining unexpired credit $> 0$, writing offsetting negative `expire` transactions.
@@ -1544,6 +1601,47 @@ The Challenge Service (`apps/challenge-service`, Port 3008) powers competitive s
 - Filter by year, event type, sport, sponsor
     
 - Shareable winner cards
+
+#### 5.9.1 Hall of Fame Engine Architecture & Invariants (As Implemented — BE-1, Sep 27 2026)
+
+Hall of Fame is architecturally placed as a first-class domain inside **Leaderboard Service (`apps/leaderboard-service`, Port 3007)** under `/hall-of-fame`:
+
+- **Design Decision — Resource-Constrained Placement (D1):**
+  - Rather than provisioning a 13th microservice process that would impose a redundant 50–80MB baseline memory overhead on a 2 vCPU / 4GB RAM deployment, Hall of Fame is co-located within Leaderboard Service.
+  - *Domain Synergy:* Hall of Fame represents the terminal state of competitive glory (event winners, challenge legends, champion dynasties). Leaderboard Service already maintains participant standings, rank normalizations, snapshots, and participant identity lifecycles (`UserProfileUpdated`, `UserDeleted`, `UserRestored`).
+  - *Read vs Write Characteristics:* HoF is predominantly public read traffic (carousel feeds, archival queries), which benefits directly from Leaderboard Service's high-speed Redis caching infrastructure. Writes are infrequent (event championships, rare legend challenge completions).
+
+- **Data Model & Invariants (`hall_of_fame_entries`):**
+  - **Schema:**
+    `_id (UUID v4 string), slug (unique), category: 'event_winner' | 'challenge_legend' | 'sponsor_champion' | 'custom', title, description, quote, honoree: { type: 'user' | 'team', id, display_name, avatar_url }, members: [{ user_id, display_name, avatar_url }], source: { type: 'event' | 'challenge' | 'manual', id, title }, achievement: { domain, season, year, difficulty, award_points }, media_url, cover_url, tags: [string], featured: boolean, featured_order: number, created_by, created_at, updated_at, deleted_at`.
+  - **Deterministic Slug Generation:** Slugs are auto-generated from title and achievement year (`${slugify(title)}-${year}`). Collisions append a 2-byte hex hash to ensure permanent human-readable share links.
+  - **Compound & Filtered Indexes:**
+    - `{ slug: 1 }` (unique, `partialFilterExpression: { deleted_at: null }`)
+    - `{ category: 1, 'achievement.year': -1 }` (powers category archive browsing)
+    - `{ featured: 1, featured_order: 1 }` (powers the home/HoF highlight carousel)
+    - `{ 'honoree.id': 1, 'source.id': 1 }` (partial index preventing duplicate inductions for the same event/challenge)
+
+- **Automated Lifecycle & Domain Event Integration:**
+  - **`ChallengeLegendAchieved` Ingestion:**
+    When a user or team completes a legend-tier challenge (`grants_hall_of_fame: true`), Challenge Service emits `ChallengeLegendAchieved { challenge_id, participation_id, member_user_ids }`. Leaderboard Service consumes this event, resolves the participation and member profiles, and automatically mints a `category: 'challenge_legend'` Hall of Fame entry with idempotency protection.
+  - **Event Winner Inductions:**
+    Upon `EventCompleted`, tournament organizers use `POST /hall-of-fame` to induct the champion individual or roster into the permanent record, linking `source.type: 'event'` and `source.id: eventId`.
+  - **GDPR & Profile Reconciliation:**
+    Hall of Fame entry honorees and team members participate in the same consumer hooks:
+    - `UserProfileUpdated`: Refreshes `display_name` and `avatar_url` across existing entries.
+    - `UserDeleted`: Anonymizes personal snapshot identities (`'Deleted User'`) while preserving the historical achievement record.
+    - `UserRestored`: Re-hydrates restored member identities upon 45-day reactivation.
+
+- **Public & Management API Surface:**
+  - `GET /hall-of-fame` — Public paginated listing with filtering by `category`, `year`, `domain`, `featured`, `search`.
+  - `GET /hall-of-fame/featured` — Public carousel of highlighted champions sorted by `featured_order`.
+  - `GET /hall-of-fame/:slugOrId` — Public detailed view of a single Hall of Fame card.
+  - `POST /hall-of-fame` — Core+ induction endpoint (`requireAuth`, `requireActiveUser(UserRole.CORE)`).
+  - `PATCH /hall-of-fame/:id` — Core+ metadata updates (quote, description, tags, media_url, featured flag, featured_order).
+  - `DELETE /hall-of-fame/:id` — Coordinator+ soft-deletion (`requireAuth`, `requireActiveUser(UserRole.COORDINATOR)`).
+
+- **Gateway Edge Ingress (`gateway :3000`):**
+  - Routes `/hall-of-fame` directly to `:3007` (`target: config.services.leaderboard`, `owner: 'BE-1 · W4'`).
     
 
 ### 5.10 P: Store Page
@@ -1651,6 +1749,65 @@ The Challenge Service (`apps/challenge-service`, Port 3008) powers competitive s
     
 - Camera and gallery access required
     
+
+#### 5.11.1 Media Service Architecture & Invariants (As Implemented — BE-1, Sep 26 2026)
+
+The Media Service (`apps/media-service`, Port 3009) governs binary asset upload, validation, storage partitioning, categorization, album organization, community moderation, and static file delivery across the BGSC platform:
+
+- **Architectural Placement & Port Topology:**
+  - *Dedicated Container (`:3009`):* Mounted behind API Gateway routes `/media/**` and unified static file delivery `/uploads/**` (`LIVE_SERVICES` contains `'media'`).
+  - *Unified Storage Ownership:* Prior to Week 4, individual services wrote uploads to local disk subdirectories. In Week 4, Media Service consolidates storage ownership under `/uploads` (`avatars/`, `events/`, `registrations/`, `media/`), presenting a single static delivery pipeline with aggressive caching headers (`Cache-Control: public, max-age=604800, immutable`), directory browsing prevention, and MIME sniffing protection (`nosniff`).
+
+- **Data Models & Collections (`media`, `media_albums`):**
+  - `media`: Stores individual uploaded assets (`_id: uuid`, `uploader: { user_id, display_name, avatar_url }`, `url`, `thumbnail_url`, `original_filename`, `mime_type`, `media_type: 'image' | 'video'`, `size_bytes`, `category: 'event' | 'community' | 'memories' | 'sponsor' | 'hall_of_fame' | 'general'`, `event_id`, `album_id`, `caption`, `tags[]`, `status: 'pending' | 'approved' | 'rejected'`, `approved_by`, `approved_at`, `rejection_reason`, `metadata`, `views_count`, `likes_count`).
+  - `media_albums`: Groups media into curated albums (`_id: uuid`, `title`, `slug`, `description`, `category`, `cover_media_id`, `event_id`, `created_by`, `media_count`, `is_public`).
+
+- **Binary Sniffing & Security Invariants:**
+  - *Magic-Byte Validation:* Client `Content-Type` headers and file extensions are untrusted. The service sniffs the initial binary magic bytes before accepting or persisting files:
+    * JPEG (`FF D8 FF`)
+    * PNG (`89 50 4E 47 0D 0A 1A 0A`)
+    * WebP (`RIFF .... WEBP`)
+    * MP4 (`ftyp` container at offset 4–8)
+    * WebM (`1A 45 DF A3` EBML identifier)
+  - *Payload Ceilings:* Strict 10MB limit on images (`IMAGE_MAX_BYTES = 10 * 1024 * 1024`), 50MB limit on video clips (`VIDEO_MAX_BYTES = 50 * 1024 * 1024`).
+  - *Path Traversal Defense:* Prefix keys and filenames are generated server-side using UUID v4; directory traversal attempts are rejected with `400 invalid_path`.
+
+- **Moderation Workflow & Tiered Invariants:**
+  - Uploads by Core, Coordinators, or Admins (`UserRole.CORE+`) are automatically set to `status: 'approved'`.
+  - Community user uploads (`UserRole.USER`, `UserRole.MEMBER`) default to `status: 'pending'`.
+  - Pending uploads are hidden from public gallery views (`GET /media` filters `status === 'approved'` by default).
+  - Admin moderation workflow: Core/Admin review items via `GET /media/moderation/pending` and execute `PATCH /media/:id/moderate` with `{ status: 'approved' | 'rejected', reason?: string }`.
+  - Moderation decisions emit `MediaApproved` or `MediaRejected`.
+
+- **2 vCPU Memory & Performance Optimization:**
+  - *Streaming File Intake:* Prevents holding entire binary payloads in heap memory across concurrent requests, utilizing streaming disk writes and early header buffer inspection.
+  - *Lean Projections:* All gallery, album, and item queries utilize `.lean()` and indexed compound sorting (`{ category: 1, status: 1, created_at: -1 }`, `{ event_id: 1, status: 1, created_at: -1 }`).
+
+- **Domain Events Emitted (Redis Pub/Sub `bgsc.events`):**
+  - `MediaUploaded`: `{ media_id, uploader_user_id, category, event_id, status }`
+  - `MediaApproved`: `{ media_id, approved_by }`
+  - `MediaRejected`: `{ media_id, reason, rejected_by }`
+  - `MediaDeleted`: `{ media_id, url }`
+
+- **Domain Events Consumed (`bgsc.events`):**
+  - `UserProfileUpdated`: Refreshes `uploader` display name and avatar snapshots across all owned media records.
+  - `UserDeleted`: Anonymizes `uploader` snapshots per GDPR (`display_name: 'Deleted User'`, `avatar_url: null`).
+  - `EventCompleted`: Automatically initializes an official Event Album in `media_albums` if not already present.
+
+- **Comprehensive API Surface:**
+  - `POST /media/upload` — upload image/video (multipart/form-data or binary body, with category, event_id, album_id, caption, tags).
+  - `GET /media` — public gallery with filters (`?category=&event_id=&tag=&media_type=&status=approved&page=&limit=`).
+  - `GET /media/:id` — single media detail with uploader snapshot.
+  - `PATCH /media/:id` — update caption or tags (uploader or admin).
+  - `DELETE /media/:id` — delete media item, safely unlink file from disk (normalizing leading slashes), decrement album media count, and unset dangling cover_media_id references across albums.
+  - `GET /media/albums` — list public media albums.
+  - `POST /media/albums` — create album (Core/Admin).
+  - `GET /media/albums/:id` — get album details and constituent media items.
+  - `GET /media/moderation/pending` — admin queue of unapproved community media.
+  - `PATCH /media/:id/moderate` — approve or reject media item (Core/Admin).
+  - `POST /media/:id/like` — toggle like counter on media item.
+  - `GET /uploads/*` — secure static file delivery with HTTP caching.
+
 
 ### 5.12 F: Feedback & Contact Us
 
@@ -3000,13 +3157,13 @@ Development follows the **"Platform → Engagement → Operations → Scale"** m
 |**Layer**|**Technology**|
 |**Mobile App**|React Native (Expo)|
 |**Web (Admin)**|React + Tailwind|
-|**Backend**|Node.js + NestJS|
-|**Database**|PostgreSQL (Supabase/Railway)|
-|**Cache**|Redis|
-|**Auth**|Supabase Auth / Firebase Auth|
-|**Storage**|Supabase Storage / Cloudinary|
-|**Hosting**|Railway/Render (backend) + Vercel (web)|
-|**Event Bus**|In-memory event emitter (upgrade to Kafka in Phase 2)|
+|**Backend**|Node.js (Express 5 + TypeScript Microservices)|
+|**Database**|MongoDB 7.0 (Mongoose 9)|
+|**Cache**|Redis 7.0|
+|**Auth**|JWT (15m Access + 7d Refresh) + Google OAuth + Phone OTP|
+|**Storage**|Local Disk (`/uploads/`) → AWS S3 / R2 (Media Service :3009)|
+|**Hosting**|Docker Compose (Backend Network) + Vercel / Cloudflare (Web/Edge)|
+|**Event Bus**|Redis 7.0 Pub/Sub (`bgsc.events`) with in-process fallback|
 
 **MVP Timeline:**
 
