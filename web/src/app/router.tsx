@@ -4,6 +4,7 @@ import { AdminLayout } from '../components/layout/adminLayout'
 import { Login } from '../pages/Login'
 import { Dashboard } from '../pages/Dashboard'
 import { Users } from '../pages/Users'
+import { Events } from '../pages/Events'
 
 export const router = createBrowserRouter([
     { path: '/login', element: <Login /> },
@@ -18,13 +19,10 @@ export const router = createBrowserRouter([
         { index: true, element: <Navigate to="/dashboard" replace /> },
         { path: 'dashboard', element: <Dashboard /> },
         {
-        path: 'events',
-        element: (
-            <div className="p-6 rounded border border-gray-200 bg-white text-gray-700 text-sm">
-            Events Management Module
-            </div>
-        ),
+            path: 'events',
+            element: <Events />,
         },
+        
         {
         path: 'announcements',
         element: (

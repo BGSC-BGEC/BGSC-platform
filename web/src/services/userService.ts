@@ -42,42 +42,70 @@ function mapBackendUser(raw: RawBackendUser): User {
     }
 }
 
-export async function getUsers(): Promise<User[]> {
+export async function updateUserRole(
+    id: string,
+    newRole: User['role'],
+    reason = 'Admin role update'
+    ): Promise<User | null> {
     if (isMock) {
-    await new Promise((resolve) => setTimeout(resolve, 250))
-    return DEFAULT_USER_DATA
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const user = DEFAULT_USER_DATA.find((u) => u.id === id)
+    if (user) {
+        user.role = newRole
+        return { ...user }
+    }
+    return null
     }
 
     try {
-    const response = await apiClient.get<BackendUsersResponse | RawBackendUser[]>('/users')
-    // Handle both { users: [...] } envelope and bare array
-    const rawList = Array.isArray(response) ? response : response?.users || []
-    return rawList.map(mapBackendUser)
+    const raw = await apiClient.put<RawBackendUser>(`/users/${id}/role`, {
+        role: newRole,
+        reason,
+    })
+    return raw ? mapBackendUser(raw) : null
     } catch (error) {
-    console.warn('[userService] Backend unreachable, falling back to mock data:', error)
-    return DEFAULT_USER_DATA
+    console.warn(`[userService] Failed to update role for user ${id}:`, error)
+    return null
+    }
+}
+
+export async function getUsers(): Promise<User[]> {
+    if (isMock) {
+        await new Promise((resolve) => setTimeout(resolve, 250))
+        return DEFAULT_USER_DATA
+    }
+
+    try {
+        const response = await apiClient.get<BackendUsersResponse | RawBackendUser[]>('/users')
+        // Handle both { users: [...] } envelope and bare array
+        const rawList = Array.isArray(response) ? response : response?.users || []
+        return rawList.map(mapBackendUser)
+        } catch (error) {
+        console.warn('[userService] Backend unreachable, falling back to mock data:', error)
+        return DEFAULT_USER_DATA
     }
 }
 
 export async function getUserById(id: string): Promise<User | null> {
     if (isMock) {
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    return DEFAULT_USER_DATA.find((u) => u.id === id) || null
+        await new Promise((resolve) => setTimeout(resolve, 150))
+        return DEFAULT_USER_DATA.find((u) => u.id === id) || null
     }
 
     try {
-    const response = await apiClient.get<RawBackendUser | { user: RawBackendUser }>(`/users/${id}`)
-    const raw = 'user' in response && response.user ? response.user : (response as RawBackendUser)
-    return raw ? mapBackendUser(raw) : null
-    } catch (error) {
-    console.warn(`[userService] Backend unreachable for user ${id}, falling back to mock:`, error)
-    return DEFAULT_USER_DATA.find((u) => u.id === id) || null
+        const response = await apiClient.get<RawBackendUser | { user: RawBackendUser }>(`/users/${id}`)
+        const raw = 'user' in response && response.user ? response.user : (response as RawBackendUser)
+        return raw ? mapBackendUser(raw) : null
+        } catch (error) {
+            console.warn(`[userService] Backend unreachable for user ${id}, falling back to mock:`, error)
+            return DEFAULT_USER_DATA.find((u) => u.id === id) || null
     }
 }
 
 export const userService = {
     getUsers,
     getUserById,
+    updateUserRole,
 }
 
 export default userService
