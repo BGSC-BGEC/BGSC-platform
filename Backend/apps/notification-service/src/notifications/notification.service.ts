@@ -3,11 +3,14 @@ import {
     Notification,
     NotificationCategory,
     ServiceError,
+    User,
+    UserStatus,
     notificationExpiry,
 } from '@bgsc/shared';
 import { v4 as uuid } from 'uuid';
 import { allOf, keysetFilter, pageOf } from './cursor';
 import { ListNotificationsInput } from './notification.schemas';
+import { isMuted } from './preferences';
 
 /**
  * The inbox: writes that create notifications, and the four reads a client makes of its own.
@@ -67,12 +70,37 @@ function documentFor(input: NotificationInput): Record<string, unknown> {
         channel: 'in_app',
         dedupe_key: input.dedupe_key,
         read_at: null,
+        dismissed_at: null,
         expires_at: notificationExpiry(),
     };
 }
 
-/** One recipient. Returns false when the notification already existed — a replay, not a failure. */
+/**
+ * Every inbox read and write filters on this. A dismissed card is hidden, not deleted: the row is
+ * also the dedupe record, and deleting it let a replay or a reconcile hand the card straight back.
+ */
+const visible = { dismissed_at: null };
+
+/**
+ * A live account, as every fan-out path already requires (`broadcast.ts`). Per-user triggers name
+ * their recipient in the payload, and a registration, a team or a lot outlives the account behind
+ * it — a deleted or suspended user must not collect cards that appear the day they are restored.
+ */
+async function isLiveRecipient(userId: string): Promise<boolean> {
+    return (await User.exists({ _id: userId, status: UserStatus.ACTIVE, deleted_at: null })) !== null;
+}
+
+/**
+ * One recipient. Returns false when nothing was created: a replay, or a user who muted the category.
+ *
+ * The mute check lives HERE rather than at each caller because every per-user trigger (registration,
+ * waitlist, points, challenge) comes through this function — and the first version checked
+ * preferences only on the fan-out paths, so muting `event`, `challenge` or `system` silenced
+ * almost nothing.
+ */
 export async function createOne(input: NotificationInput): Promise<boolean> {
+    if (!(await isLiveRecipient(input.user_id))) return false;
+    if (await isMuted(input.user_id, input.category)) return false;
     try {
         await Notification.create(documentFor(input));
         return true;
@@ -112,7 +140,7 @@ export async function createMany(inputs: NotificationInput[]): Promise<number> {
 }
 
 /**
- * Retract every copy of one notification (plan D17). Used when the announcement behind it is
+ * Retract every copy of one notification. Used when the announcement behind it is
  * deleted: a card that opens onto a 404 is worse than no card.
  *
  * Served by the `{ dedupe_key, user_id }` index, whose leading key is exactly this filter.
@@ -152,7 +180,7 @@ export interface ListResult {
 }
 
 export async function list(userId: string, input: ListNotificationsInput): Promise<ListResult> {
-    const conditions: Record<string, unknown>[] = [{ user_id: userId }];
+    const conditions: Record<string, unknown>[] = [{ user_id: userId, ...visible }];
     if (input.unread === true) conditions.push({ read_at: null });
     if (input.unread === false) conditions.push({ read_at: { $ne: null } });
     if (input.category) conditions.push({ category: input.category });
@@ -169,7 +197,7 @@ export async function list(userId: string, input: ListNotificationsInput): Promi
 }
 
 export async function unreadCount(userId: string): Promise<number> {
-    return Notification.countDocuments({ user_id: userId, read_at: null });
+    return Notification.countDocuments({ user_id: userId, read_at: null, ...visible });
 }
 
 /**
@@ -180,26 +208,30 @@ export async function unreadCount(userId: string): Promise<number> {
 export async function markRead(userId: string, id: string): Promise<Date> {
     const now = new Date();
     const updated = await Notification.findOneAndUpdate(
-        { _id: id, user_id: userId, read_at: null },
+        { _id: id, user_id: userId, read_at: null, ...visible },
         { $set: { read_at: now } },
         { returnDocument: 'after' }
     ).lean<INotification>();
     if (updated) return updated.read_at as Date;
 
-    const existing = await Notification.findOne({ _id: id, user_id: userId }).lean<INotification>();
+    const existing = await Notification.findOne({ _id: id, user_id: userId, ...visible }).lean<INotification>();
     if (!existing) throw new ServiceError(404, 'notification_not_found');
     return existing.read_at as Date;
 }
 
 export async function markAllRead(userId: string): Promise<number> {
     const res = await Notification.updateMany(
-        { user_id: userId, read_at: null },
+        { user_id: userId, read_at: null, ...visible },
         { $set: { read_at: new Date() } }
     );
     return res.modifiedCount ?? 0;
 }
 
+/** Hide, don't delete (see `visible`). A second dismiss of the same card is a 404, like a read of it. */
 export async function dismiss(userId: string, id: string): Promise<void> {
-    const res = await Notification.deleteOne({ _id: id, user_id: userId });
-    if ((res.deletedCount ?? 0) === 0) throw new ServiceError(404, 'notification_not_found');
+    const res = await Notification.updateOne(
+        { _id: id, user_id: userId, ...visible },
+        { $set: { dismissed_at: new Date() } }
+    );
+    if ((res.matchedCount ?? 0) === 0) throw new ServiceError(404, 'notification_not_found');
 }

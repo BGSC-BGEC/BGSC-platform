@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import * as svc from './user.service';
-import { serializeUser, snapshotOf, Viewer } from './user.serializer';
+import { serializeUser, visibilityFor, Viewer } from './user.serializer';
 import { playerCardFor } from './playerCard';
 import { putObject, deleteObject, sniffImage, IMAGE_MAX_BYTES } from '../storage/storage';
 import {
@@ -15,17 +15,28 @@ import {
 
 /** HTTP only. Data access, events and audit rows live in user.service.ts. */
 
+/**
+ * Who is looking. The LIVE role when `requireActiveUser` loaded the viewer (every route that
+ * resolves PII scope does): the token's role claim outlives a demotion by up to fifteen minutes,
+ * and PII visibility is exactly what a demoted coordinator should lose at once. Self routes may
+ * fall back to the token — a viewer is always "full" on their own record.
+ */
 const viewerOf = (req: Request): Viewer | undefined =>
-    req.user ? { id: req.user.id, role: req.user.role } : undefined;
+    req.actor
+        ? { id: req.actor._id, role: req.actor.role }
+        : req.user
+          ? { id: req.user.id, role: req.user.role }
+          : undefined;
 
 /**
  * The actor for a role or status change: the document `requireActiveUser` just loaded, never the
  * token's claim. The claim is what a demoted administrator still carries around for fifteen
  * minutes; the document is what they actually are.
  */
-const liveActorOf = (req: Request): { id: string; role: UserRole } => ({
+const liveActorOf = (req: Request): svc.Actor => ({
     id: req.actor!._id,
     role: req.actor!.role,
+    ip: req.ip ?? null,
 });
 
 export const getMe = wrap(async (req, res) => {
@@ -77,11 +88,13 @@ export const deletionPreview = wrap(async (req, res) => {
 });
 
 export const deleteMe = wrap(async (req, res) => {
-    const user = await svc.findById(req.user!.id);
-    if (!user) return void res.status(404).json({ error: 'not_found' });
+    // Active accounts only. A suspended user who self-deleted could never come back — reactivate
+    // refuses a suspended prior status, and the admin status route cannot see deleted accounts —
+    // so self-deletion under suspension was an irreversible action taken with a dead session.
+    const user = await svc.findActiveSelf(req.user!.id);
 
     const { reason, research_consent } = req.body as { reason?: string; research_consent: boolean };
-    const { restorable_until } = await svc.softDelete(user, req.user!.id, { reason, research_consent });
+    const { restorable_until } = await svc.softDelete(user, req.user!.id, { reason, research_consent, ip: req.ip ?? null });
 
     // Not "deleted": nothing was destroyed. The account is hidden and restorable until this date.
     res.status(202).json({
@@ -153,8 +166,12 @@ export const getUser = wrap(async (req, res) => {
 export const getPlayerCard = wrap(async (req, res) => {
     const user = await svc.findByRef((req.params as Record<string, string>).ref);
     if (!user) return void res.status(404).json({ error: 'not_found' });
-    // A private profile still exposes its card (D9) — that is the stub deep links render.
-    res.json(await playerCardFor(user));
+    // A private profile still answers with its card — that is the stub deep links render — but
+    // a stranger gets the stub only: no bio, interests, social handles or rating inputs.
+    const viewer = viewerOf(req);
+    const scope = await svc.piiScopeFor(viewer);
+    const stubOnly = visibilityFor(user, viewer, svc.scopeAllows(scope, user._id)) === 'minimal';
+    res.json(await playerCardFor(user, stubOnly));
 });
 
 export const listUsers = wrap(async (req, res) => {
@@ -196,16 +213,11 @@ export const changeStatus = wrap(async (req, res) => {
     res.json(serializeUser(updated, viewerOf(req)));
 });
 
-export const getSnapshots = wrap(async (req, res) => {
-    const { ids } = req.query as unknown as { ids: string[] };
-    const users = await svc.snapshots(ids);
-    res.json({ snapshots: users.map(snapshotOf) });
-});
-
 /** Exported for the admin detail view; the list endpoint deliberately omits per-row counts. */
 export const auditForUser = wrap(async (req, res) => {
     const { ref } = req.params as Record<string, string>;
-    const user = await svc.findByRef(ref);
+    // Deleted accounts included: their trail is exactly what an admin comes here for.
+    const user = await svc.findByRefIncludingDeleted(ref);
     if (!user) return void res.status(404).json({ error: 'not_found' });
     const { AuditLog } = await import('@bgsc/shared');
     const rows = await AuditLog.find({ target_type: 'user', target_id: user._id })

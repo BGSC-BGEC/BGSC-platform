@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { AuthController } from './auth.controller';
-import { requireAuth, validate } from '@bgsc/shared';
+import { requireActiveUser, requireAuth, validate } from '@bgsc/shared';
 import {
   RegisterSchema,
   LoginSchema,
@@ -12,6 +12,7 @@ import {
   ReactivateAccountSchema,
   SendPhoneOtpSchema,
   VerifyPhoneOtpSchema,
+  GoogleExchangeSchema,
 } from './auth.schemas';
 
 /**
@@ -64,17 +65,21 @@ accountRoutes.post(
 // Google OAuth (Co-located on same server)
 authRoutes.get('/google', AuthController.googleAuth);
 authRoutes.get('/google/callback', AuthController.googleCallback);
+authRoutes.post('/google/exchange', validate({ body: GoogleExchangeSchema }), AuthController.googleExchange);
 
-// Phone OTP Verification
+// Phone OTP Verification. requireActiveUser: a suspended or deleted account's still-valid access
+// token must not be able to claim a phone number.
 authRoutes.post(
   '/phone/send-otp',
   requireAuth,
+  requireActiveUser(),
   validate({ body: SendPhoneOtpSchema }),
   AuthController.sendPhoneOtp
 );
 authRoutes.post(
   '/phone/verify-otp',
   requireAuth,
+  requireActiveUser(),
   validate({ body: VerifyPhoneOtpSchema }),
   AuthController.verifyPhoneOtp
 );

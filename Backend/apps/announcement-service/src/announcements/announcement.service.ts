@@ -162,7 +162,35 @@ function assertPinWithinExpiry(a: IAnnouncement, publishAt: Date): void {
 async function loadForEdit(id: string, editor: Editor) {
     const a = await Announcement.findOne({ _id: id, ...alive, ...rankFilter(editor.role) });
     if (!a) throw new ServiceError(404, 'announcement_not_found');
+    await assertMayEdit(a, editor);
     return a;
+}
+
+/** `ROLE_LABEL` read backwards, for an author whose account no longer exists. */
+const RANK_OF_LABEL: Record<string, RoleName> = {
+    Guest: 'guest',
+    Member: 'member',
+    Core: 'core',
+    Coordinator: 'coordinator',
+    Founder: 'founder',
+};
+
+/**
+ * Owner decision (audit #2): an announcement is changed only by its author, or by someone who
+ * STRICTLY outranks the author. Before this, any core member could rewrite, publish or delete a
+ * coordinator's post as long as its audience floor was within their rank.
+ *
+ * The author's rank is their live role — a demoted author no longer shields their posts from the
+ * rank they left, and a promoted one gains the protection. An author whose account is gone falls
+ * back to the historical `role_label`. 403, not 404: the editor can already read it.
+ */
+async function assertMayEdit(a: Pick<IAnnouncement, 'author'>, editor: Editor): Promise<void> {
+    if (a.author.user_id === editor.id) return;
+    const author = await User.findById(a.author.user_id).select('role').lean<{ role: RoleName }>();
+    const authorRole = author?.role ?? RANK_OF_LABEL[a.author.role_label] ?? 'founder';
+    if (roleRank(editor.role) <= roleRank(authorRole)) {
+        throw new ServiceError(403, 'not_author_or_senior');
+    }
 }
 
 /**
@@ -180,17 +208,37 @@ async function claim(
     editor: Editor,
     from: readonly AnnouncementStatus[],
     set: Record<string, unknown>,
-    lostCode: string
+    lostCode: string,
+    publishAt?: Date
 ): Promise<IAnnouncement> {
     const scope = { _id: id, ...alive, ...rankFilter(editor.role) };
+    // Authorship first: `author` never changes, so a check ahead of the CAS cannot go stale.
+    const target = await Announcement.findOne(scope).select('author').lean<Pick<IAnnouncement, 'author'>>();
+    if (!target) throw new ServiceError(404, 'announcement_not_found');
+    await assertMayEdit(target, editor);
+
     const claimed = await Announcement.findOneAndUpdate(
-        { ...scope, status: { $in: from } },
+        { ...scope, status: { $in: from }, ...(publishAt ? pinFitsExpiry(publishAt) : {}) },
         { $set: set },
         { returnDocument: 'after' }
     );
     if (claimed) return claimed;
     if (!(await Announcement.exists(scope))) throw new ServiceError(404, 'announcement_not_found');
+    // Still claimable by status, so it was the pin that refused: a PATCH moved `pinned_until` after
+    // this request's own check ran.
+    if (publishAt && (await Announcement.exists({ ...scope, status: { $in: from } }))) {
+        throw new ServiceError(422, 'pinned_until_after_expiry');
+    }
     throw new ServiceError(409, lostCode);
+}
+
+/**
+ * `assertPinWithinExpiry` again, inside the claim's filter. The assert ran on the document this
+ * request loaded; a draft PATCH of `pinned_until` can land between that load and the claim, and the
+ * claim is a query update — no hook — so it would publish a pin that outlasts the announcement.
+ */
+function pinFitsExpiry(publishAt: Date): Record<string, unknown> {
+    return { $or: [{ pinned_until: null }, { pinned_until: { $lte: expiryFor(publishAt) } }] };
 }
 
 /** The committed-transition half of the audit policy (file header). Never throws. */
@@ -212,7 +260,7 @@ async function auditCommitted(entry: Parameters<typeof recordAudit>[0]): Promise
  * treatment: the hook raised it on the save that created the draft, so it is correct on disk.
  *
  * `delivery.*.requested`: Spec §6.4 auto-sends WhatsApp on publish. Week 4's Broadcast Service reads
- * these flags and writes the per-category rows back (plan D6, D7).
+ * these flags and writes the per-category rows back.
  */
 export function publishedSet(now: Date): Record<string, unknown> {
     return {
@@ -306,7 +354,7 @@ export async function list(
         .limit(input.pinned ? PINNED_SCAN_CAP : input.limit + 1)
         .lean();
 
-    // The banner (plan §3.4): `priority` is a string enum, so sorting it in Mongo gives
+    // The banner: `priority` is a string enum, so sorting it in Mongo gives
     // urgent > normal > important — alphabetical, and wrong. Ordered here instead, over the
     // whole pinned set, then cut to the page.
     if (input.pinned) {
@@ -545,7 +593,8 @@ export async function publishOrSchedule(
             editor,
             ['draft', 'scheduled'],
             { status: 'scheduled', scheduled_for: scheduledFor },
-            'already_published'
+            'already_published',
+            scheduledFor
         );
 
         publish('AnnouncementScheduled', PRODUCER, {
@@ -566,7 +615,7 @@ export async function publishOrSchedule(
     const now = new Date();
     assertPinWithinExpiry(a, now);
 
-    const published = await claim(id, editor, ['draft', 'scheduled'], publishedSet(now), 'already_published');
+    const published = await claim(id, editor, ['draft', 'scheduled'], publishedSet(now), 'already_published', now);
     await announcePublished(published, editor);
     return published;
 }
@@ -608,15 +657,109 @@ export async function remove(id: string, editor: Editor): Promise<IAnnouncement>
 }
 
 /* ------------------------------------------------------------------ *
- * Delivery writeback (be2-broadcast-service-plan.md §6)
+ * Delivery writeback
  * ------------------------------------------------------------------ */
+
+type StoredDeliveryRow = IAnnouncement['delivery']['whatsapp']['per_category'][number];
+
+const MASK = '••••';
+const UNMAPPED = '(unmapped)';
+
+/**
+ * The composer's label for a destination: enough to tell two groups apart, not the destination.
+ * Idempotent — an already-masked label (what the Notification Service sends) passes unchanged —
+ * which is what lets `maskLegacyGroupIds` run on every boot. Mirrors `dispatch.ts:maskDestination`.
+ */
+export function maskGroupId(groupId: string): string {
+    if (groupId === UNMAPPED || groupId.startsWith(MASK)) return groupId;
+    return groupId.length <= 4 ? MASK : `${MASK}${groupId.slice(-4)}`;
+}
+
+/**
+ * One-off repair, run idempotently at boot: receipts written before masking existed carry the raw
+ * destination (a phone number — PII) in `delivery.whatsapp.per_category.group_id`. Masks them in
+ * place and touches nothing else; a second run finds nothing to do.
+ *
+ * ponytail: loads each affected document. There are a handful — WhatsApp never ran configured in
+ * production — so no bulk pipeline.
+ */
+export async function maskLegacyGroupIds(): Promise<number> {
+    const legacy = await Announcement.find({
+        'delivery.whatsapp.per_category': {
+            $elemMatch: { group_id: { $nin: [UNMAPPED], $not: new RegExp(`^${MASK}`) } },
+        },
+    })
+        .select('delivery.whatsapp.per_category')
+        .lean<Pick<IAnnouncement, '_id' | 'delivery'>[]>();
+
+    let masked = 0;
+    for (const a of legacy) {
+        for (const row of a.delivery.whatsapp.per_category) {
+            const label = maskGroupId(row.group_id);
+            if (label === row.group_id) continue;
+            // Guarded on the raw value, so a receipt that landed in between is not overwritten.
+            await Announcement.updateOne(
+                { _id: a._id },
+                { $set: { 'delivery.whatsapp.per_category.$[r].group_id': label } },
+                { arrayFilters: [{ 'r.category': row.category, 'r.group_id': row.group_id }] }
+            );
+            masked += 1;
+        }
+    }
+    return masked;
+}
+
+/**
+ * Write one category's receipt, newest-wins. Returns whether it landed.
+ *
+ * Two writers call this for the same announcement — the broadcast's own writeback and the
+ * notification sweep's retry — and their requests can arrive in either order. Two rules make the
+ * outcome independent of that order:
+ *
+ *  - The dispatch row's `revision` travels with the receipt, and an in-place update applies only
+ *    over an OLDER one. A stale snapshot arriving last matches nothing and is dropped, instead of
+ *    putting `pending` back over `sent`.
+ *  - When the category has no row yet, both writers miss the update and race to append. The `$ne`
+ *    guard lets only one append; the loser must not treat that as done — its receipt may be the
+ *    newer — so it goes round once more and lands through the revision-guarded update.
+ *
+ * `alive` is on every write, not only on the load: a delete can land in between, and a receipt
+ * written onto a soft-deleted announcement is a write to a document no read path returns.
+ */
+async function applyWhatsAppRow(id: string, stored: StoredDeliveryRow): Promise<boolean> {
+    for (let pass = 0; pass < 2; pass += 1) {
+        const updated = await Announcement.updateOne(
+            {
+                _id: id,
+                ...alive,
+                'delivery.whatsapp.per_category': {
+                    // `$not: { $gte }` so a row stored before `revision` existed is still replaceable.
+                    $elemMatch: { category: stored.category, revision: { $not: { $gte: stored.revision } } },
+                },
+            },
+            { $set: { 'delivery.whatsapp.per_category.$[r]': stored } },
+            { arrayFilters: [{ 'r.category': stored.category }] }
+        );
+        if ((updated.matchedCount ?? 0) > 0) return true;
+
+        const appended = await Announcement.updateOne(
+            { _id: id, ...alive, 'delivery.whatsapp.per_category.category': { $ne: stored.category } },
+            { $push: { 'delivery.whatsapp.per_category': stored } }
+        );
+        if ((appended.matchedCount ?? 0) > 0) return true;
+        // Neither matched: the row exists with a revision at least as new (stale — the second pass
+        // misses again and we stop), or another writer appended it a moment ago (the second pass
+        // replaces it if ours is newer).
+    }
+    return false;
+}
 
 /**
  * Record what the Notification Service's broadcast actually did, per channel.
  *
- * This closes plan D7 ("build the internal route when there is a caller"): Week 4's broadcast is
+ * The internal route was built only once it had a caller: Week 4's broadcast is
  * that caller. It is the ONLY write to `delivery.*` — publishing sets the two `requested` flags and
- * nothing else, because group ids are the broadcaster's configuration, not this service's (D6).
+ * nothing else, because group ids are the broadcaster's configuration, not this service's.
  *
  * Every refusal happens before any write. Query updates run no document middleware, so the model's
  * `pre('validate')` guard on `delivery.whatsapp.per_category[].category` never fires here — and it
@@ -640,61 +783,51 @@ export async function recordDelivery(id: string, input: RecordDeliveryInput): Pr
     for (const row of input.whatsapp ?? []) {
         const stored = {
             category: row.category,
-            group_id: row.group_id,
+            // Masked here as well as by the sender: this document is served to every core+ reader,
+            // so a raw destination must not land on it whoever sent it.
+            group_id: maskGroupId(row.group_id),
             status: row.status,
             message_id: row.message_id ?? null,
             attempted_at: row.attempted_at ?? null,
             error: row.error ?? null,
+            revision: row.revision,
         };
 
-        // Update in place if the category already has a row...
-        // `alive` is repeated on every update, not only on the load above: a delete can land
-        // between them, and a delivery receipt written onto a soft-deleted announcement is a write
-        // to a document every read path has already stopped returning.
-        const updated = await Announcement.updateOne(
-            { _id: id, ...alive, 'delivery.whatsapp.per_category.category': row.category },
-            { $set: { 'delivery.whatsapp.per_category.$[r]': stored } },
-            { arrayFilters: [{ 'r.category': row.category }] }
-        );
-
-        // ...otherwise append it. The `$ne` guard is what makes the pair safe under concurrency:
-        // a second writer that lost the race above matches nothing here, so one category can never
-        // end up with two rows (the same trick as `reads.ts:markRead`).
-        if ((updated.matchedCount ?? 0) === 0) {
-            await Announcement.updateOne(
-                { _id: id, ...alive, 'delivery.whatsapp.per_category.category': { $ne: row.category } },
-                { $push: { 'delivery.whatsapp.per_category': stored } }
-            );
+        if (await applyWhatsAppRow(id, stored)) {
+            publish('AnnouncementDelivered', PRODUCER, {
+                announcement_id: id,
+                channel: 'whatsapp',
+                category: row.category,
+                status: row.status,
+            });
         }
-
-        publish('AnnouncementDelivered', PRODUCER, {
-            announcement_id: id,
-            channel: 'whatsapp',
-            category: row.category,
-            status: row.status,
-        });
     }
 
     if (input.push) {
-        await Announcement.updateOne(
-            { _id: id, ...alive },
+        // `$not: { $gte }` rather than `$lt`, so a document written before `revision` existed
+        // (the field absent) still accepts its first receipt.
+        const applied = await Announcement.updateOne(
+            { _id: id, ...alive, 'delivery.push.revision': { $not: { $gte: input.push.revision } } },
             {
                 $set: {
                     'delivery.push.status': input.push.status,
                     'delivery.push.sent_count': input.push.sent_count ?? null,
+                    'delivery.push.revision': input.push.revision,
                 },
             }
         );
-        publish('AnnouncementDelivered', PRODUCER, {
-            announcement_id: id,
-            channel: 'push',
-            category: null,
-            status: input.push.status,
-        });
+        if ((applied.matchedCount ?? 0) > 0) {
+            publish('AnnouncementDelivered', PRODUCER, {
+                announcement_id: id,
+                channel: 'push',
+                category: null,
+                status: input.push.status,
+            });
+        }
     }
 
     // No audit row: `AuditLog` records human actions with an actor and an IP (AuditLog.ts), and the
-    // delivery block already carries the full per-category history of the machine ones (plan D7).
+    // delivery block already carries the full per-category history of the machine ones.
     const fresh = await Announcement.findOne({ _id: id, ...alive });
     if (!fresh) throw new ServiceError(404, 'announcement_not_found');
     return fresh;

@@ -10,7 +10,7 @@ import { EventIdParams, GenerateBracketSchema } from './bracket.schemas';
  * Reads are `optionalAuth`: Spec §5.5's spectator bracket view is a public screen, and a guest
  * watching a tournament is the ordinary case. Writes rank the **live** user document
  * (`requireActiveUser`) and are then narrowed again to the event's own core admins in the service
- * (`actor.ts`, plan D14).
+ * (`actor.ts`).
  */
 export const bracketRoutes = Router();
 

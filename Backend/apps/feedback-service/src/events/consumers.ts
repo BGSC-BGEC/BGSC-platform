@@ -29,11 +29,12 @@ async function handleUserProfileUpdated(payload: ProfileUpdatedPayload): Promise
     if (!touchesSnapshot) return;
 
     try {
-        const user = await User.findById(user_id);
+        // A late profile event for a deleted account must not put its name back.
+        const user = await User.findOne({ _id: user_id, deleted_at: null });
         if (!user) return;
         const snapshot = userSnapshotOf(user);
         await FeedbackTicket.updateMany(
-            { 'reporter.user_id': user_id },
+            { 'reporter.user_id': user_id, 'reporter.deleted': { $ne: true } },
             { $set: { 'reporter.display_name': snapshot.display_name, 'reporter.avatar_url': snapshot.avatar_url } }
         );
     } catch (err) {
@@ -52,12 +53,45 @@ async function handleUserDeleted(payload: { user_id: string }): Promise<void> {
     if (!user_id) return;
 
     try {
+        // The reply address goes too: on an attributed ticket it is the account's own email.
         await FeedbackTicket.updateMany(
             { 'reporter.user_id': user_id },
-            { $set: anonymizedSnapshot('reporter.') }
+            { $set: { ...anonymizedSnapshot('reporter.'), contact_email: null } }
         );
     } catch (err) {
         log(`anonymization for ${user_id}`, err);
+    }
+}
+
+/**
+ * A restored account gets its name back — and, where the delete erased it, the reply address.
+ * Not gated on changed_fields: everything about the snapshot changed.
+ */
+async function handleUserRestored(payload: { user_id: string }): Promise<void> {
+    const { user_id } = payload;
+    if (!user_id) return;
+
+    try {
+        // Only an account that is actually back: a stale UserRestored replayed after a new delete is a no-op.
+        const user = await User.findOne({ _id: user_id, deleted_at: null }).select('+email');
+        if (!user) return;
+        const snapshot = userSnapshotOf(user);
+        await FeedbackTicket.updateMany(
+            { 'reporter.user_id': user_id },
+            {
+                $set: {
+                    'reporter.display_name': snapshot.display_name,
+                    'reporter.avatar_url': snapshot.avatar_url,
+                    'reporter.deleted': false,
+                },
+            }
+        );
+        await FeedbackTicket.updateMany(
+            { 'reporter.user_id': user_id, contact_email: null },
+            { $set: { contact_email: user.email ?? null } }
+        );
+    } catch (err) {
+        log(`restore for ${user_id}`, err);
     }
 }
 
@@ -68,9 +102,12 @@ export function initializeConsumers(): void {
     subscribe('UserDeleted', (event) => {
         void handleUserDeleted(event.payload as unknown as { user_id: string });
     });
+    subscribe('UserRestored', (event) => {
+        void handleUserRestored(event.payload as unknown as { user_id: string });
+    });
 
     console.log('[feedback-service] Event consumers initialized');
 }
 
 /** Test seam: the selfchecks drive the handlers directly, without the bus in the way. */
-export const handlers = { handleUserProfileUpdated, handleUserDeleted };
+export const handlers = { handleUserProfileUpdated, handleUserDeleted, handleUserRestored };

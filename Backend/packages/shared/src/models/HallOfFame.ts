@@ -17,12 +17,14 @@ export interface IHallOfFameEntry extends Document<string> {
         id: string;
         display_name: string;
         avatar_url?: string | null;
+        deleted?: boolean;
     };
     
     members?: Array<{
         user_id: string;
         display_name: string;
         avatar_url?: string | null;
+        deleted?: boolean;
     }>;
     
     source: {
@@ -56,13 +58,17 @@ const HonoreeSchema = new Schema({
     type: { type: String, enum: ['user', 'team'], required: true },
     id: { type: String, required: true },
     display_name: { type: String, required: true },
-    avatar_url: { type: String, default: null }
+    avatar_url: { type: String, default: null },
+    // Raised by `anonymizedSnapshot()` when the account behind the snapshot is deleted.
+    deleted: { type: Boolean, default: false }
 }, { _id: false });
 
 const MemberSchema = new Schema({
     user_id: { type: String, required: true },
     display_name: { type: String, required: true },
-    avatar_url: { type: String, default: null }
+    avatar_url: { type: String, default: null },
+    // Raised by `anonymizedSnapshot()` when the account behind the snapshot is deleted.
+    deleted: { type: Boolean, default: false }
 }, { _id: false });
 
 const SourceSchema = new Schema({
@@ -109,6 +115,11 @@ export const HallOfFameEntrySchema: Schema<IHallOfFameEntry> = new Schema<IHallO
 HallOfFameEntrySchema.index({ slug: 1 }, { unique: true, partialFilterExpression: { deleted_at: null } });
 HallOfFameEntrySchema.index({ category: 1, 'achievement.year': -1 });
 HallOfFameEntrySchema.index({ featured: 1, featured_order: 1 });
-HallOfFameEntrySchema.index({ 'honoree.id': 1, 'source.id': 1 }, { partialFilterExpression: { deleted_at: null, 'source.id': { $type: 'string' } } });
+// One live entry per (category, honoree, source): what makes the ChallengeLegendAchieved consumer
+// idempotent across N instances, where a read-then-insert let two of them both create one.
+HallOfFameEntrySchema.index(
+    { category: 1, 'honoree.id': 1, 'source.id': 1 },
+    { unique: true, partialFilterExpression: { deleted_at: null, 'source.id': { $type: 'string' } } }
+);
 
 export const HallOfFameEntry = model<IHallOfFameEntry>('HallOfFameEntry', HallOfFameEntrySchema);

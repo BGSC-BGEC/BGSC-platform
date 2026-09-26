@@ -7,7 +7,7 @@
     "dev": "nodemon --watch src --watch ../../packages/shared/src --ext ts --exec ts-node src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "selfcheck": "ts-node src/selfcheck/event.selfcheck.ts && ts-node src/selfcheck/auction.selfcheck.ts"
+    "selfcheck": "ts-node src/selfcheck/event.selfcheck.ts && ts-node src/selfcheck/auction.selfcheck.ts && ts-node src/selfcheck/event.db.selfcheck.ts"
   },
   "dependencies": {
     "@bgsc/shared": "1.0.0",

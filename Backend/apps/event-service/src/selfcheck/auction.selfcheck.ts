@@ -7,6 +7,7 @@ import {
     TeamIdParamSchema,
     UpdateAuctionConfigSchema,
 } from '../auction/auction.schemas';
+import { overrideQuotaAllows } from '../auction/auction.service';
 
 console.log('--- Auction Engine Selfcheck ---');
 
@@ -93,6 +94,10 @@ console.log('--- Auction Engine Selfcheck ---');
 
     const invalidQuota = UpdateAuctionConfigSchema.safeParse({ oc_override_quota: 1.5 });
     assert.strictEqual(invalidQuota.success, false, 'rejects quota > 1.0');
+
+    // The model caps the lot quota at 3/7; the schema used to allow 1 and the save 500'd.
+    const overCeiling = UpdateAuctionConfigSchema.safeParse({ oc_override_quota: 0.5 });
+    assert.strictEqual(overCeiling.success, false, 'rejects lot quota above the 3/7 ceiling');
 
     const invalidCaptainQuota = UpdateAuctionConfigSchema.safeParse({ oc_captain_override_quota: 1.5 });
     assert.strictEqual(invalidCaptainQuota.success, false, 'rejects captain quota > 1.0');
@@ -694,51 +699,15 @@ console.log('--- Auction Engine Selfcheck ---');
     assert.strictEqual(lot.status, 'on_block', 'lot state remains on_block');
 }
 
-// 20. Atomic Capacity Reservation & Overbooking Immunity Math
+// 20. The real quota predicate: a quota of 0 allows nothing (it used to fall back to 3/7 via `||`).
 {
-    const max = 10;
-    let confirmedCount = 9;
-    let waitlistCount = 0;
-
-    function simulateAtomicReserve(wasWaitlisted: boolean, waitlistEnabled: boolean) {
-        // Atomic condition: counts.registrations_confirmed < max
-        if (confirmedCount < max) {
-            confirmedCount += 1;
-            if (wasWaitlisted) {
-                waitlistCount = Math.max(0, waitlistCount - 1);
-            }
-            return { reserved: true, waitlisted: false };
-        }
-        if (wasWaitlisted) {
-            return { reserved: false, reason: 'capacity_full' };
-        }
-        if (!waitlistEnabled) {
-            return { reserved: false, reason: 'capacity_full' };
-        }
-        waitlistCount += 1;
-        return { reserved: true, waitlisted: true };
-    }
-
-    // 1st request claims last open seat (seat 10)
-    const res1 = simulateAtomicReserve(false, true);
-    assert.strictEqual(res1.reserved, true);
-    assert.strictEqual(res1.waitlisted, false);
-    assert.strictEqual(confirmedCount, 10);
-
-    // 2nd request cannot claim seat, gets routed to waitlist
-    const res2 = simulateAtomicReserve(false, true);
-    assert.strictEqual(res2.reserved, true);
-    assert.strictEqual(res2.waitlisted, true);
-    assert.strictEqual(confirmedCount, 10, 'confirmed count never exceeds max 10');
-    assert.strictEqual(waitlistCount, 1, 'waitlist count increments');
-
-    // 3rd request with waitlist disabled gets capacity_full
-    const res3 = simulateAtomicReserve(false, false);
-    assert.strictEqual(res3.reserved, false);
-    assert.strictEqual(res3.reason, 'capacity_full');
-    assert.strictEqual(confirmedCount, 10);
-    assert.strictEqual(waitlistCount, 1);
+    assert.strictEqual(overrideQuotaAllows(7, 0, 0), false, 'quota 0 allows no overrides');
+    assert.strictEqual(overrideQuotaAllows(7, 2, 3 / 7), true, '3rd of 7 allowed');
+    assert.strictEqual(overrideQuotaAllows(7, 3, 3 / 7), false, '4th of 7 refused');
+    assert.strictEqual(overrideQuotaAllows(0, 0, 1), false, 'no lots, nothing to override');
 }
+
+// Seat reservation, settlement and the rest run against MongoDB in event.db.selfcheck.ts.
 
 console.log('auction service selfcheck: all assertions passed');
 

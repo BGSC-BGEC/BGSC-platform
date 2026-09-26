@@ -32,7 +32,7 @@ announcementRoutes.post('/read-all', requireAuth, requireActiveUser(), c.markAll
 // ---- feed ------------------------------------------------------------------
 announcementRoutes.get('/', optionalAuth, validate({ query: ListAnnouncementsQuery }), c.listAnnouncements);
 
-// ---- composer (Spec §6.4; "Core with permission" collapses to core+, plan §D5) ----
+// ---- composer (Spec §6.4; "Core with permission" collapses to core+) ----
 announcementRoutes.post(
     '/',
     requireAuth,

@@ -46,6 +46,14 @@ export interface ILeaderboardEntry extends Document<string> {
     scored_by: string | null;
 
     version: number;
+    /**
+     * Investments whose debit was asked for but not yet applied here (leaderboard-model.md §6). The
+     * `$inc` removes its request in the same update; anything left behind is settled (refunded) by
+     * the leaderboard's sweep, so a crash between the debit and the `$inc` cannot keep the points.
+     */
+    pending_requests: { request_id: string; user_id: string; amount: number; at: Date; settle: 'apply' | 'refund' }[];
+    /** Request ids already applied: a client retry with the same id is a replay, not a second `$inc`. */
+    applied_requests: string[];
     created_at: Date;
     updated_at: Date;
 }
@@ -92,6 +100,24 @@ const LeaderboardEntrySchema = new Schema<ILeaderboardEntry>(
         scored_by: { type: String, default: null },
 
         version: { type: Number, default: 0 }, // optimistic lock for concurrent investments
+        pending_requests: {
+            type: [
+                new Schema(
+                    {
+                        request_id: { type: String, required: true },
+                        user_id: { type: String, required: true },
+                        amount: { type: Number, required: true, min: 1 },
+                        at: { type: Date, required: true },
+                        settle: { type: String, enum: ['apply', 'refund'], default: 'apply' },
+                    },
+                    { _id: false }
+                ),
+            ],
+            default: [],
+        },
+        // ponytail: grows by one id per investment (5/user/event/hour); trim to the last N if an
+        // event ever runs long enough for it to matter.
+        applied_requests: { type: [String], default: [] },
     },
     timestamps
 );
@@ -115,6 +141,7 @@ LeaderboardEntrySchema.index({ event_id: 1, 'participant.id': 1 }, { unique: tru
 LeaderboardEntrySchema.index({ event_id: 1, final_score: -1, 'participant.display_name': 1 }); // deterministic tiebreak
 LeaderboardEntrySchema.index({ event_id: 1, rank: 1 }); // podium, pagination
 LeaderboardEntrySchema.index({ 'participant.id': 1, event_id: 1 }); // profile "my results"
+LeaderboardEntrySchema.index({ 'pending_requests.at': 1 }); // settle sweep: unsettled investments
 
 export const LeaderboardEntry = model<ILeaderboardEntry>('LeaderboardEntry', LeaderboardEntrySchema, 'leaderboard_entries');
 

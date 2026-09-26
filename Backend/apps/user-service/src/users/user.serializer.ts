@@ -61,7 +61,7 @@ export function visibilityFor(
         return 'full';
     }
     if (viewer && elevated) return 'full';
-    // D9: a private profile still answers 200 with a card stub, so deep links keep working.
+    // A private profile still answers 200 with a card stub, so deep links keep working.
     if (user.settings?.privacy?.is_profile_public === false) return 'minimal';
     return 'public';
 }

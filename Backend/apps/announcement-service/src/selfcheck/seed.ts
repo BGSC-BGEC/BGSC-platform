@@ -58,7 +58,7 @@ export async function seedEvent(title: string): Promise<string> {
     return id;
 }
 
-/** A confirmed registration is what makes an event-scoped announcement visible (plan §3.6). */
+/** A confirmed registration is what makes an event-scoped announcement visible. */
 export async function seedConfirmedRegistration(userId: string, eventId: string): Promise<string> {
     const id = uuid();
     await FormSubmission.create({

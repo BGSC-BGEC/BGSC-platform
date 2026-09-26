@@ -122,6 +122,10 @@ const PORT = parseInt(process.env.PORT || '<port>', 10);
 const options = {
     name: NAME,
     port: PORT,
+    // The mongoose models this service OWNS (relationships.md §1). Only these get their indexes
+    // built at boot — a bad index on someone else's collection must not stop you booting, and
+    // yours must not stop theirs. Omitting it builds every registered model (the old behaviour).
+    models: ['Thing'],
     routes(app: express.Express) {
         app.use('/things', thingRoutes);
         // Service-to-service only. The gateway refuses /internal from the edge; the router
@@ -154,9 +158,9 @@ if (require.main === module) {
 | `{ success: true, data }` envelope on every `res.json` — handlers return bare objects | `successEnvelope` |
 | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` | `createServiceApp` |
 | `GET /health` — `200 ok` only while Mongo is connected, else `503 degraded` | `createServiceApp` |
-| 404 fallthrough, `ServiceError` → its status, body-parser 4xx passthrough, everything else → `500 internal_error` | `errorHandler` |
-| Refuse to boot in production on a published secret | `assertInternalTokenConfigured` |
-| `connectDB()`, **`createIndexes()` on every model and wait for it**, `connectEventBus()` | `startService` |
+| 404 fallthrough, `ServiceError` → its status, body-parser 4xx passthrough, escaped `ZodError` → `422 validation_failed`, malformed URL (`URIError`) → `400 bad_request`, everything else → `500 internal_error` | `errorHandler` |
+| Refuse to boot in production on a published secret, the committed Mongo password, or a `REDIS_URL` without a password | `assertInternalTokenConfigured` |
+| `connectDB()` (with `autoIndex: false`), **`createIndexes()` on the `models:` you own and wait for it**, `connectEventBus()` | `startService` |
 | `unhandledRejection` logged, `uncaughtException` exits | `installProcessGuards` |
 | `SIGINT`/`SIGTERM` → close server → disconnect bus and DB | `startService` |
 
@@ -232,12 +236,17 @@ per-service.
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: <port>
-      MONGO_URI: mongodb://bgsc_admin:bgsc_password@mongodb:27017/bgsc_dev?authSource=admin
-      # Without this, publish() stays in-process and no other service hears your events.
+      MONGO_URI: mongodb://bgsc_admin:${MONGO_ROOT_PASSWORD:-bgsc_password}@mongodb:27017/bgsc_dev?authSource=admin
+      # Without this, publish() stays in-process and no other service hears your events. The
+      # password travels separately (config/redis.ts) — never paste it into the URL.
       REDIS_URL: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-dev_redis_password_change_me}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
+      # config/env.ts refuses to boot in production without it — event-service once missed it and
+      # took the whole stack down through the gateway's depends_on.
+      CORS_ORIGIN: ${CORS_ORIGIN:?set CORS_ORIGIN in .env}
       # Only the services this one CALLS over HTTP, by container name. Reads of another
       # service's collection go through the shared model and need no URL (§6.5).
       # EVENT_SERVICE_URL: http://event-service:3003
@@ -264,10 +273,16 @@ Notes:
 - `INTERNAL_API_TOKEN` is required even with no `/internal` routes: `startService` always calls
   `assertInternalTokenConfigured()` (a no-op outside `NODE_ENV=production`, fatal inside it), and
   compose refuses to start without the three secrets by design. Production parity is the point.
+  It is also the key every event-bus message is signed with, so it must be the same value in every
+  service — a mismatch shows up as `Event bus: dropped a message with a bad signature`.
+- If you call another service's `/internal` routes, add a `depends_on` on that service being
+  healthy as well as the URL.
 - The gateway block already carries `<NAME>_SERVICE_URL: http://<name>:<port>` for every planned
   service. Do not add it twice.
-- A service that writes files (avatars, registration uploads) needs a named volume on
-  `/app/uploads`; copy `user-service`'s `volumes:` entry. Week 4's Media Service replaces this.
+- A service that writes files uses `config.uploadDir` (never a path relative to `__dirname`), writes
+  under its own prefix (`avatars/`, `events/`, `registrations/`, …), and gets the shared volume plus
+  `UPLOAD_DIR: /app/uploads` — copy `user-service`'s entries. Do not mount `/uploads` statically:
+  media-service is the only thing that serves it, and the gateway routes it there.
 - The healthcheck is the same line as every other service with the port changed. `/health` is
   fail-closed (503 without Mongo), so `service_healthy` means "can serve", not "process is up".
 
@@ -298,8 +313,7 @@ Only for a service that is **not** on the plan (no row, no port):
 | `.env.example` | `<KEY>_SERVICE_URL=http://localhost:<port>` |
 | `docker-compose.yml` → `gateway.environment` | `<KEY>_SERVICE_URL: http://<name>:<port>` |
 
-The ROUTES order matters when prefixes overlap (`/uploads/avatars` before `/uploads`); first match
-wins.
+The ROUTES order matters when prefixes overlap; first match wins.
 
 ---
 
@@ -392,11 +406,18 @@ The ownership table in `docs/modeldocs/relationships.md` §1 decides this:
 | Need | How |
 |---|---|
 | **Read** another service's collection | Import the model from `@bgsc/shared` and query it. No HTTP, no client, no URL in compose. Same database, same replica — a read is a read |
-| **Write** to a document another service owns | HTTP to that service's `/internal` endpoint through a `clients/<other>-client.ts` with `x-internal-token`; add `<OTHER>_SERVICE_URL` to your compose block. `registration-service/src/clients/event-client.ts` is the reference, and its header states the rule |
+| **Write** to a document another service owns | `callInternal(config.services.<other>, '/internal/...', { method, body })` from `@bgsc/shared` — never a hand-rolled `fetch`. It sends `X-Internal-Token`, unwraps the `{ success, data }` envelope (a hand-written client once read `result.reserved` off the wrapper and rejected every registration), and throws `InternalCallError`. `status >= 400` is a refusal: surface it, never fall back. `outcomeUnknown` (no answer / 5xx) means the write may have landed: retry with the SAME idempotency key or fail `503`, and never write the other service's collection yourself. Add `<OTHER>_SERVICE_URL` and a `depends_on` to your compose block |
 | Keep a display snapshot fresh (`{ user_id, display_name, avatar_url }`) | Consume `UserProfileUpdated { user_id, changed_fields }` and `updateMany`. Gate on `changed_fields` containing `full_name` or `avatar_url`. Best-effort: a miss costs a stale name, never a broken record. Copy `registration-service/src/events/consumers.ts` |
 
 The agreed exceptions (`users.points_balance`, `users.announcements.*`) are listed in
 `relationships.md` §1; do not add a third without writing it down there.
+
+**Event-scoped authority.** Anything that acts on one event's data — its forms, registrations,
+teams, scores, podium, albums — checks `isEventAdmin(event, actor)` (or `requireEventAdmin(eventId,
+actor)`: 404 for a missing or invisible draft, 403 for a visible non-admin) from `@bgsc/shared`,
+with the LIVE actor `{ id: req.actor._id, role: req.actor.role }` from `requireActiveUser`, never
+the token claim. Challenge-owned data is core+ by design. Escape user text before putting it in a
+`$regex` (`escapeRegex`).
 
 ### 6.6 Error envelope
 
@@ -447,8 +468,11 @@ scratch Mongo and hits routes over `fetch()` with signed JWTs. Pattern copied fr
 `apps/user-service/src/users/user.e2e.ts`:
 
 - `import { app } from '../index'` — `createServiceApp` already exports it.
-- scratch DB: `const TEST_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_e2e$2')`.
+- scratch DB of its own: `const TEST_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_e2e_<name>$2')`.
+  Never the shared `bgsc_e2e` (suites running side by side wipe each other) and never `bgsc_dev`.
 - `await mongoose.connect(TEST_DB); await mongoose.connection.dropDatabase(); await Model.syncIndexes();`
+  **Not optional since audit #2:** `autoIndex` is off, so a scratch DB has no unique indexes until
+  you build them — a test expecting a duplicate to be refused would pass it silently.
 - ephemeral port: `server = app.listen(0); base = http://127.0.0.1:${port}`. Never collides.
 - inline JWT: `const token = (id, role) => jwt.sign({sub:id, role}, config.jwt.accessSecret, {expiresIn:'5m'})`.
 - `call(method, path, {as?, body?})` helper builds Bearer header, unwraps the `{success, data}`
@@ -470,9 +494,8 @@ writes created.
 **Register the file** in the service's `package.json` `e2e` script. The root `npm test` chains
 `selfcheck && e2e` over every workspace, so passing both flips the merge gate.
 
-The teardown drops `bgsc_e2e`. If a workspace ordering matters (e.g. user.e2e must drop before
-announcement.e2e because they share scratch-DB state at boot), document it in the file's header
-comment. Today they all use distinct service exports so order is unconstrained.
+The teardown drops `bgsc_e2e_<name>`. Because every suite owns its database, suites never share
+state and their order is unconstrained.
 
 ---
 
@@ -509,7 +532,23 @@ for why both exist.
   from `dist/`. Do not set `PORT` in it — every service would bind the same port; each service
   defaults its own.
 - **`REDIS_URL` in compose.** Without it every `publish()` stays inside the process. Fine for one
-  service in dev; wrong the moment a second service is supposed to hear it.
+  service in dev; wrong the moment a second service is supposed to hear it — and refused at a
+  production boot. The password is `REDIS_PASSWORD`, not part of the URL. A Redis client of your own
+  (a cache) must be built from `redisOptions()` in `@bgsc/shared` — `new Redis(config.redisUrl)`
+  would connect without the password, and ioredis lets a URL password beat an options one.
+- **Rotating `INTERNAL_API_TOKEN`:** old value into `INTERNAL_API_TOKEN_PREVIOUS` (verify-only),
+  new one in `INTERNAL_API_TOKEN`, restart every service at once.
+- **Pub/sub loses messages published while you are down.** There is no outbox: if your service
+  produces an event whose loss would leave data wrong (a reward, a refund, a deletion), add a replay
+  sweep — every 5 min, a 7-day window keyed on a lifecycle timestamp, a bounded page, re-publishing
+  what is missing. Consumers must therefore be idempotent by a key derived from the data, never the
+  envelope's `message_id`.
+- **The bus is signed and isolated (Sep 26, 2026).** Every message on Redis is
+  `{ v, sig, body }`, `sig` = HMAC-SHA256 of `body` keyed by `INTERNAL_API_TOKEN`; unsigned or
+  tampered messages are dropped and logged, because points-service credits what a
+  `ChallengeCompleted` payload says. A process skips its own echo by a per-process instance id. Each
+  `subscribe()` listener is isolated: one that throws or rejects is logged and the rest still run —
+  but still wrap your handlers so a failure says which one.
 - **An unreachable Redis is not fatal (changed Sep 20, 2026).** `connectEventBus()` used to await
   its first connect, so a Redis outage crash-looped every service in the platform — the HTTP API
   down because the *event bus* was down. It now wires the transport, connects in the background and

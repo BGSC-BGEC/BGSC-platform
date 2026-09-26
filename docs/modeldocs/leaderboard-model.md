@@ -40,7 +40,8 @@ Leaderboard Service reads these; never writes them.
     type: 'user' | 'team',
     id: string,
     display_name: string,               // snapshot
-    avatar_url: string | null           // snapshot
+    avatar_url: string | null,          // snapshot
+    deleted: boolean                    // raised by UserDeleted, lowered by UserRestored (relationships.md §4)
   },
   registration_id: string | null,       // user entries: -> form_submissions._id
 
@@ -80,7 +81,7 @@ Spec §5.6 and the plan want "user position highlight", "scroll to my position",
 - `invested_points >= 0`; `invested_points <= events.points_pool.investment_cap` when cap set
 - one entry per `(event_id, participant.id)` — unique index
 - `participant.type == 'team' ⇔ events.teaming.is_teamed`; `registration_id != null ⇔ participant.type == 'user'`
-- entries exist only for confirmed registrations / locked teams; removed on `RegistrationCancelled` / `TeamDisbanded` before `start_at`; frozen after
+- entries exist only for confirmed registrations / locked teams, and only while the event is `upcoming`/`ongoing`; on `RegistrationCancelled` / `TeamDisbanded` an entry is **deleted only if the event is still `upcoming`/`draft` AND `invested_points == 0`**, otherwise marked `stats.eliminated`. An entry with investment is never deleted: the cancel-refund sweep finds spends only through entry ids (Sep 26).
 
 ### 3.3 Indexes
 
@@ -121,13 +122,16 @@ Flow, all inside Leaderboard Service:
 ```
 1. guard: user is confirmed participant; events.points_pool.investment_enabled; event.status == 'ongoing';
           amount ≥ 10; entry.invested_points + amount ≤ investment_cap; rate limit 5/user/event/hour (Redis)
-2. request Points Service debit: reason 'leaderboard.investment', reference { type: 'leaderboard_entry', id },
-   idempotency_key 'leaderboard.investment:<request_id>'   → sync call; 4xx ⇒ abort, nothing written
-3. entries.findOneAndUpdate({ _id, version }, { $inc: { invested_points: amount, version: 1 } })
-   → 0 matched ⇒ retry step 3 (points already debited, must land)
+2. POST points:/internal/points/spend { user_id, amount, reference { type: 'leaderboard_entry', id }, request_id }
+   idempotency_key 'leaderboard.investment:<request_id>'   → callInternal; refusal ⇒ abort, nothing written;
+   unknown outcome ⇒ one retry with the same request_id, then refund-by-request_id (404 = nothing taken) and 503
+3. entries.findOneAndUpdate({ _id, not eliminated, invested_points <= cap - amount }, { $inc: { invested_points: amount, version: 1 } })
+   → 0 matched ⇒ POST /internal/points/refund { user_id, reference, request_id } (exactly that spend, once), then 409/400
 4. recompute final_score + ranks for the event; snapshot; refresh cache
 5. emit LeaderboardInvestmentMade { event_id, user_id, amount, new_rank }
 ```
+
+**No fallback writes (Sep 26).** This service never writes `users` or `point_transactions`; the old fallback did on any network error, and debited twice whenever the points call had in fact landed. A 401/403 from Points (our token) is a 503, not a 401 the client reads as "logged out".
 
 Investments are non-refundable (Spec) **except** on event cancel: `EventCancelled` ⇒ Points Service refunds every `leaderboard.investment` spend whose `reference.id` is one of this event's entries (see points-model.md §4).
 
@@ -137,7 +141,8 @@ Projection endpoint (`GET .../project?amount=`) is read-only math on the cached 
 
 - `rank == null` for all entries while `count(entries) < events.leaderboard.min_participants`. UI shows lock state (Spec §5.6).
 - If participants drop below threshold mid-event (cancellations), ranks keep the **last computed** values and `leaderboard_snapshots` gets a `frozen: true` marker; investment disabled until count recovers.
-- On `EventCompleted`: final recompute, snapshot with `reason: 'final', frozen: true`, no further writes accepted.
+- On `EventCompleted`: final recompute, snapshot with `reason: 'final', frozen: true`, no further writes accepted, and `LeaderboardFrozen { reason: 'final', podium }` for Points (§9).
+- On `EventCancelled`: a `reason: 'freeze', frozen: true` snapshot and the Redis keys dropped — **entries are kept** (Sep 26). Deleting them raced the Points Service's refund sweep on the same message, and a lost race lost every investment refund.
 
 `leaderboard_snapshots` (small, for history/Δ/audit):
 
@@ -155,7 +160,7 @@ Keep last 20 per event (capped by a cleanup job). `previous_rank` on entries = r
 | `lb:event:{event_id}:meta` | HASH | `updated_at`, `frozen`, `count` |
 | `lb:global:{period}:{domain}` | ZSET | member = user_id, score = Σ `earn` amounts in period; `period ∈ all|semester|month|week`, `domain ∈ all|sports|esports|fitness|general` (matches `events.domain` / `challenges.domain`) |
 
-Event ZSET rebuilt on every recompute (write-through). Global ZSETs rebuilt by a job every 5 min from `point_transactions` (`$match created_at ≥ period_start, type: 'earn'` → `$group user_id`). Mongo is truth; Redis loss ⇒ rebuild.
+Event ZSET rebuilt on every recompute (write-through). Global ZSETs rebuilt from `point_transactions` — points earned net of reversals (`earn` rows plus negative `adjust` rows whose reason is not `admin.manual` — reversals; a cancelled event's reversed credit no longer stays on the board) → `$group user_id` — and evicted (5s debounce) on `PointsEarned`/`PointsAdjusted`. Mongo is truth; Redis loss ⇒ rebuild.
 
 Global filters (plan Week 3 BE-1: "by event, category, time period"): event ⇒ event ZSET; domain/period ⇒ the matching global ZSET. Domain of a point transaction = `domain` of its referenced event/challenge, resolved at rebuild time from a `{ id → domain }` map fetched once per run. ponytail: contingency "global only, no filters" = build only `lb:global:all:all`.
 
@@ -164,10 +169,16 @@ Global filters (plan Week 3 BE-1: "by event, category, time period"): event ⇒ 
 ```
 LeaderboardUpdated            { event_id, reason, changed_participant_ids[] }
 LeaderboardInvestmentMade     { event_id, user_id, amount, previous_rank, new_rank }
-LeaderboardFrozen             { event_id, reason: 'below_threshold' | 'final' }
+LeaderboardFrozen             { event_id, reason: 'below_threshold' | 'final', podium? }
+                              // podium (final only): [{ place, participant: { type, id }, user_ids[] }]
+                              // team → its members' ids; empty below threshold. Points pays event.podium.<place> off it.
+HallOfFameEntryCreated        { entry_id, slug, category, honoree: { type, id }, source: { type, id }, participation_id }
+                              // Challenge Service records reward.hall_of_fame_entry_id from it
 ```
 
-Consumed: `RegistrationCreated` (create user entry, solo events), `RegistrationCancelled` (remove entry pre-start), `TeamLocked` (create team entry, teamed events), `TeamDisbanded` (remove entry pre-start), `EventCompleted` (final freeze), `EventCancelled` (drop entries; Points handles refunds itself).
+Consumed: `RegistrationCreated` (create user entry, solo events — the one "now confirmed" event, including promotions), `RegistrationCancelled` (withdraw: delete pre-start with nothing invested, else eliminate), `TeamLocked` (create team entry from the `teams` doc, teamed events), `TeamDisbanded` (withdraw), `EventCompleted` (final freeze + podium), `EventCancelled` (freeze, keep entries; Points refunds), `UserProfileUpdated` (gated on `full_name`/`avatar_url`) / `UserDeleted` (`anonymizedSnapshot`) / `UserRestored` (re-snapshot, `deleted: false`) on entries and Hall of Fame honorees/members, `ChallengeLegendAchieved` (create the Hall of Fame entry; unique `{ category, honoree.id, source.id }` makes it once across instances), `PointsEarned` / `PointsAdjusted` (debounced 5s eviction of the global ZSETs).
+
+**Never written here:** `challenge_participations` (the HoF link goes out as `HallOfFameEntryCreated`), `users`, `point_transactions`.
 
 ## 10. Read patterns
 

@@ -6,9 +6,17 @@ import {
     UserRole,
     UserStatus,
     publish,
+    rankOf,
     recordAudit,
     ServiceError,
 } from '@bgsc/shared';
+
+/** Who performed an admin write, for the audit row. `role` is the live document's, never the token's. */
+export interface Actor {
+    id: string;
+    role: UserRole;
+    ip?: string | null;
+}
 
 /**
  * All Mongo access for the User Service. Controllers do HTTP; this does data, events and audit.
@@ -20,7 +28,7 @@ const PRODUCER = 'user-service';
 /** Never return soft-deleted users from any read path. */
 const alive = { deleted_at: null };
 
-/** `:ref` is a UUID or a username — one route, resolved here (be2-user-service-plan.md §3.1). */
+/** `:ref` is a UUID or a username — one route, resolved here. */
 export async function findByRef(ref: string): Promise<IUser | null> {
     return isUuid(ref)
         ? User.findOne({ _id: ref, ...alive })
@@ -29,6 +37,11 @@ export async function findByRef(ref: string): Promise<IUser | null> {
 
 export async function findById(id: string): Promise<IUser | null> {
     return User.findOne({ _id: id, ...alive });
+}
+
+/** Admin-only lookups (the audit view): a deleted account's trail is exactly what gets asked for. */
+export async function findByRefIncludingDeleted(ref: string): Promise<IUser | null> {
+    return isUuid(ref) ? User.findOne({ _id: ref }) : User.findOne({ username: ref.toLowerCase() });
 }
 
 /**
@@ -44,9 +57,10 @@ export async function findById(id: string): Promise<IUser | null> {
  */
 export async function findActiveSelf(id: string): Promise<IUser> {
     const user = await findById(id);
-    if (!user) throw new ServiceError(404, 'not_found');
-    if (user.status !== UserStatus.ACTIVE && user.status !== UserStatus.PENDING_VERIFICATION) {
-        throw new ServiceError(403, 'account_' + user.status);
+    // Suspended, deleted or gone: the session is no longer a session. 401 with no reason, the same
+    // answer requireActiveUser gives — `account_suspended` told the caller why.
+    if (!user || (user.status !== UserStatus.ACTIVE && user.status !== UserStatus.PENDING_VERIFICATION)) {
+        throw new ServiceError(401, 'unauthorized');
     }
     return user;
 }
@@ -56,14 +70,12 @@ function profilePaths(input: UpdateProfileInput, current: IUser): Record<string,
     const set: Record<string, unknown> = {};
     if (input.full_name !== undefined) set['profile.full_name'] = input.full_name;
     if (input.bio !== undefined) set['profile.bio'] = input.bio;
-    if (input.phone_number !== undefined) {
+    // A number typed into a profile form is not a verified one, so a changed number always drops the
+    // badge in the same write. An UNchanged number is not written at all: re-writing it raced an OTP
+    // verification of a different number and could land that stale number under the new badge.
+    if (input.phone_number !== undefined && input.phone_number !== (current.profile?.phone_number ?? null)) {
         set['profile.phone_number'] = input.phone_number;
-        // A number typed into a profile form is not a verified one. Without this, a user could
-        // verify one number by OTP and then swap in another while keeping the verified badge —
-        // and the badge is what the unique index and every "verified contact" read rely on.
-        if (input.phone_number !== current.profile?.phone_number) {
-            set.is_phone_verified = false;
-        }
+        set.is_phone_verified = false;
     }
     if (input.interests !== undefined) set['profile.interests'] = input.interests;
     for (const [k, v] of Object.entries(input.social_links ?? {})) {
@@ -80,7 +92,9 @@ export async function updateProfile(user: IUser, input: UpdateProfileInput): Pro
     // a write that never happened.
     if (Object.keys(set).length === 0) return user;
 
-    const updated = (await User.findOneAndUpdate({ _id: user._id, ...alive }, { $set: set }, { returnDocument: 'after' }))!;
+    const updated = await User.findOneAndUpdate({ _id: user._id, ...alive }, { $set: set }, { returnDocument: 'after' });
+    // Deleted between the load and the write.
+    if (!updated) throw new ServiceError(401, 'unauthorized');
 
     // changed_fields is load-bearing: relationships.md §4 uses it to skip snapshot rewrites when
     // neither display_name nor avatar_url moved.
@@ -104,7 +118,38 @@ export async function updateSettings(user: IUser, input: UpdateSettingsInput): P
     if (input.theme !== undefined) set['settings.theme'] = input.theme;
     if (Object.keys(set).length === 0) return user;
 
-    return (await User.findOneAndUpdate({ _id: user._id, ...alive }, { $set: set }, { returnDocument: 'after' }))!;
+    const updated = await User.findOneAndUpdate({ _id: user._id, ...alive }, { $set: set }, { returnDocument: 'after' });
+    if (!updated) throw new ServiceError(401, 'unauthorized');
+    return updated;
+}
+
+/** UserDeleted replay window and page. */
+export const DELETE_REPLAY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const DELETE_REPLAY_PAGE = 500;
+
+/**
+ * Replay sweep. There is no outbox, so a `UserDeleted` lost between the claim and a consumer (bus
+ * down, consumer restarting) left a deleted user's name and avatar in every snapshot. Re-publishing
+ * every deletion of the last 7 days is safe: the consumers anonymise, which is idempotent.
+ *
+ * ponytail: bounded page, newest first, every instance. Paginate if >500 deletions a week happens.
+ */
+export async function replayDeleted(now: Date = new Date()): Promise<number> {
+    const users = await User.find({
+        deleted_at: { $gte: new Date(now.getTime() - DELETE_REPLAY_WINDOW_MS) },
+        status: UserStatus.DELETED,
+    })
+        .select('_id deletion')
+        .sort({ deleted_at: -1 })
+        .limit(DELETE_REPLAY_PAGE);
+    for (const u of users) {
+        publish('UserDeleted', PRODUCER, {
+            user_id: u._id,
+            research_consent: u.deletion?.research_consent ?? false,
+            restorable_until: u.deletion?.restorable_until ?? null,
+        });
+    }
+    return users.length;
 }
 
 /** Touch-on-request, used by the admin "Last Active Epoch" column. Fire-and-forget. */
@@ -127,6 +172,11 @@ export function touchLastActive(userId: string): void {
  * was wrong under ordinary concurrency: five simultaneous callers wrote five audit rows for one
  * real transition, and a fabricated audit entry is worse than a missing one because it is believed.
  * Claim-then-audit-with-rollback gives both properties instead of trading one for the other.
+ *
+ * ponytail: a process crash between the claim and the audit write leaves the change with no row —
+ * there is no transaction on a standalone Mongo to close that window. Accepted: it needs a crash
+ * inside one round-trip, and the claimed state itself is still correct. Replica set + transaction
+ * if that ever stops being acceptable.
  */
 async function auditedTransition<T>(opts: {
     claim: () => Promise<T | null>;
@@ -157,7 +207,7 @@ async function auditedTransition<T>(opts: {
 }
 
 /**
- * Self-service restore window (D11). After this, only an admin can bring the account back.
+ * Self-service restore window. After this, only an admin can bring the account back.
  *
  * Re-exported from @bgsc/shared rather than defined here: Auth Service reads the same number to
  * decide whether a deleted user may sign back in, and the two were 30 and 45. That gap meant days
@@ -208,23 +258,25 @@ export function restorableUntil(deletedAt: Date): Date {
 }
 
 /**
- * Deletion hides the account. Nothing is destroyed and no purge job exists (Spec §11.2.1, D10) —
+ * Deletion hides the account. Nothing is destroyed and no purge job exists (Spec §11.2.1) —
  * the restore window governs self-service restore, not erasure. The gate that collects this
  * consent must say so; RETENTION_DISCLOSURE is what it should say.
  */
 export async function softDelete(
     user: IUser,
     actorId: string,
-    opts: { reason?: string | null; research_consent: boolean }
+    opts: { reason?: string | null; research_consent: boolean; ip?: string | null }
 ): Promise<{ deleted_at: Date; restorable_until: Date }> {
     const now = new Date();
     const until = restorableUntil(now);
 
     await auditedTransition<IUser>({
         // Only the caller that flips deleted_at from null proceeds; the rest are already-deleted.
+        // `status: user.status` pins the status recorded as prior_status to the one being replaced —
+        // Auth's reactivate restores it, so deleting can never launder a suspension into `active`.
         claim: () =>
             User.findOneAndUpdate(
-                { _id: user._id, deleted_at: null },
+                { _id: user._id, deleted_at: null, status: user.status },
                 {
                     $set: {
                         deleted_at: now,
@@ -235,6 +287,7 @@ export async function softDelete(
                             research_consent: opts.research_consent,
                             restorable_until: until,
                             disclosure_version: RETENTION_DISCLOSURE_VERSION,
+                            prior_status: user.status,
                         },
                     },
                 },
@@ -256,6 +309,7 @@ export async function softDelete(
                     restorable_until: until,
                 },
                 reason: opts.reason ?? null,
+                ip: opts.ip ?? null,
             }),
         rollback: (before) =>
             User.updateOne(
@@ -282,17 +336,32 @@ export async function softDelete(
  */
 
 /**
+ * An admin may act only on someone they strictly outrank. changeStatus guarded founders alone, so
+ * a coordinator could suspend — or un-suspend — a peer coordinator (audit Sep 26). Founders are
+ * covered by the same rule: nobody outranks them.
+ */
+function assertOutranks(actor: Actor, role: UserRole): void {
+    if (rankOf(actor.role) <= rankOf(role)) throw new ServiceError(403, 'forbidden');
+}
+
+/**
  * Spec §5.15.5: role changes are audited, and an admin cannot demote their own active session.
  * Promotion to coordinator/founder is refused at the schema (ASSIGNABLE_ROLES) because it requires
  * Founder 2FA that does not exist yet.
+ *
+ * Claim-then-audit-with-rollback (auditedTransition), with the claim conditional on the role that
+ * was read: two admins racing on one user produce one change and one audit row whose
+ * previous_value is true, and a target deleted mid-request is a 409, not a 500 after an audit row.
  */
 export async function changeRole(
     target: IUser,
     newRole: UserRole,
-    actor: { id: string; role: UserRole },
+    actor: Actor,
     reason: string
 ): Promise<IUser> {
     if (target._id === actor.id) throw new ServiceError(409, 'cannot_change_own_role');
+    assertOutranks(actor, target.role);
+    assertOutranks(actor, newRole);
     // Guard the other direction too: a coordinator must not be demoted by the assignable-role list.
     if (target.role === UserRole.COORDINATOR || target.role === UserRole.FOUNDER) {
         throw new ServiceError(501, 'requires_2fa');
@@ -301,26 +370,27 @@ export async function changeRole(
 
     const previous = target.role;
 
-    // Audit BEFORE applying. Mongo is standalone here, so there is no transaction to wrap the pair
-    // in; one of the two orderings has to fail badly. If the write lands first and the audit throws,
-    // a privilege change exists with no trail — which is exactly what §7.3 forbids. This way a
-    // failure leaves an audit row for a change that did not happen, which is detectable (the row's
-    // previous_value still matches the live value) and harmless by comparison.
-    await recordAudit({
-        actor_id: actor.id,
-        action: 'user.role_changed',
-        target_type: 'user',
-        target_id: target._id,
-        previous_value: { role: previous },
-        new_value: { role: newRole },
-        reason,
+    const updated = await auditedTransition<IUser>({
+        claim: () =>
+            User.findOneAndUpdate(
+                { _id: target._id, ...alive, role: previous },
+                { $set: { role: newRole } },
+                { returnDocument: 'after' }
+            ),
+        conflict: new ServiceError(409, 'conflict'),
+        audit: () =>
+            recordAudit({
+                actor_id: actor.id,
+                action: 'user.role_changed',
+                target_type: 'user',
+                target_id: target._id,
+                previous_value: { role: previous },
+                new_value: { role: newRole },
+                reason,
+                ip: actor.ip ?? null,
+            }),
+        rollback: () => User.updateOne({ _id: target._id, role: newRole }, { $set: { role: previous } }),
     });
-
-    const updated = (await User.findOneAndUpdate(
-        { _id: target._id, ...alive },
-        { $set: { role: newRole } },
-        { returnDocument: 'after' }
-    ))!;
 
     publish('UserRoleChanged', PRODUCER, {
         user_id: target._id,
@@ -332,14 +402,21 @@ export async function changeRole(
     return updated;
 }
 
+/** The audit action for a status transition, named for what actually happened. */
+export function statusAction(previous: UserStatus, next: UserStatus): string {
+    if (next === UserStatus.SUSPENDED) return 'user.suspended';
+    if (previous === UserStatus.SUSPENDED) return 'user.reactivated';
+    return 'user.status_changed';
+}
+
 export async function changeStatus(
     target: IUser,
     newStatus: UserStatus,
-    actor: { id: string; role: UserRole },
+    actor: Actor,
     reason: string
 ): Promise<IUser> {
     if (target._id === actor.id) throw new ServiceError(409, 'cannot_change_own_status');
-    if (target.role === UserRole.FOUNDER) throw new ServiceError(403, 'forbidden');
+    assertOutranks(actor, target.role);
     if (target.status === newStatus) throw new ServiceError(409, 'no_change');
 
     const previous = target.status;
@@ -347,21 +424,33 @@ export async function changeStatus(
     // Suspension must end the session, not just flag the account.
     if (newStatus === UserStatus.SUSPENDED) set.refresh_token_hash = null;
 
-    // Audit first — same reasoning as changeRole.
-    await recordAudit({
-        actor_id: actor.id,
-        action: newStatus === UserStatus.SUSPENDED ? 'user.suspended' : 'user.reactivated',
-        target_type: 'user',
-        target_id: target._id,
-        previous_value: { status: previous },
-        new_value: { status: newStatus },
-        reason,
+    const updated = await auditedTransition<IUser>({
+        claim: () =>
+            User.findOneAndUpdate(
+                { _id: target._id, ...alive, status: previous },
+                { $set: set },
+                { returnDocument: 'after' }
+            ),
+        conflict: new ServiceError(409, 'conflict'),
+        audit: () =>
+            recordAudit({
+                actor_id: actor.id,
+                action: statusAction(previous, newStatus),
+                target_type: 'user',
+                target_id: target._id,
+                previous_value: { status: previous },
+                new_value: { status: newStatus },
+                reason,
+                ip: actor.ip ?? null,
+            }),
+        // The cleared refresh token is not restored: a rolled-back suspension costs one re-login.
+        rollback: () => User.updateOne({ _id: target._id, status: newStatus }, { $set: { status: previous } }),
     });
-
-    const updated = (await User.findOneAndUpdate({ _id: target._id, ...alive }, { $set: set }, { returnDocument: 'after' }))!;
 
     if (newStatus === UserStatus.SUSPENDED) {
         publish('UserDisabled', PRODUCER, { user_id: target._id, reason, disabled_by: actor.id });
+    } else if (previous === UserStatus.SUSPENDED) {
+        publish('UserEnabled', PRODUCER, { user_id: target._id, reason, enabled_by: actor.id });
     }
 
     return updated;
@@ -374,27 +463,37 @@ export interface ListResult {
 
 interface Cursor {
     /** Value of the sort field on the last row of the previous page. `null` is a real value here. */
-    v: string | number | null;
+    v: string | number | Date | null;
     /** Tiebreaker. Without it, rows sharing a sort value straddle the page boundary and vanish. */
     id: string;
 }
 
+const DATE_SORTS = new Set(['created_at', 'last_active_at']);
+
 const encodeCursor = (c: Cursor) => Buffer.from(JSON.stringify(c)).toString('base64url');
 
-function decodeCursor(raw: string): Cursor | null {
+/**
+ * Decodes and type-checks a cursor FOR THE SORT IT IS USED WITH. `v` is client-supplied and lands
+ * inside a query filter: anything but a primitive is a Mongo operator in disguise, and a primitive
+ * of the wrong type (`"garbage"` on a date sort, or a created_at cursor replayed with
+ * sort=points_balance) made Mongoose throw a CastError, which surfaced as a 500.
+ */
+export function decodeCursor(raw: string, sort: string): Cursor | null {
+    let c: { v?: unknown; id?: unknown };
     try {
-        const c = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Cursor;
-        if (typeof c?.id !== 'string') return null;
-        // `v` is client-supplied and lands inside a query filter. Anything but a primitive is a
-        // Mongo operator document in disguise: `{ v: { $ne: null } }` becomes `{ field: { $ne: null } }`
-        // in the equality branch of keysetFilter. Schema casting happens to reject it on a Number
-        // path today, but that is the schema saving us, not this code.
-        const t = typeof c.v;
-        if (c.v !== null && t !== 'string' && t !== 'number') return null;
-        return c;
+        c = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
     } catch {
         return null;
     }
+    if (!c || typeof c !== 'object' || typeof c.id !== 'string') return null;
+    if (c.v === null) return { v: null, id: c.id };
+
+    if (DATE_SORTS.has(sort)) {
+        if (typeof c.v !== 'string') return null;
+        const d = new Date(c.v);
+        return Number.isNaN(d.getTime()) ? null : { v: d, id: c.id };
+    }
+    return typeof c.v === 'number' && Number.isFinite(c.v) ? { v: c.v, id: c.id } : null;
 }
 
 /**
@@ -435,7 +534,7 @@ export async function listUsers(input: ListUsersInput): Promise<ListResult> {
 
     const conditions: Record<string, unknown>[] = [filter];
     if (input.cursor) {
-        const c = decodeCursor(input.cursor);
+        const c = decodeCursor(input.cursor, input.sort);
         if (!c) throw new ServiceError(422, 'invalid_cursor');
         conditions.push(keysetFilter(input.sort, c));
     }
@@ -465,13 +564,21 @@ export async function listUsers(input: ListUsersInput): Promise<ListResult> {
 /**
  * User search (Spec §13.1). Elasticsearch is out of MVP; a Mongo text index covers campus scale.
  * ponytail: text index. Swap for Elasticsearch when fuzzy/typo tolerance is actually needed.
+ *
+ * The text index covers `profile.full_name`, so the text branch is limited to public profiles: a
+ * private profile hides its real name, and matching on it anyway told any signed-in user whose
+ * account a name belonged to. The username-prefix branch still finds private profiles — the
+ * username is public by design.
  */
 export async function searchUsers(q: string, limit: number): Promise<IUser[]> {
     const filter = { ...alive, status: { $in: [UserStatus.ACTIVE, UserStatus.PENDING_VERIFICATION] } };
 
     let byText: IUser[] = [];
     try {
-        byText = await User.find({ ...filter, $text: { $search: q } }, { score: { $meta: 'textScore' } })
+        byText = await User.find(
+            { ...filter, 'settings.privacy.is_profile_public': { $ne: false }, $text: { $search: q } },
+            { score: { $meta: 'textScore' } }
+        )
             .sort({ score: { $meta: 'textScore' } })
             .limit(limit);
     } catch (err) {
@@ -486,10 +593,6 @@ export async function searchUsers(q: string, limit: number): Promise<IUser[]> {
     // which is what a search-as-you-type box actually needs.
     const safe = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return User.find({ ...filter, username: { $regex: `^${safe}`, $options: 'i' } }).limit(limit);
-}
-
-export async function snapshots(ids: string[]): Promise<IUser[]> {
-    return User.find({ _id: { $in: ids } }); // includes soft-deleted: snapshots must still resolve
 }
 
 /**

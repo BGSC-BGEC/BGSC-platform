@@ -11,7 +11,7 @@ import { z } from 'zod';
  * Request schemas. Zod strips unknown keys, so these double as the sanitization layer: a client
  * cannot set `status`, `published_at` or `delivery` by adding the field to a PATCH body.
  *
- * Three of these rules are load-bearing beyond length caps — see be2-announcement-service-plan.md §4.5.
+ * Three of these rules are load-bearing beyond length caps — each is commented where it is defined.
  */
 
 /**
@@ -82,7 +82,7 @@ export const UpdateAnnouncementSchema = z
         title: z.string().trim().min(1).max(120).optional(),
         body: z.string().trim().min(1).max(5000).optional(),
         media_url: MediaUrl.nullable().optional(),
-        // Refused by the service once the announcement has left `draft` (§4.3) — the WhatsApp
+        // Refused by the service once the announcement has left `draft` — the WhatsApp
         // fan-out has already gone out against these two.
         categories: Categories.optional(),
         audience: AudienceSchema.optional(),
@@ -92,7 +92,7 @@ export const UpdateAnnouncementSchema = z
     })
     .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' });
 
-/** Send Now is this body empty; Schedule for Later is the same route with a date (§D4). */
+/** Send Now is this body empty; Schedule for Later is the same route with a date. */
 export const PublishAnnouncementSchema = z.object({
     scheduled_for: z.coerce.date().optional(),
 });
@@ -109,7 +109,7 @@ export const ListAnnouncementsQuery = z.object({
         .enum(['true', 'false'])
         .optional()
         .transform((v) => v === 'true'),
-    // Honoured only for core+; everyone else is pinned to 'published' in the service (§3.5).
+    // Honoured only for core+; everyone else is pinned to 'published' in the service.
     status: z.enum(ANNOUNCEMENT_STATUS).optional(),
     // Capped: uncapped, one client asks for 100000 and the 4-month window protects nothing.
     limit: z.coerce.number().int().min(1).max(50).default(20),
@@ -119,8 +119,8 @@ export const ListAnnouncementsQuery = z.object({
 export const IdParams = z.object({ id: z.string().uuid() });
 
 /**
- * Delivery writeback from the Notification Service (`PATCH /internal/announcements/:id/delivery`,
- * be2-broadcast-service-plan.md §6). Service-to-service only — the route mounts
+ * Delivery writeback from the Notification Service (`PATCH /internal/announcements/:id/delivery`).
+ * Service-to-service only — the route mounts
  * `requireServiceToken` and the gateway refuses `/internal/*` at the edge.
  *
  * Every field is the caller's OUTCOME, never an instruction: there is no way to ask this service
@@ -128,13 +128,16 @@ export const IdParams = z.object({ id: z.string().uuid() });
  */
 const DeliveryRow = z.object({
     category: z.enum(ANNOUNCEMENT_CATEGORY),
-    // Not validated as a phone number or a group id: the destination is opaque to this service by
-    // design (plan D3), and pinning a format here would break the day a provider changes shape.
+    // A MASKED label (`••••1234`), never the destination itself: that is PII, and this document is
+    // served to every core+ reader. Opaque to this service by design, so no format check.
     group_id: z.string().trim().min(1).max(200),
     status: z.enum(DELIVERY_STATUS),
     message_id: z.string().trim().max(200).nullish(),
     attempted_at: z.coerce.date().nullish(),
     error: z.string().trim().max(300).nullish(),
+    // The sender's dispatch-row revision. Receipts can arrive out of order; an older one never
+    // overwrites a newer one (announcement.service.ts:applyWhatsAppRow).
+    revision: z.number().int().min(0),
 });
 
 export const RecordDeliverySchema = z
@@ -153,6 +156,7 @@ export const RecordDeliverySchema = z
             .object({
                 status: z.enum(DELIVERY_STATUS),
                 sent_count: z.number().int().min(0).nullish(),
+                revision: z.number().int().min(0),
             })
             .optional(),
     })

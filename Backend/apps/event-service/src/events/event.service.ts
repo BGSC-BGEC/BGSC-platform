@@ -1,11 +1,24 @@
-import { Event, IEvent, ServiceError, publish, UserRole, FormSubmission, IFormSubmission, User, userSnapshotOf } from '@bgsc/shared';
 import {
-    CreateEventInput,
-    UpdateEventInput,
-    QueryEventsInput,
-    QueryParticipantsInput,
-} from './event.schemas';
+    Event,
+    EventStatus,
+    IEvent,
+    ServiceError,
+    publish,
+    UserRole,
+    UserStatus,
+    FormSubmission,
+    IFormSubmission,
+    User,
+    userSnapshotOf,
+    AuctionLot,
+    FormDefinition,
+    DELETED_DISPLAY_NAME,
+} from '@bgsc/shared';
+import { AuctionConfigSchema, CreateEventInput, UpdateEventInput, QueryEventsInput, QueryParticipantsInput } from './event.schemas';
 import { randomBytes } from 'crypto';
+import { Actor, TERMINAL_STATUSES, assertEventAdmin, assertVisible, atLeast, escapeRegex, isEventAdmin } from './access';
+import { asServiceError, promoteRegistration, recordAttendance } from '../clients/registration-client';
+import { invalidateAuctionLiveCache } from '../auction/cache';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRODUCER = 'event-service';
@@ -23,21 +36,22 @@ export function slugify(text: string): string {
         .replace(/^-+|-+$/g, '');
 }
 
-export async function generateUniqueSlug(title: string, date: Date): Promise<string> {
-    const year = date.getFullYear();
-    const baseSlug = `${slugify(title)}-${year}`;
-    let slug = baseSlug;
-    let attempts = 0;
+const slugBase = (title: string, date: Date) => `${slugify(title) || 'event'}-${date.getUTCFullYear()}`;
+const slugSuffixed = (base: string) => `${base}-${randomBytes(3).toString('hex')}`;
 
-    while (await Event.exists({ slug, deleted_at: null })) {
-        attempts++;
-        const suffix = randomBytes(2).toString('hex');
-        slug = `${baseSlug}-${suffix}`;
-        if (attempts > 10) break;
-    }
-
-    return slug;
-}
+/**
+ * Lifecycle (event-model.md §5). `past` and `cancelled` are terminal. Anything not listed is a 409,
+ * so `draft → past` (an EventCompleted for an event that never ran) and `ongoing → draft` (hiding a
+ * running event) are gone. Every move is a compare-and-swap on the status it started from, so two
+ * concurrent PATCHes cannot both publish the same transition.
+ */
+export const STATUS_TRANSITIONS: Record<EventStatus, EventStatus[]> = {
+    draft: ['upcoming', 'cancelled'],
+    upcoming: ['ongoing', 'cancelled'],
+    ongoing: ['past', 'cancelled'],
+    past: [],
+    cancelled: [],
+};
 
 export function validateEventInvariants(input: Partial<CreateEventInput>): void {
     if (input.start_at && input.end_at && input.start_at >= input.end_at) {
@@ -85,41 +99,88 @@ export function validateEventInvariants(input: Partial<CreateEventInput>): void 
     }
 }
 
-export async function createEvent(
-    actor: { id: string; role: string },
-    input: CreateEventInput
-): Promise<IEvent> {
+/**
+ * The model's invariant hook throws a plain Error, which the error handler turns into a 500. The
+ * specific checks above cover the common mistakes with their own codes; this runs the hook itself so
+ * every other rule (form_id for non-DE, team sizes, elim_after_n, podium multipliers, ...) is a 422.
+ */
+async function assertValid(doc: IEvent): Promise<void> {
+    try {
+        await doc.validate();
+    } catch (err) {
+        throw new ServiceError(422, 'invalid_event', {
+            message: (err as Error).message.replace(/^Event invariant: /, ''),
+        });
+    }
+}
+
+/** A core admin has edit rights, so it must be a live account ranked core or above. */
+async function assertCoreAdmins(ids: string[]): Promise<void> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return;
+    const ok = await User.countDocuments({
+        _id: { $in: unique },
+        status: UserStatus.ACTIVE,
+        deleted_at: null,
+        role: { $in: [UserRole.CORE, UserRole.COORDINATOR, UserRole.FOUNDER] },
+    });
+    if (ok !== unique.length) throw new ServiceError(422, 'invalid_core_admin');
+}
+
+/**
+ * The form an event registers through must be a published form owned by that event.
+ * A read of Registration Service's collection, not a write — reads are allowed across services.
+ */
+export async function assertEventForm(eventId: string, formId: string): Promise<void> {
+    const form = await FormDefinition.findById(formId, { owner: 1, status: 1 }).lean();
+    if (!form || form.owner?.type !== 'event' || form.owner.id !== eventId || form.status !== 'published') {
+        throw new ServiceError(422, 'registration_form_invalid');
+    }
+}
+
+const isDuplicateSlug = (err: unknown) =>
+    (err as { code?: number; keyPattern?: Record<string, unknown> })?.code === 11000 &&
+    Boolean((err as { keyPattern?: Record<string, unknown> }).keyPattern?.slug);
+
+export async function createEvent(actor: Actor, input: CreateEventInput): Promise<IEvent> {
     validateEventInvariants(input);
+    await assertCoreAdmins(input.core_admins);
 
-    const slug = await generateUniqueSlug(input.title, input.start_at);
-    const coreAdmins = Array.from(new Set([actor.id, ...input.core_admins]));
+    // Leaderboard & auction nullability invariants: normalized here rather than refused.
+    const leaderboard =
+        input.type === 'DE' ? null : input.leaderboard ?? { format: 'points_table' as const, elim_after_n: null, min_participants: 2 };
+    const auction =
+        input.type === 'ALL' ? { ...(input.auction ?? AuctionConfigSchema.parse({})), status: 'not_started' as const } : null;
 
-    // Leaderboard & auction nullability invariants
-    let leaderboard = input.leaderboard;
-    if (input.type === 'DE') {
-        leaderboard = null;
-    } else if (!leaderboard) {
-        leaderboard = { format: 'points_table', elim_after_n: null, min_participants: 2 };
-    }
-
-    let auction = input.auction;
-    if (input.type !== 'ALL') {
-        auction = null;
-    }
-
-    const event = await Event.create({
+    const base = slugBase(input.title, input.start_at);
+    const event = new Event({
         ...input,
-        slug,
+        slug: (await Event.exists({ slug: base })) ? slugSuffixed(base) : base,
         created_by: actor.id,
-        core_admins: coreAdmins,
+        core_admins: Array.from(new Set([actor.id, ...input.core_admins])),
         leaderboard,
         auction,
-        counts: {
-            registrations_confirmed: 0,
-            registrations_waitlisted: 0,
-            teams: 0,
-        },
+        counts: { registrations_confirmed: 0, teams: 0 },
+        seat_holders: [],
     });
+    await assertValid(event);
+    // Created straight into `upcoming`: the same form rule as leaving draft. (A form must be owned by
+    // the event, which does not exist yet — so in practice only a formless DE can skip the draft.)
+    if (event.status !== 'draft' && event.registration.form_id) {
+        await assertEventForm(event._id, event.registration.form_id);
+    }
+
+    // The probe above races a concurrent create, and the unique index also covers soft-deleted
+    // events (which the old probe ignored), so an 11000 on slug is a retry, not a 500.
+    for (let attempt = 0; ; attempt++) {
+        try {
+            await event.save();
+            break;
+        } catch (err) {
+            if (!isDuplicateSlug(err) || attempt >= 3) throw err;
+            event.slug = slugSuffixed(base);
+        }
+    }
 
     publish('EventCreated', PRODUCER, {
         event_id: event._id,
@@ -131,9 +192,31 @@ export async function createEvent(
     return event;
 }
 
+/**
+ * Which events a viewer may see in a list. Drafts and unlisted events ("reachable by link only",
+ * event-model.md) are shown to their own admins; coordinator+ sees everything.
+ */
+function listScope(viewer?: Actor): Record<string, unknown> {
+    const publicScope = { status: { $ne: 'draft' }, visibility: 'public' };
+    if (!viewer || !atLeast(viewer.role, UserRole.CORE)) return publicScope;
+    if (atLeast(viewer.role, UserRole.COORDINATOR)) return {};
+    return { $or: [publicScope, { core_admins: viewer.id }, { created_by: viewer.id }] };
+}
+
+function cursorCondition(cursor: string, sort: QueryEventsInput['sort']): Record<string, unknown> {
+    if (sort !== 'date_asc' && sort !== 'date_desc') {
+        throw new ServiceError(422, 'cursor_requires_date_sort');
+    }
+    const [date, id] = Buffer.from(cursor, 'base64').toString().split('|');
+    const at = new Date(date);
+    if (!id || Number.isNaN(at.getTime())) throw new ServiceError(422, 'invalid_cursor');
+    const op = sort === 'date_asc' ? '$gt' : '$lt';
+    return { $or: [{ start_at: { [op]: at } }, { start_at: at, _id: { $gt: id } }] };
+}
+
 export async function listEvents(
     query: QueryEventsInput,
-    viewer?: { id: string; role: string }
+    viewer?: Actor
 ): Promise<{
     events: IEvent[];
     next_cursor: string | null;
@@ -142,71 +225,46 @@ export async function listEvents(
     limit: number;
     total_pages?: number;
 }> {
-    const filter: Record<string, unknown> = { deleted_at: null };
+    // Conditions are ANDed, never assigned over each other: the cursor's `$or` used to replace the
+    // search's `$or`, so page two silently dropped the search.
+    const conds: Record<string, unknown>[] = [{ deleted_at: null }, listScope(viewer)];
+    const list = (s: string) => s.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
 
-    // Categories filter
-    if (query.category) {
-        const cats = query.category.split(',').map((c) => c.trim().toLowerCase());
-        filter.category = cats.length === 1 ? cats[0] : { $in: cats };
+    if (query.category) conds.push({ category: { $in: list(query.category) } });
+    if (query.status) conds.push({ status: { $in: list(query.status) } });
+    if (query.domain) conds.push({ domain: query.domain.toLowerCase() });
+    if (query.type) conds.push({ type: query.type.toUpperCase() });
+    if (query.tags) conds.push({ tags: { $in: list(query.tags) } });
+
+    if (query.search?.trim()) {
+        const regex = new RegExp(escapeRegex(query.search.trim()), 'i');
+        conds.push({ $or: [{ title: regex }, { description: regex }, { tags: query.search.trim().toLowerCase() }] });
     }
 
-    // Status filter
-    const isAdmin = viewer && [UserRole.CORE, UserRole.COORDINATOR, UserRole.FOUNDER].includes(viewer.role as UserRole);
-    if (query.status) {
-        const statuses = query.status.split(',').map((s) => s.trim().toLowerCase());
-        // Non-admins can never view drafts
-        const safeStatuses = isAdmin ? statuses : statuses.filter((s) => s !== 'draft');
-        filter.status = safeStatuses.length === 1 ? safeStatuses[0] : { $in: safeStatuses };
-    } else if (!isAdmin) {
-        filter.status = { $ne: 'draft' };
-    }
-
-    // Domain & Type
-    if (query.domain) filter.domain = query.domain.toLowerCase();
-    if (query.type) filter.type = query.type.toUpperCase();
-
-    // Tags filter
-    if (query.tags) {
-        const tags = query.tags.split(',').map((t) => t.trim().toLowerCase());
-        filter.tags = tags.length === 1 ? tags[0] : { $in: tags };
-    }
-
-    // Search query on title, tags or description
-    if (query.search) {
-        const regex = new RegExp(query.search.trim(), 'i');
-        filter.$or = [
-            { title: regex },
-            { description: regex },
-            { tags: query.search.trim().toLowerCase() },
-        ];
-    }
-
-    // Date range
-    if (query.from || query.to) {
-        const dateFilter: Record<string, Date> = {};
-        if (query.from) dateFilter.$gte = new Date(query.from);
-        if (query.to) dateFilter.$lte = new Date(query.to);
-        filter.start_at = dateFilter;
-    }
+    if (query.from) conds.push({ start_at: { $gte: query.from } });
+    if (query.to) conds.push({ start_at: { $lte: query.to } });
 
     const limit = Math.min(100, query.limit || 20);
 
-    // Sort definition
     let sortObj: Record<string, 1 | -1> = { start_at: 1, _id: 1 };
     if (query.sort === 'date_desc') {
         sortObj = { start_at: -1, _id: 1 };
     } else if (query.sort === 'popular') {
-        sortObj = { 'counts.registrations_confirmed': -1, start_at: 1 };
+        sortObj = { 'counts.registrations_confirmed': -1, start_at: 1, _id: 1 };
     } else if (query.sort === 'title') {
         sortObj = { title: 1, _id: 1 };
     }
 
+    // `seat_holders` is internal bookkeeping (and grows with the event), not list payload.
+    const projection = { seat_holders: 0 };
+
     // Page-based pagination (for admin dashboard / list views)
     if (query.page) {
+        const filter = { $and: conds };
         const page = Math.max(1, query.page);
         const skip = (page - 1) * limit;
         const [events, total] = await Promise.all([
-            Event.find(filter).sort(sortObj).skip(skip).limit(limit),
+            Event.find(filter, projection).sort(sortObj).skip(skip).limit(limit),
             Event.countDocuments(filter),
         ]);
         return {
@@ -219,28 +277,16 @@ export async function listEvents(
         };
     }
 
-    // Cursor pagination (based on start_at + _id)
-    if (query.cursor) {
-        try {
-            const [cursorDate, cursorId] = Buffer.from(query.cursor, 'base64').toString().split('|');
-            filter.$or = [
-                { start_at: { $gt: new Date(cursorDate) } },
-                { start_at: new Date(cursorDate), _id: { $gt: cursorId } },
-            ];
-        } catch {
-            throw new ServiceError(422, 'invalid_cursor');
-        }
-    }
+    // Cursor pagination on (start_at, _id) — only meaningful for the date sorts.
+    if (query.cursor) conds.push(cursorCondition(query.cursor, query.sort));
 
-    const events = await Event.find(filter)
-        .sort(sortObj)
-        .limit(limit + 1);
+    const events = await Event.find({ $and: conds }, projection).sort(sortObj).limit(limit + 1);
 
     const hasMore = events.length > limit;
     const results = hasMore ? events.slice(0, limit) : events;
 
     let nextCursor: string | null = null;
-    if (hasMore && results.length > 0) {
+    if (hasMore && results.length > 0 && (query.sort === 'date_asc' || query.sort === 'date_desc')) {
         const last = results[results.length - 1];
         nextCursor = Buffer.from(`${last.start_at.toISOString()}|${last._id}`).toString('base64');
     }
@@ -248,169 +294,237 @@ export async function listEvents(
     return { events: results, next_cursor: nextCursor, limit };
 }
 
-export async function findByRef(
-    ref: string,
-    viewer?: { id: string; role: string }
-): Promise<IEvent> {
-    const query = isUuid(ref)
-        ? { _id: ref, deleted_at: null }
-        : { slug: ref.toLowerCase(), deleted_at: null };
+export async function findByRef(ref: string, viewer?: Actor): Promise<IEvent> {
+    const query = isUuid(ref) ? { _id: ref, deleted_at: null } : { slug: ref.toLowerCase(), deleted_at: null };
 
-    const event = await Event.findOne(query);
+    const event = await Event.findOne(query, { seat_holders: 0 });
     if (!event) throw new ServiceError(404, 'not_found');
-
-    if (event.status === 'draft') {
-        const isCoreAdmin = viewer && (event.core_admins.includes(viewer.id) || event.created_by === viewer.id);
-        const isPrivileged = viewer && [UserRole.COORDINATOR, UserRole.FOUNDER].includes(viewer.role as UserRole);
-        if (!isCoreAdmin && !isPrivileged) {
-            throw new ServiceError(404, 'not_found');
-        }
-    }
-
+    assertVisible(event, viewer);
     return event;
 }
 
-export async function updateEvent(
-    ref: string,
-    actor: { id: string; role: string },
-    input: UpdateEventInput
-): Promise<IEvent> {
-    const event = await findByRef(ref, actor);
+/** Nested objects a PATCH merges into instead of replacing (C2: a partial object must not wipe siblings). */
+const NESTED_KEYS = new Set(['registration', 'teaming', 'points_pool', 'scoring', 'leaderboard']);
 
-    const isCoreAdmin = event.core_admins.includes(actor.id) || event.created_by === actor.id;
-    const isPrivileged = [UserRole.COORDINATOR, UserRole.FOUNDER].includes(actor.role as UserRole);
-    if (!isCoreAdmin && !isPrivileged) {
-        throw new ServiceError(403, 'forbidden');
+export async function updateEvent(ref: string, actor: Actor, input: UpdateEventInput): Promise<IEvent> {
+    const event = await findByRef(ref, actor);
+    assertEventAdmin(event, actor);
+
+    // Past and cancelled events are records: registrations, ledger rows and boards point at them.
+    if (TERMINAL_STATUSES.includes(event.status)) {
+        throw new ServiceError(409, 'event_is_terminal');
     }
 
+    const { status, ...fields } = input as Record<string, unknown> & { status?: EventStatus };
+    const from = event.status;
+    const current = event.toObject() as unknown as Record<string, unknown>;
+
+    // Only the creator or coordinator+ decides who else administers the event. A core admin adding
+    // arbitrary accounts (a plain `user` included) handed out edit rights nobody granted.
+    if (fields.core_admins !== undefined) {
+        if (event.created_by !== actor.id && !atLeast(actor.role, UserRole.COORDINATOR)) {
+            throw new ServiceError(403, 'core_admins_owner_only');
+        }
+        await assertCoreAdmins(fields.core_admins as string[]);
+    }
+
+    // Nested objects are written as dotted paths (`registration.max_participants`), never as a whole
+    // subdocument rebuilt from this (possibly stale) read — two admins editing different fields of
+    // `registration` at once no longer undo each other (audit #2). A null subdocument (leaderboard)
+    // is set whole, since there is nothing to dot into.
+    const set: Record<string, unknown> = {};
+    const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+        v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date);
+    for (const [key, value] of Object.entries(fields)) {
+        if (value === undefined) continue;
+        if (NESTED_KEYS.has(key) && isPlainObject(value) && current[key] != null) {
+            for (const [sub, v] of Object.entries(value)) {
+                if (v === undefined) continue;
+                if (key === 'scoring' && sub === 'normalization' && isPlainObject(v)) {
+                    for (const [n, nv] of Object.entries(v)) if (nv !== undefined) set[`scoring.normalization.${n}`] = nv;
+                } else {
+                    set[`${key}.${sub}`] = v;
+                }
+            }
+        } else {
+            set[key] = value;
+        }
+    }
+
+    if (status && status !== from) {
+        if (!STATUS_TRANSITIONS[from].includes(status)) {
+            throw new ServiceError(409, 'invalid_status_transition', { from, to: status });
+        }
+        // Cancelling reverses points and drops boards (model doc §5: Coordinator+).
+        if (status === 'cancelled' && !atLeast(actor.role, UserRole.COORDINATOR)) {
+            throw new ServiceError(403, 'coordinator_required');
+        }
+        set.status = status;
+    }
+
+    if (Object.keys(set).length === 0) return event;
+
+    // Apply to the loaded document, then check the merged result.
+    event.set(set);
     validateEventInvariants({
-        start_at: input.start_at ?? event.start_at,
-        end_at: input.end_at ?? event.end_at,
-        registration: input.registration ? { ...event.registration, ...input.registration } : event.registration,
-        teaming: input.teaming ? { ...event.teaming, ...input.teaming } : event.teaming,
-        scoring: input.scoring ? { ...event.scoring, ...input.scoring } : event.scoring,
+        start_at: event.start_at,
+        end_at: event.end_at,
+        registration: event.registration as CreateEventInput['registration'],
+        teaming: event.teaming as CreateEventInput['teaming'],
+        scoring: event.scoring as CreateEventInput['scoring'],
     });
+    await assertValid(event);
 
-    // Check status transition validity
-    let statusTransition: string | null = null;
-    if (input.status && input.status !== event.status) {
-        if (event.status === 'cancelled' || event.status === 'past') {
-            throw new ServiceError(409, 'event_is_terminal');
-        }
-        statusTransition = input.status;
+    // Event ↔ form: leaving draft, or changing the form of a published event, needs a
+    // published form that belongs to THIS event. A draft may point anywhere, or nowhere.
+    const to = (set.status as EventStatus | undefined) ?? from;
+    const formTouched = 'registration.form_id' in set || 'registration' in set;
+    const leavingDraft = from === 'draft' && to !== 'draft' && to !== 'cancelled';
+    if ((leavingDraft || (to !== 'draft' && to !== 'cancelled' && formTouched)) && event.registration.form_id) {
+        await assertEventForm(event._id, event.registration.form_id);
     }
 
-    Object.assign(event, input);
-    await event.save();
+    // Write back the model-cast values (defaults filled, tags lowercased, created_by kept in
+    // core_admins) — `$set` of the touched paths only.
+    const casted = event.toObject() as unknown as Record<string, unknown>;
+    for (const key of Object.keys(set)) set[key] = key.split('.').reduce<unknown>((o, k) => (o as Record<string, unknown>)?.[k], casted);
 
-    if (statusTransition === 'cancelled') {
-        publish('EventCancelled', PRODUCER, { event_id: event._id });
-    } else if (statusTransition === 'ongoing') {
-        publish('EventStarted', PRODUCER, { event_id: event._id });
-    } else if (statusTransition === 'past') {
-        publish('EventCompleted', PRODUCER, { event_id: event._id });
+    // Lifecycle timestamps ride in the same CAS as the transition.
+    const now = new Date();
+    if (set.status === 'ongoing') set.started_at = now;
+    if (set.status === 'past') set.completed_at = now;
+    if (set.status === 'cancelled') set.cancelled_at = now;
+
+    const updated = await Event.findOneAndUpdate(
+        { _id: event._id, status: from, deleted_at: null },
+        { $set: set },
+        { returnDocument: 'after', projection: { seat_holders: 0 } }
+    );
+    if (!updated) throw new ServiceError(409, 'event_changed_concurrently');
+
+    if (set.status === 'cancelled') {
+        // Bids on a cancelled event must stop too: the auction finishes and the lot on the block is
+        // closed unsold (a lot mid-settlement finishes its keyed charge; see auction.service).
+        await Event.updateOne(
+            { _id: updated._id, 'auction.status': { $in: ['not_started', 'live', 'paused'] } },
+            { $set: { 'auction.status': 'finished' } }
+        );
+        await AuctionLot.updateMany(
+            { event_id: updated._id, status: 'on_block' },
+            { $set: { status: 'unsold', closed_at: now }, $inc: { version: 1 } }
+        );
+        invalidateAuctionLiveCache(updated._id);
+        publish('EventCancelled', PRODUCER, { event_id: updated._id, title: updated.title });
+    } else if (set.status === 'ongoing') {
+        publish('EventStarted', PRODUCER, { event_id: updated._id, title: updated.title });
+    } else if (set.status === 'past') {
+        publish('EventCompleted', PRODUCER, { event_id: updated._id, title: updated.title });
     }
 
-    publish('EventUpdated', PRODUCER, { event_id: event._id });
-    return event;
+    publish('EventUpdated', PRODUCER, { event_id: updated._id });
+    return updated;
 }
 
-export async function deleteEvent(
-    ref: string,
-    actor: { id: string; role: string }
-): Promise<{ deleted: boolean }> {
+export async function deleteEvent(ref: string, actor: Actor): Promise<{ deleted: boolean }> {
     const event = await findByRef(ref, actor);
 
-    const isPrivileged = [UserRole.COORDINATOR, UserRole.FOUNDER].includes(actor.role as UserRole);
-    if (!isPrivileged) {
+    if (!atLeast(actor.role, UserRole.COORDINATOR)) {
         throw new ServiceError(403, 'forbidden');
     }
 
-    if (event.status !== 'draft') {
-        throw new ServiceError(409, 'cannot_delete_published_event');
-    }
-
-    event.deleted_at = new Date();
-    await event.save();
+    // CAS: a publish racing the delete must not leave a soft-deleted published event.
+    const deleted = await Event.findOneAndUpdate(
+        { _id: event._id, status: 'draft', deleted_at: null },
+        { $set: { deleted_at: new Date() } }
+    );
+    if (!deleted) throw new ServiceError(409, 'cannot_delete_published_event');
 
     publish('EventDeleted', PRODUCER, { event_id: event._id });
     return { deleted: true };
 }
 
-export async function reserveSeat(
-    eventId: string,
-    registrationId: string,
-    _idempotencyKey: string
-): Promise<{ reserved: boolean; waitlisted?: boolean; reason?: string }> {
-    const event = await Event.findOne({ _id: eventId, deleted_at: null });
+/* ------------------------------------------------------------------ *
+ * Seat contract — called by Registration Service
+ * ------------------------------------------------------------------ */
+
+export type ReserveResult =
+    | { reserved: true }
+    | { reserved: false; reason: 'capacity_full' | 'waitlist_disabled' | 'event_closed' | 'not_open' | 'event_not_found' };
+
+const SEAT_OPEN_STATUSES: EventStatus[] = ['upcoming', 'ongoing'];
+
+/**
+ * Idempotent per registration id: the seat is `$addToSet` + `$inc` guarded by
+ * `seat_holders: { $ne: id }`, so a retry (or a second instance) never counts it twice.
+ *
+ * `capacity_full` means "full, and this event waitlists"; `waitlist_disabled` means "full, no
+ * waitlist" — the registration waitlists on the first and rejects on the second. The old code
+ * answered `{ reserved: true, waitlisted: true }` for a waitlist place, which registration read as
+ * a confirmed seat (audit Sep 26, C4).
+ */
+export async function reserveSeat(eventId: string, registrationId: string): Promise<ReserveResult> {
+    const event = await Event.findOne(
+        { _id: eventId, deleted_at: null },
+        { status: 1, registration: 1, seat_holders: { $elemMatch: { $eq: registrationId } } }
+    );
     if (!event) return { reserved: false, reason: 'event_not_found' };
+    if (event.seat_holders?.length) return { reserved: true };
+
+    if (!SEAT_OPEN_STATUSES.includes(event.status)) return { reserved: false, reason: 'event_closed' };
 
     const now = new Date();
-    if (event.status === 'cancelled' || event.status === 'past') {
-        return { reserved: false, reason: 'event_closed' };
+    if (event.registration.opens_at && now < event.registration.opens_at) {
+        return { reserved: false, reason: 'not_open' };
     }
     if (event.registration.closes_at && now > event.registration.closes_at) {
-        return { reserved: false, reason: 'event_closed' };
+        // After close, only a registration submitted before close may take a seat: a waitlist
+        // promotion, or a captain approved after close. A new entry may not.
+        const submittedInTime = await FormSubmission.exists({
+            _id: registrationId,
+            'owner.id': eventId,
+            submitted_at: { $lte: event.registration.closes_at },
+        });
+        if (!submittedInTime) return { reserved: false, reason: 'event_closed' };
     }
 
     const max = event.registration.max_participants;
+    const filter: Record<string, unknown> = {
+        _id: eventId,
+        deleted_at: null,
+        status: { $in: SEAT_OPEN_STATUSES },
+        seat_holders: { $ne: registrationId },
+    };
+    if (max !== null) filter['counts.registrations_confirmed'] = { $lt: max };
 
-    // Check if this was a waitlist promotion
-    const existingSub = await FormSubmission.findById(registrationId);
-    const wasWaitlisted = existingSub && existingSub.status === 'waitlisted';
+    const claimed = await Event.updateOne(filter, {
+        $addToSet: { seat_holders: registrationId },
+        $inc: { 'counts.registrations_confirmed': 1 },
+    });
+    if (claimed.modifiedCount === 1) return { reserved: true };
 
-    if (max !== null) {
-        const updated = await Event.findOneAndUpdate(
-            {
-                _id: eventId,
-                'counts.registrations_confirmed': { $lt: max },
-            },
-            { $inc: { 'counts.registrations_confirmed': 1 } },
-            { returnDocument: 'after' }
-        );
-
-        if (!updated) {
-            if (wasWaitlisted) {
-                return { reserved: false, reason: 'capacity_full' };
-            }
-            if (!event.registration.waitlist_enabled) {
-                return { reserved: false, reason: 'capacity_full' };
-            }
-            // Waitlist enabled -> seat reserved on waitlist
-            await Event.updateOne({ _id: eventId }, { $inc: { 'counts.registrations_waitlisted': 1 } });
-            return { reserved: true, waitlisted: true };
-        }
-
-        if (wasWaitlisted) {
-            await Event.updateOne(
-                { _id: eventId, 'counts.registrations_waitlisted': { $gt: 0 } },
-                { $inc: { 'counts.registrations_waitlisted': -1 } }
-            );
-        }
-        return { reserved: true, waitlisted: false };
-    }
-
-    // Capacity unlimited
-    await Event.updateOne({ _id: eventId }, { $inc: { 'counts.registrations_confirmed': 1 } });
-    if (wasWaitlisted) {
-        await Event.updateOne(
-            { _id: eventId, 'counts.registrations_waitlisted': { $gt: 0 } },
-            { $inc: { 'counts.registrations_waitlisted': -1 } }
-        );
-    }
-    return { reserved: true, waitlisted: false };
-}
-
-export async function releaseSeat(
-    eventId: string,
-    _registrationId: string
-): Promise<{ released: boolean }> {
-    await Event.updateOne(
-        { _id: eventId, 'counts.registrations_confirmed': { $gt: 0 } },
-        { $inc: { 'counts.registrations_confirmed': -1 } }
+    // Lost the CAS: already a holder (a concurrent retry), closed meanwhile, or full.
+    const after = await Event.findOne(
+        { _id: eventId },
+        { status: 1, 'registration.waitlist_enabled': 1, seat_holders: { $elemMatch: { $eq: registrationId } } }
     );
-    return { released: true };
+    if (!after) return { reserved: false, reason: 'event_not_found' };
+    if (after.seat_holders?.length) return { reserved: true };
+    if (!SEAT_OPEN_STATUSES.includes(after.status)) return { reserved: false, reason: 'event_closed' };
+    return { reserved: false, reason: after.registration.waitlist_enabled ? 'capacity_full' : 'waitlist_disabled' };
 }
+
+/** Idempotent: only a current holder releases, so a retried release cannot free a second seat. */
+export async function releaseSeat(eventId: string, registrationId: string): Promise<{ released: boolean }> {
+    const res = await Event.updateOne(
+        { _id: eventId, seat_holders: registrationId },
+        { $pull: { seat_holders: registrationId }, $inc: { 'counts.registrations_confirmed': -1 } }
+    );
+    return { released: res.modifiedCount === 1 };
+}
+
+/* ------------------------------------------------------------------ *
+ * Registration-facing reads
+ * ------------------------------------------------------------------ */
 
 export async function getEventEligibility(
     ref: string,
@@ -430,12 +544,17 @@ export async function getEventEligibility(
     const event = await findByRef(ref);
     const now = new Date();
 
-    const existing = await FormSubmission.findOne({
-        'owner.type': 'event',
-        'owner.id': event._id,
-        'user.user_id': userId,
-        status: { $ne: 'cancelled' },
-    });
+    // Rejected and cancelled rows do not hold the one-active-registration slot (the partial unique
+    // index agrees), so they must not read as "already registered" here either.
+    const existing = await FormSubmission.findOne(
+        {
+            'owner.type': 'event',
+            'owner.id': event._id,
+            'user.user_id': userId,
+            status: { $nin: ['cancelled', 'rejected'] },
+        },
+        { _id: 1 }
+    ).lean();
 
     const max = event.registration.max_participants;
     const confirmed = event.counts.registrations_confirmed;
@@ -456,49 +575,26 @@ export async function getEventEligibility(
         captain_application_required: event.teaming.captain_application_required,
         existing_registration_id: existing ? existing._id : null,
     };
+    const no = (reason: string, capacity = capacityStatus) => ({ eligible: false, reason, capacity_status: capacity, ...baseResult });
 
-    if (existing) {
-        return {
-            eligible: false,
-            reason: 'already_registered',
-            capacity_status: capacityStatus,
-            ...baseResult,
-        };
-    }
-
-    if (event.status === 'draft') {
-        return { eligible: false, reason: 'event_draft', capacity_status: capacityStatus, ...baseResult };
-    }
-    if (event.status === 'cancelled') {
-        return { eligible: false, reason: 'event_cancelled', capacity_status: capacityStatus, ...baseResult };
-    }
-    if (event.status === 'past') {
-        return { eligible: false, reason: 'event_past', capacity_status: capacityStatus, ...baseResult };
+    if (existing) return no('already_registered');
+    if (event.status === 'cancelled') return no('event_cancelled');
+    if (event.status === 'past') return no('event_past');
+    if (event.registration.opens_at && now < event.registration.opens_at) return no('not_yet_open');
+    if (event.registration.closes_at && now > event.registration.closes_at) return no('registration_closed');
+    if (isFull && !event.registration.waitlist_enabled) return no('capacity_full', 'full');
+    // No usable form, no way to register — never answer "eligible" for that (audit #2 H1).
+    if (!event.registration.form_id) return no('registration_form_unavailable');
+    try {
+        await assertEventForm(event._id, event.registration.form_id);
+    } catch {
+        return no('registration_form_unavailable');
     }
 
-    if (event.registration.opens_at && now < event.registration.opens_at) {
-        return { eligible: false, reason: 'not_yet_open', capacity_status: capacityStatus, ...baseResult };
-    }
-    if (event.registration.closes_at && now > event.registration.closes_at) {
-        return { eligible: false, reason: 'registration_closed', capacity_status: capacityStatus, ...baseResult };
-    }
-
-    if (isFull && !event.registration.waitlist_enabled) {
-        return { eligible: false, reason: 'capacity_full', capacity_status: 'full', ...baseResult };
-    }
-
-    return {
-        eligible: true,
-        reason: null,
-        capacity_status: capacityStatus,
-        ...baseResult,
-    };
+    return { eligible: true, reason: null, capacity_status: capacityStatus, ...baseResult };
 }
 
-export async function getMyEventRegistration(
-    ref: string,
-    userId: string
-): Promise<IFormSubmission | null> {
+export async function getMyEventRegistration(ref: string, userId: string): Promise<IFormSubmission | null> {
     const event = await findByRef(ref);
     return FormSubmission.findOne({
         'owner.type': 'event',
@@ -508,67 +604,36 @@ export async function getMyEventRegistration(
     });
 }
 
-export async function getEventParticipants(
-    ref: string,
-    query: QueryParticipantsInput,
-    viewer?: { id: string; role: string }
-): Promise<{
-    event_id: string;
-    participants: Array<{
-        registration_id: string;
-        user: { user_id: string; display_name: string; avatar_url: string | null };
-        status: string;
-        role: string | null;
-        team_id: string | null;
-        base_price: number | null;
-        attended: boolean | null;
-        submitted_at: Date | null;
-        waitlist_position: number | null;
-    }>;
-    total: number;
-    page: number;
-    limit: number;
-    total_pages: number;
-}> {
+/**
+ * Admin reads of an event's registrations: its own admins only, and still core+ — a creator or listed
+ * admin demoted to `user` no longer reads the full list (the route has no role floor).
+ */
+const hasAdminRead = (event: IEvent, viewer?: Actor) => Boolean(viewer && atLeast(viewer.role, UserRole.CORE) && isEventAdmin(event, viewer));
+
+export async function getEventParticipants(ref: string, query: QueryParticipantsInput, viewer?: Actor) {
     const event = await findByRef(ref, viewer);
-    const filter: Record<string, unknown> = {
-        'owner.type': 'event',
-        'owner.id': event._id,
-    };
+    const hasAdminAccess = hasAdminRead(event, viewer);
+    const filter: Record<string, unknown> = { 'owner.type': 'event', 'owner.id': event._id };
+    // The public sees confirmed participants only, whatever `?status=` says — it used to list
+    // rejected and cancelled registrations to anonymous callers.
+    if (!hasAdminAccess) filter.status = 'confirmed';
+    else if (query.status) filter.status = query.status;
 
-    const isCoreAdmin = viewer && (event.core_admins.includes(viewer.id) || event.created_by === viewer.id);
-    const isPrivileged = viewer && [UserRole.CORE, UserRole.COORDINATOR, UserRole.FOUNDER].includes(viewer.role as UserRole);
-    const hasAdminAccess = isCoreAdmin || isPrivileged;
-
-    if (query.status) {
-        filter.status = query.status;
-    } else if (!hasAdminAccess) {
-        // Public only sees confirmed participants
-        filter.status = 'confirmed';
-    }
-
-    if (query.role) {
-        filter['context.event.role'] = query.role;
-    }
-    if (query.attended !== undefined) {
-        filter['context.event.attended'] = query.attended;
-    }
-    if (query.team_id) {
-        filter['context.event.team_id'] = query.team_id;
-    }
-    if (query.search) {
-        filter['user.display_name'] = new RegExp(query.search.trim(), 'i');
-    }
+    if (query.role) filter['context.event.role'] = query.role;
+    if (query.attended !== undefined) filter['context.event.attended'] = query.attended;
+    if (query.team_id) filter['context.event.team_id'] = query.team_id;
+    if (query.search?.trim()) filter['user.display_name'] = new RegExp(escapeRegex(query.search.trim()), 'i');
 
     const page = Math.max(1, query.page || 1);
     const limit = Math.min(100, query.limit || 20);
     const skip = (page - 1) * limit;
 
     const [submissions, total] = await Promise.all([
-        FormSubmission.find(filter)
+        FormSubmission.find(filter, { user: 1, status: 1, context: 1, submitted_at: 1, waitlist_position: 1 })
             .sort({ submitted_at: 1, created_at: 1 })
             .skip(skip)
-            .limit(limit),
+            .limit(limit)
+            .lean(),
         FormSubmission.countDocuments(filter),
     ]);
 
@@ -576,10 +641,10 @@ export async function getEventParticipants(
         registration_id: sub._id,
         user: sub.user,
         status: sub.status,
-        role: sub.context.event?.role ?? null,
-        team_id: sub.context.event?.team_id ?? null,
-        base_price: hasAdminAccess ? (sub.context.event?.base_price ?? null) : null,
-        attended: sub.context.event?.attended ?? null,
+        role: sub.context?.event?.role ?? null,
+        team_id: sub.context?.event?.team_id ?? null,
+        base_price: hasAdminAccess ? sub.context?.event?.base_price ?? null : null,
+        attended: sub.context?.event?.attended ?? null,
         submitted_at: sub.submitted_at,
         waitlist_position: sub.waitlist_position,
     }));
@@ -594,353 +659,221 @@ export async function getEventParticipants(
     };
 }
 
-export async function getEventParticipantStats(
-    ref: string,
-    viewer?: { id: string; role: string }
-): Promise<{
-    event_id: string;
-    counts: {
-        confirmed: number;
-        waitlisted: number;
-        cancelled: number;
-        rejected: number;
-        total_submissions: number;
-        attended: number;
-        absent: number;
-        unmarked: number;
-        solo_count: number;
-        captain_count: number;
-        member_count: number;
-    };
-    capacity: {
-        max_participants: number | null;
-        is_full: boolean;
-        waitlist_enabled: boolean;
-    };
-}> {
-    const event = await findByRef(ref, viewer);
-    const submissions = await FormSubmission.find({
-        'owner.type': 'event',
-        'owner.id': event._id,
-    });
+/** Counts by status / role / attendance in one aggregate rather than loading every submission. */
+async function submissionCounts(eventId: string) {
+    const rows = await FormSubmission.aggregate<{
+        _id: { status: string; role: string | null; attended: boolean | null };
+        n: number;
+    }>([
+        { $match: { 'owner.type': 'event', 'owner.id': eventId } },
+        {
+            $group: {
+                _id: {
+                    status: '$status',
+                    role: { $ifNull: ['$context.event.role', null] },
+                    attended: { $ifNull: ['$context.event.attended', null] },
+                },
+                n: { $sum: 1 },
+            },
+        },
+    ]);
 
-    let confirmed = 0;
-    let waitlisted = 0;
-    let cancelled = 0;
-    let rejected = 0;
-    let attended = 0;
-    let absent = 0;
-    let unmarked = 0;
-    let solo = 0;
-    let captain = 0;
-    let member = 0;
-
-    for (const sub of submissions) {
-        if (sub.status === 'confirmed') confirmed++;
-        else if (sub.status === 'waitlisted') waitlisted++;
-        else if (sub.status === 'cancelled') cancelled++;
-        else if (sub.status === 'rejected') rejected++;
-
-        if (sub.status === 'confirmed') {
-            if (sub.context.event?.attended === true) attended++;
-            else if (sub.context.event?.attended === false) absent++;
-            else unmarked++;
+    const c = { confirmed: 0, waitlisted: 0, cancelled: 0, rejected: 0, total: 0, attended: 0, absent: 0, unmarked: 0, solo: 0, captain: 0, member: 0 };
+    for (const { _id, n } of rows) {
+        c.total += n;
+        if (_id.status === 'confirmed' || _id.status === 'waitlisted' || _id.status === 'cancelled' || _id.status === 'rejected') {
+            c[_id.status] += n;
         }
-
-        const role = sub.context.event?.role;
-        if (role === 'solo') solo++;
-        else if (role === 'captain') captain++;
-        else if (role === 'member') member++;
+        if (_id.status === 'confirmed') {
+            if (_id.attended === true) c.attended += n;
+            else if (_id.attended === false) c.absent += n;
+            else c.unmarked += n;
+        }
+        if (_id.role === 'solo' || _id.role === 'captain' || _id.role === 'member') c[_id.role] += n;
     }
+    return c;
+}
 
+export async function getEventParticipantStats(ref: string, viewer?: Actor) {
+    const event = await findByRef(ref, viewer);
+    const c = await submissionCounts(event._id);
     const max = event.registration.max_participants;
     return {
         event_id: event._id,
         counts: {
-            confirmed,
-            waitlisted,
-            cancelled,
-            rejected,
-            total_submissions: submissions.length,
-            attended,
-            absent,
-            unmarked,
-            solo_count: solo,
-            captain_count: captain,
-            member_count: member,
+            confirmed: c.confirmed,
+            waitlisted: c.waitlisted,
+            cancelled: c.cancelled,
+            rejected: c.rejected,
+            total_submissions: c.total,
+            attended: c.attended,
+            absent: c.absent,
+            unmarked: c.unmarked,
+            solo_count: c.solo,
+            captain_count: c.captain,
+            member_count: c.member,
         },
         capacity: {
             max_participants: max,
-            is_full: max !== null && confirmed >= max,
+            is_full: max !== null && event.counts.registrations_confirmed >= max,
             waitlist_enabled: event.registration.waitlist_enabled,
         },
     };
 }
 
-export async function getEventWaitlist(
-    ref: string,
-    viewer?: { id: string; role: string }
-): Promise<{
-    event_id: string;
-    waitlist: Array<{
-        position: number;
-        registration_id: string;
-        user: { user_id: string; display_name: string; avatar_url: string | null };
-        submitted_at: Date | null;
-    }>;
-    total_waitlisted: number;
-}> {
-    const event = await findByRef(ref, viewer);
-    const submissions = await FormSubmission.find({
-        'owner.type': 'event',
-        'owner.id': event._id,
-        status: 'waitlisted',
-    }).sort({ submitted_at: 1, created_at: 1 });
+// ponytail: admin lists capped at 1000 rows; add paging when an event's waitlist/attendance outgrows it.
+const ADMIN_LIST_CAP = 1000;
 
-    const waitlist = submissions.map((sub, idx) => ({
-        position: idx + 1,
-        registration_id: sub._id,
-        user: sub.user,
-        submitted_at: sub.submitted_at,
-    }));
+export async function getEventWaitlist(ref: string, viewer: Actor) {
+    const event = await findByRef(ref, viewer);
+    assertEventAdmin(event, viewer);
+    const filter: Record<string, unknown> = { 'owner.type': 'event', 'owner.id': event._id, status: 'waitlisted' };
+    const [submissions, total] = await Promise.all([
+        FormSubmission.find(filter, { user: 1, submitted_at: 1, waitlist_position: 1 })
+            .sort({ waitlist_position: 1, submitted_at: 1 })
+            .limit(ADMIN_LIST_CAP)
+            .lean(),
+        FormSubmission.countDocuments(filter),
+    ]);
 
     return {
         event_id: event._id,
-        waitlist,
-        total_waitlisted: waitlist.length,
-    };
-}
-
-export async function promoteWaitlistedParticipant(
-    ref: string,
-    registrationId: string,
-    actor: { id: string; role: string },
-    adminOverride: boolean = false
-): Promise<IFormSubmission> {
-    const event = await findByRef(ref, actor);
-    const isCoreAdmin = event.core_admins.includes(actor.id) || event.created_by === actor.id;
-    const isPrivileged = [UserRole.CORE, UserRole.COORDINATOR, UserRole.FOUNDER].includes(actor.role as UserRole);
-    if (!isCoreAdmin && !isPrivileged) {
-        throw new ServiceError(403, 'forbidden');
-    }
-
-    const sub = await FormSubmission.findOne({
-        _id: registrationId,
-        'owner.type': 'event',
-        'owner.id': event._id,
-        status: 'waitlisted',
-    });
-    if (!sub) {
-        throw new ServiceError(404, 'waitlisted_participant_not_found');
-    }
-
-    const max = event.registration.max_participants;
-    if (max !== null && event.counts.registrations_confirmed >= max && !adminOverride) {
-        throw new ServiceError(409, 'capacity_full_cannot_promote_without_override');
-    }
-
-    sub.status = 'confirmed';
-    sub.confirmed_at = new Date();
-    sub.waitlist_position = null;
-    sub.status_history.push({
-        from: 'waitlisted',
-        to: 'confirmed',
-        by: actor.id,
-        at: new Date(),
-        reason: 'admin_promoted_from_waitlist',
-    });
-    await sub.save();
-
-    const updatedWithWaitlist = await Event.findOneAndUpdate(
-        { _id: event._id, 'counts.registrations_waitlisted': { $gt: 0 } },
-        {
-            $inc: {
-                'counts.registrations_confirmed': 1,
-                'counts.registrations_waitlisted': -1,
-            },
-        }
-    );
-    if (!updatedWithWaitlist) {
-        await Event.updateOne(
-            { _id: event._id },
-            {
-                $inc: { 'counts.registrations_confirmed': 1 },
-                $set: { 'counts.registrations_waitlisted': 0 },
-            }
-        );
-    }
-
-    publish('RegistrationConfirmed', PRODUCER, {
-        registration_id: sub._id,
-        event_id: event._id,
-        user_id: sub.user.user_id,
-        promoted_by: actor.id,
-    });
-
-    return sub;
-}
-
-export async function recordEventAttendance(
-    ref: string,
-    attendances: Array<{ registration_id: string; attended: boolean; note?: string }>,
-    actor: { id: string; role: string }
-): Promise<{ updated_count: number }> {
-    const event = await findByRef(ref, actor);
-    const isCoreAdmin = event.core_admins.includes(actor.id) || event.created_by === actor.id;
-    const isPrivileged = [UserRole.CORE, UserRole.COORDINATOR, UserRole.FOUNDER].includes(actor.role as UserRole);
-    if (!isCoreAdmin && !isPrivileged) {
-        throw new ServiceError(403, 'forbidden');
-    }
-
-    let count = 0;
-    for (const item of attendances) {
-        const sub = await FormSubmission.findOne({
-            _id: item.registration_id,
-            'owner.type': 'event',
-            'owner.id': event._id,
-        });
-        if (sub && sub.context.event) {
-            const previousAttended = sub.context.event.attended;
-            sub.context.event.attended = item.attended;
-            await sub.save();
-            count++;
-
-            if (item.attended && previousAttended !== true) {
-                publish('ParticipantAttended', PRODUCER, {
-                    event_id: event._id,
-                    registration_id: sub._id,
-                    user_id: sub.user.user_id,
-                    marked_by: actor.id,
-                });
-            }
-        }
-    }
-
-    return { updated_count: count };
-}
-
-export async function getEventAttendance(
-    ref: string,
-    viewer?: { id: string; role: string }
-): Promise<{
-    event_id: string;
-    summary: { confirmed: number; attended: number; absent: number; unmarked: number };
-    records: Array<{
-        registration_id: string;
-        user: { user_id: string; display_name: string; avatar_url: string | null };
-        attended: boolean | null;
-        role: string | null;
-        team_id: string | null;
-    }>;
-}> {
-    const event = await findByRef(ref, viewer);
-    const submissions = await FormSubmission.find({
-        'owner.type': 'event',
-        'owner.id': event._id,
-        status: 'confirmed',
-    }).sort({ submitted_at: 1 });
-
-    let attended = 0;
-    let absent = 0;
-    let unmarked = 0;
-
-    const records = submissions.map((sub) => {
-        const att = sub.context.event?.attended ?? null;
-        if (att === true) attended++;
-        else if (att === false) absent++;
-        else unmarked++;
-
-        return {
+        waitlist: submissions.map((sub, idx) => ({
+            position: idx + 1,
             registration_id: sub._id,
             user: sub.user,
-            attended: att,
-            role: sub.context.event?.role ?? null,
-            team_id: sub.context.event?.team_id ?? null,
-        };
-    });
-
-    return {
-        event_id: event._id,
-        summary: {
-            confirmed: submissions.length,
-            attended,
-            absent,
-            unmarked,
-        },
-        records,
+            submitted_at: sub.submitted_at,
+        })),
+        total_waitlisted: total,
     };
 }
 
-export async function addEventCaptain(
-    ref: string,
-    userId: string,
-    actor: { id: string; role: string }
-): Promise<IEvent> {
+/**
+ * Promotion is Registration Service's write (it owns form_submissions): it CASes the row
+ * waitlisted → confirmed and reserves the seat through the same contract as everyone else. This
+ * used to flip the row here and `$inc` the seat count unconditionally, overbooking under a race.
+ */
+export async function promoteWaitlistedParticipant(ref: string, registrationId: string, actor: Actor): Promise<unknown> {
     const event = await findByRef(ref, actor);
-    const isCoreAdmin = event.core_admins.includes(actor.id) || event.created_by === actor.id;
-    const isPrivileged = [UserRole.CORE, UserRole.COORDINATOR, UserRole.FOUNDER].includes(actor.role as UserRole);
-    if (!isCoreAdmin && !isPrivileged) {
-        throw new ServiceError(403, 'forbidden');
+    assertEventAdmin(event, actor);
+    if (TERMINAL_STATUSES.includes(event.status)) throw new ServiceError(409, 'event_is_terminal');
+
+    const belongs = await FormSubmission.exists({ _id: registrationId, 'owner.type': 'event', 'owner.id': event._id });
+    if (!belongs) throw new ServiceError(404, 'registration_not_found');
+
+    try {
+        return await promoteRegistration(registrationId, actor.id);
+    } catch (err) {
+        throw asServiceError(err);
+    }
+}
+
+/** Attendance is marked by Registration Service, which owns the rows and publishes ParticipantAttended. */
+export async function recordEventAttendance(
+    ref: string,
+    attendances: Array<{ registration_id: string; attended: boolean }>,
+    actor: Actor
+): Promise<{ updated_count: number; skipped: string[] }> {
+    const event = await findByRef(ref, actor);
+    assertEventAdmin(event, actor);
+    // Owner decision: attendance is marked AND revoked only while the event is running.
+    if (event.status !== 'ongoing' || Date.now() >= event.end_at.getTime()) {
+        throw new ServiceError(409, 'attendance_window_closed');
     }
 
-    if (!event.auction) {
-        event.auction = {
-            k_multiplier: 1.0,
-            min_bid_increment: 100,
-            bid_timer_seconds: 5,
-            oc_override_quota: 3 / 7,
-            oc_captain_override_quota: 3 / 7,
-            status: 'not_started',
-            captain_user_ids: [],
-            purse_per_team: null,
-        };
-    }
-
-    if (!event.auction!.captain_user_ids.includes(userId)) {
-        event.auction!.captain_user_ids.push(userId);
-        await event.save();
-        publish('CaptainApproved', PRODUCER, {
+    try {
+        return await recordAttendance({
             event_id: event._id,
-            user_id: userId,
-            approved_by: actor.id,
+            marked_by: actor.id,
+            attendances: attendances.map((a) => ({ registration_id: a.registration_id, attended: a.attended })),
         });
+    } catch (err) {
+        throw asServiceError(err);
     }
-
-    return event;
 }
 
-export async function removeEventCaptain(
-    ref: string,
-    userId: string,
-    actor: { id: string; role: string }
-): Promise<IEvent> {
+export async function getEventAttendance(ref: string, viewer: Actor) {
+    const event = await findByRef(ref, viewer);
+    assertEventAdmin(event, viewer);
+    const [c, submissions] = await Promise.all([
+        submissionCounts(event._id),
+        FormSubmission.find(
+            { 'owner.type': 'event', 'owner.id': event._id, status: 'confirmed' },
+            { user: 1, context: 1 }
+        )
+            .sort({ submitted_at: 1 })
+            .limit(ADMIN_LIST_CAP)
+            .lean(),
+    ]);
+
+    return {
+        event_id: event._id,
+        summary: { confirmed: c.confirmed, attended: c.attended, absent: c.absent, unmarked: c.unmarked },
+        records: submissions.map((sub) => ({
+            registration_id: sub._id,
+            user: sub.user,
+            attended: sub.context?.event?.attended ?? null,
+            role: sub.context?.event?.role ?? null,
+            team_id: sub.context?.event?.team_id ?? null,
+        })),
+    };
+}
+
+/* ------------------------------------------------------------------ *
+ * Auction captains (type 'ALL' only)
+ * ------------------------------------------------------------------ */
+
+function assertAuctionLeague(event: IEvent): void {
+    // The invariant is "auction != null exactly when type == 'ALL'". Creating an auction block on any
+    // other type broke every later save of that event with a 500 (audit Sep 26, H25).
+    if (event.type !== 'ALL' || !event.auction) {
+        throw new ServiceError(422, 'event_is_not_an_auction_league');
+    }
+}
+
+export async function addEventCaptain(ref: string, userId: string, actor: Actor): Promise<IEvent> {
     const event = await findByRef(ref, actor);
-    const isCoreAdmin = event.core_admins.includes(actor.id) || event.created_by === actor.id;
-    const isPrivileged = [UserRole.CORE, UserRole.COORDINATOR, UserRole.FOUNDER].includes(actor.role as UserRole);
-    if (!isCoreAdmin && !isPrivileged) {
-        throw new ServiceError(403, 'forbidden');
-    }
+    assertEventAdmin(event, actor);
+    assertAuctionLeague(event);
+    if (event.auction!.status === 'finished') throw new ServiceError(409, 'auction_finished');
 
-    if (event.auction) {
-        event.auction.captain_user_ids = event.auction.captain_user_ids.filter((id) => id !== userId);
-        await event.save();
-    }
+    if (!(await User.exists({ _id: userId, deleted_at: null }))) throw new ServiceError(404, 'user_not_found');
 
-    return event;
+    const res = await Event.updateOne(
+        { _id: event._id, type: 'ALL', 'auction.status': { $ne: 'finished' }, 'auction.captain_user_ids': { $ne: userId } },
+        { $addToSet: { 'auction.captain_user_ids': userId } }
+    );
+    if (res.modifiedCount === 1) {
+        invalidateAuctionLiveCache(event._id);
+        publish('CaptainApproved', PRODUCER, { event_id: event._id, user_id: userId, approved_by: actor.id });
+    }
+    return (await Event.findById(event._id, { seat_holders: 0 }))!;
 }
 
-export async function listEventCaptains(
-    ref: string
-): Promise<{ event_id: string; captain_user_ids: string[]; captains: Array<{ user_id: string; display_name: string; avatar_url: string | null }> }> {
-    const event = await findByRef(ref);
+export async function removeEventCaptain(ref: string, userId: string, actor: Actor): Promise<IEvent> {
+    const event = await findByRef(ref, actor);
+    assertEventAdmin(event, actor);
+    assertAuctionLeague(event);
+
+    // `$pull`, not a read-filter-save of the whole array, which lost a concurrent `$addToSet`.
+    await Event.updateOne({ _id: event._id }, { $pull: { 'auction.captain_user_ids': userId } });
+    invalidateAuctionLiveCache(event._id);
+    return (await Event.findById(event._id, { seat_holders: 0 }))!;
+}
+
+export async function listEventCaptains(ref: string, viewer?: Actor) {
+    const event = await findByRef(ref, viewer);
     const captainIds = event.auction?.captain_user_ids ?? [];
     const users = await User.find({ _id: { $in: captainIds } });
-
-    const captains = users.map((u) => userSnapshotOf(u));
 
     return {
         event_id: event._id,
         captain_user_ids: captainIds,
-        captains,
+        // A deleted account is shown as deleted, never by its real name (audit #2).
+        captains: users.map((u) =>
+            u.deleted_at
+                ? { user_id: u._id, display_name: DELETED_DISPLAY_NAME, avatar_url: null, deleted: true }
+                : userSnapshotOf(u)
+        ),
     };
 }

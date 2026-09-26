@@ -105,6 +105,9 @@ function assertSavable(c: Draftish): void {
     if (!s.requires_proof && s.proof_types.length > 0) fail('proof_types_without_proof');
     if (s.auto_approve && !s.requires_proof) fail('auto_approve_needs_proof');
     if (s.requires_proof && s.proof_types.length === 0) fail('proof_types_required');
+    // A submit carries at least one proof (SubmitBody .min(1)), so a cap of 0 on a challenge that
+    // requires proof is a challenge nobody can ever complete.
+    if (s.requires_proof && s.max_files < 1) fail('max_files_required');
     // The enum accepts image/video; Media Service does not exist until Week 4, so a challenge
     // demanding a file upload would be unsatisfiable (challenge-model.md §6).
     const unsupported = s.proof_types.filter((p) => !MVP_PROOF_TYPES.includes(p));
@@ -120,7 +123,7 @@ export async function createChallenge(input: CreateChallengeInput, actor: Actor)
     const teaming = normalizeTeaming(input.teaming);
     // challenge-model.md §2.2: a Legend challenge grants Hall of Fame by default. Applied here and
     // not as a schema default so an admin can still send `false` in the same request — which is
-    // what `grants_hall_of_fame` being optional in the zod schema buys (D2).
+    // what `grants_hall_of_fame` being optional in the zod schema buys.
     const grants_hall_of_fame = input.grants_hall_of_fame ?? input.difficulty === 'legend';
 
     assertSavable({ ...input, submission, teaming });
@@ -193,7 +196,7 @@ export async function updateChallenge(
 
     // Participations snapshot `award_points` at acceptance and never refresh it
     // (relationships.md §4). Repricing a live challenge would pay two people different amounts for
-    // the same work with nothing recording why (D4). Archive and re-create is the path.
+    // the same work with nothing recording why. Archive and re-create is the path.
     if (patch.award_points != null && patch.award_points !== challenge.award_points) {
         if (await ChallengeParticipation.exists({ challenge_id: id })) {
             throw new ServiceError(409, 'challenge_has_participations');
@@ -206,7 +209,7 @@ export async function updateChallenge(
         difficulty: challenge.difficulty,
     };
 
-    // The same Legend rule `createChallenge` applies (D2). Without this, promoting a challenge to
+    // The same Legend rule `createChallenge` applies. Without this, promoting a challenge to
     // 'legend' by PATCH left `grants_hall_of_fame` false and the Legend never reached Hall of Fame
     // — the default fired on one write path and not the other.
     const promotedToLegend = patch.difficulty === 'legend' && challenge.difficulty !== 'legend';
@@ -214,11 +217,24 @@ export async function updateChallenge(
         challenge.grants_hall_of_fame = true;
     }
 
-    Object.assign(challenge, patch);
-    // Re-normalize: a patch that only flips `requires_proof` leaves the stored `proof_types` in
-    // place, which is exactly the 500 that normalization exists to prevent.
-    challenge.submission = normalizeSubmission(challenge.submission) as IChallenge['submission'];
-    challenge.teaming = normalizeTeaming(challenge.teaming) as IChallenge['teaming'];
+    // The three nested groups are MERGED into what is stored; everything else is a plain replace.
+    // `Object.assign` of the whole patch replaced them wholesale, so `{ teaming: { max_teams: 5 } }`
+    // also switched teaming off (audit Sep 26, H1).
+    const { window, teaming, submission, ...flat } = patch;
+    const stored = challenge.toObject() as unknown as Pick<IChallenge, 'window' | 'teaming' | 'submission'>;
+    Object.assign(challenge, flat);
+    if (window) challenge.set('window', { ...stored.window, ...window });
+    if (teaming) challenge.set('teaming', normalizeTeaming({ ...stored.teaming, ...teaming }));
+    const mergedSubmission: { requires_proof: boolean; proof_types?: string[]; max_files: number; auto_approve: boolean } = {
+        ...stored.submission,
+        ...submission,
+    };
+    // Turning proof back on over a stored `[]` (the normalized no-proof value) means "the default
+    // types", exactly as it does on create — not a 422 for a field the admin never sent.
+    if (mergedSubmission.requires_proof && !mergedSubmission.proof_types?.length) delete mergedSubmission.proof_types;
+    // Re-normalized even when `submission` is absent from the patch: cheap, and it is what keeps a
+    // stored value the hook would throw about from ever reaching `.save()`.
+    challenge.set('submission', normalizeSubmission(mergedSubmission));
     assertSavable(challenge);
     await challenge.save();
 
@@ -312,7 +328,23 @@ export async function softDelete(id: string, actor: Actor): Promise<void> {
  * 4. Reads
  * ------------------------------------------------------------------ */
 
-export async function listChallenges(q: ListChallengesInput): Promise<{ rows: IChallenge[]; next_cursor: string | null }> {
+/** Who is reading the catalog. Core+ sees every status; everyone else sees what was published. */
+export interface Viewer {
+    admin: boolean;
+}
+
+/**
+ * Drafts are unpublished work (full description, price, reviewers) and archived is the "stop
+ * showing this" verb, so neither is browsable below Core. `completed` stays visible: it still takes
+ * submissions from people who accepted in time (challenge-model.md §2.1).
+ */
+const PUBLIC_LIST_STATUSES = new Set(['active', 'completed']);
+
+export async function listChallenges(
+    q: ListChallengesInput,
+    viewer: Viewer
+): Promise<{ rows: IChallenge[]; next_cursor: string | null }> {
+    if (!viewer.admin && !PUBLIC_LIST_STATUSES.has(q.status)) throw new ServiceError(403, 'forbidden');
     const conditions: Record<string, unknown>[] = [{ ...alive, status: q.status }];
     if (q.domain) conditions.push({ domain: q.domain });
     if (q.difficulty) conditions.push({ difficulty: q.difficulty });
@@ -333,9 +365,11 @@ export async function listChallenges(q: ListChallengesInput): Promise<{ rows: IC
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Detail by `_id` or `slug` — the mobile app deep-links on slug, the admin panel holds ids. */
-export async function getByKey(key: string): Promise<IChallenge> {
+export async function getByKey(key: string, viewer: Viewer): Promise<IChallenge> {
     const challenge = await Challenge.findOne(allOf([{ ...alive }, { $or: [{ _id: key }, { slug: key }] }]));
-    if (!challenge) throw new ServiceError(404, 'challenge_not_found');
+    // A draft is 404 below Core, not 403: slugs are derived from titles, so a 403 would confirm an
+    // unannounced challenge exists. Archived stays readable — participants' history links to it.
+    if (!challenge || (challenge.status === 'draft' && !viewer.admin)) throw new ServiceError(404, 'challenge_not_found');
     return challenge;
 }
 

@@ -1,12 +1,12 @@
 import { IBracket, IMatch, POINTS_DRAW, POINTS_LOSS, POINTS_WIN } from '@bgsc/shared';
 
 /**
- * Standings, derived from the fixtures every time they are asked for (plan D12).
+ * Standings, derived from the fixtures every time they are asked for.
  *
  * Never stored. A match result is the only input, there are at most a few hundred fixtures in an
  * event, and a materialized table is a second copy of the truth that has to be kept in step with
  * every correction a coordinator makes. When this stops being cheap, `leaderboard_entries.stats`
- * already has the fields for it (`Leaderboard.ts`) and a service that owns them (plan D8).
+ * already has the fields for it (`Leaderboard.ts`) and a service that owns them.
  */
 
 export interface StandingRow {

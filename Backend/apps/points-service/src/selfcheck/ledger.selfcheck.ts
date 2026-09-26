@@ -1,12 +1,12 @@
 import assert from 'assert';
-import { PointTransaction, ServiceError, User, idempotencyKey } from '@bgsc/shared';
+import { PointTransaction, PointTxClaim, ServiceError, User, idempotencyKey } from '@bgsc/shared';
 import { v4 as uuid } from 'uuid';
-import { drift, ledgerSum, record } from '../points/ledger';
+import { drift, ledgerHooks, ledgerSum, record, voidKey } from '../points/ledger';
 import { recalculate } from '../points/points.service';
 import { balanceOf, closeScratchDb, openScratchDb, pass, resetLedger, rowsFor, seedUser, section } from './seed';
 
 /**
- * The write path (be2-points-service-plan.md §12.1). What the model's own selfcheck
+ * The write path. What the model's own selfcheck
  * (models.selfcheck.ts:294-345) does not cover: everything that only shows up when two callers
  * arrive at once, or when the second half of a write fails.
  */
@@ -23,14 +23,14 @@ const credit = (user_id: string, amount: number, key: string) =>
         actor: { type: 'system', user_id: null },
     });
 
-const spend = (user_id: string, amount: number, key: string) =>
+const spend = (user_id: string, amount: number, key: string, entry_id: string = uuid()) =>
     record({
         user_id,
         amount: -amount,
         type: 'spend',
         source: 'leaderboard',
         reason: 'leaderboard.investment',
-        reference: { type: 'leaderboard_entry', id: uuid() },
+        reference: { type: 'leaderboard_entry', id: entry_id },
         idempotency_key: key,
         actor: { type: 'user', user_id },
     });
@@ -170,6 +170,30 @@ async function main(): Promise<void> {
         pass('a duplicate-key race compensates and returns the winner');
     }
 
+    section('one key, two callers, and a spend landing in the window');
+    {
+        const user = await seedUser(10);
+        const key = idempotencyKey.eventParticipation(uuid());
+        // Hold the winner between its $inc and its row, and land a spend of everything there. Before
+        // the claim, the loser also $inc'd and then compensated after the spend: balance -5.
+        let spent = false;
+        ledgerHooks.afterMove = async () => {
+            if (spent) return;
+            spent = true;
+            await spend(user._id, 20, uuid());
+        };
+        try {
+            const [a, b] = await Promise.all([credit(user._id, 10, key), credit(user._id, 10, key)]);
+            assert.strictEqual(a.tx._id, b.tx._id, 'one row, both callers');
+            assert.strictEqual(a.tx.balance_after, 20, 'balance_after is what this credit produced');
+        } finally {
+            ledgerHooks.afterMove = async () => undefined;
+        }
+        assert.strictEqual(await PointTransaction.countDocuments({ idempotency_key: key }), 1, 'exactly one row');
+        assert.strictEqual(await balanceOf(user._id), 0, 'moved once: 10 + 10 - 20, never negative');
+        pass('the key is claimed before the balance moves');
+    }
+
     section('compensation when the row does not land');
     {
         const user = await seedUser(100);
@@ -244,6 +268,27 @@ async function main(): Promise<void> {
         pass('a lost compare-and-swap refuses rather than overwriting');
     }
 
+    section('a claim its holder abandoned does not hold the key forever');
+    {
+        const user = await seedUser(0);
+        const stale = new Date(Date.now() - 60_000);
+        // A holder that died mid-move (claim `moving`, no row) and one that died before moving.
+        const stuck = idempotencyKey.eventParticipation(uuid());
+        const early = idempotencyKey.leaderboardInvestment(user._id, uuid(), uuid());
+        await PointTxClaim.create({ _id: stuck, state: 'moving', owner: 'dead', user_id: user._id, lease_until: stale });
+        await PointTxClaim.create({ _id: early, state: 'pending', owner: 'dead', user_id: user._id, lease_until: stale });
+        assert.strictEqual(await voidKey(early), true, 'an expired pending claim is voided, not left in place');
+        await refuses(credit(user._id, 10, stuck), 409, 'request_in_flight', 'a key held by a dead mover');
+
+        await recalculate(user._id, { id: 'selfcheck-admin', ip: null });
+        assert.strictEqual(
+            (await credit(user._id, 10, stuck)).tx.amount,
+            10,
+            'after recalculate the key is free again'
+        );
+        pass('recalculate clears a dead mover; voidKey takes over an expired pending claim');
+    }
+
     section('refundForInvestment restores spent points and dedupes on idempotency key');
     {
         const user = await seedUser(50);
@@ -268,7 +313,7 @@ async function main(): Promise<void> {
         });
 
         const reqId = uuid();
-        await spend(user._id, 20, idempotencyKey.leaderboardInvestment(reqId));
+        await spend(user._id, 20, idempotencyKey.leaderboardInvestment(user._id, entryId, reqId), entryId);
         assert.strictEqual(await balanceOf(user._id), 30);
 
         const { refundForInvestment } = await import('../points/points.service');
@@ -293,6 +338,66 @@ async function main(): Promise<void> {
         assert.strictEqual(refundTx2._id, refundTx._id);
         assert.strictEqual(await balanceOf(user._id), 50);
         pass('refundForInvestment compensates debited points and dedupes idempotently');
+
+        // Bound to a real spend: no spend, someone else's, or a different amount mints nothing.
+        const ref = { type: 'leaderboard_entry' as const, id: entryId };
+        await refuses(refundForInvestment({ user_id: user._id, reference: ref, request_id: uuid() }), 404, 'spend_not_found', 'a refund with no spend behind it');
+        const other = await seedUser(0);
+        await refuses(refundForInvestment({ user_id: other._id, reference: ref, request_id: reqId }), 404, 'spend_not_found', "a refund of someone else's spend");
+        const req2 = uuid();
+        await spend(user._id, 10, idempotencyKey.leaderboardInvestment(user._id, entryId, req2), entryId);
+        await refuses(
+            refundForInvestment({ user_id: user._id, reference: ref, request_id: req2, amount: 99_999 }),
+            409,
+            'refund_amount_mismatch',
+            'a refund larger than the spend'
+        );
+        assert.strictEqual(await balanceOf(other._id), 0);
+
+        // "No spend" is final: the key was voided, so a late spend with it cannot land afterwards.
+        const lateReq = uuid();
+        await refuses(refundForInvestment({ user_id: user._id, reference: ref, request_id: lateReq }), 404, 'spend_not_found', 'a refund that arrives before its spend');
+        await refuses(
+            spend(user._id, 5, idempotencyKey.leaderboardInvestment(user._id, entryId, lateReq), entryId),
+            409,
+            'request_voided',
+            'the spend that arrives after its refund'
+        );
+
+        // Refunds written under the retired keys count as refunds.
+        const oldReq = uuid();
+        const { tx: oldSpend } = await spend(user._id, 5, idempotencyKey.legacy.leaderboardInvestment(oldReq), entryId);
+        await record({
+            user_id: user._id,
+            amount: 5,
+            type: 'refund',
+            source: 'leaderboard',
+            reason: 'leaderboard.investment',
+            reference: { type: 'leaderboard_entry', id: entryId },
+            idempotency_key: idempotencyKey.legacy.investmentRefund(oldReq),
+            actor: { type: 'system', user_id: null },
+        });
+        const before = await balanceOf(user._id);
+        const legacy = await refundForInvestment({ user_id: user._id, reference: ref, request_id: oldReq });
+        assert.strictEqual(legacy.replayed, true, 'the legacy refund is the refund');
+        assert.strictEqual(await balanceOf(user._id), before, 'nothing paid twice');
+        assert.ok(oldSpend);
+        pass('refunds are final, voiding late spends; legacy refund keys are honoured');
+    }
+
+    section('the ledger refuses save() of an existing row and bulkWrite');
+    {
+        const user = await seedUser(0);
+        const { tx } = await credit(user._id, 5, uuid());
+        const loaded = await PointTransaction.findById(tx._id);
+        loaded!.amount = 500;
+        await assert.rejects(loaded!.save(), /append-only/);
+        await assert.rejects(
+            PointTransaction.bulkWrite([{ deleteOne: { filter: { _id: tx._id } } }]),
+            /append-only/
+        );
+        assert.strictEqual((await PointTransaction.findById(tx._id))?.amount, 5, 'the row is unchanged');
+        pass('re-save and bulkWrite are refused');
     }
 
     await resetLedger();

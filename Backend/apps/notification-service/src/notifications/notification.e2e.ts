@@ -206,7 +206,15 @@ async function main(): Promise<void> {
 
     const gone = await call('DELETE', `/notifications/${mine}`, { as: meT });
     assert.strictEqual(gone.status, 204, 'dismiss is 204 with no body');
-    assert.strictEqual(await Notification.exists({ _id: mine }), null, 'and the row is gone');
+    assert.ok(
+        await Notification.exists({ _id: mine, dismissed_at: { $ne: null } }),
+        'and the row is hidden, kept as the dedupe record'
+    );
+    const listed = await call('GET', '/notifications', { as: meT });
+    assert.ok(
+        !listed.body.notifications.some((n: { _id: string }) => n._id === mine),
+        'a dismissed card is not in the inbox'
+    );
 
     const goneAgain = await call('DELETE', `/notifications/${mine}`, { as: meT });
     assert.strictEqual(goneAgain.status, 404, 'dismissing it twice is a 404');

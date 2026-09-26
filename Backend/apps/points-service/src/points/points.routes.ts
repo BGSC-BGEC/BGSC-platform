@@ -22,7 +22,7 @@ import {
  *
  * Writes take `requireActiveUser` (the live user document's role) rather than `requireRole` (the
  * token's claim): a token outlives a demotion by up to 15 minutes, and every write here moves
- * points (plan D19).
+ * points.
  */
 export const pointsRoutes = Router();
 

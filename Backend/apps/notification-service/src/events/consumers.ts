@@ -3,6 +3,11 @@ import {
     ChallengeParticipation,
     DomainEvent,
     Event,
+    FeedbackTicket,
+    FormSubmission,
+    NotificationCategory,
+    Team,
+    User,
     subscribe,
 } from '@bgsc/shared';
 import {
@@ -16,7 +21,7 @@ import { renderMessage } from '../broadcast/templates';
 import { createOne, retract } from '../notifications/notification.service';
 
 /**
- * What this service reacts to (be2-broadcast-service-plan.md §3).
+ * What this service reacts to.
  *
  * Every handler is idempotent by construction: the dedupe key is derived from the document that
  * caused the notification, never from the message, so a replay, a Redis redelivery and a second
@@ -96,38 +101,35 @@ async function eventTitle(eventId: string): Promise<string | null> {
     return event?.title ?? null;
 }
 
-interface RegistrationConfirmedPayload extends Record<string, unknown> {
-    registration_id: string;
-    event_id: string;
-    user_id: string;
-}
-
 /**
- * "You're in" — and it arrives by two different names.
+ * "You're in".
  *
- * `RegistrationCreated` (registration-service) is the ordinary path: the seat was reserved and the
- * registration went straight to confirmed. `RegistrationConfirmed` (event-service) is the *other*
- * path: an organiser promoted somebody off the waitlist. Listening to only the second one — which
- * is what the first version of this file did — means the common case, a person who simply signed up
- * and got in, is told nothing at all.
+ * `RegistrationCreated` is the ONE event for "this registration is now confirmed", whichever path
+ * got it there — straight in on submit, an automatic promotion off the waitlist, or an organiser's
+ * promotion (fix-phase contract: event-service's `RegistrationConfirmed` is retired). The dedupe key
+ * is the registration AND which confirmation of it this is — a replay is still one card, but a row
+ * an admin rejected and then confirmed again gets its second "you're in" (audit #2).
  *
- * One dedupe key covers both, so a person promoted off the waitlist gets their waitlist card and
- * exactly one confirmation, whichever event arrives.
+ * The ordinal is counted at consume time from the row's history, so two confirmations landing
+ * before the first event is consumed would share a key. ponytail: fine at campus scale; carry the
+ * ordinal in the payload (as `ChallengeRejected.rejection_no` does) if that ever matters.
  */
 async function notifyConfirmed(registration_id: string, event_id: string, user_id: string): Promise<void> {
-    const title = await eventTitle(event_id);
+    const [title, registration] = await Promise.all([
+        eventTitle(event_id),
+        FormSubmission.findById(registration_id)
+            .select('status_history')
+            .lean<{ status_history?: { to: string }[] }>(),
+    ]);
     if (!title) return log(`registration.confirmed for event ${event_id}`, new Error('event_not_found'));
+    const nth = Math.max(1, (registration?.status_history ?? []).filter((h) => h.to === 'confirmed').length);
 
     await createOne({
         user_id,
         ...renderMessage('registration.confirmed', { event_title: title }),
         data: { event_id, registration_id },
-        dedupe_key: dedupe.registrationConfirmed(registration_id),
+        dedupe_key: dedupe.registrationConfirmed(registration_id, nth),
     });
-}
-
-async function onRegistrationConfirmed(p: RegistrationConfirmedPayload): Promise<void> {
-    await notifyConfirmed(p.registration_id, p.event_id, p.user_id);
 }
 
 interface RegistrationCreatedPayload extends Record<string, unknown> {
@@ -199,9 +201,9 @@ interface PointsEarnedPayload extends Record<string, unknown> {
 }
 
 /**
- * Deferred on Sep 26 on a false premise — the plan recorded that the Points Service published
+ * Deferred on Sep 26 on a false premise — that the Points Service published
  * nothing, when `ledger.ts` has always published five events under a computed name that a
- * `publish('` search cannot see. Built once the audit corrected that (plan D15).
+ * `publish('` search cannot see. Built once the audit corrected that.
  *
  * `PointsEarned` only: a spend is something the user just did on purpose, a refund and an
  * adjustment already carry their own explanation elsewhere, and an expiry is not news anybody wants
@@ -283,6 +285,8 @@ interface ChallengeRejectedPayload extends Record<string, unknown> {
     participation_id: string;
     challenge_id: string;
     reason?: string | null;
+    /** 1 for the participation's first rejection, 2 for its second… (challenge-service, audit #2). */
+    rejection_no?: number;
 }
 
 /**
@@ -294,15 +298,25 @@ async function onChallengeRejected(p: ChallengeRejectedPayload): Promise<void> {
     const [title, participation] = await Promise.all([
         challengeTitle(p.challenge_id),
         ChallengeParticipation.findById(p.participation_id)
-            .select('member_user_ids')
-            .lean<{ member_user_ids: string[] }>(),
+            .select('member_user_ids status_history')
+            .lean<{ member_user_ids: string[]; status_history?: { to: string }[] }>(),
     ]);
     if (!title || !participation) return;
+
+    // Which rejection this is. The producer's `rejection_no` is exact; counting the history at
+    // consume time is the fallback for an older producer (it can collapse two quick rejections).
+    // At least 1, so a participation written without history still keys.
+    const nth =
+        typeof p.rejection_no === 'number' && p.rejection_no >= 1
+            ? p.rejection_no
+            : Math.max(1, (participation.status_history ?? []).filter((h) => h.to === 'rejected').length);
 
     const message = renderMessage('challenge.rejected', {
         challenge_title: title,
         // The template is strict about empty variables, and a reviewer is not obliged to give one.
-        reason: p.reason ?? 'not stated',
+        // `??` alone let '' through (the producer's schema trims, then accepts empty), which threw
+        // and dropped the whole notice.
+        reason: p.reason?.trim() || 'not stated',
     });
 
     for (const user_id of participation.member_user_ids ?? []) {
@@ -311,7 +325,7 @@ async function onChallengeRejected(p: ChallengeRejectedPayload): Promise<void> {
                 user_id,
                 ...message,
                 data: { challenge_id: p.challenge_id, participation_id: p.participation_id },
-                dedupe_key: dedupe.challengeRejected(p.participation_id),
+                dedupe_key: dedupe.challengeRejected(p.participation_id, nth),
             });
         } catch (err) {
             log(`challenge.rejected for ${user_id} on participation ${p.participation_id}`, err);
@@ -322,6 +336,119 @@ async function onChallengeRejected(p: ChallengeRejectedPayload): Promise<void> {
 /* ------------------------------------------------------------------ *
  * Feedback (Staff notice for submitted tickets)
  * ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ *
+ * Teams, auction and feedback replies (audit #2)
+ *
+ * Every card below goes through `createOne`, which applies the recipient's mute and refuses a
+ * deleted or suspended account. Names shown in a card are read live (`deleted_at: null` for a
+ * person), never trusted from a payload.
+ * ------------------------------------------------------------------ */
+
+interface TeamInviteCreatedPayload extends Record<string, unknown> {
+    team_id: string;
+    team_name?: string;
+    owner: { type: string; id: string };
+    user_id: string;
+    invited_by: string;
+}
+
+/**
+ * An invite is only worth a card while it is pending. It is read back from the team: that gives
+ * the invite's own timestamp for the dedupe key (a re-invite after a lapse is a new card), and an
+ * invite accepted, declined or withdrawn before this ran produces nothing.
+ */
+async function onTeamInviteCreated(p: TeamInviteCreatedPayload): Promise<void> {
+    if (!p.team_id || !p.user_id) return;
+    const team = await Team.findById(p.team_id)
+        .select('name owner pending')
+        .lean<{ name: string; owner: { type: string }; pending?: { user_id: string; direction: string; created_at: Date }[] }>();
+    const invite = team?.pending?.find((x) => x.user_id === p.user_id && x.direction === 'invite');
+    if (!team || !invite) return;
+
+    const category: NotificationCategory = team.owner?.type === 'challenge' ? 'challenge' : 'event';
+    await createOne({
+        user_id: p.user_id,
+        ...renderMessage('team.invited', { team_name: team.name }),
+        category,
+        data: { team_id: p.team_id, owner: p.owner, invited_by: p.invited_by },
+        dedupe_key: dedupe.teamInvite(p.team_id, p.user_id, new Date(invite.created_at).getTime()),
+    });
+}
+
+interface PlayerSoldPayload extends Record<string, unknown> {
+    event_id: string;
+    lot_id: string;
+    player_user_id: string;
+    team_id: string;
+    captain_user_id?: string | null;
+    amount: number;
+}
+
+/**
+ * Two cards: the player learns where they went, the buying captain gets the receipt. The lot is
+ * sold once, so `lot_id` per side is the whole dedupe key.
+ */
+async function onPlayerSold(p: PlayerSoldPayload): Promise<void> {
+    if (!p.lot_id || !p.player_user_id || !p.team_id) return;
+    const [event_title, team, player] = await Promise.all([
+        eventTitle(p.event_id),
+        Team.findById(p.team_id).select('name').lean<{ name: string }>(),
+        User.findOne({ _id: p.player_user_id, deleted_at: null })
+            .select('username profile.full_name')
+            .lean<{ username: string; profile?: { full_name?: string } }>(),
+    ]);
+    if (!event_title || !team) return log(`auction.sold for lot ${p.lot_id}`, new Error('event_or_team_not_found'));
+
+    const data = { event_id: p.event_id, lot_id: p.lot_id, team_id: p.team_id, amount: p.amount };
+    const vars = { team_name: team.name, amount: p.amount, event_title };
+
+    await createOne({
+        user_id: p.player_user_id,
+        ...renderMessage('auction.sold.player', vars),
+        data,
+        dedupe_key: dedupe.auctionSold(p.lot_id, 'player'),
+    });
+
+    // No captain, or the captain bought themselves: one card is enough.
+    if (!p.captain_user_id || p.captain_user_id === p.player_user_id) return;
+    await createOne({
+        user_id: p.captain_user_id,
+        // A deleted player is not named, even to their buyer.
+        ...renderMessage('auction.sold.captain', {
+            ...vars,
+            player_name: player?.profile?.full_name || player?.username || 'Your new player',
+        }),
+        data: { ...data, player_user_id: p.player_user_id },
+        dedupe_key: dedupe.auctionSold(p.lot_id, 'captain'),
+    });
+}
+
+interface FeedbackRespondedPayload extends Record<string, unknown> {
+    ticket_id: string;
+    ticket_no: string;
+    reporter_user_id: string | null;
+}
+
+/**
+ * The reporter hears that staff replied. An anonymous ticket has no reporter (`null`) and reaches
+ * nobody here — its reply goes to the contact address the feedback service holds. The reply text
+ * itself stays on the ticket: the card is a pointer, not a copy.
+ */
+async function onFeedbackResponded(p: FeedbackRespondedPayload): Promise<void> {
+    if (!p.ticket_id || !p.ticket_no || !p.reporter_user_id) return;
+    const ticket = await FeedbackTicket.findById(p.ticket_id)
+        .select('response')
+        .lean<{ response?: { at?: Date } | null }>();
+    const respondedAt = ticket?.response?.at ? new Date(ticket.response.at).getTime() : 0;
+
+    await createOne({
+        user_id: p.reporter_user_id,
+        ...renderMessage('feedback.responded', { ticket_no: p.ticket_no }),
+        data: { ticket_id: p.ticket_id, ticket_no: p.ticket_no },
+        dedupe_key: dedupe.feedbackResponded(p.ticket_id, respondedAt),
+    });
+}
 
 interface FeedbackSubmittedPayload extends Record<string, unknown> {
     ticket_id: string;
@@ -351,7 +478,7 @@ async function onFeedbackSubmitted(p: FeedbackSubmittedPayload): Promise<void> {
  * ------------------------------------------------------------------ */
 
 /**
- * `PointsEarned` is consumed here since Sep 27. The plan's D15 had deferred it on the grounds that
+ * `PointsEarned` is consumed here since Sep 27. It had been deferred on the grounds that
  * the Points Service published nothing — it does, through a computed name (`EVENT_FOR[tx.type]` in
  * `ledger.ts`) that a search for `publish('` cannot see. The other four points events are
  * deliberately not consumed: see `onPointsEarned`.
@@ -360,15 +487,17 @@ export function initializeConsumers(): void {
     subscribe('AnnouncementPublished', safe('announcement broadcast', onAnnouncementPublished));
     subscribe('AnnouncementUpdated', safe('announcement card refresh', onAnnouncementUpdated));
     subscribe('AnnouncementDeleted', safe('announcement retraction', onAnnouncementDeleted));
-    // Both names for the same good news; see notifyConfirmed.
+    // The one "now confirmed" event; see notifyConfirmed.
     subscribe('RegistrationCreated', safe('registration confirmation', onRegistrationCreated));
-    subscribe('RegistrationConfirmed', safe('waitlist promotion', onRegistrationConfirmed));
     subscribe('RegistrationWaitlisted', safe('waitlist notification', onRegistrationWaitlisted));
     subscribe('EventCancelled', safe('event cancellation notice', onEventCancelled));
     subscribe('PointsEarned', safe('points credit notice', onPointsEarned));
     subscribe('ChallengeCompleted', safe('challenge approval notice', onChallengeCompleted));
     subscribe('ChallengeRejected', safe('challenge rejection notice', onChallengeRejected));
     subscribe('FeedbackSubmitted', safe('feedback ticket notice', onFeedbackSubmitted));
+    subscribe('FeedbackResponded', safe('feedback reply notice', onFeedbackResponded));
+    subscribe('TeamInviteCreated', safe('team invite notice', onTeamInviteCreated));
+    subscribe('PlayerSold', safe('auction sale notice', onPlayerSold));
 
     console.log('[notification-service] Event consumers initialized');
 }
@@ -379,12 +508,14 @@ export const handlers = {
     onRegistrationCreated,
     onAnnouncementUpdated,
     onAnnouncementDeleted,
-    onRegistrationConfirmed,
     onRegistrationWaitlisted,
     onEventCancelled,
     onPointsEarned,
     onChallengeCompleted,
     onChallengeRejected,
     onFeedbackSubmitted,
+    onFeedbackResponded,
+    onTeamInviteCreated,
+    onPlayerSold,
 };
 

@@ -1,6 +1,7 @@
 import { createServiceApp, startService } from '@bgsc/shared';
 import express from 'express';
 import { announcementRoutes } from './announcements/announcement.routes';
+import { maskLegacyGroupIds } from './announcements/announcement.service';
 import { internalRoutes } from './internal/internal.routes';
 import { initializeConsumers } from './events/consumers';
 import { startScheduler } from './scheduler/tick';
@@ -10,7 +11,7 @@ import { startScheduler } from './scheduler/tick';
  * document. Editorial broadcast only: no comments, no reactions.
  *
  * Makes no outbound service calls. Everything it needs from another domain is a read, and reads
- * go straight to the model (be2-announcement-service-plan.md §0.3).
+ * go straight to the model.
  */
 
 const NAME = 'announcement-service';
@@ -19,18 +20,25 @@ const PORT = parseInt(process.env.PORT || '3005', 10);
 const options = {
     name: NAME,
     port: PORT,
+    // Only its own collection's indexes are built at boot. It also writes `users.announcements.*`,
+    // but `users` belongs to User Service, which builds that collection's indexes.
+    models: ['Announcement'],
     routes(app: express.Express) {
         app.use('/announcements', announcementRoutes);
         // Service-to-service only: the gateway refuses /internal from the edge and the router
-        // mounts requireServiceToken. One caller — the Notification Service's delivery writeback
-        // (be2-broadcast-service-plan.md §6), which is what plan D7 was waiting for.
+        // mounts requireServiceToken. One caller — the Notification Service's delivery writeback.
         app.use('/internal', internalRoutes);
     },
     async onReady() {
         // Author snapshot refresh.
         initializeConsumers();
-        // Scheduled -> published, published -> archived, archived -> purged (plan §6).
+        // Scheduled -> published, published -> archived, archived -> purged.
         startScheduler();
+        // One-off, idempotent: receipts from before masking carry raw destinations (PII). Never
+        // a reason not to serve.
+        void maskLegacyGroupIds()
+            .then((n) => n > 0 && console.log(`[${NAME}] Masked ${n} legacy delivery group_id(s).`))
+            .catch((err) => console.error(`[${NAME}] Legacy group_id masking failed:`, err));
     },
 };
 

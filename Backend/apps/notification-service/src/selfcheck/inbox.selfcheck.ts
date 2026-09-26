@@ -1,12 +1,11 @@
 import assert from 'assert';
-import { Notification, NotificationPreference, ServiceError, UserRole } from '@bgsc/shared';
+import { Notification, NotificationPreference, ServiceError, User, UserRole } from '@bgsc/shared';
 import * as prefs from '../notifications/preferences';
 import * as svc from '../notifications/notification.service';
 import { closeScratchDb, openScratchDb, seedUser } from './seed';
 
 /**
- * The inbox a client reads, and the preferences that shape it
- * (be2-broadcast-service-plan.md §7, §12).
+ * The inbox a client reads, and the preferences that shape it.
  *
  * Pagination is tested against a deliberate timestamp TIE, because that is the case a keyset gets
  * wrong: rows sharing a `created_at` straddle the page boundary and one of them disappears.
@@ -155,8 +154,36 @@ async function main(): Promise<void> {
     await seedNotification(me._id, 'announcement:after');
     assert.strictEqual(await svc.unreadCount(me._id), 1, 'and a notification that arrives after it is unread again');
 
+    await Notification.updateOne({ _id: oldest }, { $set: { read_at: null } });
+    const beforeDismiss = await svc.unreadCount(me._id);
     await svc.dismiss(me._id, oldest);
-    assert.strictEqual(await Notification.exists({ _id: oldest }), null, 'dismissing deletes the row');
+    assert.ok(!ids((await svc.list(me._id, { limit: 20 })).notifications).includes(oldest), 'dismissed leaves the inbox');
+    assert.strictEqual(await svc.unreadCount(me._id), beforeDismiss - 1, 'and the badge');
+    await assert.rejects(() => svc.markRead(me._id, oldest), (err: ServiceError) => err.status === 404, 'and is 404 to read');
+    // The row is the dedupe record: a replay of the same cause must not hand the card back.
+    assert.ok(await Notification.exists({ _id: oldest, dismissed_at: { $ne: null } }), 'hidden, not deleted');
+    await seedNotification(me._id, 'announcement:a1');
+    assert.ok(!ids((await svc.list(me._id, { limit: 20 })).notifications).some((id) => id === oldest), 'still gone');
+    assert.strictEqual(
+        await Notification.countDocuments({ user_id: me._id, dedupe_key: 'announcement:a1' }),
+        1,
+        'and a replay after a dismiss creates nothing'
+    );
+    await assert.rejects(() => svc.dismiss(me._id, oldest), (err: ServiceError) => err.status === 404);
+
+    // A deleted account collects no per-user cards.
+    const goneUser = await seedUser('Gone', UserRole.USER);
+    await User.updateOne({ _id: goneUser._id }, { $set: { deleted_at: new Date() } });
+    const toGone = await svc.createOne({
+        user_id: goneUser._id,
+        category: 'system',
+        type: 'points.earned',
+        title: 't',
+        body: 'b',
+        dedupe_key: 'points.earned:gone',
+    });
+    assert.strictEqual(toGone, false, 'a deleted user gets no card');
+    assert.strictEqual(await Notification.countDocuments({ user_id: goneUser._id }), 0, 'none at all');
     console.log('✓ read, read-all, unread filtering and dismiss all behave');
 
     /* ---- preferences -------------------------------------------------------- */

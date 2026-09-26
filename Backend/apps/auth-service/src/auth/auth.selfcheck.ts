@@ -11,7 +11,8 @@ import {
   SendPhoneOtpSchema,
   VerifyPhoneOtpSchema,
 } from './auth.schemas';
-import { AuthService } from './auth.service';
+import { AuthService, digestsMatch, isSafeReturnPath, sha256 } from './auth.service';
+import { MailerService } from './mailer.service';
 import { IUser, UserRole, config } from '@bgsc/shared';
 
 /* ------------------------------- schemas ------------------------------- */
@@ -98,4 +99,49 @@ assert.strictEqual(decodedAccess.role, UserRole.MEMBER, 'role claim matches user
 const decodedRefresh = jwt.verify(tokens.refresh_token, config.jwt.refreshSecret) as any;
 assert.strictEqual(decodedRefresh.sub, mockUser._id, 'refresh token sub matches user _id');
 
-console.log('auth service selfcheck: all assertions passed');
+// C3 regression: bcrypt reads only 72 bytes, which for a refresh JWT is the header plus half the
+// user id — so every refresh token of one user shared a "hash". The digest covers the whole token,
+// and the jti makes two tokens minted in the same second differ at all.
+const again = AuthService.generateTokenPair(mockUser);
+assert.notStrictEqual(again.refresh_token, tokens.refresh_token, 'two refresh tokens are never identical');
+assert.strictEqual(
+  again.refresh_token.slice(0, 72),
+  tokens.refresh_token.slice(0, 72),
+  'they share the first 72 bytes — exactly what bcrypt would have compared'
+);
+assert.ok(!digestsMatch(sha256(again.refresh_token), sha256(tokens.refresh_token)), 'the stored digest tells them apart');
+assert.ok(digestsMatch(sha256(tokens.refresh_token), sha256(tokens.refresh_token)), 'and matches the right one');
+assert.ok(!digestsMatch('abc', 'abcd'), 'a length mismatch is a mismatch, not a throw');
+
+/* ------------------------------ return paths ----------------------------- */
+
+assert.ok(isSafeReturnPath('/events/42?tab=teams'), 'a relative path is a valid OAuth return path');
+for (const bad of ['https://evil.example', '//evil.example', '/\\evil.example', '/\t/evil.example', '/a\\b', 'events', '/' + 'x'.repeat(200)]) {
+  assert.ok(!isSafeReturnPath(bad), `not a return path: ${bad.slice(0, 20)}`);
+}
+
+/* ------------------------ production mail log has no PII ------------------- */
+
+void (async () => {
+  const cfg = config as unknown as { nodeEnv: string };
+  const realEnv = cfg.nodeEnv;
+  const realLog = console.log;
+  const lines: string[] = [];
+  cfg.nodeEnv = 'production';
+  console.log = (...a: unknown[]) => void lines.push(a.map(String).join(' '));
+  try {
+    await MailerService.sendVerificationEmail('u-1', 'secret@x.example', 'tok-secret');
+    await MailerService.sendPasswordResetEmail('u-1', 'secret@x.example', 'tok-secret');
+  } finally {
+    console.log = realLog;
+    cfg.nodeEnv = realEnv;
+  }
+  const out = lines.join('\n');
+  assert.ok(out.includes('u-1'), 'the production stub names the user by id');
+  assert.ok(!out.includes('secret@x.example') && !out.includes('tok-secret'), 'and never logs the address or token');
+
+  console.log('auth service selfcheck: all assertions passed');
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

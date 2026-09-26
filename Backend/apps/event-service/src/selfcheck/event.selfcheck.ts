@@ -1,5 +1,7 @@
 import assert from 'assert';
-import { slugify, validateEventInvariants } from '../events/event.service';
+import { STATUS_TRANSITIONS, slugify, validateEventInvariants } from '../events/event.service';
+import { UpdateEventSchema, QueryEventsSchema, RecordAttendanceSchema } from '../events/event.schemas';
+import { escapeRegex, isEventAdmin } from '../events/access';
 import { sniffImage } from '../storage/storage';
 
 console.log('--- Event Service Selfcheck ---');
@@ -109,5 +111,43 @@ const fakeFile = Buffer.from('hello world not an image');
 assert.strictEqual(sniffImage(jpegHeader), 'image/jpeg', 'sniffs JPEG correctly');
 assert.strictEqual(sniffImage(pngHeader), 'image/png', 'sniffs PNG correctly');
 assert.strictEqual(sniffImage(fakeFile), null, 'rejects non-image bytes');
+
+// 8. C2: the update schema carries only what the client sent — no defaults, nested partials.
+assert.deepStrictEqual(UpdateEventSchema.parse({ title: 'x' }), { title: 'x' }, 'PATCH {title} fills no defaults');
+assert.deepStrictEqual(
+    UpdateEventSchema.parse({ registration: { max_participants: 5 } }),
+    { registration: { max_participants: 5 } },
+    'nested partial needs no closes_at and fills nothing'
+);
+assert.strictEqual((UpdateEventSchema.parse({ auction: { status: 'live' } }) as Record<string, unknown>).auction, undefined, 'auction not patchable');
+
+// 9. Status transition map: terminal states are terminal, no skipping to past.
+assert.deepStrictEqual(STATUS_TRANSITIONS.past, []);
+assert.deepStrictEqual(STATUS_TRANSITIONS.cancelled, []);
+assert.ok(!STATUS_TRANSITIONS.draft.includes('past'), 'draft cannot jump to past');
+assert.ok(!STATUS_TRANSITIONS.ongoing.includes('draft'), 'a running event cannot be hidden');
+
+// 10. Search text is literal; bad dates are 422s at the edge, not CastErrors.
+assert.doesNotThrow(() => new RegExp(escapeRegex('(a+)+$[')), 'escaped search compiles');
+assert.ok(new RegExp(escapeRegex('a.b')).test('a.b') && !new RegExp(escapeRegex('a.b')).test('axb'), 'dot is literal');
+assert.strictEqual(QueryEventsSchema.safeParse({ from: 'not-a-date' }).success, false, 'invalid from rejected');
+assert.strictEqual(QueryEventsSchema.safeParse({ search: 'x'.repeat(101) }).success, false, 'search length capped');
+
+// 11. Event admin = creator, listed core admin, or coordinator+; any other core is not.
+const ev = { created_by: 'c', core_admins: ['c', 'a'] };
+assert.ok(isEventAdmin(ev, { id: 'a', role: 'core' }));
+assert.ok(isEventAdmin(ev, { id: 'z', role: 'coordinator' }));
+assert.ok(!isEventAdmin(ev, { id: 'z', role: 'core' }), 'an unrelated core is not an event admin');
+assert.ok(!isEventAdmin(ev, undefined));
+
+// 12. Audit #2: links a browser renders are http(s) or our own uploads; attendance ids are uuids.
+assert.strictEqual(UpdateEventSchema.safeParse({ rules_pdf_url: 'javascript:alert(1)' }).success, false, 'javascript: url refused');
+assert.strictEqual(UpdateEventSchema.safeParse({ rules_pdf_url: 'https://x.org/rules.pdf' }).success, true);
+assert.strictEqual(UpdateEventSchema.safeParse({ rules_pdf_url: '/uploads/events/e/r.pdf' }).success, true);
+assert.strictEqual(
+    RecordAttendanceSchema.safeParse({ attendances: [{ registration_id: 'not-a-uuid', attended: true }] }).success,
+    false,
+    'attendance ids validated at the edge'
+);
 
 console.log('event service selfcheck: all assertions passed');

@@ -91,9 +91,36 @@ interface TokenResponse {
     scope?: string;
 }
 
+/**
+ * The one refusal a client can act on: link Strava again. NEVER a 401 — on a BGSC route a 401 means
+ * "your BGSC session is dead", and a client that refreshes or signs out on 401 would do exactly that
+ * because Strava revoked a token (audit Sep 26).
+ */
+export const reauthRequired = (): ServiceError => new ServiceError(409, 'strava_reauth_required');
+
+/** Upstream status -> our answer. Shared by the token endpoint and the API. */
+function upstreamFailure(res: Response): ServiceError {
+    if (res.status === 429) {
+        return new ServiceError(503, 'strava_rate_limited', { retry_after: res.headers.get('retry-after') });
+    }
+    // 400 on the token endpoint is a dead/used code or refresh token; 401/403 on the API is a
+    // revoked token or a scope the athlete did not grant.
+    if (res.status === 400 || res.status === 401 || res.status === 403) return reauthRequired();
+    return new ServiceError(502, 'strava_api_failed');
+}
+
+/** `fetch` rejects (DNS, reset, timeout) as a plain Error, which would be a 500 for Strava's outage. */
+async function stravaFetch(url: string, init: RequestInit): Promise<Response> {
+    try {
+        return await fetch(url, init);
+    } catch {
+        throw new ServiceError(502, 'strava_api_failed');
+    }
+}
+
 export async function exchange(body: Record<string, string>): Promise<TokenResponse> {
     assertConfigured();
-    const res = await fetch(`${STRAVA_API}/oauth/token`, {
+    const res = await stravaFetch(`${STRAVA_API}/oauth/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -103,27 +130,59 @@ export async function exchange(body: Record<string, string>): Promise<TokenRespo
         }),
         signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) throw new ServiceError(res.status === 429 ? 503 : 401, 'strava_token_exchange_failed');
+    if (!res.ok) throw upstreamFailure(res);
     return (await res.json()) as TokenResponse;
+}
+
+/**
+ * `open()` for a stored token. A row sealed under another key (rotation, or the dev key derived
+ * from a JWT secret that changed) cannot be read by anyone ever again, so it is a reconnect, not a
+ * 500 on every call.
+ */
+export function openStored(sealed: string): string {
+    try {
+        return open(sealed);
+    } catch {
+        throw reauthRequired();
+    }
 }
 
 /**
  * The access token for a credential, refreshed if it is about to die. Returns the plaintext token
  * and never stores it — the row keeps only the sealed copy.
+ *
+ * The write is a compare-and-swap on the sealed refresh token (fresh IV per seal, so it identifies
+ * exactly one stored generation). Two concurrent syncs inside the margin both refresh; before this,
+ * both `save()`d and the last one won, possibly storing a refresh token Strava had already
+ * superseded. Now the loser discards its tokens and uses the winner's.
+ * ponytail: both still call Strava once each; a per-credential lease would save the second call.
  */
 export async function freshToken(cred: IStravaCredential): Promise<string> {
-    if (cred.expires_at.getTime() - Date.now() > REFRESH_MARGIN_MS) return open(cred.access_token_enc);
+    if (cred.expires_at.getTime() - Date.now() > REFRESH_MARGIN_MS) return openStored(cred.access_token_enc);
 
     const refreshed = await exchange({
         grant_type: 'refresh_token',
-        refresh_token: open(cred.refresh_token_enc),
+        refresh_token: openStored(cred.refresh_token_enc),
     });
 
-    cred.access_token_enc = seal(refreshed.access_token);
-    cred.refresh_token_enc = seal(refreshed.refresh_token);
-    cred.expires_at = new Date(refreshed.expires_at * 1000);
-    await cred.save();
-    return refreshed.access_token;
+    const next = {
+        access_token_enc: seal(refreshed.access_token),
+        refresh_token_enc: seal(refreshed.refresh_token),
+        expires_at: new Date(refreshed.expires_at * 1000),
+    };
+    const won = await StravaCredential.updateOne(
+        { _id: cred._id, refresh_token_enc: cred.refresh_token_enc },
+        { $set: next }
+    );
+    if (won.matchedCount === 1) {
+        Object.assign(cred, next);
+        return refreshed.access_token;
+    }
+
+    // Lost the race, or the credential was disconnected meanwhile.
+    const current = await StravaCredential.findById(cred._id);
+    if (!current) throw new ServiceError(404, 'strava_not_connected');
+    return openStored(current.access_token_enc);
 }
 
 /**
@@ -134,15 +193,11 @@ export async function freshToken(cred: IStravaCredential): Promise<string> {
  * expected state the client can act on (strava-integration.md §9.2).
  */
 export async function apiGet<T>(path: string, token: string): Promise<T> {
-    const res = await fetch(`${STRAVA_API}/api/v3${path}`, {
+    const res = await stravaFetch(`${STRAVA_API}/api/v3${path}`, {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(15_000),
     });
-    if (res.status === 429) {
-        throw new ServiceError(503, 'strava_rate_limited', { retry_after: res.headers.get('retry-after') });
-    }
-    if (res.status === 401) throw new ServiceError(401, 'strava_token_rejected');
-    if (!res.ok) throw new ServiceError(502, 'strava_api_failed');
+    if (!res.ok) throw upstreamFailure(res);
     return (await res.json()) as T;
 }
 

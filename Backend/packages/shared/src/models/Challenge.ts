@@ -91,7 +91,9 @@ const ChallengeSchema = new Schema<IChallenge>(
         domain: { type: String, enum: CHALLENGE_DOMAIN, required: true },
         kind: { type: String, enum: CHALLENGE_KIND, required: true },
         difficulty: { type: String, enum: CHALLENGE_DIFFICULTY, required: true },
-        tags: { type: [String], default: [], lowercase: true },
+        // Options on the ELEMENT, not the array: `{ type: [String], lowercase: true }` puts the option
+        // on the array path, where it lowercases nothing.
+        tags: { type: [{ type: String, lowercase: true, trim: true }], default: [] },
 
         award_points: { type: Number, required: true, min: 1 },
         grants_hall_of_fame: { type: Boolean, default: false },
@@ -126,7 +128,8 @@ const ChallengeSchema = new Schema<IChallenge>(
 
         submission: {
             requires_proof: { type: Boolean, default: true },
-            proof_types: { type: [String], enum: PROOF_TYPE, default: () => [...MVP_PROOF_TYPES] },
+            // Enum on the element, for the same reason as `tags` above.
+            proof_types: { type: [{ type: String, enum: PROOF_TYPE }], default: () => [...MVP_PROOF_TYPES] },
             max_files: { type: Number, default: 5, min: 0 },
             auto_approve: { type: Boolean, default: false }, // trust-based digital challenges
         },
@@ -214,6 +217,8 @@ export interface IChallengeParticipation extends Document<string> {
         id: string;
         display_name: string;
         avatar_url: string | null;
+        /** Set by the UserDeleted anonymization, cleared again by UserRestored. */
+        deleted?: boolean;
     };
     member_user_ids: string[];
 
@@ -384,6 +389,8 @@ ChallengeParticipationSchema.index(
     { partialFilterExpression: { status: 'accepted' } } // expiry scheduler
 );
 ChallengeParticipationSchema.index({ 'review.reviewer_user_id': 1, 'review.reviewed_at': -1 }); // reviewer audit
+// Partial: the replay sweep (challenge-service scheduler/replay.ts) only ever reads approved rows.
+ChallengeParticipationSchema.index({ updated_at: 1 }, { partialFilterExpression: { status: 'approved' } });
 
 export const ChallengeParticipation = model<IChallengeParticipation>(
     'ChallengeParticipation',

@@ -108,6 +108,8 @@ draft ──activate──> active ──(closes_at passed or admin)──> comp
 | `{ status: 1, domain: 1, difficulty: 1 }` | Challenge browser filters (Spec §5.7) |
 | `{ status: 1, 'window.closes_at': 1 }` | scheduler: complete expired |
 | `{ tags: 1, status: 1 }` | tag filter / search |
+
+`tags` (lowercase/trim) and `submission.proof_types` (enum) declare their options on the array **element**; on the array path Mongoose silently ignored them (Sep 26).
 | `{ created_by: 1 }`, `{ reviewers: 1 }` | admin lists |
 
 ## 3. `challenge_participations`
@@ -122,7 +124,8 @@ draft ──activate──> active ──(closes_at passed or admin)──> comp
     type: 'user' | 'team',
     id: string,                           // user_id or teams._id (owner.type == 'challenge')
     display_name: string,
-    avatar_url: string | null
+    avatar_url: string | null,
+    deleted?: boolean                     // raised by UserDeleted, lowered by UserRestored (solo only)
   },
   member_user_ids: string[],              // team: all members at acceptance; user: [user_id]. Points fan out to these.
 
@@ -160,7 +163,7 @@ draft ──activate──> active ──(closes_at passed or admin)──> comp
   reward: {
     points_awarded: number,
     point_transaction_ids: string[],      // one per member_user_id
-    hall_of_fame_entry_id: string | null
+    hall_of_fame_entry_id: string | null  // set by THIS service on HallOfFameEntryCreated (Leaderboard never writes it)
   } | null,
 
   status_history: { from: string, to: string, by: string, at: Date }[],
@@ -195,7 +198,7 @@ accepted ──submit──> submitted ─(auto_approve)─> approved
 | create (`accepted`) | challenge `active`; now in `[window.opens_at, window.closes_at]`; unique index passes; solo: `counts.accepted < max_participants`; team: caller is captain of a `teams` doc with `owner = { challenge, id }`, `status != 'disbanded'`, `teaming.team_size_min <= members <= teaming.team_size_max`, and team count `< teaming.max_teams` — the team is then `locked` and `member_user_ids` copied from it. Plus a query the unique index cannot express: **no member of the team may already be on another roster for this challenge** — `{ challenge_id, 'participant.id' }` is unique on the *team*, so without it Points pays an overlapping member twice. The lock is `POST /internal/teams/:id/lock` on Registration Service (their collection, so it crosses by HTTP) and is best-effort: `member_user_ids` is already snapshotted, so a failed lock costs a movable roster, not a wrong payout | `ChallengeAccepted` |
 | accepted → under_review | `requires_proof`; ≥ 1 proof; `now <= deadline_at`; challenge not `archived`; caller ∈ `member_user_ids` | `ChallengeSubmitted` |
 | accepted → approved | `auto_approve` (the submit writes the verdict and the reward in the same update) | `ChallengeSubmitted` + `ChallengeCompleted` |
-| under_review → approved | reviewer ∈ `challenge.reviewers` or Core+, **and not a member of the participation** (D16) | `ChallengeCompleted` |
+| under_review → approved | reviewer ∈ `challenge.reviewers` or Core+, **and not a member of the participation** | `ChallengeCompleted` |
 | under_review → rejected | same | `ChallengeRejected` |
 | rejected → under_review | user resubmits; `now <= deadline_at`; `submission.version += 1` | `ChallengeSubmitted` |
 | accepted → approved | `requires_proof == false`; reviewer/Core+ marks complete (physical challenges verified in person) | `ChallengeCompleted` |
@@ -218,7 +221,9 @@ Spec §5.7 (via UI): submission is replaceable while `under_review` (same transi
    reward = { points_awarded: challenge_snapshot.award_points, point_transaction_ids: [], ... }
 2. challenges.counts.approved $inc
 3. publish ChallengeCompleted { participation_id, challenge_id, participant, member_user_ids, award_points }
-4. if challenge.grants_hall_of_fame → publish ChallengeLegendAchieved (Hall of Fame creates the entry, Week 4)
+4. if challenge.grants_hall_of_fame → publish ChallengeLegendAchieved; Leaderboard Service (Hall of Fame) creates
+   the entry and publishes HallOfFameEntryCreated { entry_id, source, participation_id }, from which this
+   service sets reward.hall_of_fame_entry_id (only on an approved row with a reward)
 5. later, on read: reward.point_transaction_ids filled from the ledger (below)
 ```
 
@@ -263,16 +268,18 @@ ChallengeAccepted         { participation_id, challenge_id, participant, member_
 ChallengeSubmitted        { participation_id, challenge_id, version }
 ChallengeCompleted        { participation_id, challenge_id, participant, member_user_ids[], award_points }
                           // Spec §8.2 → Points. The consumer destructures only the last three
-                          // (points consumers.ts:189-195); `participant` is carried because
-                          // be2-points-service-plan.md §5.5 specifies it. A superset satisfies both.
+                          // (points consumers.ts:189-195); `participant` is carried as well;
+                          // a superset satisfies every consumer.
 ChallengeRejected         { participation_id, challenge_id, reason }
 ChallengeExpired          { participation_id, challenge_id }
 ChallengeLegendAchieved   { participation_id, challenge_id, member_user_ids[] }                 // → Hall of Fame
 ```
 
 Consumed: `UserProfileUpdated { user_id, changed_fields }` (refresh the solo participant snapshot when
-`full_name` or `avatar_url` moved) and `UserDeleted` (anonymize it; the rows stay, because an approved
-participation is what a paid ledger row references). **Not** `PointsEarned` — see §3.2. Team size validation for challenge teams is done by Registration Service at write time using `challenges.teaming`, so no team events need consuming here.
+`full_name` or `avatar_url` moved), `UserRestored` (the same re-snapshot, ungated, `deleted: false`),
+`UserDeleted` (anonymize it with `anonymizedSnapshot`; the rows stay, because an approved participation is
+what a paid ledger row references; the user's Strava link is removed too) and `HallOfFameEntryCreated`
+(Sep 26: the Leaderboard Service used to write `reward.hall_of_fame_entry_id` into this collection). **Not** `PointsEarned` — see §3.2. Team size validation for challenge teams is done by Registration Service at write time using `challenges.teaming`, so no team events need consuming here.
 
 ## 5. Read patterns
 

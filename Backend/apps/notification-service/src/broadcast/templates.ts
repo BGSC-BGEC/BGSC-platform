@@ -1,7 +1,7 @@
 import { NotificationCategory } from '@bgsc/shared';
 
 /**
- * The message templating system (plan §4, MVP plan Week 4 Saturday).
+ * The message templating system (MVP plan Week 4 Saturday).
  *
  * One registry keyed by notification type, so the wording of every message the platform sends is
  * in one file rather than inlined at six call sites. `{{var}}` interpolation, nothing more —
@@ -72,6 +72,27 @@ export const TEMPLATES = {
         category: 'system',
         title: 'New {{kind}}: {{ticket_no}}',
         body: '{{subject}} ({{category}})',
+    },
+    'feedback.responded': {
+        category: 'system',
+        title: 'Reply to {{ticket_no}}',
+        body: 'The team has responded to your ticket {{ticket_no}}. Open it to read the reply.',
+    },
+    // `category` is overridden to 'challenge' for a challenge team (consumers.ts:onTeamInviteCreated).
+    'team.invited': {
+        category: 'event',
+        title: 'Team invite: {{team_name}}',
+        body: "You've been invited to join {{team_name}}. Accept it from the team page; it expires in 72 hours.",
+    },
+    'auction.sold.player': {
+        category: 'event',
+        title: 'Signed to {{team_name}}',
+        body: '{{team_name}} bought you for {{amount}} in the {{event_title}} auction.',
+    },
+    'auction.sold.captain': {
+        category: 'event',
+        title: 'You signed {{player_name}}',
+        body: '{{player_name}} joins {{team_name}} for {{amount}} in the {{event_title}} auction.',
     },
 } as const satisfies Record<string, Template>;
 

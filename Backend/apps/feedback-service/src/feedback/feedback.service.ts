@@ -12,6 +12,7 @@ import {
     RoleName,
     ServiceError,
     User,
+    UserStatus,
     config,
     publish,
     recordAudit,
@@ -19,6 +20,7 @@ import {
     userSnapshotOf,
 } from '@bgsc/shared';
 import { createHash } from 'crypto';
+import { isIPv4, isIPv6 } from 'net';
 import { v4 as uuid } from 'uuid';
 import { allOf, keysetFilter, pageOf } from './cursor';
 import { ListTicketsInput, SubmitContactInput, SubmitFeedbackInput, UpdateStatusInput } from './feedback.schemas';
@@ -50,42 +52,71 @@ export interface Actor {
 }
 
 /* ------------------------------------------------------------------ *
- * Abuse control on a public write (plan §5)
+ * Abuse control on a public write
  * ------------------------------------------------------------------ */
 
 /**
  * The submitter's rate-limit key.
  *
- * An account id when there is one; otherwise the address — **hashed**, because it is only ever
- * compared for equality and a raw-IP column on an anonymous feedback form is a liability nobody
- * asked for. Keyed with the JWT secret so the hash cannot be reversed with a list of the
+ * An account id for an attributed ticket; otherwise the address — **hashed**, because it is only
+ * ever compared for equality and a raw-IP column on an anonymous feedback form is a liability
+ * nobody asked for. Keyed with the JWT secret so the hash cannot be reversed with a list of the
  * four billion addresses.
+ *
+ * An ANONYMOUS ticket from a signed-in user is keyed by the address too, never by the account: a
+ * `user:<id>` throttle row stamped the same millisecond as an anonymous ticket is the reporter's
+ * name written one collection over (audit Sep 26).
  */
-export function subjectKey(submitter: Submitter): string {
-    if (submitter.user) return `user:${submitter.user._id}`;
+export function subjectKey(submitter: Submitter, anonymous = submitter.user === null): string {
+    if (submitter.user && !anonymous) return `user:${submitter.user._id}`;
     const digest = createHash('sha256')
-        .update(`${submitter.ip ?? 'unknown'}|${config.jwt.accessSecret}`)
+        .update(`${rateSubject(submitter.ip)}|${config.jwt.accessSecret}`)
         .digest('hex');
     return `ip:${digest}`;
 }
 
 /**
- * ponytail: a count-then-insert, so two requests arriving in the same millisecond can both pass and
- * put one extra ticket through. That is a cap on floods, not a gate on a resource — the failure
- * costs one row — and closing it properly means a counter document per subject with an atomic
- * `$inc`, which is the upgrade if a script ever makes it worth having.
+ * The part of an address that identifies one client. IPv6 hands every home a /64, so keying on
+ * the full address lets one client rotate through 2^64 fresh buckets — the gateway limiter
+ * normalises the same way (`ipKeyGenerator(ip, 64)`).
+ */
+export function rateSubject(ip: string | null): string {
+    if (!ip) return 'unknown';
+    const bare = ip.split('%')[0]; // zone id
+    if (bare.startsWith('::ffff:') && isIPv4(bare.slice(7))) return bare.slice(7);
+    if (!isIPv6(bare)) return bare;
+
+    const [head, tail] = bare.split('::');
+    const left = head ? head.split(':') : [];
+    const right = tail ? tail.split(':') : [];
+    // An embedded dotted quad is two hextets wide.
+    const width = (parts: string[]) => parts.reduce((n, p) => n + (p.includes('.') ? 2 : 1), 0);
+    const full = tail === undefined ? left : [...left, ...Array(8 - width(left) - width(right)).fill('0'), ...right];
+    return `${full.slice(0, 4).map((h) => parseInt(h, 16).toString(16)).join(':')}::/64`;
+}
+
+/**
+ * Insert first, then count what arrived up to and including our own row. A count-then-insert let
+ * every one of N parallel requests see "under the cap" and pass (audit #2); now each request is
+ * counted before it is judged, so a burst of N lets at most the cap through — and a same-millisecond
+ * tie errs towards refusing both, which is the right way for an abuse cap to be wrong. A refused
+ * request takes its row back out, so a flood does not keep extending its own lockout.
  */
 async function assertUnderRate(key: string): Promise<void> {
     const since = new Date(Date.now() - 3_600_000);
-    const recent = await FeedbackThrottle.countDocuments({ subject_key: key, created_at: { $gte: since } });
-    if (recent >= FEEDBACK_RATE_PER_HOUR) {
-        throw new ServiceError(429, 'too_many_tickets', { retry_after_minutes: 60 });
-    }
-    await FeedbackThrottle.create({
+    const mine = await FeedbackThrottle.create({
         _id: uuid(),
         subject_key: key,
         expires_at: new Date(Date.now() + 3_600_000),
     });
+    const upToMine = await FeedbackThrottle.countDocuments({
+        subject_key: key,
+        created_at: { $gte: since, $lte: mine.created_at },
+    });
+    if (upToMine > FEEDBACK_RATE_PER_HOUR) {
+        await FeedbackThrottle.deleteOne({ _id: mine._id });
+        throw new ServiceError(429, 'too_many_tickets', { retry_after_minutes: 60 });
+    }
 }
 
 /* ------------------------------------------------------------------ *
@@ -106,10 +137,13 @@ async function create(
     // An anonymous ticket has nowhere to send the Spec §5.12 receipt unless the submitter gives an
     // address, and a signed-out submitter is always anonymous whatever the toggle says.
     const anonymous = input.is_anonymous || submitter.user === null;
-    const email = input.contact_email ?? (anonymous ? null : submitter.user!.email);
+    // An attributed ticket replies to the account, full stop. Honouring any address the caller
+    // typed turned the receipt (with the caller's own subject line) into mail to a stranger. The
+    // anonymous path still takes an address — it has nothing else — and is capped per client.
+    const email = anonymous ? input.contact_email ?? null : submitter.user!.email ?? null;
     if (anonymous && !email) throw new ServiceError(422, 'contact_email_required');
 
-    await assertUnderRate(subjectKey(submitter));
+    await assertUnderRate(subjectKey(submitter, anonymous));
 
     const ticket = await insertWithUniqueNumber({
         kind: opts.kind,
@@ -137,12 +171,14 @@ async function create(
     });
 
     // Best-effort: a ticket that is stored but whose receipt could not be sent is still a ticket.
-    await FeedbackMailer.sendTicketReceipt(email!, ticket.ticket_no, ticket.subject).catch((err) =>
+    // An anonymous receipt goes to an address nobody verified, so it carries no caller-written text:
+    // echoing the subject made the form a way to mail arbitrary words to arbitrary inboxes.
+    await FeedbackMailer.sendTicketReceipt(email!, ticket.ticket_no, anonymous ? null : ticket.subject).catch((err) =>
         console.error(`[feedback-service] receipt for ${ticket.ticket_no} failed:`, err)
     );
 
     // Staff notice. The Notification Service knows who staff are and how to fan out to a role
-    // floor; this service should not learn either (plan §4).
+    // floor; this service should not learn either.
     publish('FeedbackSubmitted', PRODUCER, {
         ticket_id: ticket._id,
         ticket_no: ticket.ticket_no,
@@ -305,6 +341,16 @@ export async function setStatus(
         );
     }
 
+    // A signed-in reporter hears about the reply in-app too (notification-service consumes this).
+    // Attributed tickets only: an anonymous ticket has nobody to notify, by design.
+    if (input.response && updated.reporter?.user_id) {
+        publish('FeedbackResponded', PRODUCER, {
+            ticket_id: updated._id,
+            ticket_no: updated.ticket_no,
+            reporter_user_id: updated.reporter.user_id,
+        });
+    }
+
     publish('FeedbackStatusChanged', PRODUCER, {
         ticket_id: updated._id,
         ticket_no: updated.ticket_no,
@@ -345,6 +391,19 @@ export async function submitterFor(
     ip: string | null
 ): Promise<Submitter> {
     if (!user) return { user: null, ip };
-    const doc = await User.findById(user.id).select('+email');
+    // A deleted account's token is still unexpired for a while; it files as signed-out, never
+    // snapshotting a deleted user back onto a ticket.
+    const doc = await User.findOne({ _id: user.id, deleted_at: null }).select('+email');
     return { user: doc ?? null, ip };
+}
+
+/**
+ * The reader of a ticket, from the LIVE user rather than the token claim: the staff view shows the
+ * reporter's address, and a demoted or suspended core member keeps a valid token for fifteen
+ * minutes. Anyone whose account is no longer active reads as a stranger.
+ */
+export async function liveViewer(user: { id: string } | undefined): Promise<{ id: string | null; role: RoleName | undefined }> {
+    if (!user) return { id: null, role: undefined };
+    const doc = await User.findOne({ _id: user.id, deleted_at: null, status: UserStatus.ACTIVE }).select('role').lean<{ role: RoleName }>();
+    return doc ? { id: user.id, role: doc.role } : { id: null, role: undefined };
 }

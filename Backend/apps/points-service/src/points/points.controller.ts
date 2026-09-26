@@ -14,7 +14,7 @@ const isAdmin = (req: Request) => rankOf(req.user!.role) >= rankOf(UserRole.CORE
 
 /**
  * `note` is an admin's free-text justification on a clawback and `actor.user_id` is who wrote it;
- * neither is owed to the member it happened to. Both stay for core+ (plan §8.3).
+ * neither is owed to the member it happened to. Both stay for core+.
  */
 function present(tx: IPointTransaction, admin: boolean): Record<string, unknown> {
     const row = {
@@ -75,7 +75,7 @@ export const eventLedger = wrap(async (req: Request, res: Response) => {
         (req.params as Record<string, string>).eventId,
         req.query as unknown as EventLedgerQueryInput
     );
-    res.json(presentPage(page, isAdmin(req)));
+    res.json({ ...presentPage(page, isAdmin(req)), podium_conflicts: page.podium_conflicts });
 });
 
 export const transactionAudit = wrap(async (req: Request, res: Response) => {

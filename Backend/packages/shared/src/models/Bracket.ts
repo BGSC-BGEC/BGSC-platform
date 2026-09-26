@@ -13,17 +13,20 @@ import { PARTICIPANT_TYPE, ParticipantType } from './Leaderboard';
  * delete and "report a score" one update.
  *
  * Note what is NOT here: `events.bracket`. That slot is reserved on a document the Event Service
- * owns (relationships.md §1), and `brackets.event_id` is the same link from the side that owns it
- * (plan D3).
+ * owns (relationships.md §1), and `brackets.event_id` is the same link from the side that owns it.
  */
 
 /**
  * The formats generated today. `events.leaderboard.format` carries five (Event.ts); `double_elim`
- * and `elim_after_n` are not generated yet (plan D4) — the first is loser-bracket routing, the
+ * and `elim_after_n` are not generated yet — the first is loser-bracket routing, the
  * second is a standings rule rather than a tree.
  */
 export const BRACKET_FORMAT = ['round_robin', 'single_elim'] as const;
 export const BRACKET_SEEDING = ['registration', 'random', 'manual'] as const;
+/**
+ * `draft` is the delete claim: `DELETE /brackets/:event_id` moves `active` → `draft` before it
+ * checks for results, and a report that finds `draft` backs out (bracket-service match.service.ts).
+ */
 export const BRACKET_STATUS = ['draft', 'active', 'completed'] as const;
 
 export type BracketFormat = (typeof BRACKET_FORMAT)[number];
@@ -61,6 +64,8 @@ export interface IBracket extends Document<string> {
     rounds: number;
     status: BracketStatus;
     generated_by: string;
+    /** When a delete claimed this bracket (`status: 'draft'`). A stale claim is a dead deleter's. */
+    claimed_at: Date | null;
     created_at: Date;
     updated_at: Date;
 }
@@ -76,6 +81,7 @@ const BracketSchema = new Schema<IBracket>(
         rounds: { type: Number, required: true, min: 1 },
         status: { type: String, enum: BRACKET_STATUS, default: 'active' },
         generated_by: { type: String, required: true },
+        claimed_at: { type: Date, default: null },
     },
     timestamps
 );
@@ -109,7 +115,7 @@ export type MatchStatus = (typeof MATCH_STATUS)[number];
 export const MATCH_TERMINAL: readonly MatchStatus[] = ['completed', 'bye', 'cancelled'];
 export const isTerminalMatch = (s: MatchStatus): boolean => MATCH_TERMINAL.includes(s);
 
-/** `main` is every match today. The two others are the double-elimination seam (plan D9). */
+/** `main` is every match today. The two others are the double-elimination seam. */
 export const BRACKET_SIDE = ['main', 'upper', 'lower'] as const;
 export type BracketSide = (typeof BRACKET_SIDE)[number];
 
@@ -160,7 +166,7 @@ export interface IMatch extends Document<string> {
 
     /**
      * Who reported the result. Null on a bye — nobody played it — which is exactly what makes this
-     * the right field to ask "has this draw been played yet" (plan §7).
+     * the right field to ask "has this draw been played yet".
      */
     reported_by: string | null;
 

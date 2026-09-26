@@ -154,7 +154,9 @@ const FormDefinitionSchema = new Schema<IFormDefinition>(
         created_by: { type: String, required: true },
         published_at: { type: Date, default: null },
     },
-    timestamps
+    // Every edit/publish/archive is a read-modify-save; optimistic concurrency turns a lost update
+    // (two admins publishing and editing at once) into a VersionError the service maps to 409.
+    { ...timestamps, optimisticConcurrency: true }
 );
 
 FormDefinitionSchema.pre('validate', function (this: IFormDefinition) {
@@ -393,3 +395,47 @@ FormSubmissionSchema.index({ 'owner.id': 1, 'context.event.captain_application.s
 FormSubmissionSchema.index({ 'owner.id': 1, 'context.event.role': 1 }); // auction: members with a base_price
 
 export const FormSubmission = model<IFormSubmission>('FormSubmission', FormSubmissionSchema, 'form_submissions');
+
+/* ------------------------------------------------------------------ *
+ * form_uploads
+ * ------------------------------------------------------------------ */
+
+/**
+ * The server's record of one file answer, written by `POST /registrations/upload-file`.
+ *
+ * `files[]` on a submission used to be whatever the client sent — url, size and mime included — so
+ * a `javascript:` link, someone else's upload or a 50 MB file claiming to be 10 bytes all passed the
+ * form's own accept/size rules (backend-audit-2026-09-26 H5). A submission now names an upload by
+ * its url and the metadata stored is read from here, and only from an upload the same user made for
+ * the same form and field.
+ */
+export interface IFormUpload extends Document<string> {
+    _id: string;
+    user_id: string;
+    form_id: string;
+    field_key: string;
+    url: string;
+    name: string;
+    size: number;
+    mime: string;
+    created_at: Date;
+}
+
+const FormUploadSchema = new Schema<IFormUpload>(
+    {
+        _id: uuidId,
+        user_id: { type: String, required: true },
+        form_id: { type: String, required: true },
+        field_key: { type: String, required: true, match: KEY_PATTERN },
+        url: { type: String, required: true },
+        name: { type: String, required: true },
+        size: { type: Number, required: true, min: 1 },
+        mime: { type: String, required: true },
+    },
+    { timestamps: { createdAt: 'created_at', updatedAt: false }, versionKey: false }
+);
+
+FormUploadSchema.index({ url: 1 }, { unique: true });
+FormUploadSchema.index({ user_id: 1, created_at: -1 }); // per-user upload quota
+
+export const FormUpload = model<IFormUpload>('FormUpload', FormUploadSchema, 'form_uploads');

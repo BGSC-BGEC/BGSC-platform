@@ -15,7 +15,7 @@ import { Actor } from './points.service';
  *
  * Downstream handlers read the result with `actorOf(res)` / `userOf(res)`.
  *
- * Copied from announcement-service (be2-points-service-plan.md D19): this is the service where a
+ * Copied from announcement-service: this is the service where a
  * stale token mints points, so the 15-minute window between a demotion and a token's expiry is not
  * one to leave open.
  */

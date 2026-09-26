@@ -2,7 +2,7 @@ import { ACTIVE_MONTHS, ARCHIVE_MONTHS, Announcement } from '@bgsc/shared';
 import { Actor, announcePublished, publishedSet } from '../announcements/announcement.service';
 
 /**
- * The scheduler (be2-announcement-service-plan.md §6).
+ * The scheduler.
  *
  * No cron dependency for one timer, and no second timer for the purge: both extra queries are
  * indexed and match nothing on virtually every pass.

@@ -68,6 +68,10 @@ export const VerifyPhoneOtpSchema = z.object({
     .regex(/^\d{6}$/, { message: 'otp must be exactly 6 digits' }),
 });
 
+export const GoogleExchangeSchema = z.object({
+  login_code: z.string().regex(/^[0-9a-f]{64}$/),
+});
+
 export type RegisterInput = z.infer<typeof RegisterSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
 export type RefreshTokenInput = z.infer<typeof RefreshTokenSchema>;

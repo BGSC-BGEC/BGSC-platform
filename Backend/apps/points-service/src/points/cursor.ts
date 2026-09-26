@@ -3,7 +3,7 @@ import { ServiceError } from '@bgsc/shared';
 /**
  * Keyset pagination for the ledger. Every list in this service is ordered by `created_at`
  * descending with `_id` breaking ties, so this is the single-field version of the helper in
- * `announcement-service/src/announcements/audience.ts` (plan §6.2, D16).
+ * `announcement-service/src/announcements/audience.ts`.
  *
  * Never skip/offset: the ledger only grows, so an offset page walks further every time and a row
  * inserted mid-pagination shifts every later page by one.

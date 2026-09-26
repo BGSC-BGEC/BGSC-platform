@@ -1,13 +1,16 @@
 import { JOIN_POLICY, TEAM_STATUS } from '@bgsc/shared';
 import { z } from 'zod';
+import { PageQuery } from '../registrations/registration.schemas';
 
 export const CreateTeamSchema = z.object({
     owner: z.object({
         type: z.enum(['event', 'challenge']),
         id: z.string().uuid(),
     }),
-    name: z.string().min(1).max(60), // matches the Team model's maxlength
+    name: z.string().trim().min(1).max(60), // matches the Team model's maxlength
     join_policy: z.enum(JOIN_POLICY).optional(),
+    // Accepted for older clients and ignored: roster bounds come from the owner's `teaming`
+    // (team.service captainContext), never from the captain.
     size_min: z.number().int().min(1).optional(),
     size_max: z.number().int().min(1).optional(),
 });
@@ -26,6 +29,9 @@ export const ListTeamsQuery = z.object({
     owner_id: z.string().uuid().optional(),
     status: z.enum(TEAM_STATUS).optional(),
     join_policy: z.enum(JOIN_POLICY).optional(),
+    // Teams holding a live invite for the caller.
+    invited: z.literal('me').optional(),
+    ...PageQuery,
 });
 
 export type CreateTeamInput = z.infer<typeof CreateTeamSchema>;

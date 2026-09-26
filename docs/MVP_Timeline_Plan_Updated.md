@@ -473,6 +473,7 @@
   - Media metadata and tagging
 
 - [x] **BE-2: Broadcast & WhatsApp Integration** (8h)
+  - _Status (audit #2, Sep 26): in-app broadcast + notification cards are live. WhatsApp delivery and push/FCM are **deferred to post-MVP** — code kept, no credentials wired; the service logs this at boot._
   - Broadcast message service (push announcements)
   - WhatsApp Business API integration
   - Message templating system
@@ -496,6 +497,7 @@
   - Contact us form endpoint
   - Feedback categorization (bug, suggestion, general)
   - Email notification integration
+    - _Status (audit #2, Sep 26): mail is still the dev logger across auth + feedback — **launch blocker** until a real provider is wired._
   - Tournament bracket data structure
   - Bracket generation for events
   - Match/game results update

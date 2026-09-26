@@ -1,14 +1,25 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { config } from '@bgsc/shared';
 
 /**
  * Media Service local disk storage layer (Spec §5.11.1 & §15.1).
  * Ponytail architecture: local disk storage with magic-byte validation and strict size limits.
  * Prepares the surface for S3/R2 migration without changing calling contracts.
+ *
+ * Two trees, one volume:
+ *  - `UPLOAD_DIR` (`config.uploadDir`) is the platform's one upload root, and this service is the
+ *    only thing that serves it at `/uploads`. Media writes under `media/`; avatars, events and
+ *    registrations are other services' prefixes in the same directory.
+ *  - `PENDING_DIR` holds files nobody has approved yet. It lives on the same volume so it survives
+ *    a restart and an approval is a rename, but under a dot-directory, which the static mount
+ *    ignores (`dotfiles: 'ignore'` → 404). A pending or rejected upload is never publicly served —
+ *    before the Sep 26 audit, moderation hid the gallery row and served the file anyway.
  */
 
-export const UPLOAD_DIR = process.env.UPLOAD_DIR || path.resolve(__dirname, '../../uploads');
+export const UPLOAD_DIR = config.uploadDir;
+export const PENDING_DIR = path.join(UPLOAD_DIR, '.pending');
 
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024; // 10MB
 export const VIDEO_MAX_BYTES = 50 * 1024 * 1024; // 50MB
@@ -20,6 +31,12 @@ export const MEDIA_MIME_TYPES = {
     'video/mp4': { ext: 'mp4', type: 'video' as const },
     'video/webm': { ext: 'webm', type: 'video' as const },
 } as const;
+
+/**
+ * What the upload route will buffer. The declared type only decides whether the body is read at
+ * all — the bytes are sniffed regardless — but `*\/*` meant every request of any type was read.
+ */
+export const ACCEPTED_CONTENT_TYPES = [...Object.keys(MEDIA_MIME_TYPES), 'application/octet-stream'];
 
 export type SupportedMime = keyof typeof MEDIA_MIME_TYPES;
 
@@ -72,23 +89,30 @@ export interface StoredMediaObject {
     media_type: 'image' | 'video';
 }
 
+/** `root/key`, refusing anything that resolves outside `root`. */
+function within(root: string, key: string): string {
+    const base = path.resolve(root);
+    const dest = path.resolve(base, key.replace(/^\/+/, ''));
+    if (!dest.startsWith(base + path.sep)) {
+        throw new Error('media storage: refusing to write outside upload directory');
+    }
+    return dest;
+}
+
 /**
- * Writes raw media buffer to disk with defensive path traversal checks.
+ * Writes raw media buffer to disk with defensive path traversal checks. `pending` files go to the
+ * unserved tree; the URL is the one the file WILL have once approved.
  */
 export async function putMediaObject(
     prefix: string,
     body: Buffer,
-    sniffed: SniffedMedia
+    sniffed: SniffedMedia,
+    pending = false
 ): Promise<StoredMediaObject> {
     const filename = `${randomUUID()}.${sniffed.ext}`;
     const cleanPrefix = prefix.replace(/^\/+|\/+$/g, '');
     const key = `${cleanPrefix}/${filename}`;
-    const dest = path.join(UPLOAD_DIR, key);
-
-    // Defense-in-depth against directory traversal
-    if (!path.resolve(dest).startsWith(path.resolve(UPLOAD_DIR) + path.sep)) {
-        throw new Error('putMediaObject: refusing to write outside upload directory');
-    }
+    const dest = within(pending ? PENDING_DIR : UPLOAD_DIR, key);
 
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.writeFile(dest, body);
@@ -102,17 +126,57 @@ export async function putMediaObject(
     };
 }
 
+/** Rename between the trees. Idempotent: a file already where it is going is a success. */
+async function move(key: string, from: string, to: string): Promise<void> {
+    const src = within(from, key);
+    const dest = within(to, key);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    try {
+        await fs.rename(src, dest);
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT' && (await exists(dest))) return;
+        throw err;
+    }
+}
+
+const exists = (p: string) => fs.access(p).then(() => true, () => false);
+
+/** Approval: the file becomes publicly served. */
+export const publishMediaObject = (key: string) => move(key, PENDING_DIR, UPLOAD_DIR);
+
+/** Back to review: the file stops being served. */
+export const withdrawMediaObject = (key: string) => move(key, UPLOAD_DIR, PENDING_DIR);
+
+/** Whether the file exists in either tree — a legacy row can point at a file that never moved here. */
+export async function hasMediaObject(key: string): Promise<boolean> {
+    for (const root of [PENDING_DIR, UPLOAD_DIR]) {
+        try {
+            if (await exists(within(root, key))) return true;
+        } catch {
+            return false;
+        }
+    }
+    return false;
+}
+
 /**
- * Safe object removal from storage.
+ * Safe object removal, from whichever tree holds it. Never throws for a key outside the root.
+ *
+ * Pending, public, pending again: a concurrent approve (pending → public) or withdraw (public →
+ * pending) renames between two `rm`s, and a single pass in either order can miss the file and
+ * orphan it in the tree it just moved to (audit #2). Three passes catch one move either way.
  */
 export async function deleteMediaObject(key: string): Promise<void> {
-    const resolvedUploadDir = path.resolve(UPLOAD_DIR);
-    const cleanKey = key.replace(/^\/+/, '');
-    const dest = path.resolve(resolvedUploadDir, cleanKey);
-
-    if (!dest.startsWith(resolvedUploadDir + path.sep)) {
-        return;
+    for (const root of [PENDING_DIR, UPLOAD_DIR, PENDING_DIR]) {
+        let dest: string;
+        try {
+            dest = within(root, key);
+        } catch {
+            return;
+        }
+        await fs.rm(dest, { force: true });
     }
-
-    await fs.rm(dest, { force: true });
 }
+
+/** Where a stored URL's file lives, relative to either root. */
+export const keyOf = (url: string): string => url.replace(/^\/uploads\//, '');

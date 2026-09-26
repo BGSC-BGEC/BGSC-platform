@@ -7,7 +7,7 @@ import {
 import { UpdatePreferencesInput } from './notification.schemas';
 
 /**
- * Per-category in-app toggles (Spec §10.3, be2-broadcast-service-plan.md §7.2).
+ * Per-category in-app toggles (Spec §10.3).
  *
  * The document's `_id` IS the user id, so there is no lookup key to get wrong and no second index.
  * An absent document means every default: nothing is created at signup, and there is no backfill
@@ -58,6 +58,11 @@ export async function update(userId: string, input: UpdatePreferencesInput): Pro
         }
     }
     return get(userId);
+}
+
+/** One recipient's mute, for the per-user triggers. Absent document = default = not muted. */
+export async function isMuted(userId: string, category: NotificationCategory): Promise<boolean> {
+    return (await NotificationPreference.exists({ _id: userId, [`channels.in_app.${category}`]: false })) !== null;
 }
 
 /**

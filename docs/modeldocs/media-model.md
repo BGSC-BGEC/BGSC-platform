@@ -1,7 +1,7 @@
 # Media Model
 
 **Owner service:** Media Service, :3009 (plan Week 4 Saturday, BE-1)
-**Collections:** `media`, `media_albums`
+**Collections:** `media`, `media_albums`, `media_likes`
 **Spec refs:** §2.1 Media Service (`:3009`), §2.3 File Storage (`/uploads/` -> S3/R2), §5.11 F: Media Page (Event Albums, Community Uploads, Memories, Sponsor Galleries, Moderation, Permissions), §15.1 Media Uploads (JPEG, PNG, WebP, max 10MB images; MP4, WebM max 50MB videos/clips).
 **MVP plan refs:** Week 4 Saturday BE-1 — Media upload, media gallery management, categorization, approval workflow, static file delivery, metadata/tagging.
 
@@ -23,7 +23,9 @@ uploads/
     2026/
       09/
 ```
-All static delivery (`GET /uploads/*`) is served by `media-service` with strict HTTP headers (`X-Content-Type-Options: nosniff`, `Cache-Control: public, max-age=604800, immutable`, directory browsing denied, dotfiles denied).
+All static delivery (`GET /uploads/*`) is served by `media-service` with strict HTTP headers (`X-Content-Type-Options: nosniff`, `Cache-Control: public, max-age=604800, immutable`, directory browsing denied, dotfiles ignored → 404).
+
+**As built (Sep 26):** one upload root for the platform, `config.uploadDir` (`UPLOAD_DIR`; compose mounts one named volume `uploads` at `/app/uploads` in user, event, registration and media). Each writer keeps its own prefix (`avatars/`, `events/`, `registrations/`, `media/`); **only Media Service serves `/uploads`** — the static mounts in user/event/registration are gone, so a file is reachable at exactly one gateway route. Unapproved gallery uploads live in `.pending/` on the same volume (never served; dotfiles answer 404, not 403, so a pending file's existence is not confirmed) and are moved into `media/` on approval, back on withdrawal.
 
 ---
 
@@ -32,12 +34,13 @@ All static delivery (`GET /uploads/*`) is served by `media-service` with strict 
 ```jsonc
 {
   _id: uuid,                          // string UUID v4
-  uploader: {
+  uploader: {                         // the shared UserSnapshot (relationships.md §4)
     user_id: string,
     display_name: string,
-    avatar_url: string | null
+    avatar_url: string | null,
+    deleted: boolean
   },
-  url: string,                        // e.g. "/uploads/media/2026/09/uuid.webp"
+  url: string,                        // e.g. "/uploads/media/2026/09/uuid.webp"; a pending item's file is in .pending/ until approved
   thumbnail_url: string | null,
   original_filename: string,
   mime_type: string,                  // "image/jpeg" | "image/png" | "image/webp" | "video/mp4" | "video/webm"
@@ -58,7 +61,7 @@ All static delivery (`GET /uploads/*`) is served by `media-service` with strict 
     duration_seconds?: number
   },
   views_count: number,                // default: 0
-  likes_count: number,                // default: 0
+  likes_count: number,                // default: 0; moved only when a media_likes row is inserted/removed
   created_at: Date,
   updated_at: Date
 }
@@ -89,14 +92,25 @@ All static delivery (`GET /uploads/*`) is served by `media-service` with strict 
   description: string | null,
   category: 'event' | 'community' | 'memories' | 'sponsor' | 'hall_of_fame' | 'general',
   cover_media_id: string | null,
-  event_id: string | null,            // indexed
+  event_id: string | null,            // unique when set (`event_id_unique`, partial on string) — one album per event
   created_by: string,                 // user_id
-  media_count: number,                // default: 0
+  media_count: number,                // default: 0; APPROVED items only
   is_public: boolean,                 // default: true
   created_at: Date,
   updated_at: Date
 }
 ```
+
+---
+
+## 3.1 `media_likes` Collection (Sep 26)
+
+```jsonc
+{ _id: uuid, media_id: string, user_id: string, created_at: Date, updated_at: Date }
+// index: { media_id: 1, user_id: 1 } unique
+```
+
+**Decision:** a like is a toggle, not a counter anybody can spin — `POST /media/:id/like` used to `$inc likes_count` on every call. One row per (media, user); `likes_count` is the denormalized total. Media Service is the only writer.
 
 ---
 
@@ -108,6 +122,7 @@ All static delivery (`GET /uploads/*`) is served by `media-service` with strict 
   - `MediaRejected`: `{ media_id, reason, rejected_by }`
   - `MediaDeleted`: `{ media_id, url }`
 - **Consumes:**
-  - `UserProfileUpdated`: Refreshes uploader snapshot (`display_name`, `avatar_url`) in `media`.
-  - `UserDeleted`: Anonymizes uploader snapshots per GDPR (`display_name = 'Deleted User'`, `avatar_url = null`).
-  - `EventCompleted`: Auto-initializes an official Event Album in `media_albums` if not already present.
+  - `UserProfileUpdated`: Refreshes uploader snapshot (`display_name`, `avatar_url`) in `media` (gated on those fields).
+  - `UserDeleted`: `anonymizedSnapshot('uploader.')` — `Deleted user`, `avatar_url: null`, `deleted: true`, the same wording as every other collection.
+  - `UserRestored`: re-snapshot from `users`, `deleted: false`.
+  - `EventCompleted { event_id, title }`: creates the event's album (named from `title`) if absent; a second delivery hits `event_id_unique` and is ignored.

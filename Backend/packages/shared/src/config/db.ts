@@ -19,7 +19,11 @@ export async function connectDB(): Promise<void> {
       console.log('MongoDB reconnected.');
     });
 
+    // autoIndex off: `buildIndexes` builds exactly the models this service owns, awaited and fatal.
+    // With it on, every service ALSO background-built all 30+ models' indexes with errors swallowed
+    // — the `models:` scoping was only half real (audit #2).
     await mongoose.connect(config.mongoUri, {
+      autoIndex: false,
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
     });

@@ -1,6 +1,29 @@
+import crypto from 'crypto';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { config, wrap } from '@bgsc/shared';
+
+/**
+ * Binds a Google sign-in to the browser that started it (see AuthService.verifyState). Lax, not
+ * Strict: the callback is a top-level navigation back from accounts.google.com, which Strict would
+ * strip the cookie from. Scoped to the OAuth paths so it rides on nothing else.
+ */
+export const OAUTH_NONCE_COOKIE = 'bgsc_oauth_nonce';
+const OAUTH_COOKIE_OPTS = {
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  secure: config.nodeEnv === 'production',
+  path: '/auth/google',
+};
+
+/** One cookie out of the Cookie header. No cookie-parser for a single value. */
+export function readCookie(req: Request, name: string): string | undefined {
+  for (const part of (req.headers.cookie ?? '').split(';')) {
+    const eq = part.indexOf('=');
+    if (eq > 0 && part.slice(0, eq).trim() === name) return decodeURIComponent(part.slice(eq + 1).trim());
+  }
+  return undefined;
+}
 
 /**
  * Handlers return bare payloads. The shared success envelope in createServiceApp wraps them as
@@ -41,6 +64,7 @@ export class AuthController {
   });
 
   static verifyEmail = wrap(async (req: Request, res: Response): Promise<void> => {
+    // No tokens: a verification link is not a sign-in link.
     const result = await AuthService.verifyEmail(req.body.token);
     res.status(200).json({ message: 'email_verified', ...result });
   });
@@ -61,41 +85,48 @@ export class AuthController {
   });
 
   static reactivateAccount = wrap(async (req: Request, res: Response): Promise<void> => {
-    const result = await AuthService.reactivateAccount(req.body.login, req.body.password);
+    const result = await AuthService.reactivateAccount(req.body.login, req.body.password, req.ip ?? null);
     res.status(200).json({ message: 'account_reactivated', ...result });
   });
 
   static googleAuth = (req: Request, res: Response): void => {
-    const state = req.query.state as string | undefined;
-    const url = AuthService.getGoogleAuthUrl(state);
+    const state = typeof req.query.state === 'string' ? req.query.state : undefined;
+    const nonce = crypto.randomBytes(32).toString('hex');
+    const url = AuthService.getGoogleAuthUrl(nonce, state);
+    res.cookie(OAUTH_NONCE_COOKIE, nonce, { ...OAUTH_COOKIE_OPTS, maxAge: 10 * 60 * 1000 });
     res.redirect(url);
   };
 
   static googleCallback = wrap(async (req: Request, res: Response): Promise<void> => {
-    const code = req.query.code as string;
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
     if (!code) {
       res.status(400).json({ error: 'missing_authorization_code' });
       return;
     }
 
-    // Throws unless this callback corresponds to a consent screen we sent the user to. Returns
+    // Throws unless this callback belongs to a consent screen THIS browser was sent to. Returns
     // whatever the caller stashed on the way in — a return path, typically — to hand back.
-    const callerState = AuthService.verifyState(req.query.state as string | undefined);
-
-    const result = await AuthService.handleGoogleCallback(code);
+    const callerState = AuthService.verifyState(
+      typeof req.query.state === 'string' ? req.query.state : undefined,
+      readCookie(req, OAUTH_NONCE_COOKIE)
+    );
+    res.clearCookie(OAUTH_NONCE_COOKIE, OAUTH_COOKIE_OPTS);
 
     const isBrowser = req.headers.accept?.includes('text/html');
     if (isBrowser) {
-      const params = new URLSearchParams({
-        access_token: result.tokens.access_token,
-        refresh_token: result.tokens.refresh_token,
-      });
+      // A one-time code, never the tokens: a URL is kept by history, logs and proxies.
+      const params = new URLSearchParams({ login_code: await AuthService.googleLoginCode(code) });
       if (callerState) params.append('state', callerState);
       res.redirect(`${config.frontendUrl}/auth/callback?${params.toString()}`);
       return;
     }
 
-    res.status(200).json(result);
+    res.status(200).json(await AuthService.handleGoogleCallback(code));
+  });
+
+  /** The frontend swaps the callback's one-time login code for the token pair. */
+  static googleExchange = wrap(async (req: Request, res: Response): Promise<void> => {
+    res.status(200).json(await AuthService.exchangeLoginCode(req.body.login_code));
   });
 
   static sendPhoneOtp = wrap(async (req: Request, res: Response): Promise<void> => {

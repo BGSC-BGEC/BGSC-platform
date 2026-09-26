@@ -1,36 +1,27 @@
-import { ServiceError, UserRole, rankOf } from '@bgsc/shared';
+import { ServiceError } from '@bgsc/shared';
 import { Request, Response, NextFunction } from 'express';
 import * as registrationService from './registration.service';
 import {
+    AdminAnswersInput,
     SubmitRegistrationInput,
     UpdateRegistrationInput,
     UpdateCaptainApplicationInput,
     UpdateStatusInput,
     CancelRegistrationInput,
+    ListRegistrationsInput,
 } from './registration.schemas';
+import { actorOf } from '../access';
 
 /**
- * May act on someone else's registration. Ranked against the shared ladder rather than a literal
- * list of role names, so inserting a role below `core` cannot silently widen this.
+ * Every route here mounts `requireActiveUser`, so `actorOf(req)` is the live document. Whether the
+ * actor administers a registration is decided by the service against its OWNER (the event's
+ * admins, core+ for challenge/generic) — never "is core" on the token.
  */
-/**
- * Sees admin_only fields, and decides admin-only branches.
- *
- * Prefers the document `requireActiveUser` loaded over the token's claim: the claim stays valid for
- * up to fifteen minutes after a demotion or a suspension. Routes that only mount `requireAuth` have
- * no live document to read, and fall back to the claim — those are reads, where a stale answer is
- * not a damage path (adding-a-service.md §6.2; whole-backend audit, Sep 27).
- */
-const isAdmin = (req: Request) => rankOf((req.actor?.role ?? req.user!.role) as UserRole) >= rankOf(UserRole.CORE);
 
 export async function submitRegistrationHandler(req: Request, res: Response, next: NextFunction) {
     try {
         const body = req.body as SubmitRegistrationInput;
-        const registration = await registrationService.submitRegistration({
-            ...body,
-            user_id: req.user!.id,
-            is_admin: isAdmin(req),
-        });
+        const registration = await registrationService.submitRegistration({ ...body, user_id: req.user!.id });
         res.status(201).json(registration);
     } catch (err) {
         next(err);
@@ -45,7 +36,7 @@ export async function getMyRegistrationHandler(req: Request, res: Response, next
         }
         const registration = await registrationService.getMyRegistration(ownerId, req.user!.id);
         if (!registration) {
-            return res.status(404).json({ error: 'not_registered' });
+            throw new ServiceError(404, 'not_registered');
         }
         res.json(registration);
     } catch (err) {
@@ -55,17 +46,7 @@ export async function getMyRegistrationHandler(req: Request, res: Response, next
 
 export async function getRegistrationHandler(req: Request, res: Response, next: NextFunction) {
     try {
-        const registrationId = typeof req.params.id === 'string' ? req.params.id : '';
-        const registration = await registrationService.getRegistration(registrationId);
-
-        // Check access: self or admin
-        const isOwner = registration.user.user_id === req.user!.id;
-
-        if (!isOwner && !isAdmin(req)) {
-            throw new ServiceError(403, 'forbidden');
-        }
-
-        res.json(registration);
+        res.json(await registrationService.getOwnRegistration(req.params.id as string, actorOf(req)));
     } catch (err) {
         next(err);
     }
@@ -73,28 +54,27 @@ export async function getRegistrationHandler(req: Request, res: Response, next: 
 
 export async function listRegistrationsHandler(req: Request, res: Response, next: NextFunction) {
     try {
-        const filter: {
-            owner_id?: string;
-            status?: string;
-            user_id?: string;
-        } = {};
+        res.json(await registrationService.listRegistrations(req.query as unknown as ListRegistrationsInput, actorOf(req)));
+    } catch (err) {
+        next(err);
+    }
+}
 
-        if (req.query.owner_id && typeof req.query.owner_id === 'string') {
-            filter.owner_id = req.query.owner_id;
-        }
-        if (req.query.status && typeof req.query.status === 'string') {
-            filter.status = req.query.status;
-        }
-
-        // Non-admin can only see their own
-        if (!isAdmin(req)) {
-            filter.user_id = req.user!.id;
-        } else if (req.query.user_id && typeof req.query.user_id === 'string') {
-            filter.user_id = req.query.user_id;
-        }
-
-        const registrations = await registrationService.listRegistrations(filter);
-        res.json(registrations);
+/** `GET /registrations/:id/files/:field_key` — the only way a registration file leaves the disk. */
+export async function downloadFileHandler(req: Request, res: Response, next: NextFunction) {
+    try {
+        const file = await registrationService.registrationFile(req.params.id as string, req.params.field_key as string, actorOf(req));
+        // attachment() sets Content-Type from the (user-chosen) filename's extension, so the stored
+        // mime is written after it — `x.html` must not come back as text/html.
+        res.attachment(file.name);
+        res.setHeader('Content-Type', file.mime);
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('Cache-Control', 'private, no-store');
+        // `send` ignores dotfile segments by default, and the store is `.private/`; the path is
+        // already confined to it by `privatePathOf`.
+        res.sendFile(file.path, { dotfiles: 'allow' }, (err) => {
+            if (err && !res.headersSent) next(new ServiceError(404, 'file_not_found'));
+        });
     } catch (err) {
         next(err);
     }
@@ -102,9 +82,8 @@ export async function listRegistrationsHandler(req: Request, res: Response, next
 
 export async function updateRegistrationHandler(req: Request, res: Response, next: NextFunction) {
     try {
-        const registrationId = typeof req.params.id === 'string' ? req.params.id : '';
         const registration = await registrationService.updateRegistration(
-            registrationId,
+            req.params.id as string,
             req.user!.id,
             req.body as UpdateRegistrationInput
         );
@@ -114,17 +93,19 @@ export async function updateRegistrationHandler(req: Request, res: Response, nex
     }
 }
 
+export async function updateAdminAnswersHandler(req: Request, res: Response, next: NextFunction) {
+    try {
+        const { answers } = req.body as AdminAnswersInput;
+        res.json(await registrationService.updateAdminAnswers(req.params.id as string, actorOf(req), answers));
+    } catch (err) {
+        next(err);
+    }
+}
+
 export async function cancelRegistrationHandler(req: Request, res: Response, next: NextFunction) {
     try {
-        const registrationId = typeof req.params.id === 'string' ? req.params.id : '';
         const { reason } = req.body as CancelRegistrationInput;
-        const registration = await registrationService.cancelRegistration(
-            registrationId,
-            req.user!.id,
-            isAdmin(req),
-            reason
-        );
-        res.json(registration);
+        res.json(await registrationService.cancelRegistration(req.params.id as string, actorOf(req), reason));
     } catch (err) {
         next(err);
     }
@@ -132,15 +113,8 @@ export async function cancelRegistrationHandler(req: Request, res: Response, nex
 
 export async function updateCaptainApplicationHandler(req: Request, res: Response, next: NextFunction) {
     try {
-        const registrationId = typeof req.params.id === 'string' ? req.params.id : '';
         const body = req.body as UpdateCaptainApplicationInput;
-        const registration = await registrationService.updateCaptainApplication(
-            registrationId,
-            req.user!.id,
-            body.status,
-            body.note
-        );
-        res.json(registration);
+        res.json(await registrationService.updateCaptainApplication(req.params.id as string, actorOf(req), body.status, body.note));
     } catch (err) {
         next(err);
     }
@@ -148,15 +122,8 @@ export async function updateCaptainApplicationHandler(req: Request, res: Respons
 
 export async function updateStatusHandler(req: Request, res: Response, next: NextFunction) {
     try {
-        const registrationId = typeof req.params.id === 'string' ? req.params.id : '';
         const body = req.body as UpdateStatusInput;
-        const registration = await registrationService.updateRegistrationStatus(
-            registrationId,
-            req.user!.id,
-            body.status,
-            body.reason
-        );
-        res.json(registration);
+        res.json(await registrationService.updateRegistrationStatus(req.params.id as string, actorOf(req), body.status, body.reason));
     } catch (err) {
         next(err);
     }

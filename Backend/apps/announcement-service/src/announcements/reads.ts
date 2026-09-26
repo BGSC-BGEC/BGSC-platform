@@ -2,7 +2,7 @@ import { Announcement, IAnnouncement, ServiceError, User } from '@bgsc/shared';
 import { Viewer, allOf, audienceFilter } from './audience';
 
 /**
- * Read / unread state (be2-announcement-service-plan.md §5).
+ * Read / unread state.
  *
  * There is no `announcement_reads` collection: state lives on the User document as
  * `{ last_seen_at, read_ids[] }`. This service is its only writer — the agreed cross-service

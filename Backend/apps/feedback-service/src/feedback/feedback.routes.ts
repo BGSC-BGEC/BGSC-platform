@@ -55,6 +55,6 @@ feedbackRoutes.patch(
 // which is how the receipt email works.
 feedbackRoutes.get('/:ticket_no', optionalAuth, validate({ params: TicketNoParams }), c.getTicket);
 
-/** Contact-us is its own front door onto the same collection (plan D2). */
+/** Contact-us is its own front door onto the same collection. */
 export const contactRoutes = Router();
 contactRoutes.post('/', optionalAuth, validate({ body: SubmitContactSchema }), c.submitContact);

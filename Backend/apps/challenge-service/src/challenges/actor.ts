@@ -15,7 +15,7 @@ import { Actor } from './challenge.service';
  *
  * Downstream handlers read the result with `actorOf(res)` / `userOf(res)`.
  *
- * Copied from points-service (be2-challenge-service-plan.md §2): approving a participation
+ * Copied from points-service: approving a participation
  * publishes ChallengeCompleted, which mints points on the other side of the bus, so the 15-minute
  * window between a demotion and a token's expiry is not one to leave open here either.
  */

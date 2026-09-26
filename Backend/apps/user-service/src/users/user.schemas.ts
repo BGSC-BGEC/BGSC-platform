@@ -80,21 +80,12 @@ export const SearchQuery = z.object({
     limit: z.coerce.number().int().min(1).max(20).default(10),
 });
 
-export const SnapshotQuery = z.object({
-    // Comma-separated ids; capped so one call cannot ask for the whole user table.
-    ids: z
-        .string()
-        .min(1)
-        .transform((s) => s.split(',').map((x) => x.trim()).filter(Boolean))
-        .refine((a) => a.length > 0 && a.length <= 100, { message: 'between 1 and 100 ids' }),
-});
-
 export type UpdateProfileInput = z.infer<typeof UpdateProfileSchema>;
 export type UpdateSettingsInput = z.infer<typeof UpdateSettingsSchema>;
 export type ListUsersInput = z.infer<typeof ListUsersQuery>;
 
 /**
- * Account deletion gate (Spec §11.2.1, decision D12).
+ * Account deletion gate (Spec §11.2.1).
  *
  * `confirm` must be the literal string DELETE — a typed confirmation, so a stray DELETE request
  * cannot remove an account. `research_consent` is opt-IN and defaults to false: retention is

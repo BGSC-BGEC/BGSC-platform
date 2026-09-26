@@ -5,6 +5,7 @@ import { internalRoutes } from './internal/internal.routes';
 import { pointsRoutes } from './points/points.routes';
 import { seedRules } from './rules/rules.service';
 import { startExpirySweeper } from './scheduler/expiry';
+import { startReplaySweeper } from './scheduler/replay';
 
 /**
  * Points Service — :3006. Owns `point_transactions` (append-only ledger) and `point_rules`, and is
@@ -12,8 +13,7 @@ import { startExpirySweeper } from './scheduler/expiry';
  * exception).
  *
  * Makes no outbound HTTP calls: everything it needs from another domain is a read or an event, and
- * everything another domain needs from it is an inbound internal route
- * (be2-points-service-plan.md §0.3).
+ * everything another domain needs from it is an inbound internal route.
  */
 
 const NAME = 'points-service';
@@ -22,6 +22,7 @@ const PORT = parseInt(process.env.PORT || '3006', 10);
 const options = {
     name: NAME,
     port: PORT,
+    models: ['PointTransaction', 'PointRule', 'PointExpiryCursor', 'PointTxClaim'],
     routes(app: express.Express) {
         app.use('/points', pointsRoutes);
         // The leaderboard investment debit. The gateway refuses /internal from the edge; the
@@ -29,12 +30,14 @@ const options = {
         app.use('/internal', internalRoutes);
     },
     async onReady() {
-        // Insert-only: a restart must never revert an admin's toggle (plan §4.3).
+        // Insert-only: a restart must never revert an admin's toggle.
         await seedRules();
         // Attendance credits, cancellation reversals, challenge awards.
         initializeConsumers();
-        // Credits past their expires_at become negative 'expire' rows (plan §7).
+        // Credits past their expires_at become negative 'expire' rows.
         startExpirySweeper();
+        // Missed EventCancelled / ParticipantAttended messages, re-derived.
+        startReplaySweeper();
     },
 };
 

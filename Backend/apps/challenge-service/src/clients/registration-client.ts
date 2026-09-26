@@ -1,4 +1,4 @@
-import { config } from '@bgsc/shared';
+import { InternalCallError, callInternal, config } from '@bgsc/shared';
 
 /**
  * The one thing this service cannot do for itself: lock a team's roster.
@@ -23,20 +23,18 @@ const TIMEOUT_MS = 5000;
  * not wrong — and failing the acceptance instead would lose a participation over a lock.
  */
 export async function lockTeam(teamId: string, lockedBy: string): Promise<boolean> {
+    // Locking is idempotent on Registration's side (an already-locked team answers 200), so there
+    // is nothing to reconcile on an unknown outcome: the next acceptance attempt, or an admin, can
+    // simply lock again.
     try {
-        const res = await fetch(`${config.services.registration}/internal/teams/${teamId}/lock`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Internal-Token': config.internalToken },
-            body: JSON.stringify({ locked_by: lockedBy }),
-            signal: AbortSignal.timeout(TIMEOUT_MS),
+        await callInternal(config.services.registration, `/internal/teams/${encodeURIComponent(teamId)}/lock`, {
+            body: { locked_by: lockedBy },
+            timeoutMs: TIMEOUT_MS,
         });
-        if (!res.ok) {
-            console.error(`[challenge-service] team lock ${teamId} responded ${res.status}`);
-            return false;
-        }
         return true;
     } catch (err) {
-        console.error(`[challenge-service] team lock ${teamId} unreachable:`, (err as Error).message);
+        const e = err as InternalCallError;
+        console.error(`[challenge-service] team lock ${teamId} failed: ${e.status ?? '?'} ${e.code ?? (err as Error).message}`);
         return false;
     }
 }

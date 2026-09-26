@@ -36,7 +36,26 @@ declare global {
 
 const rankOf = (role: string): number => ROLE_RANK.indexOf(role as RoleName);
 
-export function requireActiveUser(floor: UserRole | RoleName = UserRole.GUEST) {
+type Middleware = (req: Request, res: Response, next: NextFunction) => Promise<void>;
+
+/**
+ * `requireActiveUser(UserRole.CORE)` builds the guard. Mounting the factory itself —
+ * `router.post('/', requireAuth, requireActiveUser, …)` — used to call it with `req` as the floor,
+ * throw "unknown role '[object Object]'" and 500 every request (hall-of-fame routes, audit Sep 26).
+ * A factory mounted bare now behaves as the documented default, `requireActiveUser()`.
+ */
+export function requireActiveUser(floor?: UserRole | RoleName): Middleware;
+export function requireActiveUser(req: Request, res: Response, next: NextFunction): Promise<void>;
+export function requireActiveUser(
+    floorOrReq: UserRole | RoleName | Request = UserRole.GUEST,
+    res?: Response,
+    next?: NextFunction
+): Middleware | Promise<void> {
+    if (typeof floorOrReq === 'object' && res && next) return guard(UserRole.GUEST)(floorOrReq, res, next);
+    return guard(floorOrReq as UserRole | RoleName);
+}
+
+function guard(floor: UserRole | RoleName): Middleware {
     const min = rankOf(floor);
     // A typo in a route's floor should fail at boot, not silently admit everybody.
     if (min < 0) throw new Error(`requireActiveUser: unknown role '${floor}'`);

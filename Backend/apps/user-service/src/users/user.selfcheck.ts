@@ -99,7 +99,7 @@ const min = serializeUser(privateUser, stranger);
 assert.strictEqual(min.private, true, 'a private profile is flagged so FE can render a stub');
 assert.strictEqual(min.email, undefined, 'a private profile exposes no email at all, not even masked');
 assert.strictEqual(min.profile.full_name, undefined, 'a private profile exposes no real name');
-assert.ok(min.username && 'avatar_url' in min.profile, 'username and avatar survive for deep links (D9)');
+assert.ok(min.username && 'avatar_url' in min.profile, 'username and avatar survive for deep links');
 
 // Secrets are select:false, but the serializer must not pass them through even if a caller opts in.
 const withSecrets = serializeUser(
@@ -129,7 +129,7 @@ assert.strictEqual(
 /* --------------------------------- rating --------------------------------- */
 
 const r = computeRating({ participations: 3, podiums: 2, challenges: 4, points_balance: 260 });
-assert.strictEqual(r.rating, 3 * 2 + 2 * 15 + 4 * 5 + 5, 'rating matches the D1 formula');
+assert.strictEqual(r.rating, 3 * 2 + 2 * 15 + 4 * 5 + 5, 'rating matches the formula');
 assert.strictEqual(r.formula_version, RATING_VERSION, 'result carries the formula version');
 assert.strictEqual(
     computeRating({ participations: 0, podiums: 0, challenges: 0, points_balance: 0 }).rating,

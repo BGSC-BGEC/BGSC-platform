@@ -1,7 +1,9 @@
+import { randomUUID } from 'crypto';
 import {
     ActorType,
     IPointTransaction,
     PointTransaction,
+    PointTxClaim,
     PointsReferenceType,
     PointsSource,
     PointsType,
@@ -14,7 +16,7 @@ import { ruleExists } from '../rules/rules.service';
 /**
  * The one write path. Every point movement in the platform — consumer, admin route, internal
  * route, expiry sweep — goes through `record()`. There is no second path that touches
- * `point_transactions` or `users.points_balance` (be2-points-service-plan.md §3).
+ * `point_transactions` or `users.points_balance`.
  */
 
 export const PRODUCER = 'points-service';
@@ -61,8 +63,8 @@ const MAX_KEY_LENGTH = 200;
 /**
  * Every model invariant, refused as a 4xx before the insert.
  *
- * The model's `pre('validate')` hook throws a plain `Error`, which the shared handler maps to 500
- * (plan §0.6). Without this function a caller's typo reads as a server fault.
+ * The model's `pre('validate')` hook throws a plain `Error`, which the shared handler maps to 500.
+ * Without this function a caller's typo reads as a server fault.
  */
 async function assertRecordable(input: RecordInput): Promise<void> {
     const fail = (code: string): never => {
@@ -99,22 +101,134 @@ function payloadOf(tx: IPointTransaction): Record<string, unknown> {
     return tx.type === 'refund' ? { ...event, reason_text: tx.note } : event;
 }
 
+/* ------------------------------------------------------------------ *
+ * Key claims
+ * ------------------------------------------------------------------ */
+
+/** How long a `pending` claim is protected before another caller may take it over. */
+const LEASE_MS = 30_000;
+/** How long a caller that lost the claim waits for the winner's row before giving up. */
+const WAIT_MS = 3_000;
+const POLL_MS = 25;
+
+/** Test seam: runs after the balance moved and before the row lands — the window the claim closes. */
+export const ledgerHooks: { afterMove: () => Promise<void> } = { afterMove: async () => undefined };
+
+type Claim = { kind: 'claimed'; owner: string } | { kind: 'replay'; tx: IPointTransaction };
+
 /**
- * Cache first, row second, compensate on failure — the inverse of points-model.md §2.2, which
- * inserts the row and then compare-and-swaps the balance (plan §3.2, D1).
+ * Own the key or learn its row. Insert-first: the unique `_id` settles a race between callers, and
+ * the loser waits for the winner's row instead of moving money of its own.
+ */
+async function claim(key: string, user_id: string): Promise<Claim> {
+    const owner = randomUUID();
+    const lease = () => new Date(Date.now() + LEASE_MS);
+    try {
+        await PointTxClaim.create({ _id: key, state: 'pending', owner, user_id, lease_until: lease() });
+        return { kind: 'claimed', owner };
+    } catch (err) {
+        if (!isDuplicateKey(err)) throw err;
+    }
+
+    const deadline = Date.now() + WAIT_MS;
+    for (;;) {
+        const row = await PointTransaction.findOne({ idempotency_key: key });
+        if (row) return { kind: 'replay', tx: row };
+
+        const held = await PointTxClaim.findById(key).lean();
+        if (!held) {
+            // The holder finished (row, then claim deleted) between our reads, or gave up. One more
+            // look at the row decides; otherwise the key is free again.
+            const late = await PointTransaction.findOne({ idempotency_key: key });
+            if (late) return { kind: 'replay', tx: late };
+            return claim(key, user_id);
+        }
+        if (held.state === 'void') throw new ServiceError(409, 'request_voided');
+        // Provably abandoned: still `pending` (nothing moved) and its lease has run out. The CAS is on
+        // the exact claim we read, so two takers cannot both win, and the old holder's own
+        // pending->moving CAS now fails.
+        if (held.state === 'pending' && held.lease_until.getTime() < Date.now()) {
+            const taken = await PointTxClaim.findOneAndUpdate(
+                { _id: key, state: 'pending', owner: held.owner },
+                { $set: { owner, lease_until: lease() } }
+            );
+            if (taken) return { kind: 'claimed', owner };
+        }
+        if (Date.now() > deadline) throw new ServiceError(409, 'request_in_flight');
+        await new Promise((r) => setTimeout(r, POLL_MS));
+    }
+}
+
+/**
+ * Close a key for good: a refund found no spend behind a request, so a late spend with that key must
+ * never land. True when the key is now void; false when a row or a live writer already holds it.
+ */
+export async function voidKey(key: string): Promise<boolean> {
+    try {
+        await PointTxClaim.create({ _id: key, state: 'void', owner: 'void', lease_until: new Date() });
+    } catch (err) {
+        if (!isDuplicateKey(err)) throw err;
+        const held = await PointTxClaim.findById(key).lean();
+        if (held?.state === 'void') return true;
+        // An abandoned `pending` claim moved nothing: take it over into `void` with the same CAS
+        // `claim()` uses, so the old holder's pending->moving CAS now fails.
+        if (held?.state !== 'pending' || held.lease_until.getTime() >= Date.now()) return false;
+        const taken = await PointTxClaim.updateOne(
+            { _id: key, state: 'pending', owner: held.owner },
+            { $set: { state: 'void', owner: 'void' } }
+        );
+        if (!taken.modifiedCount) return false;
+    }
+    // A writer may have finished (row written, claim deleted) between the caller's lookup and our insert.
+    if (await PointTransaction.exists({ idempotency_key: key })) {
+        await PointTxClaim.deleteOne({ _id: key, state: 'void' });
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Claim the key, then cache first, row second, compensate on failure — the inverse of
+ * points-model.md §2.2, which inserts the row and then compare-and-swaps the balance.
  *
  * That order cannot be repaired: the ledger refuses updates and deletes by hook, so a row written
  * before a lost CAS keeps a wrong `balance_after` forever. This order's only failure window is
- * step 3 throwing, and the cache is not immutable, so `$inc: -amount` undoes it.
+ * step 4 throwing, and the cache is not immutable, so `$inc: -amount` undoes it.
  */
 export async function record(input: RecordInput): Promise<RecordResult> {
     await assertRecordable(input);
+    const key = input.idempotency_key;
 
     // 1. Dedupe first: a replayed domain event costs one indexed read and no writes at all.
-    const existing = await PointTransaction.findOne({ idempotency_key: input.idempotency_key });
+    const existing = await PointTransaction.findOne({ idempotency_key: key });
     if (existing) return { tx: existing, replayed: true };
 
-    // 2. Move the balance atomically, with the solvency guard inside the filter. Two simultaneous
+    // 2. Own the key. Only the holder moves money; everyone else replays the holder's row.
+    const claimed = await claim(key, input.user_id);
+    if (claimed.kind === 'replay') return { tx: claimed.tx, replayed: true };
+    const release = () => PointTxClaim.deleteOne({ _id: key, owner: claimed.owner });
+
+    let moving;
+    try {
+        // The row may have landed and its claim gone between step 1 and our insert.
+        const raced = await PointTransaction.findOne({ idempotency_key: key });
+        if (raced) {
+            await release();
+            return { tx: raced, replayed: true };
+        }
+        // Still ours and still pending? From here the balance may move, so no one may take it over.
+        moving = await PointTxClaim.findOneAndUpdate(
+            { _id: key, owner: claimed.owner, state: 'pending' },
+            { $set: { state: 'moving' } }
+        );
+    } catch (err) {
+        // Nothing has moved yet, so the key can be handed back rather than left to its lease.
+        await release().catch(() => undefined);
+        throw err;
+    }
+    if (!moving) throw new ServiceError(409, 'request_in_flight');
+
+    // 3. Move the balance atomically, with the solvency guard inside the filter. Two simultaneous
     //    spends of the last 10 points cannot both match — which is what makes "no negative
     //    balance" true under concurrency rather than true in the common case.
     const guard = input.amount < 0 ? { points_balance: { $gte: -input.amount } } : {};
@@ -124,15 +238,17 @@ export async function record(input: RecordInput): Promise<RecordResult> {
         { returnDocument: 'after', projection: { points_balance: 1 } }
     );
     if (!user) {
+        await release();
         // Two reasons to match nothing, and the caller must be able to tell them apart: one is
         // retryable by a human with more points, the other never is.
         const exists = await User.exists({ _id: input.user_id, deleted_at: null });
         throw new ServiceError(exists ? 409 : 404, exists ? 'insufficient_points' : 'user_not_found');
     }
 
-    // 3. Append the row, carrying the balance the $inc actually produced.
+    // 4. Append the row, carrying the balance the $inc actually produced.
     let tx: IPointTransaction;
     try {
+        await ledgerHooks.afterMove();
         tx = await PointTransaction.create({
             user_id: input.user_id,
             amount: input.amount,
@@ -140,35 +256,45 @@ export async function record(input: RecordInput): Promise<RecordResult> {
             source: input.source,
             reason: input.reason,
             reference: input.reference,
-            idempotency_key: input.idempotency_key,
+            idempotency_key: key,
             balance_after: user.points_balance ?? input.amount,
             actor: input.actor,
             note: input.note ?? null,
             expires_at: input.expires_at ?? null,
         });
     } catch (err) {
-        // The row did not land, so the balance movement must not stand. If the compensation itself
-        // fails, the cache is now ahead of the ledger: say so loudly and still surface the original
-        // error, because swallowing it would report a write that never happened. `recalculate`
-        // repairs the balance from the ledger, which is truth.
-        await User.updateOne({ _id: input.user_id }, { $inc: { points_balance: -input.amount } }).catch(
-            (compensationErr) =>
-                console.error(
-                    `[points-service] COMPENSATION FAILED for ${input.user_id}: balance is ahead of the ledger by ${input.amount}`,
-                    compensationErr
-                )
-        );
-        if (isDuplicateKey(err)) {
-            // Lost a race with an identical key: the winner's row is the answer, not an error.
-            const winner = await PointTransaction.findOne({ idempotency_key: input.idempotency_key });
-            if (winner) return { tx: winner, replayed: true };
+        // The row did not land, so the balance movement must not stand. Taking back a credit is
+        // guarded like any debit — points spent in the window stay spent rather than going negative.
+        // If the compensation fails, the cache is ahead of the ledger: say so loudly and surface the
+        // original error. `recalculate` repairs the balance from the ledger, which is truth.
+        const back = input.amount > 0 ? { points_balance: { $gte: input.amount } } : {};
+        const undone = await User.updateOne(
+            { _id: input.user_id, ...back },
+            { $inc: { points_balance: -input.amount } }
+        ).catch(() => null);
+        if (!undone?.modifiedCount) {
+            console.error(
+                `[points-service] COMPENSATION FAILED for ${input.user_id}: balance is off the ledger by ${input.amount}; run recalculate`
+            );
         }
+        await release();
         throw err;
     }
+    await release();
 
     // Fire-and-forget by contract: a throwing consumer cannot fail the write that produced it.
     publish(EVENT_FOR[tx.type], PRODUCER, payloadOf(tx));
     return { tx, replayed: false };
+}
+
+/**
+ * Drop a user's claims whose lease ran out: a holder that crashed or failed between claim and
+ * release. Only `recalculate` calls this, right after it has checked the balance against the ledger,
+ * so a stale claim has nothing outstanding — its row is the truth, or it has none and the balance
+ * was just derived without it. `void` claims are permanent and stay.
+ */
+export async function clearStaleClaims(user_id: string): Promise<void> {
+    await PointTxClaim.deleteMany({ user_id, state: { $ne: 'void' }, lease_until: { $lt: new Date() } });
 }
 
 /**
@@ -192,7 +318,7 @@ export async function ledgerSum(user_id: string): Promise<number> {
 
 /**
  * Cache minus ledger. Non-zero needs a crash between the `$inc` and its compensation — narrow, and
- * the only window there is, which is why there is no nightly reconciliation job (plan §3.5, D8).
+ * the only window there is, which is why there is no nightly reconciliation job.
  */
 export async function drift(user_id: string): Promise<number> {
     const [user, total] = await Promise.all([

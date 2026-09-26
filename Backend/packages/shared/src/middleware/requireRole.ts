@@ -38,6 +38,8 @@ export function requireRole(minimum: UserRole) {
  */
 export function requireSelfOr(minimum: UserRole, targetId: (req: Request) => string | undefined) {
     const floor = rankOf(minimum);
+    // Without this an unknown role ranked -1 and every signed-in user cleared the bar (audit Sep 26).
+    if (floor < 0) throw new Error(`requireSelfOr: unknown role '${minimum}'`);
 
     return function (req: Request, res: Response, next: NextFunction): void {
         if (!req.user) {

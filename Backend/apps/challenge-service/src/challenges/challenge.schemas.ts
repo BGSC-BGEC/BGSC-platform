@@ -10,7 +10,7 @@ import { z } from 'zod';
 /**
  * Request schemas. Zod strips unknown keys, which is the sanitization half of the job: a client
  * cannot set `status`, `counts`, `created_by` or `slug` by adding the field to a create body —
- * every one of those is the server's to decide (be2-challenge-service-plan.md §2.2).
+ * every one of those is the server's to decide.
  */
 
 const Uuid = z.string().uuid();
@@ -26,75 +26,123 @@ const Cursor = z.string().max(400).optional();
  */
 const MvpProofType = z.enum(MVP_PROOF_TYPES as [string, ...string[]]);
 
+/**
+ * `z.string().url()` is `new URL()`, which accepts `javascript:alert(1)`. These URLs are rendered
+ * as links, so anything but http(s) is a stored XSS waiting for a click.
+ */
+const HttpUrl = z
+    .string()
+    .url()
+    .max(2000)
+    .regex(/^https?:\/\//i, 'must be an http(s) URL');
+
+/*
+ * Field shapes WITHOUT defaults. The create body adds defaults on top; the update body must not
+ * have any: zod 4 applies a `.default()` even inside `.partial()`, so `PATCH { title }` used to
+ * arrive as a full document of defaults and silently wipe window, teaming, submission, reviewers,
+ * the hidden-brief flag and the capacity cap (audit Sep 26, H1).
+ */
+const NullableDate = z.coerce.date().nullable();
+const windowShape = {
+    opens_at: NullableDate,
+    closes_at: NullableDate,
+    submissions_close_at: NullableDate,
+    time_limit_minutes: z.number().int().min(1).max(525_600).nullable(),
+};
+const teamingShape = {
+    enabled: z.boolean(),
+    team_size_min: z.number().int().min(1).max(100).nullable(),
+    team_size_max: z.number().int().min(1).max(100).nullable(),
+    max_teams: z.number().int().min(1).max(1000).nullable(),
+};
+const submissionShape = {
+    requires_proof: z.boolean(),
+    proof_types: z.array(MvpProofType).max(4),
+    max_files: z.number().int().min(0).max(20),
+    auto_approve: z.boolean(),
+};
+/** Replaced whole on update, never merged: two small fields, and `null` is a meaningful value. */
+const Location = z
+    .object({ name: z.string().trim().min(1).max(200), details: z.string().trim().max(1000).nullable().default(null) })
+    .nullable();
+const Resources = z.array(z.object({ label: z.string().trim().min(1).max(120), url: HttpUrl })).max(20);
+const Tags = z.array(z.string().trim().toLowerCase().min(1).max(40)).max(20);
+
 const WindowBody = z
     .object({
-        opens_at: z.coerce.date().nullable().default(null),
-        closes_at: z.coerce.date().nullable().default(null),
-        submissions_close_at: z.coerce.date().nullable().default(null),
-        time_limit_minutes: z.number().int().min(1).max(525_600).nullable().default(null),
+        opens_at: windowShape.opens_at.default(null),
+        closes_at: windowShape.closes_at.default(null),
+        submissions_close_at: windowShape.submissions_close_at.default(null),
+        time_limit_minutes: windowShape.time_limit_minutes.default(null),
     })
     .default({ opens_at: null, closes_at: null, submissions_close_at: null, time_limit_minutes: null });
 
 const TeamingBody = z
     .object({
-        enabled: z.boolean().default(false),
-        team_size_min: z.number().int().min(1).max(100).nullable().default(null),
-        team_size_max: z.number().int().min(1).max(100).nullable().default(null),
-        max_teams: z.number().int().min(1).max(1000).nullable().default(null),
+        enabled: teamingShape.enabled.default(false),
+        team_size_min: teamingShape.team_size_min.default(null),
+        team_size_max: teamingShape.team_size_max.default(null),
+        max_teams: teamingShape.max_teams.default(null),
     })
     .default({ enabled: false, team_size_min: null, team_size_max: null, max_teams: null });
 
 const SubmissionBody = z
     .object({
-        requires_proof: z.boolean().default(true),
-        proof_types: z.array(MvpProofType).max(4).optional(),
-        max_files: z.number().int().min(0).max(20).default(5),
-        auto_approve: z.boolean().default(false),
+        requires_proof: submissionShape.requires_proof.default(true),
+        proof_types: submissionShape.proof_types.optional(),
+        max_files: submissionShape.max_files.default(5),
+        auto_approve: submissionShape.auto_approve.default(false),
     })
     .default({ requires_proof: true, max_files: 5, auto_approve: false });
 
-const LocationBody = z
-    .object({ name: z.string().trim().min(1).max(200), details: z.string().trim().max(1000).nullable().default(null) })
-    .nullable()
-    .default(null);
-
-export const CreateChallengeBody = z.object({
+const scalarShape = {
     title: z.string().trim().min(1).max(120),
     description: z.string().trim().min(1).max(20_000),
-    brief_hidden_until_accept: z.boolean().default(false),
-    cover_media_url: z.string().url().max(2000).nullable().default(null),
-
     domain: z.enum(CHALLENGE_DOMAIN),
     kind: z.enum(CHALLENGE_KIND),
     difficulty: z.enum(CHALLENGE_DIFFICULTY),
-    tags: z.array(z.string().trim().toLowerCase().min(1).max(40)).max(20).default([]),
-
     award_points: z.number().int().min(1).max(100_000),
     // Optional, not defaulted: `undefined` is what lets the service apply the Legend rule
-    // (challenge-model.md §2.2) while `false` stays an explicit admin override (D2).
+    // (challenge-model.md §2.2) while `false` stays an explicit admin override.
     grants_hall_of_fame: z.boolean().optional(),
+};
 
+export const CreateChallengeBody = z.object({
+    ...scalarShape,
+    brief_hidden_until_accept: z.boolean().default(false),
+    cover_media_url: HttpUrl.nullable().default(null),
+    tags: Tags.default([]),
     window: WindowBody,
-    location: LocationBody,
+    location: Location.default(null),
     teaming: TeamingBody,
     max_participants: z.number().int().min(1).max(100_000).nullable().default(null),
-    resources: z
-        .array(z.object({ label: z.string().trim().min(1).max(120), url: z.string().url().max(2000) }))
-        .max(20)
-        .default([]),
+    resources: Resources.default([]),
     submission: SubmissionBody,
     reviewers: z.array(Uuid).max(50).default([]),
 });
 
 /**
- * Every field optional, but the same shapes — so a partial update cannot smuggle a half-built
- * `window` past the invariants. `status` is absent on purpose: it moves through the transition
- * routes, which are compare-and-swaps, never through a PATCH.
+ * Every field optional and NOTHING defaulted, at any depth. `window`, `teaming` and `submission`
+ * are partial too: the service merges them into the stored values, so `{ teaming: { max_teams } }`
+ * changes one number instead of disabling teaming. `status` is absent on purpose: it moves through
+ * the transition routes, which are compare-and-swaps, never through a PATCH.
  */
-export const UpdateChallengeBody = CreateChallengeBody.partial().refine(
-    (b) => Object.keys(b).length > 0,
-    'at least one field must be present'
-);
+export const UpdateChallengeBody = z
+    .object({
+        ...scalarShape,
+        brief_hidden_until_accept: z.boolean(),
+        cover_media_url: HttpUrl.nullable(),
+        tags: Tags,
+        window: z.object(windowShape).partial(),
+        location: Location,
+        teaming: z.object(teamingShape).partial(),
+        max_participants: z.number().int().min(1).max(100_000).nullable(),
+        resources: Resources,
+        submission: z.object(submissionShape).partial(),
+        reviewers: z.array(Uuid).max(50),
+    })
+    .partial()
+    .refine((b) => Object.keys(b).length > 0, 'at least one field must be present');
 
 export const ListChallengesQuery = z.object({
     status: z.enum(['draft', 'active', 'completed', 'archived']).default('active'),

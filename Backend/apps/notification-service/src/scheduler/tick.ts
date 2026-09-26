@@ -3,13 +3,15 @@ import {
     DISPATCH_MAX_ATTEMPTS,
     DISPATCH_RETRYABLE,
     INotificationDispatch,
+    NOTIFICATION_TTL_DAYS,
+    Notification,
     NotificationDispatch,
 } from '@bgsc/shared';
-import { deliverAnnouncement } from '../broadcast/broadcast';
-import { attempt, writeback } from '../broadcast/dispatch';
+import { dedupe, deliverAnnouncement } from '../broadcast/broadcast';
+import { attempt, nextRetryAt, writeback } from '../broadcast/dispatch';
 
 /**
- * The scheduler (be2-broadcast-service-plan.md §8). Three sweeps, one timer.
+ * The scheduler. Four sweeps, one timer.
  *
  * ponytail: one in-process 60s timer, running in every instance. Correct under concurrency —
  * every send is claimed with a compare-and-swap before it happens — and wasteful at N instances.
@@ -28,7 +30,14 @@ export const RECONCILE_WINDOW_MS = 24 * 3_600_000;
  */
 const SWEEP_LIMIT = 50;
 
-/** Retry every send whose backoff has elapsed. */
+const log = (what: string, err: unknown) => console.error(`[notification-service] ${what} failed:`, err);
+
+/**
+ * Retry every send whose backoff has elapsed.
+ *
+ * Each attempt is caught on its own: one row whose re-read throws must not abandon the other 49 in
+ * the page — nor, by rejecting out of `tick()`, the reconcile and writeback sweeps behind it.
+ */
 export async function retryDue(now: Date = new Date()): Promise<number> {
     const rows = await NotificationDispatch.find({
         status: { $in: DISPATCH_RETRYABLE },
@@ -39,9 +48,58 @@ export async function retryDue(now: Date = new Date()): Promise<number> {
         .limit(SWEEP_LIMIT);
 
     for (const row of rows) {
-        await attempt(row);
+        try {
+            await attempt(row);
+        } catch (err) {
+            log(`dispatch attempt ${row._id}`, err);
+        }
     }
     return rows.length;
+}
+
+/**
+ * Close out a final attempt that never finished.
+ *
+ * `attempt()` claims by setting `pending` with a lease (`next_attempt_at`) and spends the attempt up
+ * front. If the process dies — or the attempt throws — before it settles, an earlier attempt is
+ * simply retried when the lease runs out. The FIFTH one is not: `retryDue` stops at the cap, so the
+ * row would read `pending` forever and the composer would be told "still trying" about a send that
+ * is over. Once its lease has lapsed it is certainly not in flight, so it is failed, honestly.
+ *
+ * `failed` keeps a retry date (the model's invariant for a retryable status) but is past the cap,
+ * so nothing picks it up again — exactly like a fifth attempt that failed normally.
+ */
+export async function settleAbandoned(now: Date = new Date()): Promise<number> {
+    // Died AFTER the provider call started (`sending_at` set): the message may be in the group, so
+    // it is closed as `outcome_unknown` whatever attempt it was — never handed back to the retry
+    // sweep, which would post it again.
+    const midSend = await NotificationDispatch.updateMany(
+        { status: 'pending', sending_at: { $ne: null }, next_attempt_at: { $lte: now } },
+        {
+            $set: {
+                status: 'outcome_unknown',
+                error: 'interrupted_mid_send',
+                next_attempt_at: null,
+                sending_at: null,
+                writeback_at: null,
+            },
+            $inc: { revision: 1 },
+        }
+    );
+
+    const res = await NotificationDispatch.updateMany(
+        { status: 'pending', attempts: { $gte: DISPATCH_MAX_ATTEMPTS }, next_attempt_at: { $lte: now } },
+        {
+            $set: {
+                status: 'failed',
+                error: 'attempt_interrupted',
+                next_attempt_at: nextRetryAt(DISPATCH_MAX_ATTEMPTS, now),
+                writeback_at: null,
+            },
+            $inc: { revision: 1 },
+        }
+    );
+    return (midSend.modifiedCount ?? 0) + (res.modifiedCount ?? 0);
 }
 
 /**
@@ -58,6 +116,11 @@ export async function retryDue(now: Date = new Date()): Promise<number> {
  * category. An `exists` test would call that one done and the second community group would never
  * hear about it. Re-running is harmless either way: every claim is idempotent.
  *
+ * The whole window is read (two fields per announcement) and counted in ONE aggregate; only the
+ * incomplete ones are capped. The first version capped the candidate page instead, unsorted — so
+ * past fifty publishes in a day, the complete ones filled the page and a lost one could sit outside
+ * it every tick until it aged out of the window.
+ *
  * It is also what makes scheduled broadcasts true end to end — the Announcement Service's own tick
  * publishes them, and this guarantees the broadcast follows even if that event was dropped.
  */
@@ -68,19 +131,55 @@ export async function reconcile(now: Date = new Date()): Promise<number> {
         'delivery.whatsapp.requested': true,
         published_at: { $gte: new Date(now.getTime() - RECONCILE_WINDOW_MS) },
     })
+        .sort({ published_at: -1 })
         .select('_id categories')
-        .limit(SWEEP_LIMIT)
         .lean<{ _id: string; categories: string[] }[]>();
+    if (candidates.length === 0) return 0;
+
+    const counts = await NotificationDispatch.aggregate<{ _id: string; n: number }>([
+        { $match: { 'source.type': 'announcement', 'source.id': { $in: candidates.map((c) => c._id) } } },
+        { $group: { _id: '$source.id', n: { $sum: 1 } } },
+    ]);
+    const rowsFor = new Map(counts.map((c) => [c._id, c.n]));
+
+    // One per category, plus the push row.
+    const incomplete = candidates.filter((c) => (rowsFor.get(c._id) ?? 0) < c.categories.length + 1);
 
     let delivered = 0;
-    for (const { _id, categories } of candidates) {
-        const rows = await NotificationDispatch.countDocuments({ 'source.type': 'announcement', 'source.id': _id });
-        // One per category, plus the push row.
-        if (rows >= categories.length + 1) continue;
-        await deliverAnnouncement(_id);
-        delivered += 1;
+    for (const { _id } of incomplete.slice(0, SWEEP_LIMIT)) {
+        try {
+            await deliverAnnouncement(_id);
+            delivered += 1;
+        } catch (err) {
+            log(`reconcile ${_id}`, err);
+        }
     }
     return delivered;
+}
+
+/**
+ * Retract the cards of deletes whose `AnnouncementDeleted` never arrived.
+ *
+ * The same outage that loses a publish loses a delete, and the retraction consumer is the only
+ * other thing that removes a card — so without this, every recipient keeps one that opens onto a
+ * 404 for the rest of its ninety days. Looks back exactly that far: an older card has already been
+ * dropped by the TTL index. One `deleteMany` over the whole page, served by the `dedupe_key` prefix.
+ *
+ * ponytail: re-retracts the same recent deletes every tick (an index probe each, deleting nothing).
+ * Mark them done in a local collection if deletions ever number in the thousands per quarter.
+ */
+export async function retractDeleted(now: Date = new Date()): Promise<number> {
+    const deleted = await Announcement.find({
+        deleted_at: { $gte: new Date(now.getTime() - NOTIFICATION_TTL_DAYS * 86_400_000) },
+    })
+        .sort({ deleted_at: -1 })
+        .limit(SWEEP_LIMIT * 10)
+        .select('_id')
+        .lean<{ _id: string }[]>();
+    if (deleted.length === 0) return 0;
+
+    const res = await Notification.deleteMany({ dedupe_key: { $in: deleted.map((a) => dedupe.announcement(a._id)) } });
+    return res.deletedCount ?? 0;
 }
 
 /**
@@ -98,14 +197,20 @@ export async function retryWritebacks(): Promise<number> {
     const announcementIds = [...new Set(stale.map((r) => r.source.id))];
     let written = 0;
     for (const id of announcementIds) {
-        if (await writeback(id)) written += 1;
+        try {
+            if (await writeback(id)) written += 1;
+        } catch (err) {
+            log(`writeback ${id}`, err);
+        }
     }
     return written;
 }
 
 export interface TickResult {
     retried: number;
+    abandoned: number;
     reconciled: number;
+    retracted: number;
     written_back: number;
 }
 
@@ -113,9 +218,11 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     // Order matters only in that reconciliation can create rows the writeback sweep should then
     // pick up — doing it before the writeback pass saves those rows a minute.
     const retried = await retryDue(now);
+    const abandoned = await settleAbandoned(now);
     const reconciled = await reconcile(now);
+    const retracted = await retractDeleted(now);
     const written_back = await retryWritebacks();
-    return { retried, reconciled, written_back };
+    return { retried, abandoned, reconciled, retracted, written_back };
 }
 
 export function startScheduler(): NodeJS.Timeout {

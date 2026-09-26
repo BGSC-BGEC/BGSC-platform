@@ -10,11 +10,15 @@
     "start": "node dist/index.js",
     "typecheck": "npx -p typescript@7 tsc --build --force && npx -p typescript@7 tsc --noEmit -p tsconfig.check.json && npm run build",
     "preselfcheck": "npm run build --workspace @bgsc/shared",
-    "selfcheck": "npm run selfcheck --workspaces --if-present",
+    "selfcheck": "npm run selfcheck --workspaces --if-present && ts-node src/gateway/gateway.selfcheck.ts && node scripts/migrate-audit2.selfcheck.js",
     "pree2e": "npm run build --workspace @bgsc/shared",
     "e2e": "npm run e2e --workspaces --if-present",
     "test": "npm run selfcheck && npm run e2e",
-    "smoke": "ts-node src/gateway/gateway.smoke.ts"
+    "smoke": "ts-node src/gateway/gateway.smoke.ts",
+    "//seed:founder": "One-time bootstrap: promotes the registered, active account FOUNDER_EMAIL to founder. In the image: docker compose run --rm -e FOUNDER_EMAIL=... user-service node apps/user-service/dist/scripts/seed-founder.js",
+    "seed:founder": "ts-node apps/user-service/src/scripts/seed-founder.ts",
+    "//migrate:audit2": "Dry run by default; `npm run migrate:audit2 -- --apply` writes. Targets MONGO_URI. See scripts/migrate-audit2.js.",
+    "migrate:audit2": "npm run build --workspace @bgsc/shared && node scripts/migrate-audit2.js"
   },
   "keywords": [],
   "author": "Rubber_Duck",

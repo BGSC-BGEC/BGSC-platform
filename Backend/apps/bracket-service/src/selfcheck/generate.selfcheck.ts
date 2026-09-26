@@ -3,7 +3,7 @@ import { BracketParticipant } from '@bgsc/shared';
 import { bracketSize, generate, roundRobin, seedOrder, seedParticipants, singleElim } from '../brackets/generate';
 
 /**
- * The draw, checked as a function (be2-feedback-bracket-plan.md §13).
+ * The draw, checked as a function.
  *
  * No database: a round-robin schedule is either every pair exactly once with nobody playing twice
  * in a round, or it is wrong, and Mongo has no opinion on that. Pinned ids (`m<round>-<slot>`) make

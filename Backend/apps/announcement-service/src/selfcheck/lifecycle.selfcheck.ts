@@ -274,6 +274,76 @@ async function main(): Promise<void> {
     assert(await Announcement.findById(deletedRecently._id), 'a recently deleted one is kept');
     console.log('✓ 4 months to archived, a year to gone');
 
+    /* ---- 8. fix-phase regressions ---------------------------------------- */
+    console.log('8. Tags and the pin race...');
+    const tagged = await draft({ tags: ['Finals', ' MIXED '] });
+    assert.deepStrictEqual([...tagged.tags], ['finals', 'mixed'], 'tags are stored lowercased and trimmed');
+
+    // A PATCH of pinned_until landing between publish's load and its claim. Simulated by moving the
+    // pin the moment the load resolves: the load passes the assert, the claim must still refuse.
+    const racy = await draft();
+    const far = new Date(Date.now() + 12 * MONTH_MS);
+    const realFindOne = Announcement.findOne.bind(Announcement);
+    (Announcement as unknown as { findOne: unknown }).findOne = (...args: Parameters<typeof realFindOne>) => {
+        (Announcement as unknown as { findOne: unknown }).findOne = realFindOne;
+        return realFindOne(...args).then(async (doc) => {
+            await Announcement.updateOne({ _id: racy._id }, { $set: { pinned_until: far } });
+            return doc;
+        });
+    };
+    await assert.rejects(
+        () => svc.publishOrSchedule(racy._id, undefined, ACTOR),
+        /pinned_until_after_expiry/,
+        'the claim re-checks the pin, so the race is a 422, not a silently invalid document'
+    );
+    assert.strictEqual((await Announcement.findById(racy._id))!.status, 'draft', 'and nothing was published');
+    console.log('✓ tags lowercase; a pin moved mid-publish is refused by the claim');
+
+    /* ---- 9. edit authority: the author, or someone strictly above them ---- */
+    console.log('9. Edit authority...');
+    const peer = await seedUser('Peer Coordinator', UserRole.COORDINATOR);
+    const junior = await seedUser('Junior Core', UserRole.CORE);
+    const founder = await seedUser('Founder', UserRole.FOUNDER);
+    const as = (u: { _id: string; role: string }): Editor => ({ id: u._id, ip: null, role: u.role as never });
+
+    const mine = await draft(); // written by the coordinator `author`
+    for (const [who, label] of [[peer, 'an equal-rank peer'], [junior, 'a lower rank']] as const) {
+        await assert.rejects(() => svc.update(mine._id, { title: 'Hijacked' }, as(who)), /not_author_or_senior/, `${label} may not edit`);
+        await assert.rejects(() => svc.publishOrSchedule(mine._id, undefined, as(who)), /not_author_or_senior/, `nor publish`);
+        await assert.rejects(() => svc.remove(mine._id, as(who)), /not_author_or_senior/, `nor delete`);
+    }
+    assert.strictEqual((await svc.update(mine._id, { title: 'Founder fix' }, as(founder))).title, 'Founder fix', 'a strictly higher rank may');
+    assert.strictEqual((await svc.update(mine._id, { title: 'Own fix' }, ACTOR)).title, 'Own fix', 'and so may the author');
+    console.log('✓ only the author or a strictly higher rank changes an announcement');
+
+    /* ---- 10. legacy unmasked delivery group ids ------------------------- */
+    console.log('10. Legacy group_id masking...');
+    const legacy = await raw({
+        status: 'published',
+        published_at: new Date(),
+        delivery: {
+            whatsapp: {
+                requested: true,
+                per_category: [{ category: 'bgec', group_id: '+919876543210', status: 'sent', revision: 1 }],
+            },
+            push: { requested: true, status: 'skipped', sent_count: null },
+        },
+    });
+    assert.ok((await svc.maskLegacyGroupIds()) >= 1, 'a raw destination is found');
+    const maskedRow = (await Announcement.findById(legacy._id))!.delivery.whatsapp.per_category[0];
+    assert.strictEqual(maskedRow.group_id, '••••3210', 'and masked in place');
+    assert.strictEqual(maskedRow.status, 'sent', 'touching nothing else');
+    assert.strictEqual(await svc.maskLegacyGroupIds(), 0, 'a second run finds nothing: idempotent at boot');
+    const receipt = await svc.recordDelivery(legacy._id, {
+        whatsapp: [{ category: 'bgec', group_id: '+911234567890', status: 'sent', revision: 5 }],
+    });
+    assert.strictEqual(
+        receipt.delivery.whatsapp.per_category[0].group_id,
+        '••••7890',
+        'a raw destination in a new receipt is masked on arrival too'
+    );
+    console.log('✓ legacy delivery receipts lose their raw destination');
+
     await closeScratchDb();
     console.log('\n✅ All lifecycle selfchecks passed!');
 }

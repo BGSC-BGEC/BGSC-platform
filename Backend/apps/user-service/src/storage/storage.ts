@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { config } from '@bgsc/shared';
 
 /**
  * One-function storage interface. Spec §15.2 wants pre-signed S3 URLs, ClamAV scanning, three
@@ -10,7 +11,9 @@ import { randomUUID } from 'crypto';
  * `putObject` against S3/R2; nothing that calls it changes.
  */
 
-const UPLOAD_DIR = path.resolve(__dirname, '../../uploads');
+// The platform's one upload root; media-service serves it at `/uploads`. This service writes only
+// under `avatars/` (callers pass that prefix) and serves nothing itself.
+const UPLOAD_DIR = path.resolve(config.uploadDir);
 
 /** Spec §15.1: JPG, PNG, WebP, max 10MB. */
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;

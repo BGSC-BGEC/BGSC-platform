@@ -1,9 +1,9 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import { config, optionalAuth } from '@bgsc/shared';
-import { ROUTES, resolveService, isInternalPath } from './gateway/routing';
+import { assertInternalTokenConfigured, config, optionalAuth, requireRole, UserRole } from '@bgsc/shared';
+import { ROUTES, isInternalPath } from './gateway/routing';
 import { createServiceProxy, notImplemented, isLive } from './gateway/proxy';
-import { authAttemptLimiter, generalLimiter } from './gateway/rateLimit';
+import { authAttemptIpCeiling, authAttemptLimiter, generalLimiter, parseAttemptBody } from './gateway/rateLimit';
 
 /**
  * API Gateway — :3000 (Spec §2.1). The single public entry point: JWT validation, rate limiting,
@@ -11,7 +11,9 @@ import { authAttemptLimiter, generalLimiter } from './gateway/rateLimit';
  * knows about a request comes from the token or the path.
  *
  * bodyParser is deliberately absent — bodies stream straight to the downstream service. Parsing
- * here would break file uploads and force the gateway to know each service's payload shapes.
+ * here would break file uploads and force the gateway to know each service's payload shapes. The
+ * one exception is the strict auth paths (rateLimit.ts `parseAttemptBody`), whose limiter keys on
+ * the account being attempted.
  */
 
 const NAME = 'gateway';
@@ -51,14 +53,6 @@ app.get('/health', (_req: Request, res: Response) => {
     res.json({ status: 'ok', service: NAME, env: config.nodeEnv, uptime_s: Math.round(process.uptime()) });
 });
 
-app.get('/gateway/services', (_req: Request, res: Response) => {
-    res.json({
-        services: Object.entries(ROUTES).map(([key, r]) => ({
-            key, target: r.target, prefixes: r.prefixes, owner: r.owner, live: isLive(key),
-        })),
-    });
-});
-
 /**
  * `/internal/*` is service-to-service only. Services guard it with a shared token as well; this is
  * the outer layer, because the cost of one service forgetting is an unauthenticated user directory.
@@ -75,8 +69,20 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // is the service's business, and the service re-checks anyway. This only populates req.user so the
 // rate limiter can key on it and the proxy can forward identity.
 app.use(optionalAuth);
+app.use(parseAttemptBody);
+app.use(authAttemptIpCeiling);
 app.use(authAttemptLimiter);
 app.use(generalLimiter);
+
+// The routing table with its internal targets (`http://auth-service:3001`, …) is operator
+// information, not something to hand an anonymous caller mapping the network (audit Sep 26).
+app.get('/gateway/services', requireRole(UserRole.COORDINATOR), (_req: Request, res: Response) => {
+    res.json({
+        services: Object.entries(ROUTES).map(([key, r]) => ({
+            key, target: r.target, prefixes: r.prefixes, owner: r.owner, live: isLive(key),
+        })),
+    });
+});
 
 // Live services are mounted globally and scoped by pathFilter so the full path survives.
 // Unbuilt services mount on their prefixes, where Express stripping the prefix is harmless.
@@ -93,11 +99,25 @@ app.use((_req: Request, res: Response) => {
 });
 
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+    // A malformed or oversized body on a strict auth path (the only bodies parsed here) is the
+    // client's fault, same mapping as the services' error handler.
+    const parseErr = err as Error & { status?: number; expose?: boolean; type?: string };
+    if (parseErr.expose === true && typeof parseErr.status === 'number' && parseErr.status < 500) {
+        if (!res.headersSent) {
+            res.status(parseErr.status).json({
+                error: parseErr.type === 'entity.too.large' ? 'payload_too_large' : 'malformed_body',
+            });
+        }
+        return;
+    }
     console.error(`[${NAME}] Unhandled error:`, err);
     if (!res.headersSent) res.status(500).json({ error: 'internal_error' });
 });
 
 export function start(): void {
+    // The gateway verifies tokens too (rate-limit keys, /gateway/services), so a published JWT
+    // secret here is as bad as anywhere. No database or bus, so those checks are skipped.
+    assertInternalTokenConfigured({ datastores: false });
     process.on('unhandledRejection', (reason) => {
         console.error(`[${NAME}] UNHANDLED REJECTION:`, reason);
     });
@@ -111,6 +131,9 @@ export function start(): void {
         console.log(`[${NAME}] listening on :${PORT} (${config.nodeEnv})`);
         console.log(`[${NAME}] live: ${live.join(', ')} | pending: ${Object.keys(ROUTES).filter((k) => !isLive(k)).join(', ')}`);
     });
+    // Every proxy instance listens on the server; fifteen of them trip Node's default cap of 10 and
+    // print MaxListenersExceededWarning on every boot (audit #2). Not a leak: the count is fixed.
+    server.setMaxListeners(Object.keys(ROUTES).length + 10);
 
     for (const signal of ['SIGINT', 'SIGTERM'] as const) {
         process.on(signal, () => {

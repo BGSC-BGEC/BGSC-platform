@@ -5,16 +5,20 @@ import {
     FeedbackThrottle,
     FeedbackTicket,
     ServiceError,
+    User,
     UserRole,
     resetBus,
+    subscribe,
 } from '@bgsc/shared';
-import { Actor, Submitter, listInbox, listMine, setSeverity, setStatus, subjectKey, submitContact, submitFeedback, getTicket } from '../feedback/feedback.service';
+import { FeedbackMailer } from '../feedback/mailer';
+import { Actor, Submitter, listInbox, listMine, liveViewer, rateSubject, setSeverity, setStatus, subjectKey, submitContact, submitFeedback, getTicket } from '../feedback/feedback.service';
+import { SubmitFeedbackSchema } from '../feedback/feedback.schemas';
 import { TICKET_NO_PATTERN, ticketNo } from '../feedback/ticketNo';
 import { handlers } from '../events/consumers';
 import { closeScratchDb, openScratchDb, seedUser, ticketInput } from './seed';
 
 /**
- * Tickets (be2-feedback-bracket-plan.md §13).
+ * Tickets.
  *
  * The block that matters most is the anonymous one: Spec §5.12 offers the toggle, and this is
  * where the promise behind it is either kept or quietly broken.
@@ -47,6 +51,11 @@ async function main(): Promise<void> {
     assert.strictEqual(mine.contact_email, reporter.email, 'and replies go to the account address');
     assert.strictEqual(mine.status, 'submitted', 'the ladder starts at the bottom');
     assert.strictEqual(mine.kind, 'feedback');
+    // An attributed ticket replies to the account, whatever address the caller typed (audit Sep 26).
+    const redirected = await submitFeedback(ticketInput({ contact_email: 'victim@example.org' }), signedIn);
+    assert.strictEqual(redirected.contact_email, reporter.email, 'a signed-in caller cannot aim the receipt at someone else');
+    const oneLine = SubmitFeedbackSchema.parse(ticketInput({ subject: 'Hi\r\nBcc: everyone@example.org' }));
+    assert.ok(!/[\r\n]/.test(oneLine.subject), 'CR/LF is stripped from the subject (it becomes a mail header)');
     console.log('✓ a signed-in ticket is attributed and reachable');
 
     /* ---- the anonymous promise ---------------------------------------------- */
@@ -80,6 +89,15 @@ async function main(): Promise<void> {
         anon('198.51.100.20')
     );
     assert.strictEqual(walkIn.reporter, null, 'a signed-out ticket is anonymous by construction');
+
+    // The anonymous receipt goes to an unverified address, so it echoes no caller text (audit #2).
+    const receipts: (string | null)[] = [];
+    const realReceipt = FeedbackMailer.sendTicketReceipt;
+    FeedbackMailer.sendTicketReceipt = async (_to, _no, subject) => void receipts.push(subject);
+    await submitFeedback(ticketInput({ is_anonymous: true, contact_email: 'x@example.org', subject: 'BUY NOW' }), anon('198.51.100.30'));
+    await submitFeedback(ticketInput(), { user: stranger, ip: null });
+    FeedbackMailer.sendTicketReceipt = realReceipt;
+    assert.deepStrictEqual(receipts, [null, 'The scoreboard shows the wrong total'], 'anonymous receipts carry no subject; attributed ones do');
     console.log('✓ a public submission with no session needs no login and gets no attribution');
 
     /* ---- the rate limiter ----------------------------------------------------- */
@@ -110,6 +128,31 @@ async function main(): Promise<void> {
     );
     assert.ok(keys.some((k: string) => k.startsWith('ip:') && k.length > 40), 'anonymous keys are hashes');
     assert.ok(keys.some((k: string) => k.startsWith(`user:${reporter._id}`)), 'a signed-in submitter is keyed by id');
+    // The anonymous ticket the reporter filed while signed in must not have left a `user:<id>` row.
+    assert.strictEqual(
+        await FeedbackThrottle.countDocuments({ subject_key: `user:${reporter._id}` }),
+        2,
+        'only the two ATTRIBUTED tickets are keyed by the account — the anonymous one is keyed by address'
+    );
+    assert.strictEqual(subjectKey(signedIn, true), subjectKey(anon('203.0.113.9')), 'anonymous-while-signed-in = the address key');
+    assert.strictEqual(rateSubject('2001:db8:1:2:aaaa::1'), rateSubject('2001:db8:1:2:bbbb:cccc:dddd:eeee'), 'one IPv6 /64 is one bucket');
+    assert.notStrictEqual(rateSubject('2001:db8:1:2::1'), rateSubject('2001:db8:1:3::1'), 'a different /64 is not');
+    assert.strictEqual(rateSubject('::ffff:1.2.3.4'), '1.2.3.4', 'a mapped v4 is the v4');
+
+    // Insert-first (audit #2): a parallel burst cannot all squeeze under the cap.
+    const burst = await Promise.allSettled(
+        Array.from({ length: 12 }, () =>
+            submitFeedback(ticketInput({ contact_email: 'burst@example.org', is_anonymous: true }), anon('198.51.100.99'))
+        )
+    );
+    assert.ok(
+        burst.filter((r) => r.status === 'fulfilled').length <= FEEDBACK_RATE_PER_HOUR,
+        'twelve simultaneous submissions let at most the cap through'
+    );
+    assert.ok(
+        (await FeedbackThrottle.countDocuments({ subject_key: subjectKey(anon('198.51.100.99')) })) <= FEEDBACK_RATE_PER_HOUR,
+        'and a refused request takes its throttle row back out'
+    );
     assert.notStrictEqual(
         subjectKey(anon('1.1.1.1')),
         subjectKey(anon('1.1.1.2')),
@@ -146,6 +189,16 @@ async function main(): Promise<void> {
     assert.strictEqual(asBearer._id, secret._id, 'whoever holds an anonymous number may read it');
     console.log('✓ own ticket, staff, or the number itself — anything else is a 404');
 
+    // The staff view reads the LIVE role, not the token's (audit #2).
+    const demoted = await seedUser('Former Core', UserRole.CORE);
+    await User.updateOne({ _id: demoted._id }, { $set: { role: UserRole.USER } });
+    assert.strictEqual((await liveViewer({ id: demoted._id })).role, 'user', 'a demotion bites before the token expires');
+    await User.updateOne({ _id: demoted._id }, { $set: { deleted_at: new Date() } });
+    assert.strictEqual((await liveViewer({ id: demoted._id })).id, null, 'and a deleted account reads as a stranger');
+
+    const responded: Record<string, unknown>[] = [];
+    subscribe('FeedbackResponded', (e) => responded.push(e.payload));
+
     /* ---- the ladder --------------------------------------------------------------- */
 
     const reviewing = await setStatus(mine.ticket_no, { status: 'under_review' }, staff(reviewer._id));
@@ -167,6 +220,13 @@ async function main(): Promise<void> {
     assert.strictEqual(resolved.status, 'resolved');
     assert.strictEqual(resolved.response?.by_user_id, reviewer._id, 'a response records who wrote it');
     assert.ok(resolved.response?.body.includes('Fixed'), 'and what it said');
+    assert.deepStrictEqual(
+        responded,
+        [{ ticket_id: mine._id, ticket_no: mine.ticket_no, reporter_user_id: reporter._id }],
+        'a response on an attributed ticket publishes FeedbackResponded for the in-app notice'
+    );
+    await setStatus(secret.ticket_no, { status: 'resolved', response: 'Thanks, looked into it.' }, staff(reviewer._id));
+    assert.strictEqual(responded.length, 1, 'an anonymous ticket has nobody to notify');
 
     // A dispute has to be able to reopen a resolution, which is the one backwards move that exists.
     const reopened = await setStatus(mine.ticket_no, { status: 'under_review' }, staff(reviewer._id));
@@ -224,6 +284,21 @@ async function main(): Promise<void> {
     assert.strictEqual(erased!.reporter!.avatar_url, null, 'so does the avatar');
     assert.strictEqual(erased!.reporter!.deleted, true, 'and the flag the UI renders from is raised');
     assert.strictEqual(erased!.reporter!.user_id, reporter._id, 'the reference stays — it still has to resolve');
+    assert.strictEqual(erased!.contact_email, null, 'and the account email copied onto it goes too');
+
+    await handlers.handleUserRestored({ user_id: reporter._id });
+    const restored = await FeedbackTicket.findOne({ ticket_no: mine.ticket_no }).lean();
+    assert.strictEqual(restored!.reporter!.display_name, 'Priya Reporter', 'UserRestored brings the name back');
+    assert.strictEqual(restored!.reporter!.deleted, false, 'and lowers the flag');
+    assert.strictEqual(restored!.contact_email, reporter.email, 'and the reply address');
+    await handlers.handleUserDeleted({ user_id: reporter._id });
+
+    // A deleted account never reappears through a late profile or restore event.
+    await User.updateOne({ _id: reporter._id }, { $set: { deleted_at: new Date() } });
+    await handlers.handleUserProfileUpdated({ user_id: reporter._id, changed_fields: ['full_name'] });
+    await handlers.handleUserRestored({ user_id: reporter._id });
+    const stillGone = await FeedbackTicket.findOne({ ticket_no: mine.ticket_no }).lean();
+    assert.strictEqual(stillGone!.reporter!.display_name, 'Deleted user', 'late profile/restore events for a deleted account are no-ops');
 
     const stillAnonymous = await FeedbackTicket.findOne({ ticket_no: secret.ticket_no }).lean();
     assert.strictEqual(stillAnonymous!.reporter, null, 'an anonymous ticket had nothing to erase');

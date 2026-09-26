@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, requireActiveUser, requireRole, UserRole, validate, wrap } from '@bgsc/shared';
+import { requireAuth, requireActiveUser, UserRole, validate, wrap } from '@bgsc/shared';
 import * as controller from './hallOfFame.controller';
 import * as schemas from './hallOfFame.schemas';
 
@@ -10,12 +10,12 @@ hallOfFameRouter.get('/', validate({ query: schemas.HallOfFameQuerySchema }), wr
 hallOfFameRouter.get('/featured', wrap(controller.getFeaturedEntries));
 hallOfFameRouter.get('/:slugOrId', validate({ params: schemas.HallOfFameSlugOrIdParamSchema }), wrap(controller.getEntryBySlugOrId));
 
-// Protected routes
+// Protected routes. `requireActiveUser(floor)` is a factory: passed uncalled it took the request
+// as its role and threw, so every write here was a 500 (backend-audit-2026-09-26).
 hallOfFameRouter.post(
     '/',
     requireAuth,
-    requireActiveUser,
-    requireRole(UserRole.CORE),
+    requireActiveUser(UserRole.CORE),
     validate({ body: schemas.CreateHallOfFameEntrySchema }),
     wrap(controller.createEntry)
 );
@@ -23,8 +23,7 @@ hallOfFameRouter.post(
 hallOfFameRouter.patch(
     '/:id',
     requireAuth,
-    requireActiveUser,
-    requireRole(UserRole.CORE),
+    requireActiveUser(UserRole.CORE),
     validate({ params: schemas.HallOfFameIdParamSchema, body: schemas.UpdateHallOfFameEntrySchema }),
     wrap(controller.updateEntry)
 );
@@ -32,8 +31,7 @@ hallOfFameRouter.patch(
 hallOfFameRouter.delete(
     '/:id',
     requireAuth,
-    requireActiveUser,
-    requireRole(UserRole.COORDINATOR),
+    requireActiveUser(UserRole.COORDINATOR),
     validate({ params: schemas.HallOfFameIdParamSchema }),
     wrap(controller.deleteEntry)
 );

@@ -1,11 +1,10 @@
 import { Router, raw } from 'express';
-import { requireActiveUser, requireAuth, optionalAuth, requireRole, validate, UserRole } from '@bgsc/shared';
+import { requireActiveUser, requireAuth, optionalAuth, validate, UserRole } from '@bgsc/shared';
 import * as c from './event.controller';
 import { eventAuctionRoutes } from '../auction/auction.routes';
 import {
     CreateEventSchema,
     ManageCaptainSchema,
-    PromoteWaitlistSchema,
     QueryEventsSchema,
     QueryParticipantsSchema,
     RecordAttendanceSchema,
@@ -29,17 +28,16 @@ eventRoutes.get('/:ref/participants/stats', optionalAuth, validate({ params: Ref
 eventRoutes.get('/:ref/participants', optionalAuth, validate({ params: RefParamSchema, query: QueryParticipantsSchema }), c.participants);
 
 // Event Waitlist Management
-eventRoutes.get('/:ref/waitlist', requireAuth, requireRole(UserRole.CORE), validate({ params: RefParamSchema }), c.waitlist);
+eventRoutes.get('/:ref/waitlist', requireAuth, requireActiveUser(UserRole.CORE), validate({ params: RefParamSchema }), c.waitlist);
 eventRoutes.post(
     '/:ref/waitlist/:registrationId/promote',
     requireAuth,
     requireActiveUser(UserRole.CORE),
-    validate({ body: PromoteWaitlistSchema }),
     c.promoteWaitlist
 );
 
 // Event Attendance Tracking
-eventRoutes.get('/:ref/attendance', requireAuth, requireRole(UserRole.CORE), validate({ params: RefParamSchema }), c.getAttendance);
+eventRoutes.get('/:ref/attendance', requireAuth, requireActiveUser(UserRole.CORE), validate({ params: RefParamSchema }), c.getAttendance);
 // The body is validated too: `RecordAttendanceSchema` existed in event.schemas.ts and was never
 // wired, so a malformed body reached the service and surfaced as a 500 instead of a 422, and the
 // array was uncapped — one request could drive an unbounded number of queries.
@@ -67,16 +65,24 @@ eventRoutes.use('/:ref/auction', eventAuctionRoutes);
 
 // Management (Core / Admin)
 // Writes rank the LIVE user document, not the token's role claim: a token outlives a demotion or a
-// suspension by up to fifteen minutes (adding-a-service.md §6.2). Reads below keep `requireRole` —
-// a stale read is not a damage path. (Whole-backend audit, Sep 27.)
+// suspension by up to fifteen minutes (adding-a-service.md §6.2). Admin reads of an event's
+// registrations (waitlist, attendance) do too, and are scoped to the event's admins (audit #2).
 eventRoutes.post('/', requireAuth, requireActiveUser(UserRole.CORE), validate({ body: CreateEventSchema }), c.create);
-eventRoutes.patch('/:ref', requireAuth, validate({ params: RefParamSchema, body: UpdateEventSchema }), c.update);
+eventRoutes.patch(
+    '/:ref',
+    requireAuth,
+    requireActiveUser(UserRole.CORE),
+    validate({ params: RefParamSchema, body: UpdateEventSchema }),
+    c.update
+);
 eventRoutes.delete('/:ref', requireAuth, requireActiveUser(UserRole.COORDINATOR), validate({ params: RefParamSchema }), c.remove);
 
-// Media Upload (Poster / Logo)
+// Media Upload (Poster / Logo). Event admins only — any signed-in user could replace any published
+// event's cover (audit Sep 26, H21); the service checks the event-level right.
 eventRoutes.post(
     '/:ref/media',
     requireAuth,
+    requireActiveUser(UserRole.CORE),
     validate({ params: RefParamSchema }),
     raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: IMAGE_MAX_BYTES }),
     c.uploadMedia

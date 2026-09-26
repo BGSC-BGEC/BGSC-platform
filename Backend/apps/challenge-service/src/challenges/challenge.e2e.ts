@@ -147,6 +147,20 @@ async function main(): Promise<void> {
         const audits = await AuditLog.countDocuments({ action: 'challenge.created', target_id: challengeId });
         assert.strictEqual(audits, 1, 'Spec §7.3: the write is audited');
         pass('the create wrote exactly one audit row');
+
+        const js = await call('POST', '/challenges', {
+            as: core,
+            body: draftBody({ resources: [{ label: 'x', url: 'javascript:alert(1)' }] }),
+        });
+        assert.strictEqual(js.status, 422, 'a javascript: link is stored XSS, not a resource');
+        pass('only http(s) URLs are accepted');
+
+        // Unpublished below Core: 404 by key (a 403 would confirm it exists), 403 as a list filter.
+        assert.strictEqual((await call('GET', `/challenges/${challengeId}`, { as: member })).status, 404);
+        assert.strictEqual((await call('GET', `/challenges/${challengeId}`, { as: core })).status, 200);
+        assert.strictEqual((await call('GET', '/challenges?status=draft', { as: member })).status, 403);
+        assert.strictEqual((await call('GET', '/challenges?status=draft', { as: core })).status, 200);
+        pass('a draft is invisible below Core');
     }
 
     section('a suspended coordinator cannot write, whatever their token says');
@@ -189,10 +203,20 @@ async function main(): Promise<void> {
     {
         const hidden = await call('POST', '/challenges', {
             as: core,
-            body: draftBody({ brief_hidden_until_accept: true, description: 'The secret brief.' }),
+            body: draftBody({ brief_hidden_until_accept: true, description: 'The secret brief.', max_participants: 9, reviewers: [coreId] }),
         });
         const hiddenId = hidden.body._id;
         await call('POST', `/challenges/${hiddenId}/activate`, { as: core });
+
+        // Through the real route and zod: a PATCH of one field used to arrive as a full document of
+        // schema defaults and wipe the hidden-brief flag, the cap and the reviewers (audit H1).
+        const renamed = await call('PATCH', `/challenges/${hiddenId}`, { as: core, body: { title: 'Renamed secret' } });
+        assert.strictEqual(renamed.status, 200);
+        assert.strictEqual(renamed.body.title, 'Renamed secret');
+        assert.strictEqual(renamed.body.brief_hidden_until_accept, true, 'PATCH { title } keeps the brief hidden');
+        assert.strictEqual(renamed.body.max_participants, 9);
+        assert.deepStrictEqual(renamed.body.reviewers, [coreId]);
+        pass('a one-field PATCH changes one field');
 
         const before = await call('GET', `/challenges/${hiddenId}`, { as: member });
         assert.strictEqual(before.body.challenge.description, null, 'the brief is withheld before acceptance');
@@ -221,6 +245,16 @@ async function main(): Promise<void> {
         ]);
         const statuses = [a.status, b.status].sort();
         assert.deepStrictEqual(statuses, [201, 409], `expected one 201 and one 409, got ${statuses}`);
+
+        // Accept and submit rank the live user document: a suspended account cannot join, and on
+        // an auto-approve challenge cannot mint points, on a token that has not expired yet.
+        const benchedId = await seedUser(UserRole.USER, UserStatus.SUSPENDED);
+        const benched = token(benchedId, UserRole.USER);
+        assert.strictEqual((await call('POST', `/challenges/${challengeId}/accept`, { as: benched, body: {} })).status, 401);
+        assert.strictEqual(
+            (await call('POST', `/challenges/participations/${uuid()}/submit`, { as: benched, body: { proofs: [{ type: 'url', value: 'https://x.y' }] } })).status,
+            401
+        );
         assert.strictEqual(await ChallengeParticipation.countDocuments({ challenge_id: challengeId, 'participant.id': otherId }), 1);
         assert.strictEqual((await Challenge.findById(challengeId))!.counts.accepted, 2);
         pass('a double-clicked accept produces one row and one seat');
@@ -246,8 +280,8 @@ async function main(): Promise<void> {
 
         assert.strictEqual(
             (await call('POST', `/challenges/participations/${participationId}/review`, { as: member, body: { decision: 'approved' } })).status,
-            403,
-            'a participant cannot approve themselves'
+            404,
+            'a participant cannot approve themselves, and a non-reviewer gets 404 like detail and queue'
         );
 
         const queueDenied = await call('GET', `/challenges/${challengeId}/participations`, { as: member });
@@ -304,6 +338,12 @@ async function main(): Promise<void> {
         const connect = await call('GET', '/strava/connect', { as: member });
         assert.strictEqual(connect.status, 503);
         assert.strictEqual(connect.body.error, 'strava_not_configured');
+        config.strava.clientId = 'e2e-client';
+        config.strava.clientSecret = 'e2e-secret';
+        // JSON, not a 302: a Bearer-authenticated redirect cannot be followed by any real client.
+        const configured = await call('GET', '/strava/connect', { as: member });
+        assert.strictEqual(configured.status, 200);
+        assert.ok(String(configured.body.url).startsWith('https://www.strava.com/oauth/authorize?'));
         config.strava.clientId = wasId;
         config.strava.clientSecret = wasSecret;
 
@@ -358,10 +398,36 @@ async function main(): Promise<void> {
         assert.strictEqual(junk.status, 302, 'even a malformed callback must return the user, not 422 JSON');
         assert.ok(junk.headers.get('location')?.includes('strava='));
 
-        for (const r of [forged, noCode, unconfigured, junk]) {
+        // A good callback links NOTHING: it bounces code/state/scope to the app, which completes the
+        // link under its own session (POST /strava/link). The victim of a forwarded authorize URL
+        // would post with their own session and be refused.
+        config.strava.clientId = 'e2e-client';
+        config.strava.clientSecret = 'e2e-secret';
+        const good = await call('GET', `/strava/callback?code=abc&state=${valid}&scope=read,activity:read_all`);
+        assert.strictEqual(good.status, 302);
+        const target = new URL(good.headers.get('location')!);
+        assert.strictEqual(target.searchParams.get('strava'), 'authorized');
+        // The code rides in the fragment, which no server (ours or the frontend host) ever receives.
+        assert.strictEqual(target.searchParams.get('code'), null);
+        const fragment = new URLSearchParams(target.hash.slice(1));
+        assert.strictEqual(fragment.get('code'), 'abc');
+        assert.strictEqual(fragment.get('scope'), 'read,activity:read_all');
+        // Unconfigured again BEFORE the hijack: the refusal burns the code by exchanging it, and an
+        // e2e must not reach strava.com (the burn is best-effort, so the refusal is the same).
+        config.strava.clientId = '';
+        const hijack = await call('POST', '/strava/link', { as: other, body: { code: 'abc', state: valid, scope: 'activity:read_all' } });
+        assert.strictEqual(hijack.status, 400);
+        assert.strictEqual(hijack.body.error, 'oauth_state_mismatch');
+        config.strava.clientId = wasId;
+
+        // Sync spends the app-wide Strava budget: the live user document, not the token.
+        const frozenId = await seedUser(UserRole.USER, UserStatus.SUSPENDED);
+        assert.strictEqual((await call('POST', '/strava/sync', { as: token(frozenId, UserRole.USER) })).status, 401);
+
+        for (const r of [forged, noCode, unconfigured, junk, good]) {
             assert.ok(r.headers.get('location')?.startsWith(config.frontendUrl), 'always back to the frontend');
         }
-        pass('forged state, missing code and unconfigured client all redirect home with a reason');
+        pass('forged state, missing code and unconfigured client redirect home with a reason; only the starter can link');
     }
 
     section('another user cannot read your private Strava activities');
@@ -381,6 +447,10 @@ async function main(): Promise<void> {
 
         const self = await call('GET', `/strava/users/${memberId}/activities`, { as: member });
         assert.strictEqual(self.body.activities.length, 2, 'reading your own id by path is not a visitor');
+
+        await User.updateOne({ _id: memberId }, { $set: { 'settings.privacy.is_profile_public': false } });
+        assert.strictEqual((await call('GET', `/strava/users/${memberId}/activities`, { as: other })).status, 404, 'a private profile has no public feed');
+        await User.updateOne({ _id: memberId }, { $set: { 'settings.privacy.is_profile_public': true } });
         pass('activity:read_all pulls private activities; the profile route does not republish them');
     }
 

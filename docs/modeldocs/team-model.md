@@ -1,7 +1,7 @@
 # Team Model
 
 **Owner service:** Registration Service (teams are a registration construct; Event and Challenge services only read them)
-**Collection:** `teams`
+**Collections:** `teams`, `team_memberships`
 **Spec refs:** §4.1 Team, §5.5 "Event registration section" + "Event Team Formation Section", §5.7 "team formation list ... following the structure of teamed events", §5.15.4 (captain wallets/rosters), §8.1 Team* events
 
 ---
@@ -53,7 +53,8 @@ Spec §5.7 says challenge teams follow "the structure of teamed events". So one 
     version: number,                 // optimistic lock for concurrent bids
     is_overridden: boolean,          // true if OC manually adjusted captain purse within oc_captain_override_quota
     override_reason: string | null,  // reason for OC budget override
-    overridden_by: string | null     // user_id of OC member who applied the override
+    overridden_by: string | null,    // user_id of OC member who applied the override
+    applied_ops: string[]            // request_ids of purse debits/refunds already applied (idempotency)
   } | null,
 
   created_at: Date,
@@ -71,7 +72,8 @@ Spec §5.7 says challenge teams follow "the structure of teamed events". So one 
 | `invite_code` | Spec §5.5 "invite codes". Captain can rotate; old code invalid immediately. |
 | `pending` | Both invite and request directions live in one array; accepting either moves the user to `members`. Expire after 72h by default. |
 | `status` | See §4.1. `forming` while roster can change; `complete` once `size_min` met and captain confirms; `locked` after `roster_finalizes_at` (event) or on challenge acceptance; `disbanded` = soft removal. |
-| `auction.version` | Purse debit on `PlayerSold` is `findOneAndUpdate({ _id, version, 'auction.purse_spent': { $lte: total - amount } }, { $inc: { 'auction.purse_spent': amount, 'auction.version': 1 } })`. |
+| `auction.*` writes | **Registration Service only (Sep 26).** The Event Service used to `$inc` purses and `$push` members directly, and fell back to those writes on any HTTP failure — double debits after a timeout, and deliberate refusals (`team_full`, `team_locked`) overridden. Now every write is an `/internal` route here: `debit-purse` / `refund-purse { amount, request_id }`, `add-member`, `POST /internal/events/:id/auction-purses { purse_total }` (auction start; only teams with no purse), `PATCH /internal/teams/:id/auction-budget` (OC override). |
+| `auction.applied_ops` | What makes a purse op idempotent: debit = `findOneAndUpdate({ applied_ops: { $ne: rid }, $expr: spent + amount <= total }, { $inc, $push: { applied_ops: rid } })`; a replay of an applied `rid` answers 200 with the team. `rid` = `<lot_id>:debit` / `<lot_id>:refund`. Refund larger than `purse_spent` is refused (`refund_exceeds_spent`), never clamped — the old clamp was a second `save()` that could overwrite a concurrent debit. ponytail: two ids per lot sold; tens of lots per auction. |
 
 ## 4. Invariants
 
@@ -98,7 +100,7 @@ forming ──(size_min met, captain confirms)──> complete ──(roster_fin
 | create | captain (needs confirmed captain registration for event owners) | `TeamCreated` |
 | member add / remove | captain, member (leave), Core+ | `TeamMemberAdded` / `TeamMemberRemoved` |
 | forming ↔ complete | captain, or automatic on size change | `TeamUpdated` |
-| → locked | scheduler at `roster_finalizes_at`; Challenge Service on acceptance; Event Service when a lot is sold into the team (auction rosters lock per event rules) | `TeamLocked` |
+| → locked | Core+ (`PATCH /teams/:id/lock`); Challenge Service on acceptance (`POST /internal/teams/:id/lock`, idempotent). **As built:** no scheduler and no auction auto-lock — and a teamed event's leaderboard entry is created on `TeamLocked`, so event teams must be locked by hand. | `TeamLocked` |
 | → disbanded | captain while `forming`; Core+ any time; automatic on `EventCancelled` | `TeamDisbanded` |
 
 Captain leaving: blocked unless they transfer captaincy first (`TeamUpdated { captain_user_id }`) or the team has no other members (then disband).
@@ -117,17 +119,28 @@ Spec §5.5: "User toggle: Open / Closed / Invite Only (controls if others can in
 | `{ 'members.user_id': 1, 'owner.id': 1 }` | "my team for this event"; also the duplicate-membership check |
 | `{ 'owner.id': 1, join_policy: 1, status: 1 }` | Team search: open teams still forming |
 
-**One-team-per-user-per-owner:** Mongo cannot make a multikey index unique across documents the way we need. Registration Service enforces it: `findOne({ 'owner.id', 'members.user_id': uid, status: { $ne: 'disbanded' } })` then insert, inside a transaction (Mongo 4.0+ replica set). ponytail: check-then-write in a txn; if the DB chosen has no transactions, add a `team_memberships` side collection with unique `{ owner_id, user_id }`.
+**One-team-per-user-per-owner — `team_memberships` (Sep 26).** A multikey index cannot be unique across documents, and the database runs standalone (no transactions), so two concurrent joins both passed the read-then-write check. Decision: a side collection whose **primary key is the lock**.
+
+```ts
+team_memberships { _id: `${owner_id}:${user_id}`, owner_id, user_id, team_id, created_at }
+```
+
+Claimed (insert) before the roster `$push`; a second claim is E11000 → `409 already_in_team`. Released on leave/remove, and `deleteMany({ team_id })` on disband. Index `{ team_id: 1 }`. Registration Service is its only writer and reader.
 
 ## 7. Domain events (Spec §8.1)
 
+As built (Sep 26):
+
 ```
-TeamCreated        { team_id, owner, captain_id, name }
-TeamUpdated        { team_id, changed_fields[], updated_by }
-TeamMemberAdded    { team_id, user_id, added_by, via }
-TeamMemberRemoved  { team_id, user_id, removed_by }
+TeamCreated        { team_id, owner, captain_user_id, name }
+TeamMemberAdded    { team_id, owner, registration_id, user_id, acquired_via }
+TeamInviteCreated  { team_id, owner, user_id, invited_by }
+TeamMemberRemoved  { team_id, owner, registration_id, user_id, removed_by, reason }
+TeamLocked         { team_id, owner, locked_by }          // Leaderboard creates the team's entry
+TeamDisbanded      { team_id, owner, reason }             // Leaderboard withdraws the entry
 ```
-Plus `TeamLocked { team_id }` and `TeamDisbanded { team_id }` (not in spec list; needed by Event Service to freeze rosters and by Points Service to refund).
+
+`owner` is on every Team event so a consumer can filter without a read (`TeamLocked` carried none, and the leaderboard's handler was a silent no-op). `TeamUpdated` is not emitted.
 
 ## 8. Read patterns
 

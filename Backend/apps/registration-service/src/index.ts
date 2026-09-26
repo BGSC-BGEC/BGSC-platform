@@ -5,11 +5,16 @@ import { registrationRoutes } from './registrations/registration.routes';
 import { teamRoutes } from './teams/team.routes';
 import { internalRoutes } from './internal/internal.routes';
 import { initializeConsumers } from './events/consumers';
-import { UPLOAD_DIR } from './storage/storage';
+import { startSweeps } from './events/sweeps';
+import { migrateLegacyUploads } from './storage/storage';
 
 /**
  * Registration Service — :3004. Common registration service for events, challenges,
- * and anything form-shaped. Owns form_definitions, form_submissions, and teams.
+ * and anything form-shaped. Owns form_definitions, form_submissions, form_uploads and teams.
+ *
+ * Uploaded files are PRIVATE: written under `config.uploadDir/.private/registrations/` (a dot-dir
+ * media's static handler never serves) and read back only through the authed
+ * `GET /registrations/:id/files/:field_key`.
  */
 
 const NAME = 'registration-service';
@@ -18,10 +23,9 @@ const PORT = parseInt(process.env.PORT || '3004', 10);
 const options = {
     name: NAME,
     port: PORT,
+    // Only the collections this service writes get their indexes built here.
+    models: ['FormDefinition', 'FormDefinitionVersion', 'FormSubmission', 'FormUpload', 'Team', 'TeamMembership'],
     routes(app: express.Express) {
-        // Local-disk uploads. Week 4's Media Service replaces this with S3/R2 + CDN (Spec §15.2).
-        app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '1h', index: false, dotfiles: 'deny' }));
-
         app.use('/forms', formRoutes);
         app.use('/registrations', registrationRoutes);
         app.use('/teams', teamRoutes);
@@ -29,8 +33,13 @@ const options = {
         app.use('/internal', internalRoutes);
     },
     async onReady() {
-        // Event bus consumers: waitlist promotion on a released seat.
+        // Files earlier builds left under the public /uploads tree move to the private one.
+        const moved = await migrateLegacyUploads();
+        if (moved) console.log(`[${NAME}] moved ${moved} legacy registration upload(s) to private storage`);
+        // Event bus consumers: waitlist promotion, roster locks, user snapshots.
         initializeConsumers();
+        // And the same work re-derived from state, for events the bus dropped.
+        startSweeps();
     },
 };
 

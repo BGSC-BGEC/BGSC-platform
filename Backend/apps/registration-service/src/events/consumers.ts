@@ -1,25 +1,30 @@
-import {
-    FormSubmission,
-    Team,
-    User,
-    anonymizedSnapshot,
-    publish,
-    subscribe,
-    userSnapshotOf,
-} from '@bgsc/shared';
-import { transition } from '../registrations/registration.service';
-import { reserveSeat } from '../clients/event-client';
+import { FormDefinition, FormDefinitionVersion, FormSubmission, Team, User, anonymizedSnapshot, subscribe, userSnapshotOf } from '@bgsc/shared';
+import { promoteNext } from '../registrations/registration.service';
+import { lockReadyRosters } from '../teams/team.service';
 
 /**
  * Event bus consumers:
- *  - a released seat pulls the next person off the waitlist (plan §5.2 / §D6);
+ *  - a released seat pulls the next person off the waitlist;
+ *  - an event starting (or its auction closing) locks the ready rosters;
  *  - a changed profile rewrites the user snapshots this service owns (relationships.md §4);
- *  - a deleted account erases them.
+ *  - a deleted account erases them, and a restored one writes them back.
  */
+
+const logged = (what: string) => (err: unknown) => console.error(`[registration-service] ${what} consumer failed:`, err);
 
 export function initializeConsumers(): void {
     subscribe('RegistrationCancelled', (event) => {
-        void handleRegistrationCancelled(event.payload as unknown as CancelledPayload);
+        void handleRegistrationCancelled(event.payload as unknown as CancelledPayload).catch(logged('RegistrationCancelled'));
+    });
+
+    subscribe('EventStarted', (event) => {
+        const { event_id } = event.payload as { event_id?: string };
+        if (event_id) void lockReadyRosters(event_id).catch(logged('EventStarted'));
+    });
+
+    subscribe('AuctionClosed', (event) => {
+        const { event_id } = event.payload as { event_id?: string };
+        if (event_id) void lockReadyRosters(event_id).catch(logged('AuctionClosed'));
     });
 
     subscribe('UserProfileUpdated', (event) => {
@@ -28,6 +33,10 @@ export function initializeConsumers(): void {
 
     subscribe('UserDeleted', (event) => {
         void handleUserDeleted(event.payload as unknown as { user_id: string });
+    });
+
+    subscribe('UserRestored', (event) => {
+        void refreshSnapshots((event.payload as unknown as { user_id: string }).user_id, { restore: true });
     });
 
     console.log('[registration-service] Event consumers initialized');
@@ -40,47 +49,60 @@ interface ProfileUpdatedPayload {
 
 /**
  * `form_submissions.user` and `teams.members[]` store a display snapshot of the user, and this
- * service is the only writer of both (relationships.md §1). Without this consumer they were
- * written once at registration and never again — a user who changed their name kept the old one
- * on every roster and participant list forever.
- *
- * Best-effort and idempotent, per the snapshot policy: a missed event costs a stale name, not
- * a broken record, so a failure here never propagates.
+ * service is the only writer of both (relationships.md §1). Best-effort and idempotent, per the
+ * snapshot policy: a missed event costs a stale name, not a broken record.
  */
 async function handleUserProfileUpdated(payload: ProfileUpdatedPayload): Promise<void> {
     const { user_id, changed_fields } = payload;
     if (!user_id) return;
 
-    // changed_fields is load-bearing: user-service emits this for any profile write, and a bio
-    // edit must not trigger two collection-wide updates.
-    const touchesSnapshot =
-        !changed_fields || changed_fields.some((f) => f === 'full_name' || f === 'avatar_url');
+    // changed_fields is load-bearing: a bio edit must not trigger two collection-wide updates.
+    const touchesSnapshot = !changed_fields || changed_fields.some((f) => f === 'full_name' || f === 'avatar_url');
     if (!touchesSnapshot) return;
+    await refreshSnapshots(user_id, { restore: false });
+}
 
+/**
+ * Re-snapshot from a LIVE `users` row (a deleted account never re-appears).
+ *
+ * A profile refresh never touches a copy already marked deleted — a late `UserProfileUpdated`
+ * racing a `UserDeleted` used to write the real name back. `UserRestored` is the one path that
+ * clears the flag.
+ */
+async function refreshSnapshots(userId: string | undefined, opts: { restore: boolean }): Promise<void> {
+    if (!userId) return;
     try {
-        const user = await User.findById(user_id);
+        const user = await User.findOne({ _id: userId, deleted_at: null });
         if (!user) return;
         const snapshot = userSnapshotOf(user);
+        const liveOnly = opts.restore ? {} : { 'user.deleted': { $ne: true } };
+        const memberFilter = opts.restore ? { 'm.user_id': userId } : { 'm.user_id': userId, 'm.deleted': { $ne: true } };
 
         await Promise.all([
             FormSubmission.updateMany(
-                { 'user.user_id': user_id },
-                { $set: { 'user.display_name': snapshot.display_name, 'user.avatar_url': snapshot.avatar_url } }
+                { 'user.user_id': userId, ...liveOnly },
+                {
+                    $set: {
+                        'user.display_name': snapshot.display_name,
+                        'user.avatar_url': snapshot.avatar_url,
+                        'user.deleted': false,
+                    },
+                }
             ),
-            // Positional $ updates the matched member; the filter guarantees there is one.
             Team.updateMany(
-                { 'members.user_id': user_id },
+                { 'members.user_id': userId },
                 {
                     $set: {
                         'members.$[m].display_name': snapshot.display_name,
                         'members.$[m].avatar_url': snapshot.avatar_url,
+                        'members.$[m].deleted': false,
                     },
                 },
-                { arrayFilters: [{ 'm.user_id': user_id }] }
+                { arrayFilters: [memberFilter] }
             ),
         ]);
     } catch (err) {
-        console.error(`[registration-service] Snapshot refresh failed for ${user_id}:`, err);
+        console.error(`[registration-service] Snapshot refresh failed for ${userId}:`, err);
     }
 }
 
@@ -90,54 +112,26 @@ interface CancelledPayload {
     freed_seat: boolean;
 }
 
+/**
+ * `freed_seat` is set only when the Event Service confirmed the release, so a failed release no
+ * longer promotes someone into a seat that is still held. Promotion itself is exclusive per row.
+ */
 async function handleRegistrationCancelled(payload: CancelledPayload): Promise<void> {
     const { owner, freed_seat } = payload;
-
-    // A waitlisted user cancelling frees nothing — only a confirmed registration held a seat.
-    // Without this, every waitlist cancellation triggered a pointless promotion attempt.
-    if (!freed_seat || owner.type !== 'event' || !owner.id) {
-        return;
-    }
-
-    const nextInLine = await FormSubmission.findOne({
-        'owner.id': owner.id,
-        status: 'waitlisted',
-    }).sort({ waitlist_position: 1 });
-
-    if (!nextInLine) return;
-
-    try {
-        // Keyed on the registration id, so a retried promotion cannot claim a second seat.
-        const result = await reserveSeat(owner.id, nextInLine._id, nextInLine._id);
-        if (!result.reserved) return;
-
-        await transition(nextInLine, 'confirmed', 'system', 'promoted_from_waitlist');
-        await nextInLine.save();
-
-        publish('RegistrationCreated', 'registration-service', {
-            registration_id: nextInLine._id,
-            owner: nextInLine.owner,
-            user_id: nextInLine.user.user_id,
-            role: nextInLine.context.event?.role ?? 'solo',
-        });
-
-        console.log(`[registration-service] Promoted ${nextInLine._id} off the waitlist for event ${owner.id}`);
-    } catch (err) {
-        // Non-fatal: the seat is free and an admin can still confirm by hand.
-        console.error('[registration-service] Waitlist promotion failed:', err);
-    }
+    if (!freed_seat || owner?.type !== 'event' || !owner.id) return;
+    await promoteNext(owner.id);
 }
 
+/** Answer types that are contact details, not answers to the event's questions. */
+const PII_TYPES = new Set(['email', 'phone']);
+
 /**
- * A deleted account's name comes off every roster and participant list this service owns.
+ * A deleted account's name comes off every roster and participant list this service owns, and the
+ * contact details it typed into forms (email/phone answers) are removed from its registrations.
+ * `user_id` is kept: it is a reference, and the rows that point at it still resolve.
  *
- * The alternative — leaving the name and expecting the client to render "deleted user" — cannot be
- * implemented: a snapshot carries no deletion signal and `GET /users/:ref` answers 404 for a
- * deleted account, so the client has nothing to go on and the real name keeps leaving the API.
- * The copy is erased here and `deleted: true` is what the UI renders from (relationships.md §4).
- *
- * `user_id` is deliberately kept: it is a reference, and the rosters and registrations that point
- * at it still have to resolve.
+ * ponytail: other answers (free text, files) are retained under the retention policy — files are
+ * private, readable only by the event's admins. Masking more is a policy change.
  */
 async function handleUserDeleted(payload: { user_id: string }): Promise<void> {
     const { user_id } = payload;
@@ -152,6 +146,28 @@ async function handleUserDeleted(payload: { user_id: string }): Promise<void> {
                 { arrayFilters: [{ 'm.user_id': user_id }] }
             ),
         ]);
+
+        // Bounded by one person's registrations: a handful of rows, one form read each.
+        const rows = await FormSubmission.find({ 'user.user_id': user_id }).select('form_id').limit(1000).lean();
+        const formIds = [...new Set(rows.map((r) => r.form_id))];
+        // Every version of the form: a row made on an older one may hold a contact answer under a
+        // key the current fields have since dropped or retyped.
+        const [forms, versions] = await Promise.all([
+            FormDefinition.find({ _id: { $in: formIds } }).select('fields.key fields.type').lean(),
+            FormDefinitionVersion.find({ form_id: { $in: formIds } }).select('form_id fields.key fields.type').lean(),
+        ]);
+        const piiKeys = new Map<string, Set<string>>();
+        for (const def of [...forms.map((f) => ({ form_id: f._id, fields: f.fields })), ...versions]) {
+            const keys = piiKeys.get(def.form_id) ?? piiKeys.set(def.form_id, new Set()).get(def.form_id)!;
+            for (const f of def.fields) if (PII_TYPES.has(f.type)) keys.add(`answers.${f.key}`);
+        }
+        for (const [formId, keys] of piiKeys) {
+            if (keys.size === 0) continue;
+            await FormSubmission.updateMany(
+                { 'user.user_id': user_id, form_id: formId },
+                { $unset: Object.fromEntries([...keys].map((k) => [k, ''])) }
+            );
+        }
     } catch (err) {
         console.error(`[registration-service] anonymization failed for ${user_id}:`, err);
     }

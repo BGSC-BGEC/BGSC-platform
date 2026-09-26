@@ -44,7 +44,7 @@ export interface IFeedbackTicket extends Document<string> {
 
     subject: string;
     description: string;
-    /** URLs only — Media Service owns uploads (plan D7). */
+    /** URLs only — Media Service owns uploads. */
     attachments: string[];
     /** An event complaint names its event. */
     event_id: string | null;
@@ -142,7 +142,7 @@ FeedbackTicketSchema.index({ event_id: 1, created_at: -1 }, { sparse: true });
 export const FeedbackTicket = model<IFeedbackTicket>('FeedbackTicket', FeedbackTicketSchema, 'feedback_tickets');
 
 /**
- * Rate-limit bookkeeping for a PUBLIC write (plan §5).
+ * Rate-limit bookkeeping for a PUBLIC write.
  *
  * `POST /feedback` takes no token, so the only handle on a flood is the submitter — an account id
  * when there is one, and otherwise the address. The address is stored **hashed**: it is only ever

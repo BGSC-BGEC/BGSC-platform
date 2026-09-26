@@ -3,10 +3,11 @@ import {
     FormSubmission,
     IUser,
     LeaderboardEntry,
+    User,
 } from '@bgsc/shared';
 
 /**
- * Player card payload and rating (Spec §5.3, decision D1 in docs/be2-user-service-plan.md).
+ * Player card payload and rating (Spec §5.3).
  *
  * Spec calls for a "Fixed Rating Section (computed metrics)" and gives no formula. These weights are
  * a first guess; `formula_version` is what makes them cheap to change — a new version plus a
@@ -88,10 +89,13 @@ export async function ratingFor(user: IUser, force = false, now: Date = new Date
 
     const result = computeRating(await gatherRatingInputs(user), now);
 
-    // Cache write is best-effort: a failed write must not fail the card read.
+    // Cache write is best-effort: a failed write must not fail the card read. One-path $set, not
+    // `user.save()`: a save re-validated the whole document on a public read and could write back
+    // fields a concurrent PATCH had just changed.
     try {
-        user.set('player_card.stats', { ...(user.player_card?.stats ?? {}), ...result });
-        await user.save();
+        const stats = { ...(user.player_card?.stats ?? {}), ...result };
+        await User.updateOne({ _id: user._id }, { $set: { 'player_card.stats': stats } });
+        user.player_card = { ...(user.player_card ?? {}), stats };
     } catch (err) {
         console.error('Failed to cache player card rating:', err);
     }
@@ -116,9 +120,26 @@ export interface PlayerCardDTO {
  * MVP omissions vs Spec §5.3, all deliberate: sponsor badge (sponsors out of MVP), shareable image
  * export (Phase 2 §17.1), matchmaking (§17.3), friend-given tags (friends out of MVP).
  */
-export async function playerCardFor(user: IUser): Promise<PlayerCardDTO> {
+export async function playerCardFor(user: IUser, stubOnly = false): Promise<PlayerCardDTO> {
     const { rating, formula_version } = await ratingFor(user);
     const p = user.profile ?? ({} as IUser['profile']);
+
+    // Private profile, stranger viewing: the stub a deep link renders, and nothing the
+    // profile's privacy flag hides — bio, interests, social handles and the rating's inputs.
+    if (stubOnly) {
+        return {
+            user_id: user._id,
+            username: user.username,
+            avatar_url: p.avatar_url ?? null,
+            bio: '',
+            interests: [],
+            card_tier: user.player_card?.card_tier ?? 'Rookie',
+            rating,
+            formula_version,
+            social_links: {},
+            stats: {},
+        };
+    }
 
     return {
         user_id: user._id,

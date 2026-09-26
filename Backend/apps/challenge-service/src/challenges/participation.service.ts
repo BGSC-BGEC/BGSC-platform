@@ -51,9 +51,13 @@ function assertOpen(challenge: IChallenge, now: Date): void {
     // Only `active` accepts new participants. A `completed` challenge still takes submissions from
     // people who accepted in time (challenge-model.md §2.1) — that is the submit path, not this one.
     if (challenge.status !== 'active') throw new ServiceError(409, 'challenge_not_active');
-    const { opens_at, closes_at } = challenge.window;
+    const { opens_at, closes_at, submissions_close_at } = challenge.window;
     if (opens_at && now < opens_at) throw new ServiceError(409, 'challenge_not_open_yet');
     if (closes_at && now > closes_at) throw new ServiceError(409, 'challenge_window_closed');
+    // With `closes_at` null nothing above stops an accept after the hard stop, and the deadline it
+    // would get is already past: the sweeper expires it within a minute and the seat is
+    // never given back.
+    if (submissions_close_at && now >= submissions_close_at) throw new ServiceError(409, 'challenge_submissions_closed');
 }
 
 /**
@@ -103,12 +107,22 @@ async function acceptAsUser(
     actor: Actor,
     now: Date
 ): Promise<IChallengeParticipation> {
-    if (challenge.teaming.enabled && (challenge.teaming.team_size_min ?? 1) > 1) {
-        throw new ServiceError(409, 'team_required');
-    }
+    // A teamed challenge is team-only, even at team_size_min 1 (a solo player is a team of one).
+    // Letting both kinds in shared one `counts.accepted` between two caps — `max_participants` for
+    // solos, `max_teams` for teams — so solos filled `max_teams` and teams ignored
+    // `max_participants`. One kind per challenge makes each cap mean exactly one thing (audit Sep 26).
+    if (challenge.teaming.enabled) throw new ServiceError(409, 'team_required');
 
     const user = await User.findOne({ _id: actor.id, ...alive }).select('profile.full_name profile.avatar_url username');
     if (!user) throw new ServiceError(404, 'user_not_found');
+
+    // The mirror of the team path's `member_already_participating` guard. Teaming can be switched off after teams accepted,
+    // and then a member of an accepted team could accept alone: a second participation, a second
+    // idempotency key, and Points pays them twice. Only TEAM rows are checked here — a repeat solo
+    // accept is the unique index's job and keeps its own `already_accepted`.
+    if (await ChallengeParticipation.exists({ challenge_id: challenge._id, 'participant.type': 'team', member_user_ids: actor.id })) {
+        throw new ServiceError(409, 'member_already_participating');
+    }
 
     await claimSlot(challenge._id, challenge.max_participants);
     try {
@@ -161,7 +175,7 @@ async function acceptAsTeam(
     // The unique index is on `participant.id`, which for a team is the TEAM id — so the same user
     // in two different teams on one challenge passes it, and then Points pays them twice, because
     // it fans out over `member_user_ids` (points consumers.ts:203). A query is the only expression
-    // of this rule the model can't carry; it is racy in a millisecond window (plan D8).
+    // of this rule the model can't carry; it is racy in a millisecond window.
     if (await ChallengeParticipation.exists({ challenge_id: challenge._id, member_user_ids: { $in: memberIds } })) {
         throw new ServiceError(409, 'member_already_participating');
     }
@@ -294,44 +308,61 @@ export async function submit(
         if (proof.type === 'url' && !/^https?:\/\//i.test(proof.value)) throw new ServiceError(422, 'proof_url_invalid');
     }
 
-    const firstSubmit = p.submission == null;
-    const version = (p.submission?.version ?? 0) + 1;
     // Straight to `under_review`, never through `submitted`. challenge-model.md §3.1 draws
     // `submitted` as an intermediate, but there is nothing to do in it: the next transition is
     // unconditional, so a row could only ever be caught there between two lines of the same write.
     // `submitted` stays in PARTICIPATION_STATUS and in REVIEWABLE_FROM so a row written by an older
     // build still reviews, but nothing in this service assigns it.
-    const to = challenge.submission.auto_approve ? 'approved' : 'under_review';
+    //
+    // A participation a reviewer has EVER rejected goes back to a reviewer, whatever the challenge
+    // says now: otherwise flipping `auto_approve` on turns every rejection into a resubmit away
+    // from a payout nobody approved.
+    const everRejected = p.status_history.some((h) => h.to === 'rejected');
+    const to = challenge.submission.auto_approve && !everRejected ? 'approved' : 'under_review';
 
     // `p.status` was read a moment ago, so the `from` recorded below is that read's value. The CAS
     // filter bounds it to SUBMITTABLE_FROM either way, so the worst case is a history row naming
     // the wrong member of that set — never a transition that should not have happened.
-    const submitSet: Record<string, unknown> = {
+    const common: Record<string, unknown> = {
         status: to,
-        submission: {
-            proofs: input.proofs.map((pr) => ({ ...pr, size_bytes: null, mime: null })),
-            notes: input.notes,
-            submitted_at: now,
-            version,
-        },
         // A resubmit after a rejection must not leave the old verdict standing.
         review: null,
     };
     // An auto-approved participation is approved HERE, so it has to carry the reward here too —
     // the review route is not involved and `fillRewardIds` does nothing without one.
     if (to === 'approved') {
-        submitSet.reward = {
+        common.reward = {
             points_awarded: p.challenge_snapshot.award_points,
             point_transaction_ids: [],
             hall_of_fame_entry_id: null,
         };
     }
+    const proofs = input.proofs.map((pr) => ({ ...pr, size_bytes: null, mime: null }));
+    const filter = {
+        _id: id,
+        status: { $in: [...SUBMITTABLE_FROM] as ParticipationStatus[] },
+        // The rejection check again, inside the CAS: a reviewer rejecting between the read above and
+        // this write must not be overtaken by an auto-approve.
+        ...(to === 'approved' ? { 'status_history.to': { $ne: 'rejected' } } : {}),
+    };
+    const $push = { status_history: { from: p.status, to, by: actor.id, at: now } };
 
-    const updated = await ChallengeParticipation.findOneAndUpdate(
-        { _id: id, status: { $in: [...SUBMITTABLE_FROM] as ParticipationStatus[] } },
+    // Two compare-and-swaps rather than one, so "first submit" and `version` are decided by the
+    // database, not by the read above: a double-clicked first submit used to count twice in
+    // `counts.submitted` and write `version: 1` twice. The first CAS only matches a row with no
+    // submission yet; everything else is a resubmit, whose version is `$inc`ed in the same write.
+    let updated = await ChallengeParticipation.findOneAndUpdate(
+        { ...filter, submission: null },
+        { $set: { ...common, submission: { proofs, notes: input.notes, submitted_at: now, version: 1 } }, $push },
+        { returnDocument: 'after' }
+    );
+    const firstSubmit = updated != null;
+    updated ??= await ChallengeParticipation.findOneAndUpdate(
+        { ...filter, submission: { $ne: null } },
         {
-            $set: submitSet,
-            $push: { status_history: { from: p.status, to, by: actor.id, at: now } },
+            $set: { ...common, 'submission.proofs': proofs, 'submission.notes': input.notes, 'submission.submitted_at': now },
+            $inc: { 'submission.version': 1 },
+            $push,
         },
         { returnDocument: 'after' }
     );
@@ -342,7 +373,7 @@ export async function submit(
     publish('ChallengeSubmitted', PRODUCER, {
         participation_id: id,
         challenge_id: challenge._id,
-        version,
+        version: updated.submission!.version,
     });
 
     // Trust-based digital challenges approve on submit (challenge-model.md §3.1). The transition
@@ -371,7 +402,8 @@ export async function review(
     const existing = await ChallengeParticipation.findById(id);
     if (!existing) throw new ServiceError(404, 'participation_not_found');
     const challenge = await getById(existing.challenge_id);
-    if (!mayReview(challenge, actor.id, role)) throw new ServiceError(403, 'forbidden');
+    // 404, like the detail and the queue: a caller who may not review must not learn the row exists.
+    if (!mayReview(challenge, actor.id, role)) throw new ServiceError(404, 'participation_not_found');
     // Separation of duties: `mayReview` lets any Core+ approve, and a Core+ can also accept a
     // challenge. Without this a coordinator could author a 100k-point challenge, accept it and
     // approve their own payout in three requests, all of them audited as legitimate.
@@ -443,6 +475,9 @@ export async function review(
             participation_id: id,
             challenge_id: challenge._id,
             reason: input.reason,
+            // 1-based ordinal of THIS rejection, from the document the CAS just wrote. Notification
+            // keys its dedupe on it; reading it at consume time raced a quick second rejection.
+            rejection_no: updated.status_history.filter((h) => h.to === 'rejected').length,
         });
     }
     return updated;
@@ -454,7 +489,7 @@ export async function review(
  *
  * Publishes rather than calls: the Points Service consumes `ChallengeCompleted` and dedupes on
  * `challenge.completed:<participation_id>:<user_id>` (Points.ts:212), so a replay pays once and a
- * synchronous call would buy nothing but a failure mode (be2-points-service-plan.md §5.5).
+ * synchronous call would buy nothing but a failure mode.
  */
 async function settleApproval(
     p: IChallengeParticipation,
@@ -476,9 +511,18 @@ async function settleApproval(
         ip: actor.ip,
     });
 
+    publishCompleted(p);
+    if (challenge.grants_hall_of_fame) publishLegend(p);
+}
+
+/**
+ * The two approval events, built in one place because the replay sweep (scheduler/replay.ts)
+ * republishes them and a replay must be byte-for-byte the event it stands in for.
+ */
+export function publishCompleted(p: IChallengeParticipation): void {
     publish('ChallengeCompleted', PRODUCER, {
         participation_id: p._id,
-        challenge_id: challenge._id,
+        challenge_id: p.challenge_id,
         participant: { type: p.participant.type, id: p.participant.id },
         member_user_ids: p.member_user_ids,
         // The snapshot's amount, never today's. Points resolves `challenge.completed` with this as
@@ -486,14 +530,14 @@ async function settleApproval(
         // pays nobody, silently. That is why this is never computed and never optional.
         award_points: p.challenge_snapshot.award_points,
     });
+}
 
-    if (challenge.grants_hall_of_fame) {
-        publish('ChallengeLegendAchieved', PRODUCER, {
-            participation_id: p._id,
-            challenge_id: challenge._id,
-            member_user_ids: p.member_user_ids,
-        });
-    }
+export function publishLegend(p: IChallengeParticipation): void {
+    publish('ChallengeLegendAchieved', PRODUCER, {
+        participation_id: p._id,
+        challenge_id: p.challenge_id,
+        member_user_ids: p.member_user_ids,
+    });
 }
 
 export async function withdraw(id: string, reason: string | null, actor: Actor): Promise<IChallengeParticipation> {
@@ -512,7 +556,7 @@ export async function withdraw(id: string, reason: string | null, actor: Actor):
     if (!updated) throw new ServiceError(409, 'participation_not_withdrawable');
 
     // `counts.accepted` is "slots consumed", and a withdrawal is an admin undo, so the slot comes
-    // back. Expiry deliberately does NOT return it (D18): the participant took their attempt and
+    // back. Expiry deliberately does NOT return it: the participant took their attempt and
     // ran out of time. `counts.submitted` and `counts.approved` are cumulative totals and are never
     // decremented — they answer "how many ever got that far", which a withdrawal does not unmake.
     await Challenge.updateOne({ _id: existing.challenge_id, 'counts.accepted': { $gt: 0 } }, { $inc: { 'counts.accepted': -1 } });
@@ -553,9 +597,12 @@ export async function fillRewardIds(p: IChallengeParticipation): Promise<IChalle
     if (rows.length === 0) return p;
 
     const ids = rows.map((r) => r._id);
+    // `timestamps: false`: `updated_at` is the replay sweep's window key, and a bookkeeping fill must
+    // not keep a partially-paid approval (a member whose credit never lands) inside it forever.
     await ChallengeParticipation.updateOne(
         { _id: p._id },
-        { $addToSet: { 'reward.point_transaction_ids': { $each: ids } } }
+        { $addToSet: { 'reward.point_transaction_ids': { $each: ids } } },
+        { timestamps: false }
     );
     p.reward.point_transaction_ids = [...new Set([...p.reward.point_transaction_ids, ...ids])];
     return p;
@@ -583,8 +630,11 @@ export async function myParticipations(
  * Statuses a participation can only reach by submitting. For those the queue orders by
  * `submission.submitted_at`; for the rest that field is null and `accepted_at` is the only thing
  * to order by.
+ *
+ * NOT `approved`: a `requires_proof: false` challenge is approved straight out of `accepted` with
+ * no submission, the cursor cannot be built from a null, and the list stopped after one page.
  */
-const HAS_SUBMISSION = new Set<string>(['submitted', 'under_review', 'approved', 'rejected']);
+const HAS_SUBMISSION = new Set<string>(['submitted', 'under_review', 'rejected']);
 
 /**
  * The reviewer queue. **Oldest submission first** — it is a work queue, so whoever has waited

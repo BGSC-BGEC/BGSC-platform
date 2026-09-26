@@ -1,4 +1,4 @@
-import { LOT_STATUS } from '@bgsc/shared';
+import { LOT_STATUS, OC_OVERRIDE_QUOTA_MAX } from '@bgsc/shared';
 import { z } from 'zod';
 
 export const EventRefParamSchema = z.object({
@@ -46,7 +46,8 @@ export const UpdateAuctionConfigSchema = z.object({
     k_multiplier: z.number().min(0).optional(),
     min_bid_increment: z.number().int().min(1).optional(),
     bid_timer_seconds: z.number().int().min(5).max(60).optional(),
-    oc_override_quota: z.number().min(0).max(1).optional(),
+    // The model caps this at 3/7 (spec §5.15.4 hard ceiling); `max(1)` here let 0.5 through to a 500.
+    oc_override_quota: z.number().min(0).max(OC_OVERRIDE_QUOTA_MAX).optional(),
     oc_captain_override_quota: z.number().min(0).max(1).optional(),
     purse_per_team: z.number().int().min(0).optional(),
 });

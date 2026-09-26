@@ -229,7 +229,7 @@ await recordAudit({
 
 Pass the diff, never the document — copying a whole user record into the trail would copy the hashes with it.
 
-`AuditLog` was missing from Saturday's Core Data Models list. Plan gap, logged in `be2-user-service-plan.md` §11.5.
+`AuditLog` was missing from Saturday's Core Data Models list. MVP plan gap.
 
 ## 4.2 Full middleware reference
 
@@ -341,8 +341,7 @@ Note: BE-2's `PATCH /users/:ref/role` refuses promotion to `coordinator` or `fou
 
 ## 9. Context
 
-- What BE-2 is building on top: `docs/be2-user-service-plan.md`
 - Why `typescript` is pinned to 6.x: `docs/typescript-toolchain.md`
 - Data model reference: `docs/modeldocs/`
 
-The server entrypoint (`src/index.ts`) is assigned to nobody in the MVP plan — BE-2 wrote it because both Sunday tasks were blocked without it. Logged in `be2-user-service-plan.md` §11.5 so the plan gets fixed rather than the gap being absorbed silently.
+The server entrypoint (`src/index.ts`) is assigned to nobody in the MVP plan — BE-2 wrote it because both Sunday tasks were blocked without it. Flagged so the plan gets fixed rather than the gap being absorbed silently.

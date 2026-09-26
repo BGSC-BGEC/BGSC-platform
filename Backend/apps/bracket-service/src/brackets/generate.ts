@@ -2,7 +2,7 @@ import { BracketFormat, BracketParticipant, MatchStatus, MatchWinner } from '@bg
 import { v4 as uuid } from 'uuid';
 
 /**
- * The draw, as pure functions (be2-feedback-bracket-plan.md §7, §11).
+ * The draw, as pure functions.
  *
  * No database, no clock, no randomness unless a caller hands it in. A round-robin schedule is
  * either correct — every pair exactly once, nobody twice in a round — or it is not, and that has

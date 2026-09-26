@@ -10,13 +10,12 @@ import {
     roleRank,
 } from '@bgsc/shared';
 import { mutedUserIds } from '../notifications/preferences';
-import { NotificationInput, createMany, updateContent } from '../notifications/notification.service';
+import { NotificationInput, createMany, retract, updateContent } from '../notifications/notification.service';
 import { RenderedMessage, renderMessage } from './templates';
 import { dispatchAnnouncement } from './dispatch';
 
 /**
- * The in-app half of a broadcast: who gets a card, and what it says
- * (be2-broadcast-service-plan.md §3).
+ * The in-app half of a broadcast: who gets a card, and what it says.
  *
  * `dispatch.ts` is the outbound half. Keeping them apart is deliberate — one answers "which of our
  * users may see this", the other "does this go out to a public group", and the second question has
@@ -26,14 +25,24 @@ import { dispatchAnnouncement } from './dispatch';
 /** Dedupe keys, in one place. Each is derived from the document that caused the notification. */
 export const dedupe = {
     announcement: (announcementId: string) => `announcement:${announcementId}`,
-    registrationConfirmed: (registrationId: string) => `registration.confirmed:${registrationId}`,
+    // Per confirmation, not per registration: a row confirmed, rejected by an admin and confirmed
+    // again is good news twice. `nth` counts the row's transitions into 'confirmed'.
+    registrationConfirmed: (registrationId: string, nth: number) => `registration.confirmed:${registrationId}:${nth}`,
     registrationWaitlisted: (registrationId: string) => `registration.waitlisted:${registrationId}`,
     challengeApproved: (participationId: string) => `challenge.approved:${participationId}`,
-    challengeRejected: (participationId: string) => `challenge.rejected:${participationId}`,
+    // A rejected participation can be resubmitted and rejected again (`SUBMITTABLE_FROM` includes
+    // 'rejected'), so the key carries which rejection this is — or the second one is deduped away.
+    challengeRejected: (participationId: string, nth: number) => `challenge.rejected:${participationId}:${nth}`,
     eventCancelled: (eventId: string) => `event.cancelled:${eventId}`,
     // The ledger row, not the user: one card per credit, and the row is already idempotent.
     pointsEarned: (transactionId: string) => `points.earned:${transactionId}`,
     feedbackSubmitted: (ticketId: string) => `feedback.submitted:${ticketId}`,
+    // Keyed on the response time: a reply that is replaced by a newer one is a second card.
+    feedbackResponded: (ticketId: string, respondedAtMs: number) => `feedback.responded:${ticketId}:${respondedAtMs}`,
+    // Per invite, not per (team, user): an invite that lapsed or was declined can be sent again.
+    teamInvite: (teamId: string, userId: string, invitedAtMs: number) =>
+        `team.invite:${teamId}:${userId}:${invitedAtMs}`,
+    auctionSold: (lotId: string, side: 'player' | 'captain') => `auction.sold:${lotId}:${side}`,
 };
 
 /** The card body is a teaser, not the announcement. The full text is one tap away. */
@@ -66,7 +75,7 @@ export async function recipientsFor(a: Pick<IAnnouncement, 'audience'>): Promise
 
     if (a.audience.event_id !== null) {
         // The event gate is server-side and reads registrations directly — the same rule, and the
-        // same source, the announcement feed uses (announcement plan D3).
+        // same source, the announcement feed uses.
         const registrants = await FormSubmission.distinct('user.user_id', {
             'owner.type': 'event',
             'owner.id': a.audience.event_id,
@@ -89,7 +98,7 @@ export async function recipientsFor(a: Pick<IAnnouncement, 'audience'>): Promise
  *
  * The order matters. Spec §9.4's fallback is "in-app notification if WhatsApp delivery fails", so
  * the in-app cards must already exist before anything can fail — and if the process dies between
- * the two halves, the reconciliation sweep (§8.2) finds an announcement with fewer dispatch rows
+ * the two halves, the reconciliation sweep finds an announcement with fewer dispatch rows
  * than it has channels and runs the whole thing again, which is safe because both halves are
  * idempotent.
  */
@@ -113,6 +122,16 @@ export async function deliverAnnouncement(announcementId: string): Promise<{ cre
             dedupe_key: dedupe.announcement(a._id),
         }))
     );
+
+    // A delete or an edit can land between the read above and the insert, and its event has then
+    // already been handled against zero cards — the retraction deleted nothing, the refresh rewrote
+    // nothing. Re-read once and settle the cards against what the announcement is NOW.
+    const now = await Announcement.findById(announcementId).select('title body status deleted_at').lean();
+    if (!now || now.deleted_at !== null || now.status !== 'published') {
+        await retract(dedupe.announcement(announcementId));
+        return { created: 0 };
+    }
+    if (now.title !== a.title || now.body !== a.body) await refreshAnnouncementCards(announcementId);
 
     await dispatchAnnouncement(a);
     return { created };
@@ -138,9 +157,10 @@ export async function refreshAnnouncementCards(announcementId: string): Promise<
 }
 
 /**
- * One message to every confirmed registrant of an event. Used by `EventCancelled`, and the reason
- * `recipientsFor` is not the only fan-out path — this one has no role floor to apply: everyone who
- * registered is entitled to know, whatever their rank.
+ * One message to everyone registered for an event, confirmed or waiting for a place. Used by
+ * `EventCancelled`, and the reason `recipientsFor` is not the only fan-out path — this one has no
+ * role floor to apply: everyone who registered is entitled to know, whatever their rank. The
+ * waitlist is included: a person holding position 3 is waiting on this event too.
  */
 export async function fanOutToRegistrants(
     eventId: string,
@@ -151,7 +171,7 @@ export async function fanOutToRegistrants(
     const registrants = await FormSubmission.distinct('user.user_id', {
         'owner.type': 'event',
         'owner.id': eventId,
-        status: REGISTERED_STATUS,
+        status: { $in: [REGISTERED_STATUS, 'waitlisted'] },
     });
     if (registrants.length === 0) return 0;
 

@@ -55,6 +55,8 @@ leaderboardRoutes.get(
 leaderboardRoutes.post(
     '/events/:ref/invest',
     requireAuth,
+    // Spends points: a suspended or deleted account's still-valid token must not.
+    requireActiveUser(),
     validate({ params: EventRefParamSchema, body: InvestPointsSchema }),
     ctrl.investPoints
 );

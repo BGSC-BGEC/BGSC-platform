@@ -1,44 +1,76 @@
 import { Router, raw } from 'express';
-import { requireAuth, optionalAuth, requireRole, UserRole } from '@bgsc/shared';
+import { requireAuth, optionalAuth, requireActiveUser, requireRole, validate, UserRole } from '@bgsc/shared';
 import * as ctrl from './media.controller';
+import {
+    AlbumRefParams,
+    CreateAlbumSchema,
+    ListAlbumsQuerySchema,
+    ListMediaQuerySchema,
+    MediaIdParams,
+    ModerateMediaSchema,
+    PageQuerySchema,
+    UpdateMediaSchema,
+    UploadMediaQuerySchema,
+} from './media.schemas';
+import { ACCEPTED_CONTENT_TYPES, VIDEO_MAX_BYTES } from '../storage/storage';
 
+/**
+ * Every write runs `requireActiveUser`: it ranks the LIVE user document, so a suspended or
+ * demoted account stops uploading, moderating and auto-approving the moment it changes — not
+ * when its token expires. Reads keep the token (`optionalAuth` / `requireRole`), where a stale
+ * answer is not a damage path.
+ */
 export const mediaRoutes = Router();
 
-// Upload route: raw binary stream up to 50MB
+// Upload: validate the query and the declared size BEFORE the body is buffered.
 mediaRoutes.post(
     '/upload',
     requireAuth,
-    raw({
-        limit: '50mb',
-        type: ['image/*', 'video/*', 'application/octet-stream', '*/*'],
-    }),
+    requireActiveUser(),
+    validate({ query: UploadMediaQuerySchema }),
+    ctrl.declaredSize,
+    raw({ limit: VIDEO_MAX_BYTES, type: ACCEPTED_CONTENT_TYPES }),
     ctrl.uploadMedia
 );
 
 // Albums
-mediaRoutes.get('/albums', optionalAuth, ctrl.listAlbums);
-mediaRoutes.post('/albums', requireAuth, requireRole(UserRole.CORE), ctrl.createAlbum);
-mediaRoutes.get('/albums/:id', optionalAuth, ctrl.getAlbum);
+mediaRoutes.get('/albums', optionalAuth, validate({ query: ListAlbumsQuerySchema }), ctrl.listAlbums);
+mediaRoutes.post(
+    '/albums',
+    requireAuth,
+    requireActiveUser(UserRole.CORE),
+    validate({ body: CreateAlbumSchema }),
+    ctrl.createAlbum
+);
+mediaRoutes.get('/albums/:id', optionalAuth, validate({ params: AlbumRefParams }), ctrl.getAlbum);
 
 // Moderation
 mediaRoutes.get(
     '/moderation/pending',
     requireAuth,
     requireRole(UserRole.CORE),
+    validate({ query: PageQuerySchema }),
     ctrl.listPendingModeration
 );
 mediaRoutes.patch(
     '/:id/moderate',
     requireAuth,
-    requireRole(UserRole.CORE),
+    requireActiveUser(UserRole.CORE),
+    validate({ params: MediaIdParams, body: ModerateMediaSchema }),
     ctrl.moderateMedia
 );
 
 // Interactions & Details
-mediaRoutes.post('/:id/like', requireAuth, ctrl.toggleLike);
-mediaRoutes.get('/:id', optionalAuth, ctrl.getMedia);
-mediaRoutes.patch('/:id', requireAuth, ctrl.updateMedia);
-mediaRoutes.delete('/:id', requireAuth, ctrl.deleteMedia);
+mediaRoutes.post('/:id/like', requireAuth, requireActiveUser(), validate({ params: MediaIdParams }), ctrl.toggleLike);
+mediaRoutes.get('/:id', optionalAuth, validate({ params: MediaIdParams }), ctrl.getMedia);
+mediaRoutes.patch(
+    '/:id',
+    requireAuth,
+    requireActiveUser(),
+    validate({ params: MediaIdParams, body: UpdateMediaSchema }),
+    ctrl.updateMedia
+);
+mediaRoutes.delete('/:id', requireAuth, requireActiveUser(), validate({ params: MediaIdParams }), ctrl.deleteMedia);
 
 // Public Gallery
-mediaRoutes.get('/', optionalAuth, ctrl.listMedia);
+mediaRoutes.get('/', optionalAuth, validate({ query: ListMediaQuerySchema }), ctrl.listMedia);

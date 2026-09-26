@@ -46,9 +46,13 @@ export interface IUser extends Document<string> {
     phone_verification_expires?: Date | null;
     phone_verification_attempts?: number;
     refresh_token_hash?: string | null;
+    /** Session family of the current refresh token (its `sid` claim). */
+    refresh_session_id?: string | null;
     last_login_at?: Date | null;
     password_reset_token?: string | null;
     password_reset_expires?: Date | null;
+    oauth_login_code_hash?: string | null;
+    oauth_login_code_expires?: Date | null;
 
     profile: {
         full_name: string;
@@ -91,6 +95,8 @@ export interface IUser extends Document<string> {
 
     last_active_at?: Date | null;
     deleted_at?: Date | null;
+    /** Last self-service restore. The UserRestored replay sweep keys on it. */
+    restored_at?: Date | null;
 
     /** Set when the account is deleted; see docs Spec §11.2.1. Cleared on restore. */
     deletion?: {
@@ -101,6 +107,8 @@ export interface IUser extends Document<string> {
         restorable_until: Date;
         /** Exact disclosure text shown at the gate, stored so we can prove what they agreed to. */
         disclosure_version: string;
+        /** Status at the moment of deletion. Restore puts it back — deleting must not lift a suspension. */
+        prior_status?: UserStatus;
     } | null;
 
     created_at: Date;
@@ -120,6 +128,11 @@ const UserSchema = new Schema<IUser>(
         role: { type: String, enum: Object.values(UserRole), default: UserRole.USER },
         status: { type: String, enum: Object.values(UserStatus), default: UserStatus.ACTIVE },
         is_email_verified: { type: Boolean, default: false },
+        // Every one-time token below is stored as a sha256 hex digest, never the raw value: a read of
+        // this collection must not be enough to reset a password or resume a session (audit Sep 26).
+        // The refresh token is sha256 rather than bcrypt because bcrypt reads only the first 72 bytes,
+        // which for a JWT is the header plus half the user id — every refresh token a user was ever
+        // issued matched the stored hash.
         email_verification_token: { type: String, default: null, select: false },
         email_verification_expires: { type: Date, default: null, select: false },
         is_phone_verified: { type: Boolean, default: false },
@@ -128,9 +141,13 @@ const UserSchema = new Schema<IUser>(
         phone_verification_expires: { type: Date, default: null, select: false },
         phone_verification_attempts: { type: Number, default: 0, select: false },
         refresh_token_hash: { type: String, default: null, select: false },
+        refresh_session_id: { type: String, default: null, select: false },
         last_login_at: { type: Date, default: null },
         password_reset_token: { type: String, default: null, select: false },
         password_reset_expires: { type: Date, default: null, select: false },
+        // One-time code the Google callback hands the browser instead of the tokens themselves.
+        oauth_login_code_hash: { type: String, default: null, select: false },
+        oauth_login_code_expires: { type: Date, default: null, select: false },
 
         // Profile
         profile: {
@@ -179,6 +196,7 @@ const UserSchema = new Schema<IUser>(
          * The 30 days govern self-service RESTORE, not erasure.
          */
         deleted_at: { type: Date, default: null },
+        restored_at: { type: Date, default: null },
         deletion: {
             type: new Schema(
                 {
@@ -186,6 +204,9 @@ const UserSchema = new Schema<IUser>(
                     research_consent: { type: Boolean, required: true, default: false },
                     restorable_until: { type: Date, required: true },
                     disclosure_version: { type: String, required: true },
+                    // No default. A missing value means "not recorded" (pre-Sep-26 deletions), and
+                    // defaulting it to active would wave a suspended-then-deleted account back in.
+                    prior_status: { type: String, enum: Object.values(UserStatus) },
                 },
                 { _id: false }
             ),
@@ -200,8 +221,14 @@ UserSchema.index({ role: 1, status: 1 });
 UserSchema.index({ points_balance: -1 }); // fast leaderboard querying
 UserSchema.index({ created_at: -1 });
 UserSchema.index({ last_active_at: -1 });
+UserSchema.index({ restored_at: 1 }, { partialFilterExpression: { restored_at: { $type: 'date' } } }); // UserRestored replay
 UserSchema.index({ deleted_at: 1 }); // purge/restore-window sweeps, and 'who deleted recently' // admin "Last Active Epoch" column (Spec §5.15.5)
 UserSchema.index({ username: 'text', 'profile.full_name': 'text' }); // user search (Spec §13.1)
+
+// One-time token lookups. Partial so the null default on every other row costs nothing.
+for (const field of ['email_verification_token', 'password_reset_token', 'oauth_login_code_hash']) {
+    UserSchema.index({ [field]: 1 }, { partialFilterExpression: { [field]: { $type: 'string' } } });
+}
 
 /**
  * One account per verified phone number.

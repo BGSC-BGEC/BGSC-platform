@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { timingSafeEqual } from 'crypto';
 import { config } from '../config/env';
+import { redisOptions } from '../config/redis';
 
 /**
  * Guard for `/internal/*`. These routes are for service-to-service calls (snapshot refresh across
@@ -12,13 +13,6 @@ import { config } from '../config/env';
  */
 
 export const DEV_INTERNAL_TOKEN = 'dev_internal_token_change_me';
-
-/**
- * Every secret that ships with a development default. A production process starting on any of
- * these is worse than one that fails to start: a default JWT signing key means anyone who has read
- * the repository can mint a founder token.
- */
-
 
 /** Constant-time compare; a length mismatch is reported without leaking the length via timing. */
 function tokensMatch(given: string, expected: string): boolean {
@@ -40,13 +34,32 @@ export function requireServiceToken(req: Request, res: Response, next: NextFunct
     next();
 }
 
+/** The Mongo root password committed in docker-compose.yml and .env.example. */
+export const DEV_MONGO_PASSWORD = 'bgsc_password';
+/** The Redis password compose falls back to when REDIS_PASSWORD is unset. */
+export const DEV_REDIS_PASSWORD = 'dev_redis_password_change_me';
+
+const passwordOf = (uri: string): string | null => {
+    try {
+        return decodeURIComponent(new URL(uri).password) || null;
+    } catch {
+        return null;
+    }
+};
+
 /**
- * Fail closed at boot rather than serving with published secrets. Called from startService();
- * throwing here stops the process before it listens.
+ * Fail closed at boot rather than serving with published secrets. Called from startService() and
+ * the gateway's start(); throwing here stops the process before it listens.
+ *
+ * A production process on any development default is worse than one that fails to start: a default
+ * JWT signing key means anyone who has read the repository can mint a founder token.
  *
  * Checked in production only — dev defaults are the point of dev defaults.
+ *
+ * `datastores: false` is the gateway: it holds no database or bus connection, so its env carries no
+ * MONGO_URI / REDIS_URL and checking the fallbacks would refuse a correct deployment.
  */
-export function assertInternalTokenConfigured(): void {
+export function assertInternalTokenConfigured(opts: { datastores?: boolean } = {}): void {
     if (config.nodeEnv !== 'production') return;
 
     // Both the code default and the .env.example value — .env.example is in the repository, so a
@@ -73,10 +86,28 @@ export function assertInternalTokenConfigured(): void {
         published[name].includes(actual[name])
     );
 
+    if (opts.datastores !== false) {
+        // The root password published in compose opens the whole database to anyone who reaches it.
+        const mongoPassword = passwordOf(config.mongoUri);
+        if (mongoPassword === DEV_MONGO_PASSWORD) offenders.push('MONGO_URI');
+        // The bus carries domain events that move points; a password-less Redis lets anyone who can
+        // reach it read the channel. Missing entirely is refused too: a production service without
+        // the bus silently stops hearing every other service.
+        // The password is REDIS_PASSWORD, else whatever the URL carries (config/redis.ts). An
+        // unparseable URL is refused here rather than disabling the bus at runtime.
+        let redisPassword: string | null = null;
+        try {
+            redisPassword = config.redisUrl ? redisOptions().password ?? null : null;
+        } catch {
+            redisPassword = null;
+        }
+        if (!redisPassword || redisPassword === DEV_REDIS_PASSWORD) offenders.push('REDIS_URL');
+    }
+
     if (offenders.length > 0) {
         throw new Error(
-            `Refusing to start in production: ${offenders.join(', ')} still set to the development ` +
-                'default. Anyone with the repository can forge tokens against these.'
+            `Refusing to start in production: ${offenders.join(', ')} still set to a development ` +
+                'default (or missing its password). Anyone with the repository can use these.'
         );
     }
 }

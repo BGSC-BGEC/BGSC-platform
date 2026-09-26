@@ -23,7 +23,12 @@ export const ANNOUNCEMENT_CATEGORY = [
 ] as const;
 export const ANNOUNCEMENT_PRIORITY = ['normal', 'important', 'urgent'] as const;
 export const ANNOUNCEMENT_STATUS = ['draft', 'scheduled', 'published', 'archived'] as const;
-export const DELIVERY_STATUS = ['pending', 'sent', 'failed', 'rate_limited', 'skipped'] as const;
+/**
+ * `outcome_unknown`: the provider call was made and no answer says whether it went out (a timeout,
+ * a 5xx, a crash between send and record). Terminal on purpose — retrying could post the same
+ * message to a community group twice, and a send cannot be recalled.
+ */
+export const DELIVERY_STATUS = ['pending', 'sent', 'failed', 'rate_limited', 'skipped', 'outcome_unknown'] as const;
 
 export type AnnouncementCategory = (typeof ANNOUNCEMENT_CATEGORY)[number];
 export type AnnouncementPriority = (typeof ANNOUNCEMENT_PRIORITY)[number];
@@ -65,6 +70,8 @@ export interface IAnnouncement extends Document<string> {
         display_name: string;
         role_label: string;
         avatar_url: string | null;
+        /** Raised by UserDeleted, cleared by UserRestored. */
+        deleted?: boolean;
     };
 
     status: AnnouncementStatus;
@@ -83,9 +90,11 @@ export interface IAnnouncement extends Document<string> {
                 message_id: string | null;
                 attempted_at: Date | null;
                 error: string | null;
+                /** The dispatch row revision this state came from; an older one never overwrites it. */
+                revision: number;
             }[];
         };
-        push: { requested: boolean; status: DeliveryStatus; sent_count: number | null };
+        push: { requested: boolean; status: DeliveryStatus; sent_count: number | null; revision: number };
     };
 
     created_at: Date;
@@ -102,6 +111,9 @@ const WhatsAppDeliverySchema = new Schema(
         message_id: { type: String, default: null },
         attempted_at: { type: Date, default: null },
         error: { type: String, default: null },
+        // Writebacks can land out of order (the inline one and the sweep's), so the receipt keeps
+        // the newest dispatch revision it applied and refuses anything older.
+        revision: { type: Number, default: 0 },
     },
     { _id: false }
 );
@@ -115,7 +127,9 @@ const AnnouncementSchema = new Schema<IAnnouncement>(
         media_url: { type: String, default: null },
 
         categories: { type: [String], enum: ANNOUNCEMENT_CATEGORY, required: true },
-        tags: { type: [String], default: [], lowercase: true },
+        // `lowercase` beside `type: [String]` is silently ignored — Mongoose only applies it when it
+        // is declared on the element, so it lives inside the brackets.
+        tags: { type: [{ type: String, lowercase: true, trim: true }], default: [] },
         priority: { type: String, enum: ANNOUNCEMENT_PRIORITY, default: 'normal' },
 
         audience: {
@@ -149,6 +163,7 @@ const AnnouncementSchema = new Schema<IAnnouncement>(
                 requested: { type: Boolean, default: false },
                 status: { type: String, enum: DELIVERY_STATUS, default: 'pending' },
                 sent_count: { type: Number, default: null, min: 0 },
+                revision: { type: Number, default: 0 },
             },
         },
 
@@ -215,12 +230,15 @@ AnnouncementSchema.index({ status: 1, scheduled_for: 1 }, { partialFilterExpress
 AnnouncementSchema.index({ status: 1, expires_at: 1 }); // archive + purge jobs
 AnnouncementSchema.index({ status: 1, pinned_until: 1 }); // homepage banner
 AnnouncementSchema.index({ title: 'text', body: 'text' }); // MVP stand-in for Elasticsearch
+// The Notification Service's sweep for deletes whose retraction event it never heard. Partial: only
+// a deleted document carries a date, so the live majority costs the index nothing.
+AnnouncementSchema.index({ deleted_at: -1 }, { partialFilterExpression: { deleted_at: { $type: 'date' } } });
 
 export const Announcement = model<IAnnouncement>('Announcement', AnnouncementSchema, 'announcements');
 
 /**
  * announcement-model.md §4. The event-scoped check is server-side: the caller passes the viewer's
- * confirmed event IDs read from `form_submissions` (be2-announcement-service-plan.md D3), never a
+ * confirmed event IDs read from `form_submissions`, never a
  * client-supplied list. For single documents only — list queries build the same rule as a filter.
  */
 export function isVisibleTo(

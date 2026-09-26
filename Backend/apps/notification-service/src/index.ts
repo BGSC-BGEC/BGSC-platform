@@ -26,6 +26,8 @@ const PORT = parseInt(process.env.PORT || '3010', 10);
 const options = {
     name: NAME,
     port: PORT,
+    // The collections this service owns — only their indexes are built at boot.
+    models: ['Notification', 'NotificationDispatch', 'NotificationPreference', 'NotificationRateSlot'],
     routes(app: express.Express) {
         app.use('/notifications', notificationRoutes);
     },

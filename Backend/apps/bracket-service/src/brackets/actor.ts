@@ -1,4 +1,4 @@
-import { IEvent, IUser, RoleName, ServiceError, User, UserStatus, roleRank } from '@bgsc/shared';
+import { IEvent, RoleName, ServiceError, requireEventAdmin, roleRank } from '@bgsc/shared';
 import { NextFunction, Request, Response } from 'express';
 
 /**
@@ -9,10 +9,9 @@ import { NextFunction, Request, Response } from 'express';
  *  - `requireActiveUser(floor)` ranks the **live user document**, not the token's role claim, which
  *    stays valid for up to fifteen minutes after a suspension or a demotion. Lifted from
  *    `announcement-service/src/announcements/actor.ts`, where the same reasoning is written out.
- *  - `assertMayScore` then applies the **event's own** rule: a core admin of that event, or anyone
+ *  - `adminEventOr404` then applies the **event's own** rule: a core admin of that event, or anyone
  *    coordinator or above. `event.service.ts:280` already gates attendance and captain grants this
- *    way, and scoring somebody else's tournament is not a smaller act than marking attendance at it
- *    (plan D14).
+ *    way, and scoring somebody else's tournament is not a smaller act than marking attendance at it.
  */
 
 
@@ -28,11 +27,19 @@ export const actorOf = (req: Request): Actor => ({
     ip: req.ip ?? null,
 });
 
-/** A core admin of this event, or coordinator+. Anything else is a 403. */
-export function assertMayScore(event: Pick<IEvent, 'core_admins' | 'created_by'>, actor: Actor): void {
-    const ownsEvent = event.core_admins.includes(actor.id) || event.created_by === actor.id;
-    if (ownsEvent || roleRank(actor.role) >= roleRank('coordinator')) return;
-    throw new ServiceError(403, 'forbidden');
+/**
+ * Load the event and require the actor to administer it — the shared `requireEventAdmin` (a core
+ * admin of the event, its creator, or coordinator+). Visibility comes first: a draft the actor may
+ * not see is a 404 under the caller's own not-found code, a visible event they may not touch a
+ * 403. The old order (403, then the draft check) confirmed drafts to outsiders (audit #2).
+ */
+export async function adminEventOr404(eventId: string, actor: Actor, notFound = 'event_not_found'): Promise<IEvent> {
+    try {
+        return await requireEventAdmin(eventId, { id: actor.id, role: actor.role });
+    } catch (err) {
+        if (err instanceof ServiceError && err.status === 404) throw new ServiceError(404, notFound);
+        throw err;
+    }
 }
 
 /** Who is looking, as far as an `optionalAuth` route can tell. */
@@ -54,13 +61,18 @@ export interface Viewer {
  */
 export function assertEventVisible(
     event: Pick<IEvent, 'status' | 'core_admins' | 'created_by'>,
-    viewer: Viewer
+    viewer: Viewer,
+    /**
+     * The caller's own "not found" code. A draft must answer exactly what a missing event answers
+     * on the same route — two different 404 codes are an oracle for "a draft exists here".
+     */
+    notFound = 'bracket_not_found'
 ): void {
     if (event.status !== 'draft') return;
 
     const isCoreAdmin = viewer.id !== null && (event.core_admins.includes(viewer.id) || event.created_by === viewer.id);
     const isPrivileged = !!viewer.role && roleRank(viewer.role) >= roleRank('coordinator');
-    if (!isCoreAdmin && !isPrivileged) throw new ServiceError(404, 'bracket_not_found');
+    if (!isCoreAdmin && !isPrivileged) throw new ServiceError(404, notFound);
 }
 
 /**

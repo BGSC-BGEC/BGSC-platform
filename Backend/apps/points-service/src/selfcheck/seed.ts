@@ -1,8 +1,10 @@
 import {
     Event,
     EventStatus,
+    FormSubmission,
     IUser,
     LeaderboardEntry,
+    PointExpiryCursor,
     PointRule,
     PointTransaction,
     User,
@@ -42,7 +44,29 @@ export async function resetLedger(): Promise<void> {
     await mongoose.connection.collection('point_transactions').deleteMany({});
     await mongoose.connection.collection('audit_logs').deleteMany({});
     await PointRule.deleteMany({});
+    await PointExpiryCursor.deleteMany({});
     await seedRules();
+}
+
+/** A registration for (event, user). Attendance and podium pay only a `confirmed` one. */
+export async function seedRegistration(
+    event_id: string,
+    user_id: string,
+    status: 'confirmed' | 'cancelled' | 'waitlisted' = 'confirmed',
+    id: string = uuid()
+): Promise<string> {
+    await FormSubmission.create({
+        _id: id,
+        form_id: uuid(),
+        form_version: 1,
+        owner: { type: 'event', id: event_id },
+        user: { user_id, display_name: 'Selfcheck User' },
+        // Marked present: attendance pays only an attended, confirmed registration.
+        context: { event: { role: 'solo', attended: true } },
+        status,
+        waitlist_position: status === 'waitlisted' ? 1 : null,
+    });
+    return id;
 }
 
 export async function seedUser(balance = 0, role: UserRole = UserRole.USER): Promise<IUser> {

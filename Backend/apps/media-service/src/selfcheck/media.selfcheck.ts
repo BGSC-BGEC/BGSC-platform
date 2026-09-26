@@ -1,25 +1,25 @@
+import { SCRATCH_UPLOADS } from './env'; // FIRST: points config.uploadDir at a scratch directory
 import assert from 'assert';
+import { promises as fs } from 'fs';
+import path from 'path';
+import { Server } from 'http';
 import mongoose from 'mongoose';
 import { v4 as uuid } from 'uuid';
+import { Event, IUser, Media, MediaAlbum, MediaLike, ServiceError, User, UserRole, config, resetBus } from '@bgsc/shared';
 import {
-    config,
-    User,
-    UserRole,
-    Media,
-    MediaAlbum,
-    resetBus,
-    AuthUser,
-    ServiceError,
-} from '@bgsc/shared';
-import {
-    sniffMedia,
-    putMediaObject,
-    deleteMediaObject,
+    PENDING_DIR,
     UPLOAD_DIR,
     IMAGE_MAX_BYTES,
-    VIDEO_MAX_BYTES,
+    deleteMediaObject,
+    keyOf,
+    putMediaObject,
+    sniffMedia,
 } from '../storage/storage';
-import { mediaService } from '../media/media.service';
+import { MAX_PENDING_ITEMS, mediaService } from '../media/media.service';
+import { declaredSize } from '../media/media.controller';
+import { ListMediaQuerySchema, UploadMediaQuerySchema } from '../media/media.schemas';
+import { handlers } from '../events/consumers';
+import { app } from '../index';
 
 const SCRATCH_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_selfcheck_media$2');
 
@@ -34,11 +34,46 @@ async function closeScratchDb(): Promise<void> {
     await mongoose.disconnect();
 }
 
-function makeActor(id: string, role: UserRole, name = 'Test User'): AuthUser {
-    return {
-        id,
-        role,
-    };
+async function seedUser(fullName: string, role: UserRole): Promise<IUser> {
+    const id = uuid();
+    return User.create({ _id: id, email: `${id}@selfcheck.local`, username: `sc_${id.slice(0, 8)}`, role, profile: { full_name: fullName } });
+}
+
+async function seedEvent(title: string, created_by = uuid(), status: 'ongoing' | 'draft' = 'ongoing'): Promise<string> {
+    const id = uuid();
+    await Event.create({
+        _id: id,
+        slug: `sc-${id.slice(0, 12)}`,
+        title,
+        category: 'bgec',
+        type: 'DE',
+        domain: 'sports',
+        status,
+        start_at: new Date(Date.now() + 86_400_000),
+        end_at: new Date(Date.now() + 172_800_000),
+        registration: { closes_at: new Date(Date.now() + 43_200_000), form_id: null },
+        teaming: { is_teamed: false },
+        leaderboard: null,
+        created_by,
+    });
+    return id;
+}
+
+/** The invariant every moderation race must end in: the file is where the row's status says. */
+async function fileMatchesRow(id: string, url: string): Promise<boolean> {
+    const row = await Media.findById(id).lean();
+    const [pub, held] = [await onDisk(UPLOAD_DIR, url), await onDisk(PENDING_DIR, url)];
+    if (!row || row.status === 'rejected') return !pub && !held;
+    return row.status === 'approved' ? pub && !held : held && !pub;
+}
+
+const onDisk = (root: string, url: string) => fs.access(path.join(root, keyOf(url))).then(() => true, () => false);
+
+async function expectError(fn: () => Promise<unknown>, code: string, what: string): Promise<void> {
+    await assert.rejects(fn, (err: ServiceError) => {
+        assert.strictEqual(err.code, code, `${what}: expected ${code}, got ${err.code}`);
+        return true;
+    }, what);
 }
 
 // Minimal valid binary buffers
@@ -51,253 +86,292 @@ const DUMMY_GARBAGE = Buffer.from('<!DOCTYPE html><html><body>not an image</body
 
 async function main(): Promise<void> {
     console.log('[media-service selfcheck] Starting assertions...');
+    assert.strictEqual(UPLOAD_DIR, SCRATCH_UPLOADS, 'storage writes under config.uploadDir (here: a scratch dir)');
 
-    /* ---------------- 1. Magic-byte sniffing assertions ---------------- */
-    const jpegSniff = sniffMedia(DUMMY_JPEG);
-    assert.ok(jpegSniff && jpegSniff.mime === 'image/jpeg' && jpegSniff.type === 'image' && jpegSniff.ext === 'jpg');
-
-    const pngSniff = sniffMedia(DUMMY_PNG);
-    assert.ok(pngSniff && pngSniff.mime === 'image/png' && pngSniff.type === 'image' && pngSniff.ext === 'png');
-
-    const webpSniff = sniffMedia(DUMMY_WEBP);
-    assert.ok(webpSniff && webpSniff.mime === 'image/webp' && webpSniff.type === 'image' && webpSniff.ext === 'webp');
-
-    const mp4Sniff = sniffMedia(DUMMY_MP4);
-    assert.ok(mp4Sniff && mp4Sniff.mime === 'video/mp4' && mp4Sniff.type === 'video' && mp4Sniff.ext === 'mp4');
-
-    const webmSniff = sniffMedia(DUMMY_WEBM);
-    assert.ok(webmSniff && webmSniff.mime === 'video/webm' && webmSniff.type === 'video' && webmSniff.ext === 'webm');
-
-    const garbageSniff = sniffMedia(DUMMY_GARBAGE);
-    assert.strictEqual(garbageSniff, null, 'garbage/HTML input sniff returns null');
+    /* ---------------- 1. Magic-byte sniffing ---------------- */
+    assert.strictEqual(sniffMedia(DUMMY_JPEG)?.mime, 'image/jpeg');
+    assert.strictEqual(sniffMedia(DUMMY_PNG)?.mime, 'image/png');
+    assert.strictEqual(sniffMedia(DUMMY_WEBP)?.mime, 'image/webp');
+    assert.strictEqual(sniffMedia(DUMMY_MP4)?.mime, 'video/mp4');
+    assert.strictEqual(sniffMedia(DUMMY_WEBM)?.mime, 'video/webm');
+    assert.strictEqual(sniffMedia(DUMMY_GARBAGE), null, 'garbage/HTML input sniff returns null');
     console.log('✓ Magic-byte sniffing for JPEG, PNG, WebP, MP4, WebM verified');
 
-    /* ---------------- 2. Storage write and path traversal defense ---------------- */
-    const stored = await putMediaObject('test/safe', DUMMY_PNG, pngSniff!);
+    /* ---------------- 2. Storage: two trees, traversal ---------------- */
+    const pngSniff = sniffMedia(DUMMY_PNG)!;
+    const stored = await putMediaObject('test/safe', DUMMY_PNG, pngSniff);
     assert.ok(stored.url.startsWith('/uploads/test/safe/'), 'stored URL starts with /uploads/test/safe/');
-    await deleteMediaObject('/' + stored.key); // Verifies deletion succeeds even when key has leading slash
+    assert.ok(await onDisk(UPLOAD_DIR, stored.url), 'a public write lands in the served tree');
+    const held = await putMediaObject('test/safe', DUMMY_PNG, pngSniff, true);
+    assert.ok(await onDisk(PENDING_DIR, held.url) && !(await onDisk(UPLOAD_DIR, held.url)), 'a pending write does not');
+    await deleteMediaObject('/' + stored.key);
+    await deleteMediaObject(held.key);
+    assert.ok(!(await onDisk(UPLOAD_DIR, stored.url)) && !(await onDisk(PENDING_DIR, held.url)), 'delete clears either tree');
 
     await assert.rejects(
-        putMediaObject('../../../outside', DUMMY_PNG, pngSniff!),
+        putMediaObject('../../../outside', DUMMY_PNG, pngSniff),
         /refusing to write outside upload directory/,
         'traversal attempt outside upload directory is rejected'
     );
-    console.log('✓ Storage write and path traversal defense verified');
+    console.log('✓ Storage trees and path traversal defense verified');
 
-    /* ---------------- 3. Database connection & lifecycle tests ---------------- */
+    /* ---------------- 3. Request validation (audit Sep 26: .parse() was a 500) ---------------- */
+    assert.ok(!ListMediaQuerySchema.safeParse({ limit: '51' }).success, 'limit over 50 is a 422, not a 500');
+    assert.ok(!UploadMediaQuerySchema.safeParse({ event_id: '../../x' }).success, 'event_id must be a uuid (it names a directory)');
+    assert.ok(
+        !UploadMediaQuerySchema.safeParse({ tags: Array.from({ length: 21 }, (_, i) => `t${i}`).join(',') }).success,
+        'at most 20 tags'
+    );
+
+    const sized = (headers: Record<string, string>) => {
+        let status = 200;
+        let passed = false;
+        declaredSize(
+            { headers } as never,
+            { status: (s: number) => ((status = s), { json: () => undefined }) } as never,
+            () => (passed = true)
+        );
+        return { status, passed };
+    };
+    assert.strictEqual(sized({ 'content-type': 'image/png', 'content-length': String(IMAGE_MAX_BYTES + 1) }).status, 413, 'an 11MB image is refused before buffering');
+    assert.ok(sized({ 'content-type': 'video/mp4', 'content-length': String(IMAGE_MAX_BYTES + 1) }).passed, 'the same size of video is fine');
+    assert.strictEqual(sized({ 'content-type': 'image/png' }).status, 411, 'no Content-Length, no upload');
+    assert.strictEqual(sized({ 'content-type': 'image/gif', 'content-length': '10' }).status, 415, 'an unaccepted type is a 415, not an empty-body 422');
+    console.log('✓ Validation, tag caps and the declared-size gate verified');
+
+    /* ---------------- 4. Upload and moderation ---------------- */
     await openScratchDb();
     resetBus();
 
-    const memberActor = makeActor('user-member-1', UserRole.MEMBER, 'Rahul Dravid');
-    const coreActor = makeActor('user-core-1', UserRole.CORE, 'Admin Coach');
+    const member = await seedUser('Rahul Dravid', UserRole.MEMBER);
+    const other = await seedUser('Someone Else', UserRole.MEMBER);
+    const core = await seedUser('Admin Coach', UserRole.CORE);
+    const outsiderCore = await seedUser('Other Core', UserRole.CORE);
+    const asViewer = (u: IUser) => ({ id: u._id, role: u.role });
+    const eventId = await seedEvent('Spring League 2026 Finals!', core._id);
 
-    // 3a. Size limit rejections
+    // A draft event is a 404 to anyone who does not run it — upload included (audit #2).
+    const draftId = await seedEvent('Unannounced', core._id, 'draft');
+    await expectError(() => mediaService.uploadMedia(member, DUMMY_PNG, { category: 'event', event_id: draftId }), 'event_not_found', 'upload against a hidden draft');
+    const draftUpload = await mediaService.uploadMedia(core, DUMMY_PNG, { category: 'event', event_id: draftId });
+    assert.strictEqual(draftUpload.event_id, draftId, "the draft's own admin may");
+
     const oversizedImage = Buffer.alloc(IMAGE_MAX_BYTES + 10);
     oversizedImage[0] = 0xff;
     oversizedImage[1] = 0xd8;
     oversizedImage[2] = 0xff;
-
-    await assert.rejects(
-        mediaService.uploadMedia(memberActor, oversizedImage, { category: 'general' }),
-        (err: ServiceError) => {
-            assert.strictEqual(err.status, 413);
-            assert.strictEqual(err.code, 'image_payload_too_large');
-            return true;
-        },
-        'Oversized image rejected with 413'
+    await expectError(() => mediaService.uploadMedia(member, oversizedImage, { category: 'general' }), 'image_payload_too_large', 'Oversized image rejected with 413');
+    await expectError(() => mediaService.uploadMedia(member, DUMMY_GARBAGE, { category: 'general' }), 'unsupported_media_type', 'Garbage rejected with 415');
+    await expectError(
+        () => mediaService.uploadMedia(core, DUMMY_PNG, { category: 'event', event_id: uuid() }),
+        'event_not_found',
+        'an upload against an event that does not exist'
     );
 
-    await assert.rejects(
-        mediaService.uploadMedia(memberActor, DUMMY_GARBAGE, { category: 'general' }),
-        (err: ServiceError) => {
-            assert.strictEqual(err.status, 415);
-            assert.strictEqual(err.code, 'unsupported_media_type');
-            return true;
-        },
-        'Garbage rejected with 415'
-    );
-    console.log('✓ Size ceilings and unsupported MIME rejections verified');
-
-    // 3b. Tiered moderation: Member upload defaults to 'pending'
-    const memberUpload = await mediaService.uploadMedia(memberActor, DUMMY_JPEG, {
+    const memberUpload = await mediaService.uploadMedia(member, DUMMY_JPEG, {
         category: 'community',
         caption: 'Great match today!',
         tags: ['football', 'finals'],
     });
     assert.strictEqual(memberUpload.status, 'pending', 'Member upload defaults to pending');
-    assert.strictEqual(memberUpload.uploader.user_id, memberActor.id);
-    assert.strictEqual(memberUpload.caption, 'Great match today!');
+    assert.strictEqual(memberUpload.uploader.display_name, 'Rahul Dravid', 'the uploader snapshot is the user, not their id');
+    assert.ok(await onDisk(PENDING_DIR, memberUpload.url), 'a pending file sits in the unserved tree');
+    assert.ok(!(await onDisk(UPLOAD_DIR, memberUpload.url)), 'and is NOT publicly served (audit Sep 26)');
 
-    // 3c. Tiered moderation: Core upload defaults to 'approved'
-    const coreUpload = await mediaService.uploadMedia(coreActor, DUMMY_PNG, {
+    const coreUpload = await mediaService.uploadMedia(core, DUMMY_PNG, {
         category: 'event',
-        event_id: 'ev-101',
+        event_id: eventId,
         caption: 'Official Event Banner',
-        tags: ['tournament', 'official'],
     });
     assert.strictEqual(coreUpload.status, 'approved', 'Core upload defaults to approved');
-    assert.strictEqual(coreUpload.approved_by, coreActor.id);
-    console.log('✓ Tiered moderation defaults (pending vs approved) verified');
+    assert.strictEqual(coreUpload.approved_by, core._id);
+    assert.ok(coreUpload.url.startsWith(`/uploads/media/event/${eventId}/`), 'media writes under its own media/ prefix');
+    assert.ok(await onDisk(UPLOAD_DIR, coreUpload.url), 'an approved file is served');
+    console.log('✓ Tiered moderation defaults, live uploader snapshot, and pending storage verified');
 
-    // 3d. Public gallery isolation: pending media is hidden by default
     const publicGallery = await mediaService.listMedia({ page: 1, limit: 10 });
-    const hasMemberUpload = publicGallery.items.some((item) => item._id === memberUpload._id);
-    const hasCoreUpload = publicGallery.items.some((item) => item._id === coreUpload._id);
-    assert.strictEqual(hasMemberUpload, false, 'Pending member upload is hidden from public gallery');
-    assert.strictEqual(hasCoreUpload, true, 'Approved core upload is present in public gallery');
+    assert.ok(!publicGallery.items.some((i) => i._id === memberUpload._id), 'Pending member upload is hidden from public gallery');
+    assert.ok(publicGallery.items.some((i) => i._id === coreUpload._id), 'Approved core upload is present in public gallery');
 
-    // 3e. Moderation queue: Core sees pending uploads
+    await expectError(() => mediaService.getMediaById(memberUpload._id, null), 'media_not_found', 'a pending item is a 404 to a guest');
+    await expectError(() => mediaService.getMediaById(memberUpload._id, asViewer(other)), 'media_not_found', 'and to another member');
+    assert.strictEqual((await mediaService.getMediaById(memberUpload._id, asViewer(member)))._id, memberUpload._id, 'its uploader sees it');
+
     const pendingList = await mediaService.listPendingModeration({ page: 1, limit: 10 });
-    assert.strictEqual(pendingList.items.length, 1);
-    assert.strictEqual(pendingList.items[0]._id, memberUpload._id);
-    console.log('✓ Moderation queue isolation verified');
+    assert.deepStrictEqual(pendingList.items.map((i) => i._id), [memberUpload._id]);
 
-    // 3f. Admin moderation approval
-    const approvedMemberUpload = await mediaService.moderateMedia(memberUpload._id, coreActor, {
-        status: 'approved',
-    });
-    assert.strictEqual(approvedMemberUpload.status, 'approved');
-    assert.strictEqual(approvedMemberUpload.approved_by, coreActor.id);
+    const approved = await mediaService.moderateMedia(memberUpload._id, core, { status: 'approved' });
+    assert.strictEqual(approved.status, 'approved');
+    assert.ok(await onDisk(UPLOAD_DIR, memberUpload.url) && !(await onDisk(PENDING_DIR, memberUpload.url)), 'approval moves the file into /uploads');
+    await expectError(() => mediaService.moderateMedia(memberUpload._id, core, { status: 'approved' }), 'media_not_pending', 'approving twice');
 
-    const publicGalleryAfterApproval = await mediaService.listMedia({ page: 1, limit: 10 });
-    assert.strictEqual(
-        publicGalleryAfterApproval.items.some((item) => item._id === memberUpload._id),
-        true,
-        'Member upload is now visible in public gallery after approval'
-    );
-    console.log('✓ Moderation approval workflow verified');
+    const spam = await mediaService.uploadMedia(member, DUMMY_JPEG, { category: 'community', caption: 'Spam picture' });
+    const rejected = await mediaService.moderateMedia(spam._id, core, { status: 'rejected', rejection_reason: 'Inappropriate content' });
+    assert.strictEqual(rejected.rejection_reason, 'Inappropriate content');
+    assert.ok(!(await onDisk(PENDING_DIR, spam.url)) && !(await onDisk(UPLOAD_DIR, spam.url)), 'a rejected file is deleted');
+    await expectError(() => mediaService.moderateMedia(spam._id, core, { status: 'approved' }), 'media_not_pending', 'and cannot be approved after');
+    console.log('✓ Moderation moves, deletes, and refuses out-of-order decisions');
 
-    // 3g. Admin moderation rejection with reason
-    const memberUpload2 = await mediaService.uploadMedia(memberActor, DUMMY_JPEG, {
-        category: 'community',
-        caption: 'Spam picture',
-    });
-    assert.strictEqual(memberUpload2.status, 'pending');
+    // An uploader's edit to an approved item goes back to review and out of /uploads.
+    const edited = await mediaService.updateMedia(memberUpload._id, member, { caption: 'Now something else' });
+    assert.strictEqual(edited.status, 'pending', 'a member edit re-enters moderation');
+    assert.ok(await onDisk(PENDING_DIR, memberUpload.url) && !(await onDisk(UPLOAD_DIR, memberUpload.url)), 'and its file is withdrawn');
+    const coreEdit = await mediaService.updateMedia(coreUpload._id, core, { tags: ['official'] });
+    assert.strictEqual(coreEdit.status, 'approved', 'a core edit does not');
+    await mediaService.moderateMedia(memberUpload._id, core, { status: 'approved' });
+    console.log('✓ Non-core edits are re-moderated');
 
-    const rejectedUpload = await mediaService.moderateMedia(memberUpload2._id, coreActor, {
-        status: 'rejected',
-        rejection_reason: 'Inappropriate content',
-    });
-    assert.strictEqual(rejectedUpload.status, 'rejected');
-    assert.strictEqual(rejectedUpload.rejection_reason, 'Inappropriate content');
-    console.log('✓ Moderation rejection workflow verified');
+    /* ---------------- 4b. Moderation races and missing files (audit #2) ---------------- */
+    const legacy = await mediaService.uploadMedia(member, DUMMY_PNG, { category: 'community' });
+    await deleteMediaObject(keyOf(legacy.url)); // a row whose file never reached this upload root
+    await expectError(() => mediaService.moderateMedia(legacy._id, core, { status: 'approved' }), 'file_missing', 'approving a row with no file');
+    assert.strictEqual((await Media.findById(legacy._id).lean())!.status, 'pending', 'and nothing was written');
+    await mediaService.moderateMedia(legacy._id, core, { status: 'rejected' }); // rejecting it is fine
 
-    // 3h. Album creation and association
-    const album = await mediaService.createAlbum(coreActor.id, {
-        title: 'Spring League 2026 Finals!',
-        category: 'event',
-        event_id: 'ev-101',
-    });
-    assert.strictEqual(album.slug, 'spring-league-2026-finals', 'Slug derived cleanly');
-    assert.strictEqual(album.media_count, 0);
+    for (let i = 0; i < 3; i++) {
+        const racy = await mediaService.uploadMedia(member, DUMMY_PNG, { category: 'community' });
+        await Promise.allSettled([
+            mediaService.moderateMedia(racy._id, core, { status: 'approved' }),
+            mediaService.deleteMedia(racy._id, member),
+        ]);
+        assert.ok(await fileMatchesRow(racy._id, racy.url), `approve vs delete #${i}: no orphaned or hidden file`);
 
-    const albumUpload = await mediaService.uploadMedia(coreActor, DUMMY_PNG, {
-        category: 'event',
-        event_id: 'ev-101',
-        album_id: album._id,
-        caption: 'Trophy ceremony',
-    });
-    const refreshedAlbum = await mediaService.getAlbumById(album.slug);
-    assert.strictEqual(refreshedAlbum.media_count, 1, 'Album media_count incremented');
-    assert.strictEqual(refreshedAlbum.media.length, 1, 'Album constituent media populated');
-    console.log('✓ Album creation, slug derivation, and media count tracking verified');
-
-    // 3i. Like toggle and view count increment
-    const likeRes = await mediaService.toggleLike(albumUpload._id);
-    assert.strictEqual(likeRes.likes_count, 1, 'Likes count incremented');
-
-    const itemDetail = await mediaService.getMediaById(albumUpload._id);
-    assert.strictEqual(itemDetail._id, albumUpload._id);
-    console.log('✓ Like toggling and view count fetching verified');
-
-    // Set as cover media on album
-    await MediaAlbum.updateOne({ _id: album._id }, { $set: { cover_media_id: albumUpload._id } });
-    const albumWithCover = await MediaAlbum.findById(album._id);
-    assert.strictEqual(albumWithCover?.cover_media_id, albumUpload._id);
-
-    // 3j. Delete media item: decrements album media_count and unsets cover_media_id
-    const delRes = await mediaService.deleteMedia(albumUpload._id, coreActor);
-    assert.strictEqual(delRes.success, true);
-    const albumAfterDel = await mediaService.getAlbumById(album._id);
-    assert.strictEqual(albumAfterDel.media_count, 0, 'Album media_count decremented upon media deletion');
-    const albumDocAfterDel = await MediaAlbum.findById(album._id);
-    assert.strictEqual(albumDocAfterDel?.cover_media_id, null, 'Album cover_media_id unset upon media deletion');
-    console.log('✓ Media deletion, album count rollback, and cover_media_id unsetting verified');
-
-    /* ---------------- 4. Event Consumers (UserProfileUpdated, UserDeleted, EventCompleted) ---------------- */
-    const { initializeConsumers } = await import('../events/consumers');
-    initializeConsumers();
-
-    // Create user in DB
-    await User.create({
-        _id: memberActor.id,
-        email: 'rahul@test.local',
-        username: 'rahul_dravid',
-        role: UserRole.MEMBER,
-        profile: { full_name: 'Rahul The Wall Dravid', avatar_url: '/uploads/avatars/rahul.png' },
-    });
-
-    const { publish } = await import('@bgsc/shared');
-
-    // 4a. UserProfileUpdated
-    publish('UserProfileUpdated', 'user-service', {
-        user_id: memberActor.id,
-        changed_fields: ['full_name', 'avatar_url'],
-    });
-    // Wait briefly for in-memory event dispatch
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const memberMediaUpdated = await Media.findById(memberUpload._id);
-    assert.strictEqual(
-        memberMediaUpdated?.uploader.display_name,
-        'Rahul The Wall Dravid',
-        'Uploader snapshot updated after UserProfileUpdated event'
-    );
-    assert.strictEqual(
-        memberMediaUpdated?.uploader.avatar_url,
-        '/uploads/avatars/rahul.png',
-        'Uploader avatar snapshot updated'
-    );
-    console.log('✓ UserProfileUpdated consumer snapshot sync verified');
-
-    // 4b. UserDeleted GDPR anonymization
-    publish('UserDeleted', 'auth-service', { user_id: memberActor.id });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const memberMediaAnonymized = await Media.findById(memberUpload._id);
-    assert.strictEqual(
-        memberMediaAnonymized?.uploader.display_name,
-        'Deleted User',
-        'Uploader display_name anonymized to Deleted User'
-    );
-    assert.strictEqual(
-        memberMediaAnonymized?.uploader.avatar_url,
-        null,
-        'Uploader avatar set to null'
-    );
-    console.log('✓ UserDeleted consumer anonymization verified');
-
-    // 4c. EventCompleted auto-album creation
-    publish('EventCompleted', 'event-service', {
-        event_id: 'ev-999',
-        title: 'Summer Cup 2026',
-    });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    const autoAlbum = await MediaAlbum.findOne({ event_id: 'ev-999' });
-    assert.ok(autoAlbum, 'Event album auto-created upon EventCompleted');
-    assert.strictEqual(autoAlbum.title, 'Summer Cup 2026 Album');
-    assert.strictEqual(autoAlbum.category, 'event');
-    console.log('✓ EventCompleted consumer auto album initialization verified');
-
-    // Clean up created files in storage
-    const allRemaining = await Media.find().lean();
-    for (const m of allRemaining) {
-        await deleteMediaObject(m.url.replace('/uploads/', ''));
+        const edity = await mediaService.uploadMedia(core, DUMMY_PNG, { category: 'community' });
+        await Media.updateOne({ _id: edity._id }, { $set: { 'uploader.user_id': member._id } }); // the member's, already approved
+        await Promise.allSettled([
+            mediaService.updateMedia(edity._id, member, { caption: 'changed' }),
+            mediaService.moderateMedia(edity._id, core, { status: 'approved' }),
+        ]);
+        assert.ok(await fileMatchesRow(edity._id, edity.url), `edit vs approve #${i}: the file follows the final status`);
     }
 
+    // Per-uploader quota on what waits for a moderator.
+    const eager = await seedUser('Eager Uploader', UserRole.MEMBER);
+    for (let i = 0; i < MAX_PENDING_ITEMS; i++) await mediaService.uploadMedia(eager, DUMMY_PNG, { category: 'community' });
+    await expectError(() => mediaService.uploadMedia(eager, DUMMY_PNG, { category: 'community' }), 'pending_quota_exceeded', `the ${MAX_PENDING_ITEMS + 1}th pending upload`);
+    assert.ok(await mediaService.uploadMedia(core, DUMMY_PNG, { category: 'community' }), 'core is not capped');
+    console.log('✓ Moderation races converge, missing files refuse, and pending uploads are capped');
+
+    /* ---------------- 5. Albums ---------------- */
+    const album = await mediaService.createAlbum(core, { title: 'Spring League 2026 Finals!', category: 'event', event_id: eventId });
+    assert.strictEqual(album.slug, 'spring-league-2026-finals', 'Slug derived cleanly');
+    const twin = await mediaService.createAlbum(core, { title: 'Spring League 2026 Finals!' });
+    assert.ok(twin.slug.startsWith('spring-league-2026-finals-'), 'a derived slug collision gets a suffix, not a 500');
+    await expectError(() => mediaService.createAlbum(core, { title: 'x', slug: album.slug }), 'album_slug_already_exists', 'a chosen slug collision is a 409');
+    await expectError(() => mediaService.createAlbum(core, { title: '🎉🎉' }), 'album_slug_required', 'a title with nothing to slugify is a 422');
+    // Owner decision: many manual albums per event; the event's admins make them, not any core.
+    const dayTwo = await mediaService.createAlbum(core, { title: 'Spring League Day Two', event_id: eventId });
+    assert.strictEqual(dayTwo.event_id, eventId, 'a second manual album for one event is allowed');
+    await expectError(() => mediaService.createAlbum(outsiderCore, { title: 'Not Mine', event_id: eventId }), 'forbidden', 'a core member who does not run the event');
+    await expectError(() => mediaService.createAlbum(outsiderCore, { title: 'Hidden', event_id: draftId }), 'event_not_found', 'and a draft is a 404 to them');
+
+    const privateAlbum = await mediaService.createAlbum(core, { title: 'Committee Only', is_public: false });
+    await expectError(() => mediaService.getAlbumById(privateAlbum.slug, null), 'album_not_found', 'a private album is a 404 to a guest');
+    assert.ok(await mediaService.getAlbumById(privateAlbum._id, asViewer(core)), 'core can open it');
+    await expectError(
+        () => mediaService.uploadMedia(member, DUMMY_PNG, { category: 'general', album_id: privateAlbum._id }),
+        'album_not_found',
+        'a member cannot upload into a private album'
+    );
+
+    const albumUpload = await mediaService.uploadMedia(core, DUMMY_PNG, { category: 'event', event_id: eventId, album_id: album._id });
+    const memberInAlbum = await mediaService.uploadMedia(member, DUMMY_PNG, { category: 'event', album_id: album._id });
+    assert.strictEqual((await MediaAlbum.findById(album._id))!.media_count, 1, 'media_count counts approved items only');
+    await mediaService.moderateMedia(memberInAlbum._id, core, { status: 'approved' });
+    assert.strictEqual((await MediaAlbum.findById(album._id))!.media_count, 2, 'and moves on approval');
+    const refreshedAlbum = await mediaService.getAlbumById(album.slug, null);
+    assert.strictEqual(refreshedAlbum.media.length, 2, 'Album constituent media populated');
+
+    // The general gallery is not a side door into a private album (audit #2).
+    const secretShot = await mediaService.uploadMedia(core, DUMMY_PNG, { category: 'general', album_id: privateAlbum._id });
+    const guestPage = await mediaService.listMedia({ page: 1, limit: 50 }, null);
+    assert.ok(!guestPage.items.some((i) => i._id === secretShot._id), 'private-album media is not in a guest gallery');
+    assert.ok((await mediaService.listMedia({ page: 1, limit: 50 }, asViewer(core))).items.some((i) => i._id === secretShot._id), 'core sees it');
+    console.log('✓ Albums: slugs, event-admin scope, privacy, and approved-only counts');
+
+    /* ---------------- 6. Likes ---------------- */
+    const liked = await mediaService.toggleLike(albumUpload._id, asViewer(member));
+    assert.deepStrictEqual([liked.liked, liked.likes_count], [true, 1], 'a like');
+    const unliked = await mediaService.toggleLike(albumUpload._id, asViewer(member));
+    assert.deepStrictEqual([unliked.liked, unliked.likes_count], [false, 0], 'the same user again is an unlike, not a second like');
+    await mediaService.toggleLike(albumUpload._id, asViewer(member));
+    const second = await mediaService.toggleLike(albumUpload._id, asViewer(other));
+    assert.strictEqual(second.likes_count, 2, 'one like per user');
+    assert.strictEqual(await MediaLike.countDocuments({ media_id: albumUpload._id }), 2);
+    const hidden = await mediaService.uploadMedia(member, DUMMY_PNG, { category: 'general' });
+    await expectError(() => mediaService.toggleLike(hidden._id, asViewer(other)), 'media_not_found', 'nobody likes what they cannot see');
+    console.log('✓ Likes are a per-user toggle');
+
+    /* ---------------- 7. Delete ---------------- */
+    await MediaAlbum.updateOne({ _id: album._id }, { $set: { cover_media_id: albumUpload._id } });
+    await expectError(() => mediaService.deleteMedia(hidden._id, other), 'media_not_found', 'a stranger cannot even see a pending item to delete');
+    const delRes = await mediaService.deleteMedia(albumUpload._id, core);
+    assert.deepStrictEqual(delRes, { id: albumUpload._id, deleted: true }, 'no hand-written success key');
+    const albumAfterDel = await MediaAlbum.findById(album._id);
+    assert.strictEqual(albumAfterDel!.media_count, 1, 'Album media_count decremented upon media deletion');
+    assert.strictEqual(albumAfterDel!.cover_media_id, null, 'Album cover_media_id unset upon media deletion');
+    assert.strictEqual(await MediaLike.countDocuments({ media_id: albumUpload._id }), 0, 'and its likes go with it');
+    console.log('✓ Media deletion, album count rollback, and cover_media_id unsetting verified');
+
+    /* ---------------- 8. Consumers ---------------- */
+    await User.updateOne({ _id: member._id }, { $set: { 'profile.full_name': 'Rahul The Wall Dravid', 'profile.avatar_url': '/uploads/avatars/rahul.png' } });
+    await handlers.handleUserProfileUpdated({ user_id: member._id, changed_fields: ['full_name', 'avatar_url'] });
+    let snap = (await Media.findById(memberUpload._id))!.uploader;
+    assert.strictEqual(snap.display_name, 'Rahul The Wall Dravid', 'Uploader snapshot updated after UserProfileUpdated');
+    assert.strictEqual(snap.avatar_url, '/uploads/avatars/rahul.png');
+
+    await User.updateOne({ _id: member._id }, { $set: { deleted_at: new Date() } });
+    await handlers.handleUserDeleted({ user_id: member._id });
+    snap = (await Media.findById(memberUpload._id))!.uploader;
+    assert.deepStrictEqual([snap.display_name, snap.avatar_url, snap.deleted], ['Deleted user', null, true], 'the shared anonymized snapshot');
+
+    // A deleted account never reappears through a late event.
+    await handlers.handleUserProfileUpdated({ user_id: member._id, changed_fields: ['full_name'] });
+    await handlers.handleUserRestored({ user_id: member._id });
+    assert.strictEqual((await Media.findById(memberUpload._id))!.uploader.display_name, 'Deleted user', 'late rename/restore events are no-ops');
+    await User.updateOne({ _id: member._id }, { $set: { deleted_at: null } });
+
+    await handlers.handleUserRestored({ user_id: member._id });
+    snap = (await Media.findById(memberUpload._id))!.uploader;
+    assert.deepStrictEqual([snap.display_name, snap.deleted], ['Rahul The Wall Dravid', false], 'UserRestored re-snapshots');
+    await handlers.handleUserDeleted({ user_id: member._id });
+    assert.strictEqual((await Media.findById(memberUpload._id))!.uploader.display_name, 'Rahul The Wall Dravid', 'a replayed UserDeleted after a restore is a no-op');
+
+    const endedId = await seedEvent('Summer Cup 2026');
+    await Promise.all([
+        handlers.handleEventCompleted({ event_id: endedId, title: 'stale payload title' }),
+        handlers.handleEventCompleted({ event_id: endedId }),
+    ]);
+    const autoAlbums = await MediaAlbum.find({ event_id: endedId, created_by: 'system' }).lean();
+    assert.strictEqual(autoAlbums.length, 1, 'EventCompleted twice is still one system album');
+    await handlers.handleEventCompleted({ event_id: eventId }); // an event that already has manual albums
+    assert.strictEqual(await MediaAlbum.countDocuments({ event_id: eventId, created_by: 'system' }), 1, 'manual albums do not block the system one');
+    assert.strictEqual(autoAlbums[0].title, 'Summer Cup 2026 Album', 'titled from the Event, not the payload');
+    console.log('✓ Consumers: profile, delete, restore, and an idempotent event album');
+
+    /* ---------------- 9. /uploads over HTTP ---------------- */
+    const server: Server = app.listen(0);
+    await new Promise((r) => server.once('listening', r));
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+    try {
+        const served = await fetch(base + coreUpload.url);
+        assert.strictEqual(served.status, 200, 'an approved file is served');
+        assert.strictEqual(served.headers.get('cache-control'), 'public, max-age=300', 'with a short cache: moderation can withdraw it');
+        assert.strictEqual((await fetch(base + hidden.url)).status, 404, 'a pending file is not, at its future URL');
+        assert.strictEqual((await fetch(`${base}/uploads/.pending/${keyOf(hidden.url)}`)).status, 404, 'nor from the pending tree');
+    } finally {
+        server.close();
+    }
+    console.log('✓ /uploads serves approved files only');
+
     await closeScratchDb();
+    await fs.rm(SCRATCH_UPLOADS, { recursive: true, force: true });
     console.log('\n[media-service selfcheck] ALL ASSERTIONS PASSED SUCCESSFULLY!');
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
     console.error('[media-service selfcheck] FAILED:', err);
+    await closeScratchDb().catch(() => undefined);
+    await fs.rm(SCRATCH_UPLOADS, { recursive: true, force: true }).catch(() => undefined);
     process.exit(1);
 });

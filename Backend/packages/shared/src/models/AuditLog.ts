@@ -79,6 +79,15 @@ AuditLogSchema.pre(
     }
 );
 
+// The query hooks above never see a loaded row being re-saved, or a bulkWrite — both rewrote history
+// unchecked (audit Sep 26). Inserting a new row is the one write allowed.
+AuditLogSchema.pre('save', function (this: IAuditLog) {
+    if (!this.isNew) throw new Error('audit_logs is append-only: entries are never modified or removed');
+});
+AuditLogSchema.pre('bulkWrite', function () {
+    throw new Error('audit_logs is append-only: entries are never modified or removed');
+});
+
 AuditLogSchema.index({ target_type: 1, target_id: 1, created_at: -1 }); // "history of this user"
 AuditLogSchema.index({ actor_id: 1, created_at: -1 }); // "what did this admin do"
 AuditLogSchema.index({ action: 1, created_at: -1 }); // Audit Log Explorer filter (§5.15.5)

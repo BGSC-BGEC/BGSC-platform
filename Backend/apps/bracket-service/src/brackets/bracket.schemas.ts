@@ -4,7 +4,7 @@ import { z } from 'zod';
 /**
  * Request schemas. Zod strips unknown keys, which is the sanitization half of the job: a client
  * cannot set `winner`, `status`, `advances_to` or `reported_by` by adding the field to a body —
- * every one of those is the server's (be2-feedback-bracket-plan.md §8).
+ * every one of those is the server's.
  *
  * The format is deliberately NOT a parameter: it comes from `events.leaderboard.format`, which an
  * organiser already chose when they configured the event. Accepting it here would let a draw
