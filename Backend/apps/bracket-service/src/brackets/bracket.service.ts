@@ -15,10 +15,11 @@ import {
     publish,
     recordAudit,
 } from '@bgsc/shared';
-import { v4 as uuid } from 'uuid';
-import { Actor, Viewer, assertEventVisible, assertMayScore } from './actor';
-import { GenerateBracketInput } from './bracket.schemas';
+import { randomUUID } from 'crypto';
+import { Actor, Viewer, adminEventOr404, assertEventVisible } from './actor';
+import { GenerateBracketInput, MAX_FIELD } from './bracket.schemas';
 import { generate, seedParticipants } from './generate';
+import { completeBracketIfDone } from '../matches/match.service';
 
 /**
  * The draw's data access, guards and domain events. The arithmetic lives in `generate.ts`, which
@@ -26,21 +27,21 @@ import { generate, seedParticipants } from './generate';
  *
  * Writes nothing outside its own two collections. `events`, `teams` and `form_submissions` are
  * read through their models — a read is a read (`adding-a-service.md §6.5`) — and the reserved
- * `events.bracket` slot is deliberately left null (plan D3).
+ * `events.bracket` slot is deliberately left null.
  */
 
 const PRODUCER = 'bracket-service';
 
-/** The formats `generate.ts` can draw. The event model carries five (plan D4). */
+/** The formats `generate.ts` can draw. The event model carries five. */
 const SUPPORTED: readonly string[] = ['round_robin', 'single_elim'];
 
 /* ------------------------------------------------------------------ *
  * Reading the event
  * ------------------------------------------------------------------ */
 
-export async function loadEvent(eventId: string): Promise<IEvent> {
+export async function loadEvent(eventId: string, notFound = 'event_not_found'): Promise<IEvent> {
     const event = await Event.findOne({ _id: eventId, deleted_at: null });
-    if (!event) throw new ServiceError(404, 'event_not_found');
+    if (!event) throw new ServiceError(404, notFound);
     return event;
 }
 
@@ -97,14 +98,22 @@ export async function readField(event: IEvent): Promise<Field> {
         'owner.type': 'event',
         'owner.id': event._id,
         status: REGISTERED_STATUS,
+        // A deleted account is not a new seat; its snapshot is already anonymized.
+        'user.deleted': { $ne: true },
     })
         .sort({ submitted_at: 1, _id: 1 })
         .select('user')
         .lean<{ user: { user_id: string; display_name: string; avatar_url: string | null } }[]>();
 
+    // One seat per person. The unique registration index is per FORM, so an event that has had
+    // two forms can hold two confirmed rows for one user — and a duplicate id fails the Bracket
+    // invariant as a 500. The earlier registration keeps the seat.
+    const seen = new Set<string>();
+    const unique = registrations.filter((r) => !seen.has(r.user.user_id) && !!seen.add(r.user.user_id));
+
     return {
         participant_type: 'user',
-        entries: registrations.map((r) => ({
+        entries: unique.map((r) => ({
             id: r.user.user_id,
             display_name: r.user.display_name,
             avatar_url: r.user.avatar_url ?? null,
@@ -122,13 +131,16 @@ export interface DrawResult {
 }
 
 export async function generateBracket(input: GenerateBracketInput, actor: Actor): Promise<DrawResult> {
-    const event = await loadEvent(input.event_id);
-    assertMayScore(event, actor);
+    const event = await adminEventOr404(input.event_id, actor);
     const format = assertDrawable(event);
 
     const field = await readField(event);
     if (field.entries.length < 2) {
         throw new ServiceError(422, 'not_enough_participants', { found: field.entries.length });
+    }
+    // A round robin of n is n(n-1)/2 fixtures in one insert: 256 is 32,640, 1,000 would be ~500k.
+    if (field.entries.length > MAX_FIELD) {
+        throw new ServiceError(422, 'too_many_participants', { found: field.entries.length, max: MAX_FIELD });
     }
     if (input.seeding === 'manual' && !input.seeds) throw new ServiceError(422, 'manual_seeding_requires_seeds');
 
@@ -141,7 +153,7 @@ export async function generateBracket(input: GenerateBracketInput, actor: Actor)
     }
 
     const draw = generate(participants, format);
-    const bracketId = uuid();
+    const bracketId = randomUUID();
 
     // Two writes and no transaction (Mongo is standalone here, relationships.md §5). The bracket
     // goes first because its unique `event_id` is the claim: a second generator loses here, before
@@ -227,8 +239,9 @@ export async function listMatches(
 export async function getBracket(eventId: string, viewer: Viewer): Promise<DrawResult> {
     const bracket = await Bracket.findOne({ event_id: eventId });
     if (!bracket) throw new ServiceError(404, 'bracket_not_found');
-    // Same rule the Event Service applies to the event itself, and the same 404.
-    assertEventVisible(await loadEvent(eventId), viewer);
+    // Same rule the Event Service applies to the event itself — and ONE 404 code whether the
+    // event is missing, deleted or a draft, so the code is not an oracle for which.
+    assertEventVisible(await loadEvent(eventId, 'bracket_not_found'), viewer, 'bracket_not_found');
     return { bracket, matches: await listMatches(eventId) };
 }
 
@@ -238,20 +251,17 @@ export async function listMatchesFor(
     viewer: Viewer,
     filter: { round?: number; status?: string } = {}
 ): Promise<IMatch[]> {
-    assertEventVisible(await loadEvent(eventId), viewer);
+    assertEventVisible(await loadEvent(eventId), viewer, 'event_not_found');
     return listMatches(eventId, filter);
 }
 
 export async function getMatch(id: string, viewer: Viewer): Promise<IMatch> {
     const match = await Match.findById(id).lean<IMatch>();
     if (!match) throw new ServiceError(404, 'match_not_found');
-    try {
-        assertEventVisible(await loadEvent(match.event_id), viewer);
-    } catch {
-        // The event is a draft the viewer may not see; the fixture is not theirs to read either,
-        // and it answers as the fixture rather than leaking which half was missing.
-        throw new ServiceError(404, 'match_not_found');
-    }
+    // A missing event or a draft the viewer may not see: the fixture is not theirs to read either,
+    // and it answers as the fixture rather than leaking which half was missing. Anything else (a
+    // database failure) is not a 404.
+    assertEventVisible(await loadEvent(match.event_id, 'match_not_found'), viewer, 'match_not_found');
     return match;
 }
 
@@ -267,13 +277,40 @@ export async function getMatch(id: string, viewer: Viewer): Promise<IMatch> {
  * unregenerable from the moment it was drawn — the opposite of what this guard is for.
  */
 export async function deleteBracket(eventId: string, actor: Actor): Promise<void> {
-    const event = await loadEvent(eventId);
-    assertMayScore(event, actor);
+    await adminEventOr404(eventId, actor, 'bracket_not_found');
 
-    const bracket = await Bracket.findOne({ event_id: eventId });
-    if (!bracket) throw new ServiceError(404, 'bracket_not_found');
+    // Claim first: `active` → `draft`. A report re-reads the bracket AFTER its own compare-and-swap
+    // and backs out when it finds `draft` (match.service.ts), so once this claim lands no result
+    // can slip in between the "nothing played" check and the delete — the check-then-delete this
+    // replaced could destroy a result reported in that gap. A `draft` bracket is
+    // also claimable, so a delete that died half way can be retried.
+    // `claimed_at` dates the claim, so a delete that dies before finishing does not leave the
+    // bracket refusing reports forever: a report takes a stale claim back (match.service.ts).
+    const bracket = await Bracket.findOneAndUpdate(
+        { event_id: eventId, status: { $in: ['active', 'draft'] } },
+        { $set: { status: 'draft', claimed_at: new Date() } },
+        { returnDocument: 'after' }
+    );
+    if (!bracket) {
+        if (await Bracket.exists({ event_id: eventId })) throw new ServiceError(409, 'bracket_already_played');
+        throw new ServiceError(404, 'bracket_not_found');
+    }
+    const release = () =>
+        Bracket.updateOne({ _id: bracket._id, status: 'draft' }, { $set: { status: 'active', claimed_at: null } });
 
-    if (await Match.exists({ event_id: eventId, reported_by: { $ne: null } })) {
+    let played: boolean;
+    try {
+        played = !!(await Match.exists({ bracket_id: bracket._id, reported_by: { $ne: null } }));
+    } catch (err) {
+        // Nothing has been deleted yet: give the claim back rather than strand the bracket in draft.
+        await release().catch(() => undefined);
+        throw err;
+    }
+    if (played) {
+        await release();
+        // A report that finished while we held the claim could not complete the bracket then (its
+        // active → completed swap found 'draft'); if that was the last fixture, complete it now.
+        await completeBracketIfDone(bracket);
         throw new ServiceError(409, 'bracket_already_played');
     }
 

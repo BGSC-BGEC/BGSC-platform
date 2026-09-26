@@ -29,8 +29,9 @@ export const listNotifications = wrap(async (req, res) => {
     res.json({ notifications: notifications.map(present), next_cursor });
 });
 
+/** `{ count }`, the same shape as `GET /announcements/unread-count`: one badge reader for both. */
 export const getUnreadCount = wrap(async (req, res) => {
-    res.json({ unread: await svc.unreadCount(actorId(req)) });
+    res.json({ count: await svc.unreadCount(actorId(req)) });
 });
 
 export const getPreferences = wrap(async (req, res) => {

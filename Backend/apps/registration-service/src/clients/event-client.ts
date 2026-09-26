@@ -1,61 +1,63 @@
-import { config } from '@bgsc/shared';
+import { InternalCallError, callInternal, config } from '@bgsc/shared';
 
 /**
- * The one thing this service cannot do for itself: reserve capacity on an event.
+ * The one thing this service cannot do for itself: hold capacity on an event.
  *
  * `events` is written by the Event Service alone (relationships.md §1), and the seat count is a
- * write — so this is HTTP, not a direct read, even though we share the database. Everything else
- * this service needs from another domain is a read, and reads go straight to the model.
+ * write — so this is HTTP, not a direct read, even though we share the database.
  *
- * Lives here rather than in @bgsc/shared because it has exactly one caller and encodes an
- * Event-domain contract; shared is models, middleware, bus and config only.
+ * Contract: reserve and release are idempotent per registration id — the
+ * Event Service keeps `seat_holders[]` — so retrying either with the same registration is always
+ * safe. `callInternal` unwraps the `{ success, data }` envelope; reading `result.reserved` off the
+ * wrapper is what made every registration `rejected`.
  */
 
-/** Failure reasons agreed with BE-1 (be2-registration-service-plan.md §12.1). */
-export type ReserveFailure = 'capacity_full' | 'waitlist_disabled' | 'event_closed' | 'event_not_found';
+/** `reason`: `capacity_full`, `waitlist_disabled`, `event_closed`, `not_open`, `event_not_found`, … */
+export type ReserveSeatResult = { reserved: true } | { reserved: false; reason: string };
 
-export interface ReserveSeatResult {
-    reserved: boolean;
-    reason?: ReserveFailure;
+/** What a registration becomes when the event says no. Only `capacity_full` means "there is a waitlist". */
+export const settleRefusal = (reason: string): 'waitlisted' | 'rejected' =>
+    reason === 'capacity_full' ? 'waitlisted' : 'rejected';
+
+/** Throws `InternalCallError`: `outcomeUnknown` means retry with the same registration, never assume. */
+export async function reserveSeat(eventId: string, registrationId: string): Promise<ReserveSeatResult> {
+    const result = await callInternal<{ reserved?: unknown; reason?: unknown }>(
+        config.services.event,
+        `/internal/events/${encodeURIComponent(eventId)}/reserve-seat`,
+        { body: { registration_id: registrationId } }
+    );
+    if (result?.reserved === true) return { reserved: true };
+    return { reserved: false, reason: typeof result?.reason === 'string' ? result.reason : 'seat_unavailable' };
 }
 
-const TIMEOUT_MS = 5000;
+async function releaseSeat(eventId: string, registrationId: string): Promise<{ released: boolean }> {
+    const result = await callInternal<{ released?: unknown }>(
+        config.services.event,
+        `/internal/events/${encodeURIComponent(eventId)}/release-seat`,
+        { body: { registration_id: registrationId } }
+    );
+    return { released: result?.released === true };
+}
 
 /**
- * A refusal (`reserved: false`) is an answer; anything else throws. The caller must be able to
- * tell "the event says no" from "we never reached the event", because the first is a waitlist and
- * the second is a retry.
+ * Release that never throws, retried once when the outcome is unknown (safe: release is idempotent).
+ * `released` is true only when the Event Service confirmed it gave a seat back — which is the only
+ * thing `RegistrationCancelled.freed_seat` may claim.
+ *
+ * ponytail: one retry, then logged. A seat still held after that is released by the Event
+ * Service's own sweep, which drops holders whose registration is no longer confirmed or submitted;
+ * a queue of pending releases is the upgrade if that is ever too slow.
  */
-async function call<T>(path: string, body: unknown): Promise<T> {
-    const res = await fetch(`${config.services.event}${path}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Internal-Token': config.internalToken },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    if (!res.ok) {
-        throw new Error(`event-service ${path} responded ${res.status}`);
+export async function releaseSeatQuietly(eventId: string, registrationId: string): Promise<boolean> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            return (await releaseSeat(eventId, registrationId)).released;
+        } catch (err) {
+            if (!(err instanceof InternalCallError) || !err.outcomeUnknown || attempt === 1) {
+                console.error(`[registration-service] release-seat failed for ${registrationId}:`, err);
+                return false;
+            }
+        }
     }
-    return (await res.json()) as T;
-}
-
-/**
- * `idempotencyKey` is derived from the registration, not random: a retry after a timeout must
- * present the same key or the Event Service counts the seat twice (plan §D1).
- */
-export function reserveSeat(
-    eventId: string,
-    registrationId: string,
-    idempotencyKey: string
-): Promise<ReserveSeatResult> {
-    return call<ReserveSeatResult>(`/internal/events/${eventId}/reserve-seat`, {
-        registration_id: registrationId,
-        idempotency_key: idempotencyKey,
-    });
-}
-
-export function releaseSeat(eventId: string, registrationId: string): Promise<{ released: boolean }> {
-    return call<{ released: boolean }>(`/internal/events/${eventId}/release-seat`, {
-        registration_id: registrationId,
-    });
+    return false;
 }

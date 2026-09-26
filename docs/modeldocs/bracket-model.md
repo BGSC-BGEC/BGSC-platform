@@ -4,7 +4,6 @@
 **Collections:** `brackets`, `matches`
 **Spec refs:** §4.1 `Match`, §5.5 Spectator Bracket View (round robin grids, single/double elimination, bypass rounds), §5.15.2 Visual Bracket Generator, §5.6 leaderboard formats
 **MVP plan refs:** Week 4 Sunday BE-2 — tournament bracket data structure, bracket generation for events, match/game results update.
-**Service plan:** `docs/be2-feedback-bracket-plan.md`
 
 ---
 
@@ -20,7 +19,7 @@ could disagree with its own event would be a second source of truth for the same
 
 **`events.bracket` stays null.** That reserved `Mixed` slot lives on a document the Event Service
 owns (`relationships.md §1`); `brackets.event_id` is the same link from the side that owns it, so
-nothing here writes into another service's collection (plan D3).
+nothing here writes into another service's collection.
 
 ---
 
@@ -33,9 +32,9 @@ nothing here writes into another service's collection (plan D3).
   format: 'round_robin' | 'single_elim',
   participant_type: 'user' | 'team',   // from events.teaming.is_teamed
   seeding: 'registration' | 'random' | 'manual',
-  participants: [{ seed, id, display_name, avatar_url }],   // frozen at generation
+  participants: [{ seed, id, display_name, avatar_url, deleted }],   // frozen at generation; display copy follows the account
   rounds: number,
-  status: 'draft' | 'active' | 'completed',
+  status: 'draft' | 'active' | 'completed',   // 'draft' doubles as the delete claim: DELETE moves active → draft before checking for results; a report that finds draft backs out
   generated_by: string,
   created_at, updated_at
 }
@@ -44,11 +43,12 @@ nothing here writes into another service's collection (plan D3).
 | Field | Why |
 |---|---|
 | `participants` | A snapshot, like every other in this repo: a draw is the record of who was in it, not a live view of who still is. A team that disbands after the draw still played its fixtures |
-| `seeding` | `registration` is the default and the only deterministic one — arrival order, explicable to a participant. `manual` must list the field exactly once; anything else is refused |
+| `seeding` | `registration` is the default and the only deterministic one — arrival order, explicable to a participant. `manual` must list the field exactly once; anything else is refused. `seeds` sent with another seeding is ignored |
 | `event_id` unique | One bracket per event, enforced by the index rather than by a read-then-write, so a double-clicked Generate is a 409 and not two draws |
-| `format` | Only the two that are generated today. `double_elim` and `elim_after_n` are on the event model and not here (plan D4) |
+| `format` | Only the two that are generated today. `double_elim` and `elim_after_n` are on the event model and not here |
 
-**Invariants:** at least two participants; ids unique; seeds exactly `1..n` with no gaps.
+**Invariants:** at least two participants; ids unique; seeds exactly `1..n` with no gaps. At most 256
+participants (422 `too_many_participants`): a round robin of 256 is already 32,640 fixtures.
 
 ---
 
@@ -61,8 +61,8 @@ nothing here writes into another service's collection (plan D3).
   round: number,                       // 1-based
   slot: number,                        // position within the round
   bracket_side: 'main' | 'upper' | 'lower',
-  a: { seed, id, display_name } | null,
-  b: { seed, id, display_name } | null,
+  a: { seed, id, display_name, deleted } | null,
+  b: { seed, id, display_name, deleted } | null,
   score_a: number | null,
   score_b: number | null,
   winner: 'a' | 'b' | 'draw' | null,
@@ -140,16 +140,16 @@ so a double-clicked Save produces one result and one advance.
 
 | Rule | Why |
 |---|---|
-| core admin **of that event**, or coordinator+ | `event.service.ts:280` already gates attendance this way; scoring somebody else's tournament is not a smaller act (plan D14) |
+| core admin **of that event**, or coordinator+ | event-service already gates attendance this way; scoring somebody else's tournament is not a smaller act |
 | a draw is refused in single elimination | a knockout has to knock somebody out; round robin keeps draws, which is what its table is for |
 | core reports, coordinator corrects | Spec §5.15.2's admin override, and every correction is audited with the previous score |
 | a correction is refused once the **next** round has been played | this service cannot un-play a match, so it will not invalidate one |
 | the last result completes the bracket | a compare-and-swap from `active`, so `BracketCompleted` is emitted exactly once |
 
-Standings are **derived** on read, never stored (plan D12): points 3-1-0 with goal difference for a
-round robin, furthest round reached for elimination. A bye is not a game played. When that stops
-being cheap, `leaderboard_entries.stats` already has the fields — and a service that owns them
-(plan D8).
+Standings are **derived** on read, never stored: points 3-1-0 with goal difference for a
+round robin; for elimination, furthest round reached, then still standing before knocked out (the
+two finalists share a round), then seed. A bye is not a game played. When that stops
+being cheap, `leaderboard_entries.stats` already has the fields — and a service that owns them.
 
 ---
 
@@ -164,10 +164,14 @@ MatchCompleted    { event_id, bracket_id, match_id, round, winner_id, loser_id, 
 BracketCompleted  { event_id, bracket_id, format, participant_type, winner_id, winner_name }
 ```
 
-Consumed: `UserDeleted { user_id }` — and nothing else. A bracket is drawn when an organiser says
-so, not in reaction to an event. The exception is an account being deleted out from under a seed:
-the name comes off the draw and off every fixture, while the seed, the id and the results stay
-exactly as they were (relationships.md §4.1).
+Consumed: the three user-snapshot events — and nothing else. A bracket is drawn when an organiser says
+so, not in reaction to an event. The exception is the display copy of the person behind a seed:
+`UserDeleted` erases the name off the draw and off every fixture (`anonymizedSnapshot`) — only if the
+account is still deleted when it arrives, so a late one after `UserRestored` is a no-op — while the
+seed, the id and the results stay exactly as they were (relationships.md §4.1); `UserProfileUpdated`
+(gated on `full_name`/`avatar_url`) and `UserRestored` (ungated, `deleted: false`) copy it back from
+`users`. The profile consumer was missing until Sep 26, so a renamed player kept the old name on
+every draw.
 
 `MatchCompleted` and `BracketCompleted` are the seams for the two services that are not built yet:
 Leaderboard (BE-1, Week 3) for `stats`, and Hall of Fame (BE-1, Week 4) for a tournament win.
@@ -178,7 +182,7 @@ Leaderboard (BE-1, Week 3) for `stats`, and Hall of Fame (BE-1, Week 4) for a to
 
 | Deferred | Why / upgrade path |
 |---|---|
-| Double elimination | The cost is entirely loser-bracket routing. `bracket_side: 'main' \| 'upper' \| 'lower'` is on the model already, so it is code and not a migration (plan D9) |
+| Double elimination | The cost is entirely loser-bracket routing. `bracket_side: 'main' \| 'upper' \| 'lower'` is on the model already, so it is code and not a migration |
 | `elim_after_n` | Not a tree — a standings rule over ad-hoc fixtures. `leaderboard_entries.stats.fails` is where it lands |
 | Real-time score feeds (Spec §5.5) | WebSockets. MVP is polling, as the plan's own risk register says |
 | Scheduling conflicts (one venue, two fixtures, one hour) | Spec does not ask, and no venue model exists |

@@ -1,6 +1,6 @@
 import { requireServiceToken, validate, wrap } from '@bgsc/shared';
 import { Router } from 'express';
-import { SpendBody, SpendBodyInput } from '../points/points.schemas';
+import { RefundBody, RefundBodyInput, SpendBody, SpendBodyInput } from '../points/points.schemas';
 import * as svc from '../points/points.service';
 
 /**
@@ -8,10 +8,7 @@ import * as svc from '../points/points.service';
  * path at the edge (`routing.ts` `isInternalPath`), and this router checks the shared token in
  * constant time. "Not exposed on the gateway" is a deployment assumption, not an access control.
  *
- * One route, because there is exactly one caller — Leaderboard Service
- * (leaderboard-model.md §6 step 2). Challenge awards arrive on the event bus instead, so there is
- * no internal *award* route: a contract with no second party is a guess
- * (adding-a-service.md §6.4).
+ * Leaderboard Service calls /points/spend on investment, and /points/refund on compensation rollback.
  */
 export const internalRoutes = Router();
 
@@ -27,3 +24,15 @@ internalRoutes.post(
         res.json({ transaction_id: tx._id, balance_after: tx.balance_after, replayed });
     })
 );
+
+// Bound to the spend `request_id` made: same user, exactly its amount, at most once across this
+// route and the event-cancel sweep (they share `idempotencyKey.investmentRefund`).
+internalRoutes.post(
+    '/points/refund',
+    validate({ body: RefundBody }),
+    wrap(async (req, res) => {
+        const { tx, replayed } = await svc.refundForInvestment(req.body as RefundBodyInput);
+        res.json({ transaction_id: tx._id, balance_after: tx.balance_after, replayed });
+    })
+);
+

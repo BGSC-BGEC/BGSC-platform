@@ -1,14 +1,14 @@
 import { ANNOUNCEMENT_CATEGORY, AnnouncementCategory, config } from '@bgsc/shared';
 
 /**
- * WhatsApp Business (Cloud) API provider (Spec §9.4, plan §5.1).
+ * WhatsApp Business (Cloud) API provider (Spec §9.4).
  *
  * One function and one predicate, so the rest of the service never knows which provider is behind
  * it. Unconfigured is a first-class state, not an error: with no credentials every dispatch row
  * resolves `skipped / not_configured` and no HTTP call is made — the same shape as `/strava/*`
  * answering `503 strava_not_configured`, and the state this repo ships in.
  *
- * Note what the Cloud API actually is (plan §0.3): it addresses **phone numbers**, and has no
+ * Note what the Cloud API actually is: it addresses **phone numbers**, and has no
  * public endpoint for posting into a WhatsApp group. Spec §9.4's "tag maps to a group ID" is
  * therefore not implementable as written, so `destinationFor()` returns an **opaque destination**
  * that this module hands to the API unchanged. Swap this file for another provider and the map,
@@ -17,14 +17,31 @@ import { ANNOUNCEMENT_CATEGORY, AnnouncementCategory, config } from '@bgsc/share
  * Two hygiene rules this module owns, because nothing downstream can fix them:
  *  - the access token never leaves here — not into a log line, not into a stored `error`;
  *  - destinations are PII (a phone number or group id) and are never written into a message body.
+ *
+ * DEFERRED (owner decision, Sep 26): WhatsApp and push delivery are post-MVP. The code stays and
+ * is tested, but ships unconfigured — every dispatch resolves `skipped / not_configured` and the
+ * in-app card is the delivery. Said at boot by `reportConfiguration()` so nobody reads a quiet log
+ * as a broken integration.
  */
 
 const TIMEOUT_MS = 8000;
 /** Provider failures are stored on a dispatch row, which caps `error` at 300. */
 const ERROR_MAX = 240;
 
+/** Failures that happen before a single byte of the request left: the message certainly did not. */
+const PRE_SEND_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN']);
+
 export class ProviderError extends Error {
-    constructor(public readonly status: number | null, message: string) {
+    constructor(
+        public readonly status: number | null,
+        message: string,
+        /**
+         * True when the provider certainly did NOT accept the message: it answered 4xx, or the
+         * connection was refused before anything was sent. Only these are safe to retry. A timeout,
+         * a reset or a 5xx may have been delivered — retrying those is how a group gets it twice.
+         */
+        public readonly definite: boolean = false
+    ) {
         super(message);
         this.name = 'ProviderError';
     }
@@ -46,7 +63,10 @@ export function isConfigured(): boolean {
 export function reportConfiguration(): void {
     const tag = '[notification-service]';
     if (!isConfigured()) {
-        console.log(`${tag} WhatsApp is not configured; every broadcast will resolve 'skipped'.`);
+        console.log(
+            `${tag} WhatsApp and push delivery are DEFERRED post-MVP and not configured; every ` +
+                `broadcast resolves 'skipped' and the in-app card is the delivery.`
+        );
         return;
     }
 
@@ -102,13 +122,28 @@ export async function sendText(to: string, body: string): Promise<string> {
             signal: AbortSignal.timeout(TIMEOUT_MS),
         });
     } catch (err) {
-        // A timeout or a DNS failure. Retryable, and it never carries a response to leak.
-        throw new ProviderError(null, `unreachable: ${(err as Error).message}`.slice(0, ERROR_MAX));
+        // No response. A refused connection or a failed DNS lookup sent nothing; a timeout or a
+        // reset may have been delivered — the provider can accept the message and lose the reply.
+        const code = (err as { cause?: { code?: string } }).cause?.code ?? '';
+        throw new ProviderError(
+            null,
+            `unreachable: ${code || (err as Error).message}`.slice(0, ERROR_MAX),
+            PRE_SEND_CODES.has(code)
+        );
     }
 
     const text = await res.text().catch(() => '');
     if (!res.ok) {
-        throw new ProviderError(res.status, `http ${res.status}: ${text}`.slice(0, ERROR_MAX));
+        // Scrubbed before clipping: a clip only shortens an echoed phone number, and this string
+        // ends up on the announcement document every core+ reader is served.
+        const scrubbed = text.split(to).join('[destination]');
+        // A 4xx is the provider refusing the message: definitely not sent. A 5xx says nothing either
+        // way about whether it went out before the error.
+        throw new ProviderError(
+            res.status,
+            `http ${res.status}: ${scrubbed}`.slice(0, ERROR_MAX),
+            res.status >= 400 && res.status < 500
+        );
     }
 
     try {

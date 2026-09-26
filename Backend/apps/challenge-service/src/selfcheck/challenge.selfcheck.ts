@@ -2,6 +2,7 @@ import assert from 'assert';
 import { Challenge, ChallengeParticipation, ServiceError, UserRole } from '@bgsc/shared';
 import { v4 as uuid } from 'uuid';
 import * as catalog from '../challenges/challenge.service';
+import { CreateChallengeBody, UpdateChallengeBody } from '../challenges/challenge.schemas';
 import { actorOf, challengeInput, closeScratchDb, openScratchDb, seedUser } from './seed';
 
 /**
@@ -43,7 +44,7 @@ async function main(): Promise<void> {
         section('normalization keeps a valid request out of the model hook');
 
         // The schema default fills proof_types with ['url','text'] while requires_proof is false,
-        // which the model hook (Challenge.ts:173) throws about as a plain Error -> 500.
+        // which the model hook (Challenge.ts) throws about as a plain Error -> 500.
         const noProof = await catalog.createChallenge(
             challengeInput({ submission: { requires_proof: false, max_files: 0, auto_approve: false } }) as never,
             actor
@@ -104,7 +105,56 @@ async function main(): Promise<void> {
                 actor
             )
         );
-        pass('physical/team-size/window/auto-approve/media-proof all refuse as 422');
+        await refuses(422, 'max_files_required', () =>
+            catalog.createChallenge(
+                challengeInput({ submission: { requires_proof: true, proof_types: ['url'], max_files: 0, auto_approve: false } }) as never,
+                actor
+            )
+        );
+        pass('physical/team-size/window/auto-approve/media-proof/zero-files all refuse as 422');
+
+        section('request schemas');
+        {
+            // zod 4 applies `.default()` inside `.partial()`; the update schema must carry none.
+            assert.deepStrictEqual(Object.keys(UpdateChallengeBody.parse({ title: 'x' })), ['title'], 'a PATCH body is only what was sent');
+            assert.deepStrictEqual(UpdateChallengeBody.parse({ teaming: { max_teams: 5 } }).teaming, { max_teams: 5 }, 'nested groups too');
+            const js = CreateChallengeBody.safeParse({ ...challengeInput(), resources: [{ label: 'x', url: 'javascript:alert(1)' }] });
+            assert.ok(!js.success, 'a javascript: resource URL is refused');
+            assert.ok(!CreateChallengeBody.safeParse({ ...challengeInput(), cover_media_url: 'javascript:alert(1)' }).success);
+            pass('PATCH parses to exactly the sent fields; only http(s) URLs are accepted');
+        }
+
+        section('a PATCH merges into what is stored');
+        {
+            const reviewer = await seedUser('Kept Reviewer');
+            const rich = await catalog.createChallenge(
+                challengeInput({
+                    brief_hidden_until_accept: true,
+                    max_participants: 7,
+                    reviewers: [reviewer._id],
+                    tags: ['Keep'],
+                    teaming: { enabled: true, team_size_min: 2, team_size_max: 4, max_teams: 3 },
+                    window: { opens_at: null, closes_at: new Date(Date.now() + 86_400_000), submissions_close_at: null, time_limit_minutes: 30 },
+                    submission: { requires_proof: true, proof_types: ['url'], max_files: 2, auto_approve: false },
+                }) as never,
+                actor
+            );
+            const renamed = await catalog.updateChallenge(rich._id, UpdateChallengeBody.parse({ title: 'Renamed Rich' }) as never, actor);
+            assert.strictEqual(renamed.brief_hidden_until_accept, true);
+            assert.strictEqual(renamed.max_participants, 7);
+            assert.deepStrictEqual([...renamed.reviewers], [reviewer._id]);
+            assert.deepStrictEqual([...renamed.tags], ['keep'], 'tags are lowercased per element');
+            assert.strictEqual(renamed.teaming.enabled, true);
+            assert.strictEqual(renamed.window.time_limit_minutes, 30);
+            assert.deepStrictEqual([...renamed.submission.proof_types], ['url']);
+            assert.strictEqual(renamed.submission.max_files, 2);
+
+            const oneKnob = await catalog.updateChallenge(rich._id, UpdateChallengeBody.parse({ teaming: { max_teams: 5 } }) as never, actor);
+            assert.strictEqual(oneKnob.teaming.enabled, true, 'changing max_teams does not switch teaming off');
+            assert.strictEqual(oneKnob.teaming.max_teams, 5);
+            assert.strictEqual(oneKnob.teaming.team_size_min, 2);
+            pass('PATCH { title } keeps every other field; PATCH { teaming: { max_teams } } changes one number');
+        }
 
         section('slugs');
         const a = await catalog.createChallenge(challengeInput({ title: 'Run Five K' }) as never, actor);
@@ -166,6 +216,8 @@ async function main(): Promise<void> {
             accepted_at: new Date(),
             review: { reviewer_user_id: admin._id, decision: 'approved', reason: null, reviewed_at: new Date() },
         });
+        // What the service's approval always does alongside the row: the delete guard reads this.
+        await Challenge.updateOne({ _id: priced._id }, { $inc: { 'counts.approved': 1 } });
 
         await refuses(409, 'challenge_has_participations', () =>
             catalog.updateChallenge(priced._id, { award_points: 30 } as never, actor)
@@ -173,6 +225,10 @@ async function main(): Promise<void> {
         pass('repricing is refused once a participation snapshotted the old amount');
 
         await refuses(409, 'challenge_has_approved_participations', () => catalog.softDelete(priced._id, actor));
+        // An approval whose reply was lost gave its reservation back: the row stands, the count is 0.
+        await Challenge.updateOne({ _id: priced._id }, { $set: { 'counts.approved': 0 } });
+        await refuses(409, 'challenge_has_approved_participations', () => catalog.softDelete(priced._id, actor));
+        await Challenge.updateOne({ _id: priced._id }, { $set: { 'counts.approved': 1 } });
         pass('deleting is refused while an approved participation stands — the ledger references it');
 
         // Same-value patch must not trip the participation guard: it changes nothing.
@@ -204,16 +260,25 @@ async function main(): Promise<void> {
 
         section('reads');
         await catalog.transition(c._id, 'complete', actor);
-        const activeOnly = await catalog.listChallenges({ status: 'active', limit: 50 } as never);
+        const staff = { admin: true };
+        const student = { admin: false };
+        const activeOnly = await catalog.listChallenges({ status: 'active', limit: 50 } as never, student);
         assert.ok(!activeOnly.rows.some((r) => r._id === c._id), 'a completed challenge is not in the active list');
-        const byKey = await catalog.getByKey(a.slug);
+        const byKey = await catalog.getByKey(a.slug, staff);
         assert.strictEqual(byKey._id, a._id);
-        assert.strictEqual((await catalog.getByKey(a._id))._id, a._id);
+        assert.strictEqual((await catalog.getByKey(a._id, staff))._id, a._id);
         pass('detail resolves by slug and by id; filters respect status');
+
+        // `a` is still a draft: unpublished below Core, on both read paths.
+        await refuses(404, 'challenge_not_found', () => catalog.getByKey(a.slug, student));
+        await refuses(403, 'forbidden', () => catalog.listChallenges({ status: 'draft', limit: 50 } as never, student));
+        await refuses(403, 'forbidden', () => catalog.listChallenges({ status: 'archived', limit: 50 } as never, student));
+        assert.ok((await catalog.listChallenges({ status: 'draft', limit: 50 } as never, staff)).rows.length > 0);
+        pass('drafts are 404 by key and unlistable below Core; Core still sees them');
 
         const deletable = await catalog.createChallenge(challengeInput() as never, actor);
         await catalog.softDelete(deletable._id, actor);
-        await refuses(404, 'challenge_not_found', () => catalog.getByKey(deletable._id));
+        await refuses(404, 'challenge_not_found', () => catalog.getByKey(deletable._id, staff));
         assert.ok(await Challenge.exists({ _id: deletable._id }), 'soft delete keeps the row');
         pass('a soft-deleted challenge is 404 on every read path but still on disk');
 

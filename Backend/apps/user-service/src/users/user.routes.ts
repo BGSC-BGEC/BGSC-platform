@@ -3,11 +3,8 @@ import { IMAGE_MAX_BYTES } from '../storage/storage';
 import * as c from './user.controller';
 import {
     UserRole,
-    optionalAuth,
     requireAuth,
     requireActiveUser,
-    requireRole,
-    requireServiceToken,
     validate,
 } from '@bgsc/shared';
 import {
@@ -17,7 +14,6 @@ import {
     ChangeStatusSchema,
     ListUsersQuery,
     SearchQuery,
-    SnapshotQuery,
     RefParams,
     DeleteAccountSchema,
 } from './user.schemas';
@@ -52,23 +48,27 @@ userRoutes.post(
 );
 
 // ---- literal paths, before /:ref -------------------------------------------
-userRoutes.get('/search', requireAuth, validate({ query: SearchQuery }), c.searchUsers);
-userRoutes.get('/', requireAuth, requireRole(UserRole.COORDINATOR), validate({ query: ListUsersQuery }), c.listUsers);
+// requireActiveUser on every route that resolves PII scope: the scope and the serializer's
+// elevation rank the LIVE role, not a token claim that outlives a demotion.
+userRoutes.get('/search', requireAuth, requireActiveUser(), validate({ query: SearchQuery }), c.searchUsers);
+userRoutes.get('/', requireAuth, requireActiveUser(UserRole.COORDINATOR), validate({ query: ListUsersQuery }), c.listUsers);
 
 // ---- by reference (uuid or username) ---------------------------------------
-userRoutes.get('/:ref/player-card', optionalAuth, validate({ params: RefParams }), c.getPlayerCard);
+// requireAuth on both profile reads ("any authed"). optionalAuth made every public
+// profile and card an anonymous, scrapeable directory.
+userRoutes.get('/:ref/player-card', requireAuth, requireActiveUser(), validate({ params: RefParams }), c.getPlayerCard);
 
 userRoutes.get(
     '/:ref/audit',
     requireAuth,
-    requireRole(UserRole.COORDINATOR),
+    requireActiveUser(UserRole.COORDINATOR),
     validate({ params: RefParams }),
     c.auditForUser
 );
 
 // `requireActiveUser`, not `requireRole`: changing somebody's role is the most consequential write
 // on the platform, and a token outlives a demotion or a suspension by up to fifteen minutes. The
-// live document decides (adding-a-service.md §6.2; whole-backend audit, Sep 27).
+// live document decides (adding-a-service.md §6.2).
 userRoutes.patch(
     '/:ref/role',
     requireAuth,
@@ -86,15 +86,7 @@ userRoutes.patch(
     c.changeStatus
 );
 
-// optionalAuth, not requireAuth: the response differs for a signed-in viewer (field masking, §11.2).
-userRoutes.get('/:ref', optionalAuth, validate({ params: RefParams }), c.getUser);
+userRoutes.get('/:ref', requireAuth, requireActiveUser(), validate({ params: RefParams }), c.getUser);
 
-/**
- * Internal snapshot refresh for the other six BE-2 services (relationships.md §4).
- *
- * Guarded by a shared service token, not by network placement. Left open this returns every
- * user's real name and avatar to anyone who can reach the port, regardless of profile privacy.
- */
-export const internalRoutes = Router();
-internalRoutes.use(requireServiceToken);
-internalRoutes.get('/users/snapshot', validate({ query: SnapshotQuery }), c.getSnapshots);
+// No /internal routes: the snapshot endpoint had no caller (every service reads `users` directly,
+// relationships.md §1) and reported soft-deleted users as `deleted: false`. Removed Sep 26.

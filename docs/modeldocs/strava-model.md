@@ -3,7 +3,7 @@
 **Owner service:** Challenge Service (`:3008`, also serves `/strava`)
 **Collections:** `strava_credentials`, `strava_activities`
 **Spec refs:** §9.1 Strava (Physical Sports), §12.4 Integration Settings "Connect / Disconnect Strava", §14 scope table (line 2597) — which lists the integration as **excluded from MVP**
-**MVP plan refs:** Week 3 BE-2 Sunday (`MVP_Timeline_Plan_Updated.md:381-382`) — "Strava OAuth integration (basic)", "Strava activity sync endpoint"
+**MVP plan refs:** Week 3 BE-2 Sunday (`MVP_Timeline_Plan_Updated.md`) — "Strava OAuth integration (basic)", "Strava activity sync endpoint"
 **Design source:** `docs/SystemDesignDocs/strava-integration.md` — correct on the *idea*, written for a stack this repo does not have (see §6)
 
 ---
@@ -18,10 +18,10 @@ What the two collections are for: `strava_credentials` holds one row per connect
 OAuth tokens, encrypted — and `strava_activities` holds what has been pulled, keyed by Strava's own
 activity id.
 
-**Two readers.** The challenge screen (a physical challenge's proof is usually an activity) and the
-user profile (Spec §9.1 "Activity feed on user profile"). The models live in
-`packages/shared/src/models/Strava.ts` like every other model, so the profile's reader queries the
-collection directly and needs no API between the services (`adding-a-service.md §6.5`).
+**Two screens, one reader.** The challenge screen (a physical challenge's proof is usually an
+activity) and the user profile (Spec §9.1 "Activity feed on user profile"). Both are served by the
+Challenge Service — the profile's feed is `GET /strava/users/:id/activities` — and no other service
+reads these collections.
 
 ## 2. `strava_credentials`
 
@@ -37,6 +37,7 @@ collection directly and needs no API between the services (`adding-a-service.md 
   scope: string,              // 'activity:read_all,profile:read_all'
 
   last_synced_at: Date | null, // watermark for the next sync's `after=`; null before the first
+  last_sync_started_at: Date | null, // per-user sync cooldown, claimed by compare-and-swap
   created_at: Date,
   updated_at: Date
 }
@@ -132,36 +133,55 @@ the fields above are what the sync endpoint and the two screens use.
 ```
 GET /strava/connect   (auth)
   state = jwt { nonce, sub: user_id }, 10 min, HS256 on JWT_ACCESS_SECRET
-  302 -> strava.com/oauth/authorize?...&scope=activity:read_all,profile:read_all&state=...
+  -> 200 { url: strava.com/oauth/authorize?...&scope=activity:read_all,profile:read_all&state=... }
+     JSON, not a 302: a browser or app navigation cannot carry the Bearer token.
 
-GET /strava/callback  (public — a browser redirect cannot carry a Bearer token)
-  verify state -> user_id        (expired or forged -> 400 invalid_oauth_state)
+GET /strava/callback  (public — Strava's browser redirect)
+  verify state (expired or forged -> redirect ?strava=error)
+  writes NOTHING
+  302 -> ${FRONTEND_URL}/settings/integrations?strava=authorized&code&state&scope
+
+POST /strava/link  (auth)  { code, state, scope }
+  state.sub must equal the CALLER            (else 400 oauth_state_mismatch)
+  scope must include activity read           (else 409 strava_scope_insufficient)
   POST /oauth/token { code, grant_type: 'authorization_code' }
-  upsert strava_credentials, seal both tokens   (E11000 on athlete_id -> 409 strava_athlete_already_linked)
+  upsert strava_credentials, seal both tokens, store the GRANTED scope
+       (E11000 on athlete_id -> 409 strava_athlete_already_linked)
   users.profile.social_links.strava_id = athlete_id
   publish StravaConnected { user_id, athlete_id }
-  302 -> ${FRONTEND_URL}/settings/integrations?strava=connected
 ```
 
-The signed `state` is OAuth CSRF protection (RFC 6749 §10.12) and is not optional: without it an
-attacker hands a victim a callback URL carrying the attacker's authorization code, and the victim's
-BGSC account is bound to the attacker's Strava athlete. Same implementation as the Google flow in
-`auth-service` — a short-lived HMAC token, no session store, no new dependency.
+Why the link completes on an authenticated call: a signed `state` alone does not stop link-CSRF. An
+attacker can start the flow with their own session and hand the victim the authorize URL; the
+state verifies, and the victim's Strava would be stored under the attacker's account. Requiring the
+code to be redeemed by the session that started the flow (`state.sub === caller`) closes that.
+A cookie would break mobile (the app's cookie jar is not the system browser's).
 
-`error=access_denied` (the user pressed Cancel) redirects to `?strava=denied`. Changing your mind
-is not a failure.
+`error=access_denied` (the user pressed Cancel) redirects to `?strava=denied`.
+
+**Disconnect and account deletion** both run one `unlink()`: best-effort remote deauthorize (skipped
+if the stored token can no longer be decrypted), then delete the credential, every
+`strava_activities` row, and `strava_id`.
+
+**Privacy:** only `visibility: 'everyone'` is public; `followers_only` and `only_me` are private.
+Another user's feed also 404s when their profile is private or the account is deleted.
+
+**Upstream errors:** 400/401/403 from Strava -> `409 strava_reauth_required` (credential kept);
+429 -> `503 strava_rate_limited`; anything else -> `502 strava_api_failed`. Never 401, which the
+client would read as its own session expiring.
 
 ### 4.2 Token refresh
 
 Before every API call: if `expires_at` is less than 5 minutes away, exchange the refresh token and
-re-seal both. A token that dies mid-request is a 401 the user cannot act on.
+re-seal both, compare-and-swapped on the sealed refresh token so two concurrent refreshes cannot clobber
+each other (the loser uses the winner's token). A token that dies mid-request is a 401 the user cannot act on.
 
 ### 4.3 Sync
 
 ```
 POST /strava/sync   (auth)
   GET /api/v3/athlete/activities?after=<last_synced_at>&per_page=100&page=1..3
-  upsert each by String(activity.id) ; publish StravaActivitySynced per activity
+  upsert each by String(activity.id) ; publish StravaActivitySynced per NEW activity only
   advance last_synced_at to the newest start_date
   -> { synced, skipped, has_more }
 ```
@@ -170,6 +190,11 @@ Capped at **3 pages per call**. Strava allows 200 requests per 15 minutes for th
 application*, so one user's button press must not spend everyone's budget; `has_more` tells the
 client to call again. A 429 from Strava surfaces as `503 strava_rate_limited` with `Retry-After`
 passed through — an expected state, not a 500.
+
+One sync per user per **5 minutes**: a compare-and-swap on `last_sync_started_at`, claimed before
+any Strava call; inside the window the answer is `429 sync_cooldown { retry_after }`. A relink of
+the same athlete keeps the cooldown (resetting it let a link -> sync loop spend the app-wide budget);
+a relink to a different athlete is a fresh row and starts without one.
 
 ## 5. Domain events
 
@@ -197,7 +222,7 @@ decision the repo actually made.
 | TypeORM `@Entity`, `jsonb`, `timestamptz`, `bigint`, two SQL migrations (§6.1, §7.1, §14) | Mongoose on MongoDB, no migrations |
 | NestJS `PassportStrategy`, `AuthGuard('strava')`, `auth.config.ts` (§5.1, §12) | Express 5, manual OAuth, `config/env.ts` |
 | BullMQ backfill and nightly repeatable job (§8.3, §9.2) | No job queue; sync is pull-based, on request |
-| OAuth in auth-service, storage + webhook in user-service (§3) | All of it in Challenge Service (be2-challenge-service-plan.md D1) |
+| OAuth in auth-service, storage + webhook in user-service (§3) | All of it in Challenge Service |
 | Webhook endpoint registered with Strava (§8) | Out of scope: nothing in this stack is publicly reachable, as §17 of that doc concedes |
 | Tokens published on the event bus (§13) | §5 above — never |
 

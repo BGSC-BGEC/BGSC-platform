@@ -7,6 +7,7 @@
  */
 export * from './config/env';
 export * from './config/db';
+export * from './config/redis';
 export * from './models';
 export * from './middleware/requireAuth';
 export * from './middleware/requireRole';
@@ -17,3 +18,5 @@ export * from './middleware/wrap';
 export * from './events/publish';
 export * from './errors';
 export * from './service';
+export * from './http/internal';
+export * from './access/eventAdmin';

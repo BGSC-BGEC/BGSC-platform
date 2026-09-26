@@ -13,7 +13,8 @@
         { "path": "./apps/challenge-service" },
         { "path": "./apps/notification-service" },
         { "path": "./apps/feedback-service" },
-        { "path": "./apps/bracket-service" }
+        { "path": "./apps/bracket-service" },
+        { "path": "./apps/media-service" }
     ],
     "include": ["src/**/*"],
     // Test code is compiled by tsconfig.check.json and run with ts-node; it must never reach dist,

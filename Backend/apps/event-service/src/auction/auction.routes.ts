@@ -45,15 +45,18 @@ auctionRoutes.get(
     c.getLot
 );
 
-// High-Concurrency Bidding (Captains)
+// High-Concurrency Bidding (Captains). `requireActiveUser()`: a suspended or deleted captain's
+// token stays valid for fifteen minutes, and a bid spends a team's purse.
 auctionRoutes.post(
     '/lots/:id/bid',
     requireAuth,
+    requireActiveUser(),
     validate({ params: LotIdParamSchema, body: PlaceBidSchema }),
     c.bid
 );
 
-// Admin & Core Lifecycle Operations
+// Admin & Core Lifecycle Operations. The CORE floor is only the first gate: the service also
+// requires the actor to administer THIS event (core_admins / creator / coordinator+).
 auctionRoutes.post(
     '/events/:ref/lots',
     requireAuth,

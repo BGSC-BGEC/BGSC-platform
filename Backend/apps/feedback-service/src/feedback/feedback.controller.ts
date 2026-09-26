@@ -30,12 +30,17 @@ function present(ticket: IFeedbackTicket, viewer: { id: string | null; role: Rol
             : ticket
     ) as IFeedbackTicket & { __v?: number };
     const { __v, contact_email, ...rest } = plain;
-    const staff = !!viewer.role && ['core', 'coordinator', 'founder'].includes(viewer.role);
+    const staff = svc.isStaff(viewer.role);
     const mine = ticket.reporter?.user_id && ticket.reporter.user_id === viewer.id;
     return staff || mine ? { ...rest, contact_email } : rest;
 }
 
-const viewerOf = (req: Request) => ({ id: req.user?.id ?? null, role: req.user?.role as RoleName | undefined });
+/**
+ * The LIVE viewer: `req.actor` where `requireActiveUser` already loaded it, otherwise one read of
+ * the user. Never the token claim — the staff view hands out reporters' addresses.
+ */
+const viewerOf = async (req: Request): Promise<{ id: string | null; role: RoleName | undefined }> =>
+    req.actor ? { id: req.actor._id, role: req.actor.role as RoleName } : svc.liveViewer(req.user);
 
 export const submitFeedback = wrap(async (req, res) => {
     const submitter = await svc.submitterFor(req.user, req.ip ?? null);
@@ -51,29 +56,31 @@ export const submitContact = wrap(async (req, res) => {
 });
 
 export const getTicket = wrap(async (req, res) => {
-    const viewer = viewerOf(req);
+    const viewer = await viewerOf(req);
     res.json(present(await svc.getTicket(ticketNoOf(req), viewer), viewer));
 });
 
 export const listMine = wrap(async (req, res) => {
-    const viewer = viewerOf(req);
-    const { tickets, next_cursor } = await svc.listMine(viewer.id!, req.query as unknown as ListTicketsInput);
+    const viewer = await viewerOf(req);
+    // A token whose account is gone or suspended is not a session.
+    if (!viewer.id) return void res.status(401).json({ error: 'unauthorized' });
+    const { tickets, next_cursor } = await svc.listMine(viewer.id, req.query as unknown as ListTicketsInput);
     res.json({ tickets: tickets.map((t) => present(t, viewer)), next_cursor });
 });
 
 export const listInbox = wrap(async (req, res) => {
-    const viewer = viewerOf(req);
+    const viewer = await viewerOf(req);
     const { tickets, next_cursor } = await svc.listInbox(req.query as unknown as ListTicketsInput);
     res.json({ tickets: tickets.map((t) => present(t, viewer)), next_cursor });
 });
 
 export const updateStatus = wrap(async (req, res) => {
     const ticket = await svc.setStatus(ticketNoOf(req), req.body as UpdateStatusInput, actorOf(req));
-    res.json(present(ticket, viewerOf(req)));
+    res.json(present(ticket, await viewerOf(req)));
 });
 
 export const updateSeverity = wrap(async (req, res) => {
     const { severity } = req.body as UpdateSeverityInput;
     const ticket = await svc.setSeverity(ticketNoOf(req), severity, actorOf(req));
-    res.json(present(ticket, viewerOf(req)));
+    res.json(present(ticket, await viewerOf(req)));
 });

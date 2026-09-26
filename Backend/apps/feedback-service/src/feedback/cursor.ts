@@ -17,7 +17,7 @@ interface Cursor {
     id: string;
 }
 
-export const encodeCursor = (created_at: Date, id: string): string =>
+const encodeCursor = (created_at: Date, id: string): string =>
     Buffer.from(JSON.stringify({ v: created_at.toISOString(), id } satisfies Cursor)).toString('base64url');
 
 function decodeCursor(raw: string): Cursor {

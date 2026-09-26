@@ -1,8 +1,8 @@
 import { BracketFormat, BracketParticipant, MatchStatus, MatchWinner } from '@bgsc/shared';
-import { v4 as uuid } from 'uuid';
+import { randomUUID } from 'crypto';
 
 /**
- * The draw, as pure functions (be2-feedback-bracket-plan.md §7, §11).
+ * The draw, as pure functions.
  *
  * No database, no clock, no randomness unless a caller hands it in. A round-robin schedule is
  * either correct — every pair exactly once, nobody twice in a round — or it is not, and that has
@@ -29,7 +29,7 @@ export interface GeneratedDraw {
 /** Injected so a test can pin ids to `m<round>-<slot>` and read the wiring; production passes uuids. */
 export type IdFactory = (round: number, slot: number) => string;
 
-const defaultIds: IdFactory = () => uuid();
+const defaultIds: IdFactory = () => randomUUID();
 
 /**
  * One participant is not a tournament, and the shapes below quietly produce nonsense for it — a

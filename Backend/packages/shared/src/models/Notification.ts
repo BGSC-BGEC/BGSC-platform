@@ -11,7 +11,7 @@ import { ANNOUNCEMENT_CATEGORY, AnnouncementCategory, DELIVERY_STATUS, DeliveryS
  *  - `notification_preferences` per-user, per-category toggles (Spec §10.3)
  *
  * `DeliveryStatus` is imported from Announcement rather than redeclared: the same five values are
- * written back into `announcements.delivery.*` (be2-broadcast-service-plan.md §6), and two enums
+ * written back into `announcements.delivery.*`, and two enums
  * that must agree are one enum with extra steps.
  */
 
@@ -23,7 +23,7 @@ import { ANNOUNCEMENT_CATEGORY, AnnouncementCategory, DELIVERY_STATUS, DeliveryS
 export const NOTIFICATION_CATEGORY = ['announcement', 'event', 'challenge', 'system'] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORY)[number];
 
-/** Spec §4.1's `channel` enum. Only `in_app` is written today (plan D5); the rest are the seam. */
+/** Spec §4.1's `channel` enum. Only `in_app` is written today; the rest are the seam. */
 export const NOTIFICATION_CHANNEL = ['in_app', 'push', 'email', 'whatsapp'] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNEL)[number];
 
@@ -54,6 +54,11 @@ export interface INotification extends Document<string> {
     dedupe_key: string;
 
     read_at: Date | null;
+    /**
+     * Set by the user's dismiss. The row stays, hidden from every inbox read, because it is also the
+     * dedupe record: deleting it let the next replay or reconcile hand the dismissed card back.
+     */
+    dismissed_at: Date | null;
     expires_at: Date;
 
     created_at: Date;
@@ -75,6 +80,7 @@ const NotificationSchema = new Schema<INotification>(
         dedupe_key: { type: String, required: true, maxlength: 200 },
 
         read_at: { type: Date, default: null },
+        dismissed_at: { type: Date, default: null },
         expires_at: { type: Date, required: true, default: () => notificationExpiry() },
     },
     timestamps
@@ -94,11 +100,21 @@ NotificationSchema.index({ user_id: 1, read_at: 1, created_at: -1 });
  * The idempotency guard AND the retraction query, in one index.
  *
  * `dedupe_key` leads deliberately: a deleted announcement is retracted with
- * `deleteMany({ dedupe_key })` across every recipient (plan D17), which needs the key as the index
+ * `deleteMany({ dedupe_key })` across every recipient, which needs the key as the index
  * prefix. Unique on the pair, so one user gets one notification per cause while every user still
  * gets their own.
  */
 NotificationSchema.index({ dedupe_key: 1, user_id: 1 }, { unique: true });
+
+/**
+ * `UserDeleted` erasing a player's name from captain auction cards. User Service replays recent
+ * deletions on a timer, so this runs far more often than once per deletion; partial on the one
+ * type that carries the field, which is also the query's own `type` filter.
+ */
+NotificationSchema.index(
+    { 'data.player_user_id': 1 },
+    { partialFilterExpression: { type: 'auction.sold.captain' } }
+);
 
 /** Mongo drops the row when `expires_at` passes. New collection, so no index migration to do. */
 NotificationSchema.index({ expires_at: 1 }, { expireAfterSeconds: 0 });
@@ -120,13 +136,14 @@ export type DispatchSourceType = (typeof DISPATCH_SOURCE_TYPE)[number];
  * A status the sweeper will pick up again, and one it will not.
  *
  * `skipped` is terminal on purpose: configuring WhatsApp credentials next week must not make three
- * weeks of `no_group_mapped` rows suddenly broadcast (plan §8.1).
+ * weeks of `no_group_mapped` rows suddenly broadcast. `outcome_unknown` is terminal
+ * because the message may already be in the group: a retry is a possible double post.
  */
-export const DISPATCH_TERMINAL: readonly DeliveryStatus[] = ['sent', 'skipped'];
+export const DISPATCH_TERMINAL: readonly DeliveryStatus[] = ['sent', 'skipped', 'outcome_unknown'];
 export const DISPATCH_RETRYABLE: readonly DeliveryStatus[] = ['pending', 'failed', 'rate_limited'];
 export const isTerminalDispatch = (s: DeliveryStatus): boolean => DISPATCH_TERMINAL.includes(s);
 
-/** Five attempts, then the row is left alone (plan §8.1). */
+/** Five attempts, then the row is left alone. */
 export const DISPATCH_MAX_ATTEMPTS = 5;
 
 export interface INotificationDispatch extends Document<string> {
@@ -136,20 +153,30 @@ export interface INotificationDispatch extends Document<string> {
     source: { type: DispatchSourceType; id: string };
     /** The announcement category whose group this send is for. Null for channels with no fan-out. */
     category: AnnouncementCategory | null;
-    /** Opaque provider destination (plan D3). PII: never surfaced over HTTP by this service. */
+    /** Opaque provider destination. PII: never surfaced over HTTP by this service. */
     destination: string | null;
 
     status: DeliveryStatus;
     attempts: number;
     provider_message_id: string | null;
-    /** Provider failure, clipped. Never carries a credential (plan §5.1). */
+    /** Provider failure, clipped. Never carries a credential. */
     error: string | null;
 
     attempted_at: Date | null;
     /** Set exactly when `status` is retryable; null when it is terminal. */
     next_attempt_at: Date | null;
-    /** When this row's outcome reached the announcement document (plan §6). */
+    /** When this row's outcome reached the announcement document. */
     writeback_at: Date | null;
+    /**
+     * When the writeback sweep last tried this row. The sweep takes the least recently tried first,
+     * so rows whose writeback keeps coming back `retry` cannot hold its bounded page forever.
+     */
+    writeback_tried_at: Date | null;
+    /**
+     * Set immediately before the provider call, cleared by every settle. A row found `pending` with
+     * this set and its lease lapsed died mid-send: it is closed as `outcome_unknown`, never re-sent.
+     */
+    sending_at: Date | null;
     /**
      * Bumped by every state change. The writeback reads a row, makes an HTTP call, and then marks
      * what it reported — and a settle can land in between. Pinning that mark to the revision the
@@ -183,6 +210,8 @@ const NotificationDispatchSchema = new Schema<INotificationDispatch>(
         attempted_at: { type: Date, default: null },
         next_attempt_at: { type: Date, default: null },
         writeback_at: { type: Date, default: null },
+        writeback_tried_at: { type: Date, default: null },
+        sending_at: { type: Date, default: null },
         revision: { type: Number, default: 0 },
     },
     timestamps
@@ -218,19 +247,47 @@ NotificationDispatchSchema.index(
 /** The retry sweep. */
 NotificationDispatchSchema.index({ status: 1, next_attempt_at: 1 });
 
-/** Spec §9.4's one-per-tag-per-hour check, answered from durable rows rather than a Redis TTL (D4). */
-NotificationDispatchSchema.index({ channel: 1, category: 1, status: 1, attempted_at: -1 });
-
 /** The writeback-retry sweep: terminal rows whose outcome never reached the announcement. */
 NotificationDispatchSchema.index({ writeback_at: 1, status: 1 });
 
-/** Reconciliation (plan §8.2) asks "does this announcement have any rows at all". */
+/** Reconciliation asks "does this announcement have any rows at all". */
 NotificationDispatchSchema.index({ 'source.id': 1 });
 
 export const NotificationDispatch = model<INotificationDispatch>(
     'NotificationDispatch',
     NotificationDispatchSchema,
     'notification_dispatches'
+);
+
+/* ------------------------------------------------------------------ *
+ * notification_rate_slots
+ * ------------------------------------------------------------------ */
+
+/**
+ * Spec §9.4's "1 per tag per hour", as one document per (channel, category) holding the times of
+ * its most recent sends.
+ *
+ * A document rather than a count over dispatch rows because the count was check-then-send: two
+ * announcements in one tag both counted zero `sent` rows and both went out. A slot is taken by a
+ * single-document `findOneAndUpdate` BEFORE the provider call, so the second taker sees the first.
+ * Durable rather than a Redis TTL key: Redis is optional here and forgets.
+ */
+export interface INotificationRateSlot extends Document<string> {
+    /** `<channel>:<category>`, e.g. `whatsapp:fitsoc`. */
+    _id: string;
+    /** Newest last, capped at the configured rate. */
+    sends: Date[];
+}
+
+const NotificationRateSlotSchema = new Schema<INotificationRateSlot>({
+    _id: { type: String, required: true },
+    sends: { type: [Date], default: [] },
+});
+
+export const NotificationRateSlot = model<INotificationRateSlot>(
+    'NotificationRateSlot',
+    NotificationRateSlotSchema,
+    'notification_rate_slots'
 );
 
 /* ------------------------------------------------------------------ *
@@ -242,7 +299,7 @@ export const NotificationDispatch = model<INotificationDispatch>(
  *
  * An absent document means every default, so nothing is created at signup and there is no backfill.
  * Only the in_app map is enforced today; `push` and `email` slot into the same shape when they
- * have a provider (plan D8).
+ * have a provider.
  */
 export interface INotificationPreference extends Document<string> {
     _id: string;

@@ -1,4 +1,4 @@
-import { AnnouncementCategory, DeliveryStatus, config } from '@bgsc/shared';
+import { AnnouncementCategory, DeliveryStatus, InternalCallError, callInternal, config } from '@bgsc/shared';
 
 /**
  * The one thing this service cannot do for itself: write the delivery outcome onto the
@@ -19,16 +19,19 @@ const TIMEOUT_MS = 5000;
 
 export interface WhatsAppDeliveryRow {
     category: AnnouncementCategory;
+    /** Masked (`dispatch.ts:maskDestination`) — never the raw destination. */
     group_id: string;
     status: DeliveryStatus;
     message_id?: string | null;
     attempted_at?: Date | null;
     error?: string | null;
+    /** The dispatch row's revision; the receiver ignores anything older than what it holds. */
+    revision: number;
 }
 
 export interface DeliveryPayload {
     whatsapp?: WhatsAppDeliveryRow[];
-    push?: { status: DeliveryStatus; sent_count?: number | null };
+    push?: { status: DeliveryStatus; sent_count?: number | null; revision: number };
 }
 
 /**
@@ -39,34 +42,32 @@ export interface DeliveryPayload {
  * boolean would leave them at `writeback_at: null` forever — re-read, re-sent and re-logged every
  * 60 seconds, and, because the sweep takes a bounded page, permanently occupying the slots that
  * genuinely stale rows need.
+ *
+ * ONLY those two are permanent. A 401 is our token being wrong (a rotation mid-deploy), a 422 a
+ * contract drift between two versions of these services — both are fixed by a deploy, and a
+ * receipt stamped "done" in the meantime would be lost for good. They are retried, and logged
+ * every time, which is the alarm.
  */
 export type WritebackResult = 'ok' | 'retry' | 'permanent';
+
+const PERMANENT = new Set([404, 409]);
 
 export async function recordDelivery(
     announcementId: string,
     payload: DeliveryPayload
 ): Promise<WritebackResult> {
     try {
-        const res = await fetch(`${config.services.announcement}/internal/announcements/${announcementId}/delivery`, {
+        await callInternal(config.services.announcement, `/internal/announcements/${announcementId}/delivery`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json', 'X-Internal-Token': config.internalToken },
-            body: JSON.stringify(payload),
-            signal: AbortSignal.timeout(TIMEOUT_MS),
+            body: payload,
+            timeoutMs: TIMEOUT_MS,
         });
-        if (res.ok) return 'ok';
-
-        console.error(`[notification-service] delivery writeback ${announcementId} responded ${res.status}`);
-        // 404: the announcement was deleted between publish and delivery. 409: it is not published.
-        // 422: this body will never be accepted. 401: our token is wrong, and retrying a rejected
-        // credential every minute is a way to lock an account out, not a way to recover.
-        // None of those get better by asking again; a 5xx or a timeout might.
-        return res.status >= 400 && res.status < 500 ? 'permanent' : 'retry';
+        return 'ok';
     } catch (err) {
-        // Unreachable, or timed out. The announcement service may simply be restarting.
+        if (!(err instanceof InternalCallError)) throw err;
         console.error(
-            `[notification-service] delivery writeback ${announcementId} unreachable:`,
-            (err as Error).message
+            `[notification-service] delivery writeback ${announcementId} failed: ${err.status} ${err.code}`
         );
-        return 'retry';
+        return PERMANENT.has(err.status) ? 'permanent' : 'retry';
     }
 }

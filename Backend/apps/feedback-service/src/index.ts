@@ -9,7 +9,7 @@ import { contactRoutes, feedbackRoutes } from './feedback/feedback.routes';
  *
  * Spec §5.12's ticket system: bug reports, feature requests, event complaints and contact-us, with
  * an anonymous option that is actually anonymous — no reporter, no actor and no address in the
- * audit trail (be2-feedback-bracket-plan.md D10).
+ * audit trail.
  *
  * Makes no outbound service calls. The one thing it wants from another domain — telling staff a
  * ticket arrived — goes out as `FeedbackSubmitted` on the bus, because the Notification Service
@@ -22,6 +22,7 @@ const PORT = parseInt(process.env.PORT || '3011', 10);
 const options = {
     name: NAME,
     port: PORT,
+    models: ['FeedbackTicket', 'FeedbackThrottle'],
     routes(app: express.Express) {
         app.use('/feedback', feedbackRoutes);
         app.use('/contact', contactRoutes);

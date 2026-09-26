@@ -1,13 +1,17 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { config } from '@bgsc/shared';
 
 /**
- * Local-disk storage for event posters and logos.
+ * Local-disk storage for event posters and logos, under the platform's ONE upload root
+ * (`config.uploadDir`, the shared volume) with this service's prefix `events/`. Media Service serves
+ * `/uploads` for everyone; this service used to write `apps/event-service/uploads`, which neither the
+ * volume nor the gateway's `/uploads` route could see.
  * ponytail: local disk, no resize or external bucket.
- * Week 4's Media Service replaces this with S3/R2 + CDN.
  */
-export const UPLOAD_DIR = path.resolve(__dirname, '../../uploads');
+const UPLOAD_ROOT = path.resolve(config.uploadDir);
+const PREFIX = 'events';
 
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024; // 10MB max
 
@@ -38,21 +42,29 @@ export interface StoredObject {
     mime: ImageMime;
 }
 
-export async function putObject(prefix: string, body: Buffer, mime: ImageMime): Promise<StoredObject> {
-    const key = `${prefix}/${randomUUID()}.${IMAGE_TYPES[mime]}`;
-    const dest = path.join(UPLOAD_DIR, key);
+/** Writes `events/<eventId>/<uuid>.<ext>` and returns the `/uploads/...` URL Media Service serves. */
+export async function putObject(eventId: string, body: Buffer, mime: ImageMime): Promise<StoredObject> {
+    const key = `${PREFIX}/${eventId}/${randomUUID()}.${IMAGE_TYPES[mime]}`;
+    const dest = path.join(UPLOAD_ROOT, key);
 
-    if (!path.resolve(dest).startsWith(UPLOAD_DIR + path.sep)) {
-        throw new Error('putObject: refusing to write outside upload directory');
+    if (!path.resolve(dest).startsWith(path.join(UPLOAD_ROOT, PREFIX) + path.sep)) {
+        throw new Error('putObject: refusing to write outside the events upload prefix');
     }
 
     await fs.mkdir(path.dirname(dest), { recursive: true });
     await fs.writeFile(dest, body);
 
-    return {
-        key,
-        url: `/uploads/${key}`,
-        bytes: body.length,
-        mime,
-    };
+    return { key, url: `/uploads/${key}`, bytes: body.length, mime };
+}
+
+/**
+ * Deletes a file `putObject` wrote for THIS event. Anything else — an external URL, a shared
+ * `/uploads` path, another event's file, a `..` escape — is left alone. A file already gone is fine.
+ */
+export async function deleteObject(eventId: string, url: string | null): Promise<void> {
+    const prefix = `/uploads/${PREFIX}/${eventId}/`;
+    if (!url?.startsWith(prefix)) return;
+    const dest = path.resolve(UPLOAD_ROOT, url.slice('/uploads/'.length));
+    if (!dest.startsWith(path.join(UPLOAD_ROOT, PREFIX, eventId) + path.sep)) return;
+    await fs.unlink(dest).catch(() => undefined);
 }

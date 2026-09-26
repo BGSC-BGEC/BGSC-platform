@@ -118,9 +118,15 @@ export interface IEvent extends Document<string> {
 
     counts: {
         registrations_confirmed: number;
-        registrations_waitlisted: number;
-        teams: number;
     };
+
+    /** Registration ids holding a confirmed seat. Makes reserve/release idempotent per registration. */
+    seat_holders: string[];
+
+    /** Set in the same CAS as the transition; replay sweeps key their windows on these. */
+    started_at: Date | null;
+    completed_at: Date | null;
+    cancelled_at: Date | null;
 
     created_at: Date;
     updated_at: Date;
@@ -172,7 +178,8 @@ const EventSchema = new Schema<IEvent>(
         category: { type: String, enum: EVENT_CATEGORY, required: true },
         type: { type: String, enum: EVENT_TYPE, required: true },
         domain: { type: String, enum: EVENT_DOMAIN, required: true },
-        tags: { type: [String], default: [], lowercase: true },
+        // Options on the element, not the array: `{ type: [String], lowercase: true }` lowercases nothing.
+        tags: { type: [{ type: String, lowercase: true, trim: true }], default: [] },
 
         // Lifecycle. upcoming/ongoing/past are stored, not derived — a scheduler flips them.
         status: { type: String, enum: EVENT_STATUS, default: 'draft' },
@@ -258,12 +265,27 @@ const EventSchema = new Schema<IEvent>(
 
         bracket: { type: Schema.Types.Mixed, default: null },
 
-        // Denormalized; owner service $incs these in the same write as the cause. Nightly recount repairs drift.
+        // Denormalized; moved only together with `seat_holders` below. The event-service seat
+        // reconciliation sweep gives back seats whose registration no longer uses them.
+        // `registrations_waitlisted` was dropped: three writers kept it with non-idempotent $incs and it
+        // drifted on every retry. The waitlist is counted from form_submissions instead. `teams` was
+        // dropped too: nothing ever wrote it, so every payload said 0.
         counts: {
             registrations_confirmed: { type: Number, default: 0, min: 0 },
-            registrations_waitlisted: { type: Number, default: 0, min: 0 },
-            teams: { type: Number, default: 0, min: 0 },
         },
+
+        // Seat ledger behind `counts.registrations_confirmed` (reserve-seat contract): reserve
+        // is `$addToSet` + `$inc` guarded by `seat_holders: { $ne: id }`, release is `$pull` + `$inc -1`
+        // guarded by `seat_holders: id`, so a retried call cannot count a seat twice.
+        // ponytail: embedded array, one uuid per seat — ~400k seats before the 16MB document cap. Move to
+        // an `event_seats` collection with a unique { event_id, registration_id } if events get that big.
+        seat_holders: { type: [String], default: [] },
+
+        // Lifecycle timestamps, written by the status CAS itself. A crash between the
+        // CAS and the publish leaves these behind, and the downstream replay sweeps find the event by them.
+        started_at: { type: Date, default: null },
+        completed_at: { type: Date, default: null },
+        cancelled_at: { type: Date, default: null },
 
         deleted_at: { type: Date, default: null },
     },
@@ -308,7 +330,9 @@ EventSchema.pre('validate', function (this: IEvent) {
         return fail('auction.oc_override_quota exceeds the 3/7 ceiling');
     }
 
-    if (reg.form_id === null && (t.is_teamed || reg.max_participants !== null || e.type !== 'DE')) {
+    // A draft may be saved before its form exists (the form needs the event's id first), and a
+    // cancelled event never registers anyone, so a formless draft may still be cancelled.
+    if (e.status !== 'draft' && e.status !== 'cancelled' && reg.form_id === null && (t.is_teamed || reg.max_participants !== null || e.type !== 'DE')) {
         return fail("no registration form is only valid for a non-teamed, uncapped 'DE' event");
     }
 
@@ -346,6 +370,8 @@ EventSchema.index({ status: 1, end_at: 1 }); // scheduler: ongoing -> past
 EventSchema.index({ status: 1, 'registration.opens_at': 1 }); // scheduler: open registration
 EventSchema.index({ status: 1, 'registration.closes_at': 1 }); // scheduler: close registration
 EventSchema.index({ deleted_at: 1 });
+EventSchema.index({ status: 1, completed_at: 1 }); // replay sweeps: completed in window
+EventSchema.index({ status: 1, cancelled_at: 1 }); // replay sweeps: cancelled in window
 EventSchema.index({ title: 'text', tags: 'text' }); // MVP stand-in for Elasticsearch (Spec §13)
 
 export const Event = model<IEvent>('Event', EventSchema, 'events');
@@ -354,7 +380,13 @@ export const Event = model<IEvent>('Event', EventSchema, 'events');
  * auction_lots — one document per player on the block (Spec §4.1)
  * ------------------------------------------------------------------ */
 
-export const LOT_STATUS = ['queued', 'on_block', 'sold', 'unsold'] as const;
+/**
+ * `settling`: the hammer fell and the winner is being charged (on_block → settling → sold|unsold).
+ * No bid lands on it and no other lot goes up until it finalizes; a settle that finds a lot here
+ * replays the same keyed Registration calls (a crash between "sold" and the charge used to leave a
+ * lot sold, uncharged and unseated for good).
+ */
+export const LOT_STATUS = ['queued', 'on_block', 'settling', 'sold', 'unsold'] as const;
 export type LotStatus = (typeof LOT_STATUS)[number];
 
 export interface IAuctionLot extends Document<string> {
@@ -437,5 +469,19 @@ const AuctionLotSchema = new Schema<IAuctionLot>(
 AuctionLotSchema.index({ event_id: 1, order: 1 });
 AuctionLotSchema.index({ event_id: 1, status: 1 });
 AuctionLotSchema.index({ 'player.user_id': 1, event_id: 1 }, { unique: true });
+// At most one ACTIVE lot (on the block or settling) per event. Two concurrent "raise the next lot" calls
+// could put two lots up at once; the second now fails with 11000 and backs off. A new name, not an edit
+// of the older `one_lot_on_block_per_event` (on_block only): changing an existing index's options under
+// the same name fails the index build at boot. Databases that already have the old one keep it too.
+AuctionLotSchema.index(
+    { event_id: 1 },
+    { unique: true, partialFilterExpression: { status: { $in: ['on_block', 'settling'] } }, name: 'one_active_lot_per_event' }
+);
+// Lot order is unique per event. Key order (order, event_id) rather than (event_id, order): the
+// non-unique (event_id, order) above already exists in deployed databases, and re-declaring the same
+// key pattern as unique conflicts at build. Existing duplicate orders must be renumbered first.
+AuctionLotSchema.index({ order: 1, event_id: 1 }, { unique: true, name: 'lot_order_unique_per_event' });
+// The auto-settle tick: expired lots on the block, across events.
+AuctionLotSchema.index({ status: 1, timer_ends_at: 1 });
 
 export const AuctionLot = model<IAuctionLot>('AuctionLot', AuctionLotSchema, 'auction_lots');

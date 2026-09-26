@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
-import { randomUUID } from 'crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import { config } from '../config/env';
+import { redisOptions } from '../config/redis';
 
 /**
  * Domain event bus. MVP is an in-process emitter (docs/modeldocs/README.md); Kafka is Phase 2
@@ -33,6 +34,85 @@ bus.setMaxListeners(50);
  */
 const CHANNEL = 'bgsc.events';
 
+/**
+ * This process, for own-message suppression. A publisher hears its own message back from Redis and
+ * has already delivered it locally. Suppression used to be a bounded set of recent message ids, so
+ * a burst of more than ~2500 publishes before the echoes arrived (a Redis outage drains the ioredis
+ * offline queue all at once) evicted ids and delivered those events a second time.
+ * An id per process has no capacity to run out of.
+ */
+export const INSTANCE_ID: string = randomUUID();
+
+/**
+ * Wire format: `{ v: 1, sig, body }`, where `body` is the event JSON (plus `instance`) as a string
+ * and `sig` is HMAC-SHA256(body) keyed by INTERNAL_API_TOKEN. Signing the string, not a re-serialized
+ * object, means there is no canonical-JSON question to get wrong.
+ *
+ * Why: consumers act on payloads (points-service credits `award_points` from ChallengeCompleted), and
+ * anything that could reach Redis could PUBLISH a forged one. Only a holder of the
+ * internal token can now produce a message a service will accept.
+ *
+ * ponytail: no replay window. A captured message can be re-sent by whoever can read the channel —
+ * which already requires the Redis password — and consumers dedupe on their own idempotency keys.
+ * Add a timestamp check against `occurred_at` if the bus ever crosses an untrusted network.
+ */
+interface WireMessage {
+    v: 1;
+    sig: string;
+    body: string;
+}
+
+const sign = (body: string, key: string = config.internalToken): string =>
+    createHmac('sha256', key).update(body).digest('hex');
+
+/**
+ * Keys a received message may be signed with: the current token and, during a rotation, the
+ * previous one (INTERNAL_API_TOKEN_PREVIOUS, verification only — this process always signs with the
+ * current key). Rotation is still "restart every service at once": the window this covers is the
+ * messages already in flight while the fleet restarts.
+ */
+const verificationKeys = (): string[] =>
+    [config.internalToken, config.internalTokenPrevious].filter((k): k is string => !!k);
+
+function signatureMatches(body: string, sig: string): boolean {
+    const given = Buffer.from(sig, 'hex');
+    return verificationKeys().some((key) => {
+        const expected = Buffer.from(sign(body, key), 'hex');
+        return given.length === expected.length && timingSafeEqual(given, expected);
+    });
+}
+
+export function encodeWire(event: DomainEvent, instance: string = INSTANCE_ID): string {
+    const body = JSON.stringify({ ...event, instance });
+    return JSON.stringify({ v: 1, sig: sign(body), body } satisfies WireMessage);
+}
+
+/**
+ * The inverse, or `null` for anything that must not be delivered: unparseable, unsigned, a bad
+ * signature, or this process's own echo. Exported so the selfcheck can drive it without Redis.
+ */
+export function decodeWire(raw: string): DomainEvent | null {
+    let wire: Partial<WireMessage>;
+    try {
+        wire = JSON.parse(raw);
+    } catch {
+        console.error('Event bus: dropped an unparseable message');
+        return null;
+    }
+    if (typeof wire?.body !== 'string' || typeof wire.sig !== 'string') {
+        console.error('Event bus: dropped an unsigned message');
+        return null;
+    }
+    if (!signatureMatches(wire.body, wire.sig)) {
+        console.error('Event bus: dropped a message with a bad signature');
+        return null;
+    }
+    const parsed = JSON.parse(wire.body) as DomainEvent & { occurred_at: string; instance?: string };
+    if (parsed.instance === INSTANCE_ID) return null;
+    const { instance: _instance, ...event } = parsed;
+    return { ...event, occurred_at: new Date(parsed.occurred_at) };
+}
+
 interface Transport {
     publish(event: DomainEvent): void;
     close(): Promise<void>;
@@ -64,18 +144,23 @@ export async function connectEventBus(): Promise<void> {
 
     // Required lazily so a service with no Redis configured never loads the driver.
     const { default: Redis } = await import('ioredis');
-    const pub = new Redis(config.redisUrl, { maxRetriesPerRequest: null, lazyConnect: true });
-    const sub = new Redis(config.redisUrl, { maxRetriesPerRequest: null, lazyConnect: true });
+    let pub: InstanceType<typeof Redis>;
+    let sub: InstanceType<typeof Redis>;
+    try {
+        // Options object, password separate (config/redis.ts): a raw password in the URL either
+        // failed to parse — and `new Redis` threw out of startService, crash-looping every service —
+        // or silently failed auth. A bad URL is now the same as an unreachable Redis.
+        const conn = redisOptions();
+        pub = new Redis({ ...conn, maxRetriesPerRequest: null, lazyConnect: true });
+        sub = new Redis({ ...conn, maxRetriesPerRequest: null, lazyConnect: true });
+    } catch (err) {
+        console.error(`Event bus disabled: REDIS_URL is not usable (${(err as Error).message}).`);
+        return;
+    }
 
     sub.on('message', (_channel: string, raw: string) => {
-        try {
-            const event = JSON.parse(raw) as DomainEvent & { occurred_at: string };
-            // A publisher receives its own message back; it already emitted locally.
-            if (event.message_id && seen.has(event.message_id)) return;
-            deliver({ ...event, occurred_at: new Date(event.occurred_at) });
-        } catch (err) {
-            console.error('Malformed event on the bus:', err);
-        }
+        const event = decodeWire(raw);
+        if (event) deliver(event);
     });
 
     // Redis dropping is not fatal: the service keeps serving, it just stops hearing other services.
@@ -84,7 +169,7 @@ export async function connectEventBus(): Promise<void> {
 
     transport = {
         publish: (event) => {
-            pub.publish(CHANNEL, JSON.stringify(event)).catch((err: Error) =>
+            pub.publish(CHANNEL, encodeWire(event)).catch((err: Error) =>
                 console.error('Failed to publish event:', err.message)
             );
         },
@@ -133,27 +218,25 @@ export async function disconnectEventBus(): Promise<void> {
     await transport?.close();
 }
 
-/** Own-message suppression. Bounded so a long-lived process cannot grow it without limit. */
-const seen = new Set<string>();
-function remember(id: string): void {
-    seen.add(id);
-    if (seen.size > 5000) {
-        for (const old of seen) {
-            seen.delete(old);
-            if (seen.size <= 2500) break;
-        }
-    }
-}
-
-/** Fan out to local subscribers. Shared by the in-process path and the Redis path. */
+/**
+ * Fan out to local subscribers. Shared by the in-process path and the Redis path.
+ *
+ * Each listener is isolated. `bus.emit` stops at the first listener that throws, so one broken
+ * consumer used to silently skip every other consumer of the same type and the `'*'` listeners —
+ * and an async listener's rejection escaped the try/catch entirely. A consumer
+ * failing must not fail the request that produced the event either: the write already committed.
+ */
 function deliver(event: DomainEvent): void {
-    // A throwing consumer must not fail the request that produced the event: the write already
-    // committed, and the emitter is fire-and-forget by contract.
-    try {
-        bus.emit(event.type, event);
-        bus.emit('*', event);
-    } catch (err) {
-        console.error(`Event consumer threw for ${event.type}:`, err);
+    const report = (err: unknown) => console.error(`Event consumer threw for ${event.type}:`, err);
+    for (const listener of [...bus.listeners(event.type), ...bus.listeners('*')]) {
+        try {
+            const result = (listener as (e: DomainEvent) => unknown)(event);
+            if (result && typeof (result as Promise<unknown>).then === 'function') {
+                (result as Promise<unknown>).then(undefined, report);
+            }
+        } catch (err) {
+            report(err);
+        }
     }
 }
 
@@ -175,7 +258,6 @@ export function publish<P extends Record<string, unknown>>(
         payload,
     };
 
-    remember(event.message_id);
     deliver(event);
     transport?.publish(event);
 
@@ -194,5 +276,4 @@ export function subscribe<P extends Record<string, unknown>>(
 export function resetBus(): void {
     bus.removeAllListeners();
     bus.setMaxListeners(50);
-    seen.clear();
 }

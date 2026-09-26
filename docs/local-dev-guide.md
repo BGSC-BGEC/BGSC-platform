@@ -17,8 +17,24 @@ docker compose up -d
 curl localhost:3000/health          # {"status":"ok","service":"gateway",...}
 ```
 
-That brings up MongoDB, Redis, the gateway and every built service. `docker compose down` to stop,
+That brings up MongoDB, Redis, the gateway and every service. `docker compose down` to stop,
 `docker compose logs -f gateway` to watch one.
+
+MongoDB (27017), Redis (6379) and mongo-express (8081, `--profile tools`) are published on
+**127.0.0.1 only** — never the LAN. Redis runs with `--requirepass $REDIS_PASSWORD`, and every
+service gets the same `REDIS_PASSWORD` next to a password-less `REDIS_URL` (any characters are
+fine; a password pasted into the URL could not contain `/ # ? %`). Both passwords
+(`MONGO_ROOT_PASSWORD`, `REDIS_PASSWORD`) fall back to dev values that a `NODE_ENV=production` boot
+refuses. `CORS_ORIGIN` has no fallback: compose refuses to start without it.
+
+First account with power: register it (and verify it, so it is active), then
+`FOUNDER_EMAIL=you@example.com npm run seed:founder` (or set `FOUNDER_EMAIL` in `.env`). It is a
+one-time bootstrap: it refuses an unregistered or inactive account, and refuses once a different
+founder exists — promote everyone else through the app.
+
+Uploaded files go to one named volume, `uploads`, mounted at `/app/uploads` in user, event,
+registration and media services (`UPLOAD_DIR=/app/uploads`). media-service is the only one that
+serves `/uploads`.
 
 ## Faster loop — infrastructure in Docker, services on the host
 
@@ -36,6 +52,10 @@ npm run dev --workspace @bgsc/auth-service       # auth-service   :3001
 Each in its own terminal. The gateway routes to whichever services are running and returns `502`
 for one that is down, so you only need to start the service you are working on.
 
+On the host, uploads land in `Backend/uploads/` (`config.uploadDir`; override with `UPLOAD_DIR`),
+and the services need `REDIS_PASSWORD` in `.env` (as in `.env.example`) to reach the compose Redis.
+Without it every service is deaf to the others' events — look for `Event bus` errors in the log.
+
 ## Layout
 
 ```
@@ -50,6 +70,7 @@ Backend/
   apps/points-service/         :3006  BE-2
   apps/leaderboard-service/    :3007  BE-1
   apps/challenge-service/      :3008  BE-2   (also serves /strava)
+  apps/media-service/          :3009  BE-1   (also serves /uploads)
   apps/notification-service/   :3010  BE-2
   apps/feedback-service/       :3011  BE-2
   apps/bracket-service/        :3012  BE-2
@@ -64,30 +85,30 @@ Backend/
 | 3004 | registration-service | BE-2 · W2 | live |
 | 3005 | announcement-service | BE-2 · W2 | live |
 | 3006 | points-service | BE-2 · W3 | live |
-| 3007 | leaderboard-service | BE-1 · W3 | live — event standings, global rank, points investment |
+| 3007 | leaderboard-service | BE-1 · W3/W4 | live — event standings, global rank, points investment, `/hall-of-fame` |
 | 3008 | challenge-service | BE-2 · W3 | live — serves `/challenges` **and** `/strava` |
-| 3009 | media-service | BE-1 · W4 | not built |
+| 3009 | media-service | BE-1 · W4 | live — asset upload, albums, moderation, unified `/uploads` delivery |
 | 3010 | notification-service | BE-2 · W4 | live — inbox, announcement broadcast, WhatsApp |
 | 3011 | feedback-service | BE-2 · W4 | live — `/feedback`, `/contact` |
 | 3012 | bracket-service | BE-2 · W4 | live — `/brackets`, `/matches` |
 
-Unbuilt services answer `503` through the gateway naming their owner and week, so a call to
-`/events` today tells you who is writing it rather than hanging.
+A service in `ROUTES` but not `LIVE_SERVICES` answers `503` naming its owner, rather than hanging.
 
-`GET localhost:3000/gateway/services` prints this table live.
+`GET localhost:3000/gateway/services` prints this table live (coordinator token or above).
 
 ## Commands
 
 ```bash
 npm run build       # tsc --build across the workspace (project references)
 npm run typecheck   # TypeScript 7 native compiler — actually checks, then rebuilds with 6
-npm run selfcheck   # in-process assertions: model invariants, middleware, serializer, rating
+npm run selfcheck   # in-process assertions: model invariants, middleware, event bus, gateway limiter
 npm run e2e         # real Mongo + real HTTP. Needs `docker compose up -d mongodb`
 npm test            # selfcheck + e2e
+npm run live-check  # whole stack on the host, every route + cross-service journeys (~3 min)
 ```
 
-`e2e` runs against throwaway databases (`bgsc_models_e2e`, `bgsc_e2e`) that it drops on exit — your
-dev data is untouched.
+Suites run against throwaway databases (`bgsc_models_e2e`, `bgsc_selfcheck_<svc>`, `bgsc_e2e_<svc>`)
+that they drop on exit — your dev data in `bgsc_dev` is untouched.
 
 ## Adding a service
 
@@ -99,6 +120,8 @@ import { createServiceApp, startService } from '@bgsc/shared';
 const options = {
     name: 'event-service',
     port: parseInt(process.env.PORT || '3003', 10),
+    // The models this service OWNS — only their indexes are built at boot.
+    models: ['Event', 'AuctionLot'],
     routes: (app) => { app.use('/events', eventRoutes); },
 };
 export const app = createServiceApp(options);
@@ -119,6 +142,23 @@ a silent failure mode. **Follow `docs/adding-a-service.md`**; it is the checklis
 - **Don't set `PORT` globally** — every service would try to bind the same port. Each sets its own.
 - **Mongo here is standalone**, so there are no multi-document transactions. Cross-document
   consistency uses atomic conditional updates instead; see `docs/modeldocs/relationships.md` §5.
+- **Calling another service** is `callInternal(config.services.x, '/internal/...', { body })` from
+  `@bgsc/shared`, never a hand-rolled `fetch` and never a write to the other service's collection.
+  A refusal (`status >= 400`) is final; `outcomeUnknown` means retry with the same idempotency key.
+- **Every service must share `INTERNAL_API_TOKEN`.** It also signs event-bus messages; a service
+  with a different value drops everyone's events as "bad signature" (and logs it). To rotate it, set
+  the old value as `INTERNAL_API_TOKEN_PREVIOUS` and restart everything at once.
+- **Indexes are built only by `startService`** (`autoIndex` is off), for the `models:` a service
+  owns. A selfcheck or e2e on a scratch DB that expects a unique index to refuse a duplicate must
+  `await Model.syncIndexes()` first.
+- **Event-scoped writes** use `isEventAdmin(event, actor)` / `requireEventAdmin(eventId, actor)` from
+  `@bgsc/shared` with the live actor from `requireActiveUser`, never the token's role.
+- **Attendance** is only markable while an event is `ongoing` and before `end_at`
+  (`409 attendance_window_closed` otherwise) — seed an ongoing event to test it.
+- **Mail is a dev logger** (verify/reset/feedback links print to the service log). WhatsApp and push
+  are deferred to post-MVP (WhatsApp stays off unless `WHATSAPP_*` is set); in-app notifications
+  are the only channel.
+- **A dev database from before the Sep 26 fixes** is not migrated — wipe it (`docker compose down -v`).
 
 ## Reference
 

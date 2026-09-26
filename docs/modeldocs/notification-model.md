@@ -1,10 +1,9 @@
 # Notification Model
 
 **Owner service:** Notification Service, :3010 (plan Week 4 Saturday, BE-2)
-**Collections:** `notifications`, `notification_dispatches`, `notification_preferences`
+**Collections:** `notifications`, `notification_dispatches`, `notification_preferences`, `notification_rate_slots`
 **Spec refs:** §4.1 Notification, §9.4 WhatsApp Business API (tag → group, fallback, 1/tag/hour), §10 Notification System (§10.1 channels, §10.2 categories, §10.3 preferences), §6.4 Make Announcement Popup (WhatsApp auto-send on publish), §14 MVP scope ("Notifications — In-app only")
 **MVP plan refs:** Week 4 Saturday BE-2 "Broadcast & WhatsApp Integration" — broadcast service, WhatsApp Business API, message templating, notification preferences, scheduled broadcast, delivery status tracking, user notification history.
-**Service plan:** `docs/be2-broadcast-service-plan.md`
 
 ---
 
@@ -39,7 +38,7 @@ Announcement model**, not redeclared: the same values are written back into
   title: string,                          // <= 140
   body: string,                           // <= 500
   data: { announcement_id?, event_id?, challenge_id?, ... },   // deep-link ids, display only
-  channel: 'in_app',                      // Spec §4.1's enum; only in_app is written (plan D5)
+  channel: 'in_app',                      // Spec §4.1's enum; only in_app is written
   dedupe_key: string,                     // 'announcement:<id>', 'registration.confirmed:<id>', ...
   read_at: Date | null,
   expires_at: Date,                       // TTL, 90 days
@@ -70,8 +69,9 @@ Announcement model**, not redeclared: the same values are written back into
 | Index | Serves |
 |---|---|
 | `{ user_id: 1, created_at: -1, _id: -1 }` | the keyset feed — `_id` is in the index because it is in the sort |
-| `{ user_id: 1, read_at: 1, created_at: -1 }` | badge count and `?unread=true` |
+| `{ user_id: 1, read_at: 1, created_at: -1 }` | badge count (`GET /notifications/unread-count` → `{ count }`, the announcement badge's shape) and `?unread=true` |
 | `{ dedupe_key: 1, user_id: 1 }` **unique** | idempotency **and** retraction (`deleteMany({ dedupe_key })` needs the key as prefix) |
+| `{ 'data.player_user_id': 1 }` partial on `type: 'auction.sold.captain'` | `UserDeleted` erasing a player from captain cards (User Service replays recent deletions on a timer) |
 | `{ expires_at: 1 }` TTL `expireAfterSeconds: 0` | 90-day retention, no sweep job |
 
 ---
@@ -92,6 +92,8 @@ Announcement model**, not redeclared: the same values are written back into
   attempted_at: Date | null,
   next_attempt_at: Date | null,           // set iff status is retryable
   writeback_at: Date | null,              // when this outcome reached the announcement document
+  writeback_tried_at: Date | null,        // last writeback-sweep attempt; the sweep takes least recently tried first, so rows that keep failing rotate instead of holding its page
+  revision: number,                       // bumped on every settle; sent with the writeback so an older receipt never overwrites a newer one
   created_at, updated_at
 }
 ```
@@ -115,9 +117,27 @@ Announcement model**, not redeclared: the same values are written back into
 |---|---|
 | `{ source.type, source.id, channel, category }` **unique** | the claim: a colliding insert means someone already owns this send |
 | `{ status: 1, next_attempt_at: 1 }` | the retry sweep |
-| `{ channel: 1, category: 1, status: 1, attempted_at: -1 }` | Spec §9.4's 1-per-tag-per-hour check, answered from durable rows rather than a Redis TTL key |
 | `{ writeback_at: 1, status: 1 }` | terminal rows whose outcome never reached the announcement |
-| `{ source.id: 1 }` | reconciliation counts an announcement's rows against its channels — *not* an `exists` test, because a dispatch that died half way through its categories has rows and is still unfinished |
+| `{ source.id: 1 }` | reconciliation counts an announcement's rows against its channels — *not* an `exists` test, because a dispatch that died half way through its categories has rows and is still unfinished. Only publishes older than 2 minutes are candidates, so a fan-out still running is not re-run underneath itself |
+
+### 3.3 `notification_rate_slots` — Spec §9.4 "1 per tag per hour" (Sep 26)
+
+```jsonc
+{ _id: '<channel>:<category>',   // e.g. 'whatsapp:fitsoc'
+  sends: Date[] }                 // most recent sends, newest last, capped at the configured rate
+```
+
+**Decision:** the limit used to be a count of `sent` dispatch rows in the last hour, checked before the
+send — check-then-send, so two announcements in one tag both counted zero and both went out. Now a slot
+is **taken** before the provider call by one single-document `findOneAndUpdate({ _id, $expr: size(sends
+in window) < rate }, { $push: { sends: { $each: [now], $slice: -rate } } })`; the second taker sees the
+first. A provider refusal gives the slot back (best-effort; a crash keeps it, erring toward the limit).
+Durable rather than a Redis TTL key: Redis is optional here and forgets. The old
+`{ channel, category, status, attempted_at }` index on dispatches is gone with the count. Notification
+Service is the only writer.
+
+The announcement writeback sends `group_id` as a **masked** label (`••••1234`, or `(unmapped)`), never
+`destination`: the announcement document is served to every core+ reader.
 
 ---
 
@@ -139,7 +159,7 @@ people's actions.
 ### 4.1 The WhatsApp audience gate
 
 **A community group is a public destination.** An announcement with `audience.min_role` above
-`user`, or scoped to one event's registrants, is never sent to one — the dispatch row resolves
+`guest`, or scoped to one event's registrants, is never sent to one — the dispatch row resolves
 `skipped` with `audience_restricted` / `audience_scoped`.
 
 This is load-bearing: the model raises `audience.min_role` to `core` whenever the `teams` category
@@ -177,23 +197,37 @@ Consumed:
 AnnouncementPublished  { announcement_id, categories[], priority, author_user_id, audience }  → broadcast
 AnnouncementUpdated    { announcement_id, changed_fields[] }                                  → refresh card text
 AnnouncementDeleted    { announcement_id, deleted_by }                                        → retract inbox rows
-PointsEarned           { transaction_id, user_id, amount, balance_after, reason, source }      → "you earned X points"
-RegistrationCreated    { registration_id, owner, user_id, role }                             → the ordinary "you're in"
-RegistrationConfirmed  { registration_id, event_id, user_id }                                 → the waitlist-promotion one
+PointsEarned           { transaction_id, user_id, amount, balance_after, reason, source }      → "you earned X points" (not for source 'challenge')
+RegistrationCreated    { registration_id, owner, user_id, role }                             → "you're in" (every path, promotions included)
 RegistrationWaitlisted { registration_id, owner, user_id, position }
-ChallengeCompleted     { participation_id, challenge_id, member_user_ids[], award_points }
-ChallengeRejected      { participation_id, challenge_id, reason }
+ChallengeCompleted     { participation_id, challenge_id, member_user_ids[], award_points }   → "approved, X points on their way"
+ChallengeRejected      { participation_id, challenge_id, reason, rejection_no }              → keyed per rejection_no
 EventCancelled         { event_id }
+FeedbackSubmitted      { ticket_id, ticket_no, kind, category, subject }                     → staff notice (core+)
+FeedbackResponded      { ticket_id, ticket_no, reporter_user_id, responded_at }              → keyed per responded_at (falls back to the ticket's response.at)
+TeamInviteCreated      { team_id, owner, user_id, invited_by }
+PlayerSold             { event_id, lot_id, player_user_id, team_id, captain_user_id, amount } → player card + captain card
+UserDeleted            { user_id }                                                           → erase the player's name from captain auction cards
 ```
+
+A challenge approval is one card, not two: `ChallengeCompleted` already says what it pays, so the
+`PointsEarned` it causes (source `challenge`) is not carded. The captain's auction card is the only
+card that names someone other than its recipient; the name sits in its title alone, and
+`UserDeleted` (guarded on the user still being deleted) re-renders that title anonymously and sets a
+generic body (older cards named the player in the body too).
+
+**Retired (Sep 26):** `RegistrationConfirmed` — the Event Service's organiser promotion now goes through
+Registration Service and emits `RegistrationCreated` like every other entry into `confirmed`; one dedupe
+key per registration keeps it one card. A deleted announcement whose `AnnouncementDeleted` was missed
+(pub/sub has no replay) is still retracted by the tick's `retractDeleted` sweep over recent `deleted_at`.
 
 Emitted: **none.** `AnnouncementDelivered { announcement_id, channel, category, status }` is emitted
 by the **Announcement Service** when the writeback lands, because the owner of a collection emits
 the events about it (`relationships.md §6`). A retried writeback re-emits it; nothing consumes it
 today, and delivery is not a money path.
 
-`PointsEarned` joined the list on Sep 27. It had been deferred on the false premise that the Points
-Service published nothing; it publishes five events under computed names (`EVENT_FOR[tx.type]` in
-`ledger.ts`), exactly as `relationships.md §6` always said. The other four are deliberately not
+The Points Service publishes five events under computed names (`EVENT_FOR[tx.type]` in `ledger.ts`),
+as `relationships.md §6` says; only `PointsEarned` is consumed. The other four are deliberately not
 consumed: a spend is something the user just did, a refund and an adjustment explain themselves
 where they happen, and an expiry is not news to push at somebody. The dedupe key is the ledger row,
 which is already idempotent.

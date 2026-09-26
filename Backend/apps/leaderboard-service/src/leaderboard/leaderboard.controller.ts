@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { wrap } from '@bgsc/shared';
+import { ServiceError, wrap } from '@bgsc/shared';
+import { z } from 'zod';
 import * as svc from './leaderboard.service';
 import {
     QueryGlobalLeaderboardInput,
@@ -57,7 +58,13 @@ export const investPoints = wrap(async (req: Request, res: Response) => {
     const ref = req.params.ref as string;
     const actor = writeActor(req);
     const body = req.body as InvestPointsInput;
-    const result = await svc.investPoints(ref, actor, body.amount);
+    // The client's idempotency key: body `request_id`, else the `Idempotency-Key` header. A retry
+    // with the same key is the same investment.
+    const header = req.header('idempotency-key');
+    if (header !== undefined && !z.string().uuid().safeParse(header).success) {
+        throw new ServiceError(422, 'invalid_idempotency_key');
+    }
+    const result = await svc.investPoints(ref, actor, body.amount, body.request_id ?? header);
     res.json(result);
 });
 

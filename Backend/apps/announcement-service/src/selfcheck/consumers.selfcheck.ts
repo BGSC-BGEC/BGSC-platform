@@ -125,6 +125,21 @@ async function main(): Promise<void> {
     assert(erased!.author.role_label === signed!.author.role_label, 'the office stays: attribution is historical');
     console.log('✓ a deleted coordinator keeps the role label and loses the name');
 
+    // While deleted, a stray profile event must not put the name back.
+    await User.updateOne({ _id: author._id }, { $set: { deleted_at: new Date() } });
+    publish('UserProfileUpdated', 'user-service', { user_id: author._id, changed_fields: ['full_name'] });
+    await settle();
+    assert.strictEqual((await Announcement.findById(signed!._id))!.author.deleted, true, 'a deleted user stays erased');
+
+    // Restored: the byline comes back, flag and all.
+    await User.updateOne({ _id: author._id }, { $set: { deleted_at: null } });
+    publish('UserRestored', 'auth-service', { user_id: author._id });
+    await settle();
+    const restored = await Announcement.findById(signed!._id);
+    assert.strictEqual(restored!.author.display_name, 'Third Name', 'UserRestored re-snapshots the name');
+    assert.strictEqual(restored!.author.deleted, false, 'and clears the deleted flag');
+    console.log('✓ a restored coordinator gets their byline back');
+
     await closeScratchDb();
     console.log('\n✅ All consumer selfchecks passed!');
 }

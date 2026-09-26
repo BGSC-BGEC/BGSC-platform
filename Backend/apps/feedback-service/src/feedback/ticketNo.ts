@@ -5,8 +5,8 @@ import { randomInt } from 'crypto';
  *
  * A uuid is not something a person reads back over a phone or types into a search box, and for an
  * anonymous ticket this string is the only way back in — so it is also, deliberately, hard to
- * guess: eight characters from a 32-symbol alphabet is 2^40 possibilities behind a rate-limited
- * lookup (plan D15).
+ * guess: eight characters from a 28-symbol alphabet is 28^8 (about 2^38.5) possibilities behind a
+ * rate-limited lookup.
  *
  * Crockford base32 minus the vowels: no `0/O`, no `1/I/L`, and nothing that can accidentally spell
  * a word in a ticket number somebody has to read out.
@@ -14,7 +14,7 @@ import { randomInt } from 'crypto';
 const ALPHABET = '23456789BCDFGHJKMNPQRSTVWXYZ';
 const LENGTH = 8;
 
-export const TICKET_PREFIX = 'BG-';
+const TICKET_PREFIX = 'BG-';
 
 export function ticketNo(): string {
     let out = '';

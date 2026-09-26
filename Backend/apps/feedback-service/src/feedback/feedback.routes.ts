@@ -1,6 +1,5 @@
-import { UserRole, optionalAuth, requireAuth, validate } from '@bgsc/shared';
+import { UserRole, optionalAuth, requireActiveUser, requireAuth, validate } from '@bgsc/shared';
 import { Router } from 'express';
-import { requireActiveUser } from './actor';
 import * as c from './feedback.controller';
 import {
     ListTicketsQuery,
@@ -55,6 +54,6 @@ feedbackRoutes.patch(
 // which is how the receipt email works.
 feedbackRoutes.get('/:ticket_no', optionalAuth, validate({ params: TicketNoParams }), c.getTicket);
 
-/** Contact-us is its own front door onto the same collection (plan D2). */
+/** Contact-us is its own front door onto the same collection. */
 export const contactRoutes = Router();
 contactRoutes.post('/', optionalAuth, validate({ body: SubmitContactSchema }), c.submitContact);

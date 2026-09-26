@@ -78,7 +78,7 @@ npm run selfcheck   # ts-node → "models selfcheck: all assertions passed"
 
 ## 8. Note on the spec
 
-`SystemDesignDocs/BGSC Platform — Complete Feature Specification & Architecture.md` names **NestJS** at lines 229 and 2345 (two table cells, no elaboration anywhere else). The backend is Express 5 + Mongoose. Nothing here depends on that being resolved, but the stale cells are worth striking so they stop resurfacing in tooling decisions — NestJS would also be blocked by this same TS 7 issue, since `@nestjs/cli@12` depends on `typescript ~6.0.2` and peers on `ts-loader`.
+~~`SystemDesignDocs/BGSC Platform — Complete Feature Specification & Architecture.md` names **NestJS** at lines 229 and 2345 (two table cells, no elaboration anywhere else).~~ **Resolved:** All stale legacy table cells in the spec have been reconciled to the canonical stack: Node.js (Express 5 + TypeScript Microservices) and MongoDB 7.0 (Mongoose 9).
 
 Database is settled and not in question: `MVP_Timeline_Plan_Updated.md:89` "Relational → Non-Relational (NoSQL)", `:811` MongoDB.
 

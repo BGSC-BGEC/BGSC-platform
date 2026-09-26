@@ -125,6 +125,15 @@ PointTransactionSchema.pre(
     }
 );
 
+// The query hooks above never see a loaded row being re-saved, or a bulkWrite — both would rewrite
+// the ledger unchecked. Inserting a new row is the one write allowed.
+PointTransactionSchema.pre('save', function (this: IPointTransaction) {
+    if (!this.isNew) throw new Error('point_transactions is append-only: correct with a new adjust/refund row');
+});
+PointTransactionSchema.pre('bulkWrite', function () {
+    throw new Error('point_transactions is append-only: correct with a new adjust/refund row');
+});
+
 PointTransactionSchema.index({ idempotency_key: 1 }, { unique: true });
 // Paginated transaction history. `_id` is in the index because it is in the sort: the keyset
 // tiebreak is `(created_at, _id)`, and without the third key Mongo adds a SORT stage that reads
@@ -210,10 +219,103 @@ export const idempotencyKey = {
      */
     participationReversal: (credit_tx_id: string) => `event.participation.reversal:${credit_tx_id}`,
     eventPodium: (event_id: string, user_id: string) => `event.podium:${event_id}:${user_id}`,
-    eventCancelRefund: (tx_id: string) => `event.cancel.refund:${tx_id}`,
     challengeCompleted: (participation_id: string, user_id: string) => `challenge.completed:${participation_id}:${user_id}`,
-    leaderboardInvestment: (request_id: string) => `leaderboard.investment:${request_id}`,
+    /**
+     * The investing user, the entry and the client's request id: a client retry
+     * lands on the same key, and a request id can never be replayed against another entry or user.
+     */
+    leaderboardInvestment: (user_id: string, entry_id: string, request_id: string) =>
+        `leaderboard.investment:${user_id}:${entry_id}:${request_id}`,
+    /** Retired formats, read only — rows written under them must still count. */
+    legacy: {
+        leaderboardInvestment: (request_id: string) => `leaderboard.investment:${request_id}`,
+        investmentRefund: (request_id: string) => `leaderboard.investment.refund:${request_id}`,
+        eventCancelRefund: (spend_tx_id: string) => `event.cancel.refund:${spend_tx_id}`,
+    },
+    /**
+     * Keyed on the SPEND row, never on a request id: the leaderboard's compensation and the
+     * event-cancel sweep can both want to give the same spend back, and one shared key is what lets
+     * the unique index refuse the second (two keys once paid one spend back twice).
+     */
+    investmentRefund: (spend_tx_id: string) => `leaderboard.investment.refund:${spend_tx_id}`,
     adminAdjust: (request_uuid: string) => `admin:${request_uuid}`,
     /** The expiry sweep's marker: an 'expire' row referencing the credit is what makes it done. */
     expire: (tx_id: string) => `expire:${tx_id}`,
 };
+
+/* ------------------------------------------------------------------ *
+ * point_expiry_cursor — how far the expiry sweep has got
+ * ------------------------------------------------------------------ */
+
+/**
+ * One document (`_id: 'expiry'`). The sweep walks due credits in `(expires_at, _id)` order and each
+ * credit is decided exactly once, at its expiry — a credit already spent to zero then must not be
+ * "expired" later out of points earned since. Without this the sweep re-read the same first batch
+ * forever and never reached anything behind it.
+ */
+export interface IPointExpiryCursor extends Document<string> {
+    _id: string;
+    expires_at: Date;
+    tx_id: string;
+}
+
+const PointExpiryCursorSchema = new Schema<IPointExpiryCursor>(
+    {
+        _id: { type: String, required: true },
+        expires_at: { type: Date, required: true },
+        tx_id: { type: String, required: true },
+    },
+    { versionKey: false }
+);
+
+export const PointExpiryCursor = model<IPointExpiryCursor>(
+    'PointExpiryCursor',
+    PointExpiryCursorSchema,
+    'point_expiry_cursor'
+);
+
+/* ------------------------------------------------------------------ *
+ * point_tx_claims — who is writing an idempotency key right now
+ * ------------------------------------------------------------------ */
+
+/**
+ * Claimed BEFORE the balance moves. Two callers with one key used to both `$inc`
+ * and have the loser compensate, and a spend landing in that window could drive a balance negative
+ * or stamp a wrong `balance_after`. Now only the claim holder moves money.
+ *
+ *  - `pending`: claimed, nothing moved. Takeable once `lease_until` has passed — the holder checks it
+ *    still owns a `pending` claim (CAS to `moving`) before it touches the balance, so a takeover can
+ *    never overlap a live writer.
+ *  - `moving`: the balance may have moved. Never taken over; resolved by the row appearing, by the
+ *    holder's own compensation deleting the claim, or — if the holder died — by an admin recalculate
+ *    of `user_id`, which re-derives the balance and drops the user's expired claims.
+ *  - `void`: this key must never be written (a refund found no spend behind it and closed the door).
+ *
+ * The claim is deleted once the row exists; the row is the permanent record.
+ */
+export const CLAIM_STATE = ['pending', 'moving', 'void'] as const;
+export type ClaimState = (typeof CLAIM_STATE)[number];
+
+export interface IPointTxClaim extends Document<string> {
+    _id: string; // the idempotency key
+    state: ClaimState;
+    owner: string;
+    /** Whose balance this key moves; null on a `void` claim. */
+    user_id: string | null;
+    lease_until: Date;
+    created_at: Date;
+}
+
+const PointTxClaimSchema = new Schema<IPointTxClaim>(
+    {
+        _id: { type: String, required: true },
+        state: { type: String, enum: CLAIM_STATE, required: true },
+        owner: { type: String, required: true },
+        user_id: { type: String, default: null },
+        lease_until: { type: Date, required: true },
+        created_at: { type: Date, required: true, default: Date.now },
+    },
+    { versionKey: false }
+);
+
+export const PointTxClaim = model<IPointTxClaim>('PointTxClaim', PointTxClaimSchema, 'point_tx_claims');

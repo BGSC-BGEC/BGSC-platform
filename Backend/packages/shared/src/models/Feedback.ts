@@ -44,7 +44,7 @@ export interface IFeedbackTicket extends Document<string> {
 
     subject: string;
     description: string;
-    /** URLs only — Media Service owns uploads (plan D7). */
+    /** URLs only — Media Service owns uploads. */
     attachments: string[];
     /** An event complaint names its event. */
     event_id: string | null;
@@ -117,7 +117,6 @@ FeedbackTicketSchema.pre('validate', function (this: IFeedbackTicket) {
     if (t.is_anonymous && !t.contact_email) return fail('an anonymous ticket requires contact_email');
 
     if (t.attachments.length > 5) return fail('at most 5 attachments');
-    return undefined as unknown as void;
 });
 
 // `ticket_no` already has its unique index from the field definition above — declaring it twice
@@ -127,7 +126,7 @@ FeedbackTicketSchema.pre('validate', function (this: IFeedbackTicket) {
  *
  * `{ status, severity, created_at }` could not serve it: the inbox filters on `status` and sorts on
  * `created_at`, and `severity` sitting between them breaks the sort prefix — `explain()` showed
- * `SORT <- FETCH <- IXSCAN` (audit, Sep 27). Two indexes, each matching a real query shape, and both
+ * `SORT <- FETCH <- IXSCAN`. Two indexes, each matching a real query shape, and both
  * carrying `_id` because the cursor sorts on `(created_at, _id)`.
  */
 FeedbackTicketSchema.index({ status: 1, created_at: -1, _id: -1 });
@@ -142,7 +141,7 @@ FeedbackTicketSchema.index({ event_id: 1, created_at: -1 }, { sparse: true });
 export const FeedbackTicket = model<IFeedbackTicket>('FeedbackTicket', FeedbackTicketSchema, 'feedback_tickets');
 
 /**
- * Rate-limit bookkeeping for a PUBLIC write (plan §5).
+ * Rate-limit bookkeeping for a PUBLIC write.
  *
  * `POST /feedback` takes no token, so the only handle on a flood is the submitter — an account id
  * when there is one, and otherwise the address. The address is stored **hashed**: it is only ever

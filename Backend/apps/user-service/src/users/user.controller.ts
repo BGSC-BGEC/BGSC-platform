@@ -1,31 +1,42 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request } from 'express';
 import * as svc from './user.service';
-import { serializeUser, snapshotOf, Viewer } from './user.serializer';
+import { serializeUser, visibilityFor, Viewer } from './user.serializer';
 import { playerCardFor } from './playerCard';
 import { putObject, deleteObject, sniffImage, IMAGE_MAX_BYTES } from '../storage/storage';
 import {
-    ACCOUNT_DELETION_GRACE_DAYS,
+    AuditLog,
     User,
     UserRole,
     UserStatus,
     publish,
-    recordAudit,
+    restorableUntil,
     wrap,
 } from '@bgsc/shared';
 
 /** HTTP only. Data access, events and audit rows live in user.service.ts. */
 
+/**
+ * Who is looking. The LIVE role when `requireActiveUser` loaded the viewer (every route that
+ * resolves PII scope does): the token's role claim outlives a demotion by up to fifteen minutes,
+ * and PII visibility is exactly what a demoted coordinator should lose at once. Self routes may
+ * fall back to the token — a viewer is always "full" on their own record.
+ */
 const viewerOf = (req: Request): Viewer | undefined =>
-    req.user ? { id: req.user.id, role: req.user.role } : undefined;
+    req.actor
+        ? { id: req.actor._id, role: req.actor.role }
+        : req.user
+          ? { id: req.user.id, role: req.user.role }
+          : undefined;
 
 /**
  * The actor for a role or status change: the document `requireActiveUser` just loaded, never the
  * token's claim. The claim is what a demoted administrator still carries around for fifteen
  * minutes; the document is what they actually are.
  */
-const liveActorOf = (req: Request): { id: string; role: UserRole } => ({
+const liveActorOf = (req: Request): svc.Actor => ({
     id: req.actor!._id,
     role: req.actor!.role,
+    ip: req.ip ?? null,
 });
 
 export const getMe = wrap(async (req, res) => {
@@ -35,17 +46,24 @@ export const getMe = wrap(async (req, res) => {
     if (!user) return void res.status(404).json({ error: 'not_found' });
 
     if (user.deleted_at) {
+        const until = restorableUntil(user)!;
+        // Reactivation authenticates by password. An account made by Google sign-in has none, so
+        // it sets one through the reset flow first — say so, or its owner is told of a door they
+        // cannot open.
+        const hasPassword = !!(await User.exists({ _id: user._id, password_hash: { $type: 'string' } }));
         res.json({
             ...serializeUser(user, viewerOf(req), true),
             deletion: {
                 deleted_at: user.deleted_at,
-                restorable_until: user.deletion?.restorable_until ?? svc.restorableUntil(user.deleted_at),
-                restorable: new Date() <= (user.deletion?.restorable_until ?? svc.restorableUntil(user.deleted_at)),
+                restorable_until: until,
+                restorable: new Date() <= until,
                 research_consent: user.deletion?.research_consent ?? false,
                 // Named because this service deliberately has no restore route: a deleted user
                 // holds no token, so restoring authenticates by password at the Auth Service.
                 // Without this the only place a client learns a restore exists does not say how.
-                restore_with: 'POST /account/reactivate',
+                restore_with: hasPassword
+                    ? 'POST /account/reactivate'
+                    : 'POST /auth/forgot-password, then POST /account/reactivate',
             },
         });
         return;
@@ -71,17 +89,18 @@ export const updateMySettings = wrap(async (req, res) => {
  * What deletion does, so the client gate discloses the truth rather than a paraphrase of it
  * (Spec §11.2.1). Fetch this, show it, then send the confirmation.
  */
-export const deletionPreview = wrap(async (req, res) => {
-    await svc.findById(req.user!.id);
+export const deletionPreview = wrap(async (_req, res) => {
     res.json(svc.RETENTION_DISCLOSURE);
 });
 
 export const deleteMe = wrap(async (req, res) => {
-    const user = await svc.findById(req.user!.id);
-    if (!user) return void res.status(404).json({ error: 'not_found' });
+    // Active accounts only. A suspended user who self-deleted could never come back — reactivate
+    // refuses a suspended prior status, and the admin status route cannot see deleted accounts —
+    // so self-deletion under suspension was an irreversible action taken with a dead session.
+    const user = await svc.findActiveSelf(req.user!.id);
 
     const { reason, research_consent } = req.body as { reason?: string; research_consent: boolean };
-    const { restorable_until } = await svc.softDelete(user, req.user!.id, { reason, research_consent });
+    const { restorable_until } = await svc.softDelete(user, req.user!.id, { reason, research_consent, ip: req.ip ?? null });
 
     // Not "deleted": nothing was destroyed. The account is hidden and restorable until this date.
     res.status(202).json({
@@ -123,11 +142,12 @@ export const uploadAvatar = wrap(async (req, res) => {
     }
 
     // Replace, do not accumulate. Best-effort: the new avatar is already saved, so a failed
-    // cleanup must not fail the request — it only leaves a file for the Week 4 Media Service.
+    // cleanup must not fail the request — it only leaves an orphaned file on disk.
     //
     // ponytail: two uploads racing each other still orphan one file — both write, one wins the
     // document, the loser's file is never referenced. Disk-only, no correctness impact, and a
-    // per-user lock costs more than the leak. Media Service (Week 4) owns lifecycle/GC.
+    // per-user lock costs more than the leak. Nothing garbage-collects avatars; add a sweep if
+    // orphans ever matter.
     const old = previous.profile?.avatar_url;
     if (old && old !== stored.url && old.startsWith('/uploads/')) {
         deleteObject(old.replace(/^\/uploads\//, '')).catch((err) =>
@@ -153,8 +173,12 @@ export const getUser = wrap(async (req, res) => {
 export const getPlayerCard = wrap(async (req, res) => {
     const user = await svc.findByRef((req.params as Record<string, string>).ref);
     if (!user) return void res.status(404).json({ error: 'not_found' });
-    // A private profile still exposes its card (D9) — that is the stub deep links render.
-    res.json(await playerCardFor(user));
+    // A private profile still answers with its card — that is the stub deep links render — but
+    // a stranger gets the stub only: no bio, interests, social handles or rating inputs.
+    const viewer = viewerOf(req);
+    const scope = await svc.piiScopeFor(viewer);
+    const stubOnly = visibilityFor(user, viewer, svc.scopeAllows(scope, user._id)) === 'minimal';
+    res.json(await playerCardFor(user, stubOnly));
 });
 
 export const listUsers = wrap(async (req, res) => {
@@ -196,22 +220,14 @@ export const changeStatus = wrap(async (req, res) => {
     res.json(serializeUser(updated, viewerOf(req)));
 });
 
-export const getSnapshots = wrap(async (req, res) => {
-    const { ids } = req.query as unknown as { ids: string[] };
-    const users = await svc.snapshots(ids);
-    res.json({ snapshots: users.map(snapshotOf) });
-});
-
 /** Exported for the admin detail view; the list endpoint deliberately omits per-row counts. */
 export const auditForUser = wrap(async (req, res) => {
     const { ref } = req.params as Record<string, string>;
-    const user = await svc.findByRef(ref);
+    // Deleted accounts included: their trail is exactly what an admin comes here for.
+    const user = await svc.findByRefIncludingDeleted(ref);
     if (!user) return void res.status(404).json({ error: 'not_found' });
-    const { AuditLog } = await import('@bgsc/shared');
     const rows = await AuditLog.find({ target_type: 'user', target_id: user._id })
         .sort({ created_at: -1 })
         .limit(50);
     res.json({ entries: rows });
 });
-
-export { recordAudit };

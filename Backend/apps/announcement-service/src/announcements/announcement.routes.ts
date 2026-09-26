@@ -1,7 +1,6 @@
-import { UserRole, optionalAuth, requireAuth, validate } from '@bgsc/shared';
+import { UserRole, optionalAuth, requireActiveUser, requireAuth, validate } from '@bgsc/shared';
 import { Router } from 'express';
 import * as c from './announcement.controller';
-import { requireActiveUser } from './actor';
 import {
     CreateAnnouncementSchema,
     IdParams,
@@ -19,7 +18,11 @@ import {
  * by guests, and the gateway already verifies a token when one is present without ever rejecting.
  *
  * Writes use `requireActiveUser(floor)` rather than `requireRole(floor)`: it ranks the live user
- * document, not the token's role claim, which can be up to 15 minutes stale (actor.ts).
+ * document, not the token's role claim, which can be up to 15 minutes stale.
+ *
+ * Except read state: `/read-all` and `/:id/read` write only the caller's own user document, with no
+ * authority beyond being that caller, so they take `requireAuth` alone — the per-card read is the
+ * most frequent write in the service and does not buy a user lookup (reads.ts).
  */
 
 export const announcementRoutes = Router();
@@ -27,12 +30,12 @@ export const announcementRoutes = Router();
 // ---- literal paths, before /:id -------------------------------------------
 announcementRoutes.get('/heads', optionalAuth, c.getHeads);
 announcementRoutes.get('/unread-count', requireAuth, c.getUnreadCount);
-announcementRoutes.post('/read-all', requireAuth, requireActiveUser(), c.markAllRead);
+announcementRoutes.post('/read-all', requireAuth, c.markAllRead);
 
 // ---- feed ------------------------------------------------------------------
 announcementRoutes.get('/', optionalAuth, validate({ query: ListAnnouncementsQuery }), c.listAnnouncements);
 
-// ---- composer (Spec §6.4; "Core with permission" collapses to core+, plan §D5) ----
+// ---- composer (Spec §6.4; "Core with permission" collapses to core+) ----
 announcementRoutes.post(
     '/',
     requireAuth,
@@ -57,7 +60,7 @@ announcementRoutes.post(
     c.unscheduleAnnouncement
 );
 
-announcementRoutes.post('/:id/read', requireAuth, requireActiveUser(), validate({ params: IdParams }), c.markRead);
+announcementRoutes.post('/:id/read', requireAuth, validate({ params: IdParams }), c.markRead);
 
 announcementRoutes.patch(
     '/:id',

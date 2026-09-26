@@ -51,13 +51,16 @@ export function allOf(conditions: Record<string, unknown>[]): Record<string, unk
     return conditions.length === 1 ? { ...conditions[0] } : { $and: conditions };
 }
 
-/** One page plus the cursor that continues it. `limit` is already capped by zod. */
+/**
+ * One page plus the cursor that continues it, from `limit + 1` fetched rows. The extra row is only
+ * evidence that more exist; an exactly-full last page must not hand out a cursor to an empty one.
+ */
 export function pageOf<T extends { created_at: Date; _id: string }>(
     rows: T[],
     limit: number
 ): { rows: T[]; next_cursor: string | null } {
-    // A full page means "there may be more"; a short one is definitively the end.
-    if (rows.length < limit) return { rows, next_cursor: null };
-    const last = rows[rows.length - 1];
-    return { rows, next_cursor: encodeCursor(last.created_at, last._id) };
+    if (rows.length <= limit) return { rows, next_cursor: null };
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    return { rows: page, next_cursor: encodeCursor(last.created_at, last._id) };
 }

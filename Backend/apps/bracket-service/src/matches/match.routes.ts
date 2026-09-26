@@ -1,6 +1,5 @@
-import { UserRole, optionalAuth, requireAuth, validate } from '@bgsc/shared';
+import { UserRole, optionalAuth, requireActiveUser, requireAuth, validate } from '@bgsc/shared';
 import { Router } from 'express';
-import { requireActiveUser } from '../brackets/actor';
 import { ListMatchesQuery, MatchIdParams, ReportResultSchema, ScheduleMatchSchema } from '../brackets/bracket.schemas';
 import * as c from './match.controller';
 

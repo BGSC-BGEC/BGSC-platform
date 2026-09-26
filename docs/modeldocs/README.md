@@ -16,23 +16,24 @@ Legacy code/docs are **not** a source.
 | Timestamps | BSON Date, UTC. Field names end in `_at`. Every doc has `created_at`, `updated_at`. |
 | Enums | lowercase snake_case strings. |
 | Soft delete | `deleted_at: Date | null` where deletion must be reversible. Otherwise hard delete. |
-| Ownership | Each collection is owned by exactly one service (listed at top of each doc). Only the owner writes it. |
+| Ownership | Each collection is owned by exactly one service (listed at top of each doc). Only the owner writes it; everyone else goes through the owner's `/internal` route (`callInternal`) or an event it consumes. Each service lists its owned models in `createServiceApp({ models })`, which builds exactly those indexes. Sep 26 audit: see `relationships.md` §1, §5.0. |
 | Events | Every state change emits a domain event from Spec §8.1. Listed per doc. MVP event bus = in-process emitter; Kafka later (see `docs/ARCHITECTURE_REVIEW_MEETING.md` §1). |
 
 ## Docs
 
 | Doc | Collections | Spec refs |
 |---|---|---|
-| [event-model.md](event-model.md) | `events`, `auction_lots` | §4.1 Event/Auction, §5.5, §5.15 |
-| [team-model.md](team-model.md) | `teams` | §4.1 Team, §5.5, §5.7 |
-| [registration-model.md](registration-model.md) | `form_definitions`, `form_submissions` | §5.5 (registration flexibility), §5.15.1, MVP plan "Registration Service (Common)" |
-| [points-model.md](points-model.md) | `point_transactions` (+ `points_balance` denormalized on user) | §4.1 PointTransaction, §5.7, §8.1 Points events |
-| [leaderboard-model.md](leaderboard-model.md) | `leaderboard_entries` + leaderboard config embedded in `events` | §5.6, §5.15.3, §4.1 Event.points_pool |
+| [event-model.md](event-model.md) | `events` (+ `seat_holders[]` seat ledger), `auction_lots` | §4.1 Event/Auction, §5.5, §5.15 |
+| [team-model.md](team-model.md) | `teams`, `team_memberships` (one-team-per-user lock) | §4.1 Team, §5.5, §5.7 |
+| [registration-model.md](registration-model.md) | `form_definitions`, `form_definition_versions`, `form_submissions`, `form_uploads` | §5.5 (registration flexibility), §5.15.1, MVP plan "Registration Service (Common)" |
+| [points-model.md](points-model.md) | `point_transactions` (+ `points_balance` denormalized on user), `point_rules`, `point_expiry_cursor` | §4.1 PointTransaction, §5.7, §8.1 Points events |
+| [leaderboard-model.md](leaderboard-model.md) | `leaderboard_entries`, `leaderboard_snapshots` + leaderboard config embedded in `events`; Hall of Fame events (§9) | §5.6, §5.15.3, §4.1 Event.points_pool |
 | [challenge-model.md](challenge-model.md) | `challenges`, `challenge_participations` | §4.1 Challenge, §5.7, §5.15 "Challenge Creation" |
 | [announcement-model.md](announcement-model.md) | `announcements` | §4.1 Announcement, §5.2 Tab 2, §6.4, §9.4, §15.3 |
-| [notification-model.md](notification-model.md) | `notifications`, `notification_dispatches`, `notification_preferences` | §4.1 Notification, §9.4 WhatsApp, §10 Notification System (added Week 4 Saturday) |
+| [notification-model.md](notification-model.md) | `notifications`, `notification_dispatches`, `notification_preferences`, `notification_rate_slots` | §4.1 Notification, §9.4 WhatsApp, §10 Notification System (added Week 4 Saturday) |
 | [feedback-model.md](feedback-model.md) | `feedback_tickets`, `feedback_throttle` | §4.1 FeedbackTicket, §5.12 Feedback & Contact Us (added Week 4 Sunday) |
 | [bracket-model.md](bracket-model.md) | `brackets`, `matches` | §4.1 Match, §5.5 Spectator Bracket View, §5.15.2 Bracket Generator (added Week 4 Sunday) |
+| [media-model.md](media-model.md) | `media`, `media_albums`, `media_likes`; the one server of `/uploads` | §2.1 Media Service (:3009), §5.11 Media Page, §15.1 Media Uploads (added Week 4 Saturday) |
 | [strava-model.md](strava-model.md) | `strava_credentials`, `strava_activities` | §9.1 Strava, §12.4 Integration Settings (added Week 3 Sunday — see the gap note below) |
 | [relationships.md](relationships.md) | — | How everything references everything; write ownership; event flow |
 
@@ -42,7 +43,7 @@ From `MVP_Timeline_Plan_Updated.md` "MVP Scope Summary":
 
 - **In:** events (incl. auction), registration (common), points, leaderboard, challenges, announcements.
 - **Out:** sponsors, social feed, friends, store, unions. Sponsor hooks appear as **placeholders only** (`events.points_pool.sponsor_bonus`, `point_transactions.source: 'sponsor'`) so the schema does not need a migration when sponsors return (see `ARCHITECTURE_REVIEW_MEETING.md` §5).
-- Tournament brackets / `matches` were Week 4 and are designed in [bracket-model.md](bracket-model.md). The `events.bracket` slot stays **null**: the bracket lives in its own collection rather than inside a document the Event Service owns (be2-feedback-bracket-plan.md D3).
+- Tournament brackets / `matches` were Week 4 and are designed in [bracket-model.md](bracket-model.md). The `events.bracket` slot stays **null**: the bracket lives in its own collection rather than inside a document the Event Service owns.
 
 ## Plan gaps found while designing
 
