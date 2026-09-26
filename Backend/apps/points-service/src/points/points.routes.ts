@@ -15,14 +15,14 @@ import {
 } from './points.schemas';
 
 /**
- * Mounted at `/points` — the prefix the gateway forwards unchanged (routing.ts:28).
+ * Mounted at `/points` — the prefix the gateway forwards unchanged.
  *
  * Spec §5.7 marks the whole Point System page "Visibility: Authenticated only", so there is one
  * floor for the entire prefix and no `optionalAuth` anywhere in this service.
  *
  * Writes take `requireActiveUser` (the live user document's role) rather than `requireRole` (the
  * token's claim): a token outlives a demotion by up to 15 minutes, and every write here moves
- * points (plan D19).
+ * points.
  */
 export const pointsRoutes = Router();
 

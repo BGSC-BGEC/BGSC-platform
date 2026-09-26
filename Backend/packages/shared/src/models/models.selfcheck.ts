@@ -565,13 +565,17 @@ async function main(): Promise<void> {
         'a media item missing uploader'
     );
 
-    const albumWithoutSlug = new MediaAlbum({
-        title: 'Offside Football 2026 Finals!',
-        category: 'event',
-        created_by: 'u-1',
-    });
-    const a = await ok(albumWithoutSlug, 'album with auto-derived slug');
-    assert.strictEqual(a.slug, 'offside-football-2026-finals', 'slug derived correctly from title');
+    // The slug is chosen by media-service (with collision retries); the model only stores it.
+    await rejects(
+        new MediaAlbum({ title: 'Offside Football 2026 Finals!', category: 'event', created_by: 'u-1' }),
+        'slug',
+        'an album without a slug'
+    );
+    const a = await ok(
+        new MediaAlbum({ title: 'Finals', slug: 'Finals-2026', category: 'event', created_by: 'u-1' }),
+        'album with a slug'
+    );
+    assert.strictEqual(a.slug, 'finals-2026', 'slug is stored lowercased');
     assert.strictEqual(a.media_count, 0, 'media_count defaults to 0');
     assert.strictEqual(a.is_public, true, 'is_public defaults to true');
 

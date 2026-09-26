@@ -1,12 +1,12 @@
 import { IBracket, IMatch, POINTS_DRAW, POINTS_LOSS, POINTS_WIN } from '@bgsc/shared';
 
 /**
- * Standings, derived from the fixtures every time they are asked for (plan D12).
+ * Standings, derived from the fixtures every time they are asked for.
  *
  * Never stored. A match result is the only input, there are at most a few hundred fixtures in an
  * event, and a materialized table is a second copy of the truth that has to be kept in step with
  * every correction a coordinator makes. When this stops being cheap, `leaderboard_entries.stats`
- * already has the fields for it (`Leaderboard.ts`) and a service that owns them (plan D8).
+ * already has the fields for it (`Leaderboard.ts`) and a service that owns them.
  */
 
 export interface StandingRow {
@@ -123,8 +123,15 @@ export function standingsOf(bracket: IBracket, matches: IMatch[]): Standings {
                 x.seed - y.seed
         );
     } else {
-        // Furthest round first, then the seed: the bracket's own idea of standing.
-        table.sort((x, y) => (y.round_reached ?? 0) - (x.round_reached ?? 0) || x.seed - y.seed);
+        // Furthest round first, then still standing before knocked out — the finalists share a
+        // round_reached, and the seed alone put a higher-seeded runner-up above the champion —
+        // then the seed: the bracket's own idea of standing.
+        table.sort(
+            (x, y) =>
+                (y.round_reached ?? 0) - (x.round_reached ?? 0) ||
+                Number(x.eliminated) - Number(y.eliminated) ||
+                x.seed - y.seed
+        );
     }
 
     return { format: bracket.format, champion: championOf(bracket, matches, table), rows: table };

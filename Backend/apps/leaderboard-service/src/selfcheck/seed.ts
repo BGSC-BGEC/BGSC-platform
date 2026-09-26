@@ -2,6 +2,7 @@ import assert from 'assert';
 import {
     Event,
     EventDomain,
+    FormSubmission,
     EventStatus,
     IEvent,
     ILeaderboardEntry,
@@ -14,12 +15,23 @@ import {
     User,
     UserRole,
     config,
+    createServiceApp,
 } from '@bgsc/shared';
+import { Server } from 'http';
 import mongoose from 'mongoose';
 import { v4 as uuid } from 'uuid';
 import { closeRedis, getRedisClient } from '../leaderboard/redis';
 
 const SCRATCH_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_selfcheck_leaderboard$2');
+
+// The cache and rate limits go to their own logical database: the suite wipes `lb:*`, and on the
+// shared dev Redis that was the dev services' cache and every user's investment quota. Set before
+// the first `getRedisClient()`, which reads it. Pub/sub (the bus) is not per-database.
+if (config.redisUrl) {
+    const url = new URL(config.redisUrl);
+    url.pathname = '/15';
+    (config as { redisUrl: string }).redisUrl = url.toString();
+}
 
 export async function openScratchDb(): Promise<void> {
     await mongoose.connect(SCRATCH_DB);
@@ -34,7 +46,36 @@ export async function openScratchDb(): Promise<void> {
     }
 }
 
+/**
+ * Points Service's real internal routes, in this process, on a random port: an investment's debit
+ * and refund go over HTTP exactly as in production (there is no fallback to fake them any more).
+ * Required by path at runtime — the selfcheck is excluded from this service's `tsc` build.
+ */
+let pointsServer: Server | null = null;
+
+export async function startPointsService(): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { internalRoutes } = require('../../../points-service/src/internal/internal.routes');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { seedRules } = require('../../../points-service/src/rules/rules.service');
+    await seedRules();
+    const app = createServiceApp({
+        name: 'points-selfcheck',
+        port: 0,
+        routes: (a) => a.use('/internal', internalRoutes),
+    });
+    pointsServer = app.listen(0);
+    await new Promise((r) => pointsServer!.once('listening', r));
+    usePointsUrl(`http://127.0.0.1:${(pointsServer.address() as { port: number }).port}`);
+}
+
+/** Point the leaderboard at a Points Service (or at nothing, to see it fail closed). */
+export function usePointsUrl(url: string): void {
+    (config.services as { points: string }).points = url;
+}
+
 export async function closeScratchDb(): Promise<void> {
+    pointsServer?.close();
     await closeRedis();
     await mongoose.connection.dropDatabase();
     await mongoose.disconnect();
@@ -47,6 +88,7 @@ export async function resetCollections(): Promise<void> {
     await Event.deleteMany({});
     await User.deleteMany({});
     await Team.deleteMany({});
+    await FormSubmission.deleteMany({});
     const redis = await getRedisClient();
     if (redis) {
         const keys = await redis.keys('lb:*');
@@ -111,6 +153,7 @@ export async function seedEvent(
         },
         teaming: {
             is_teamed: overrides.is_teamed ?? false,
+            ...(overrides.is_teamed ? { team_size_min: 1, team_size_max: 5 } : {}),
             captain_application_required: false,
         },
         awards: [],
@@ -151,7 +194,6 @@ export async function seedEntry(
         raw_score?: number;
         normalized_score?: number;
         invested_points?: number;
-        version?: number;
     } = {}
 ): Promise<ILeaderboardEntry> {
     const raw = overrides.raw ?? {};
@@ -173,8 +215,41 @@ export async function seedEntry(
         normalized_score: normScore,
         invested_points: invPoints,
         final_score: normScore + invPoints,
-        version: overrides.version ?? 0,
     });
+}
+
+/** A confirmed registration: the only thing scoring will build an entry from. */
+export async function seedRegistration(eventId: string, userId: string): Promise<string> {
+    const sub = await FormSubmission.create({
+        form_id: uuid(),
+        form_version: 1,
+        owner: { type: 'event', id: eventId },
+        user: { user_id: userId, display_name: 'Selfcheck User' },
+        context: { event: { role: 'solo' } },
+        status: 'confirmed',
+    });
+    return sub._id;
+}
+
+/** A locked team of `eventId` with the given members. */
+export async function seedLockedTeam(eventId: string, name: string, memberIds: string[]): Promise<string> {
+    const team = await Team.create({
+        owner: { type: 'event', id: eventId },
+        name,
+        name_lower: name.toLowerCase(),
+        captain_user_id: memberIds[0],
+        members: memberIds.map((user_id) => ({
+            user_id,
+            display_name: 'Member',
+            registration_id: uuid(),
+            acquired_via: 'created',
+        })),
+        invite_code: uuid().replace(/-/g, '').slice(0, 8).toUpperCase(),
+        size_min: 1,
+        size_max: 5,
+        status: 'locked',
+    });
+    return team._id;
 }
 
 export const pass = (msg: string) => console.log(`  ok  ${msg}`);

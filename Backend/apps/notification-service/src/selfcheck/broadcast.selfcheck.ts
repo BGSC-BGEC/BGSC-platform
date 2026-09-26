@@ -1,6 +1,19 @@
 import assert from 'assert';
-import { Announcement, Notification, NotificationDispatch, UserRole, UserStatus } from '@bgsc/shared';
+import {
+    Announcement,
+    ChallengeParticipation,
+    FeedbackTicket,
+    FormSubmission,
+    Notification,
+    NotificationDispatch,
+    Team,
+    User,
+    UserRole,
+    UserStatus,
+} from '@bgsc/shared';
+import { v4 as uuid } from 'uuid';
 import { dedupe, deliverAnnouncement, recipientsFor, summarize } from '../broadcast/broadcast';
+import { retractDeleted } from '../scheduler/tick';
 import { BODY_MAX, render, renderMessage } from '../broadcast/templates';
 import { handlers } from '../events/consumers';
 import {
@@ -16,8 +29,7 @@ import {
 } from './seed';
 
 /**
- * In-app fan-out: who gets a card, what it says, and what happens on a replay
- * (be2-broadcast-service-plan.md §3, §12).
+ * In-app fan-out: who gets a card, what it says, and what happens on a replay.
  *
  * The audience rules are asserted as the *result of the query*, not by calling a predicate: a
  * filter that is right in isolation can still be wrong once combined, and it is the combination
@@ -170,6 +182,37 @@ async function main(): Promise<void> {
     );
     console.log('✓ a deleted announcement is retracted from inboxes, not from the ledger');
 
+    // A delete landing between delivery's read and its insert: the retraction already ran against
+    // zero cards. Simulated by deleting the moment the first read resolves.
+    const racedDelete = await seedAnnouncement(author, 'Deleted mid-delivery');
+    const realFindById = Announcement.findById.bind(Announcement);
+    (Announcement as unknown as { findById: unknown }).findById = (...args: Parameters<typeof realFindById>) => {
+        (Announcement as unknown as { findById: unknown }).findById = realFindById;
+        return realFindById(...args).then(async (doc) => {
+            await Announcement.updateOne({ _id: racedDelete._id }, { $set: { deleted_at: new Date() } });
+            return doc;
+        });
+    };
+    await deliverAnnouncement(racedDelete._id);
+    assert.strictEqual(
+        await Notification.countDocuments({ dedupe_key: dedupe.announcement(racedDelete._id) }),
+        0,
+        'cards inserted after a concurrent delete are retracted by the delivery itself'
+    );
+
+    // A delete whose AnnouncementDeleted was never heard (bus outage): the sweep retracts it.
+    const unheard = await seedAnnouncement(author, 'Deleted during an outage');
+    await deliverAnnouncement(unheard._id);
+    assert.ok(await Notification.countDocuments({ dedupe_key: dedupe.announcement(unheard._id) }), 'delivered');
+    await Announcement.updateOne({ _id: unheard._id }, { $set: { deleted_at: new Date() } });
+    await retractDeleted();
+    assert.strictEqual(
+        await Notification.countDocuments({ dedupe_key: dedupe.announcement(unheard._id) }),
+        0,
+        'the retraction sweep clears cards of a delete nobody announced'
+    );
+    console.log('✓ deletes racing delivery, or lost on the bus, still leave no cards behind');
+
     /* ---- templates ------------------------------------------------------ */
 
     assert.throws(
@@ -189,51 +232,55 @@ async function main(): Promise<void> {
 
     /* ---- per-user triggers ---------------------------------------------- */
 
+    // `RegistrationCreated` is the one "now confirmed" event (straight in, or promoted); the retired
+    // `RegistrationConfirmed` must not be listened to at all.
+    assert.ok(!('onRegistrationConfirmed' in handlers), 'RegistrationConfirmed is retired');
+
     const registrationId = await seedRegistration(member._id, eventId, 'confirmed');
-    await handlers.onRegistrationConfirmed({
-        registration_id: registrationId,
-        event_id: eventId,
-        user_id: member._id,
-    });
-    const confirmation = await Notification.findOne({ dedupe_key: dedupe.registrationConfirmed(registrationId) }).lean();
+    const confirmed = { registration_id: registrationId, owner: { type: 'event', id: eventId }, user_id: member._id };
+    await handlers.onRegistrationCreated(confirmed);
+    const confirmation = await Notification.findOne({ dedupe_key: dedupe.registrationConfirmed(registrationId, 1) }).lean();
     assert.ok(confirmation, 'a confirmed registration notifies its owner');
     assert.ok(confirmation!.title.includes('Scoped Event'), 'naming the event, read from the event document');
     assert.strictEqual(confirmation!.category, 'event', 'under the event category');
 
-    await handlers.onRegistrationConfirmed({
-        registration_id: registrationId,
-        event_id: eventId,
-        user_id: member._id,
-    });
+    // A redelivery is still exactly one card.
+    await handlers.onRegistrationCreated(confirmed);
     assert.strictEqual(
-        await Notification.countDocuments({ dedupe_key: dedupe.registrationConfirmed(registrationId) }),
+        await Notification.countDocuments({ dedupe_key: dedupe.registrationConfirmed(registrationId, 1) }),
         1,
         'and a redelivery does not duplicate it'
     );
 
-    // The ORDINARY path: registration-service publishes RegistrationCreated when a seat is taken
-    // straight away. Listening only to event-service's RegistrationConfirmed — which fires on a
-    // waitlist promotion — told nobody who simply signed up and got in (audit, pass B).
-    const straightIn = await seedRegistration(core._id, eventId, 'confirmed');
-    await handlers.onRegistrationCreated({
-        registration_id: straightIn,
-        owner: { type: 'event', id: eventId },
-        user_id: core._id,
-    });
-    const ordinary = await Notification.findOne({ dedupe_key: dedupe.registrationConfirmed(straightIn) }).lean();
-    assert.ok(ordinary, 'an ordinary confirmed registration notifies its owner');
-    assert.ok(ordinary!.title.includes('Scoped Event'), 'naming the event');
+    // Confirmed, rejected by an admin, confirmed again: that second confirmation is its own card.
+    await FormSubmission.collection.updateOne(
+        { _id: registrationId as never },
+        { $push: { status_history: { $each: [{ to: 'confirmed' }, { to: 'rejected' }, { to: 'confirmed' }] } } as never }
+    );
+    await handlers.onRegistrationCreated(confirmed);
+    assert.strictEqual(
+        await Notification.countDocuments({ user_id: member._id, type: 'registration.confirmed' }),
+        2,
+        'a re-confirmation is good news again'
+    );
+    assert.ok(
+        await Notification.exists({ user_id: member._id, dedupe_key: dedupe.registrationConfirmed(registrationId, 2) }),
+        'keyed as the second confirmation'
+    );
 
-    // The same registration arriving under the other name is the same card, not a second one.
-    await handlers.onRegistrationConfirmed({
-        registration_id: straightIn,
-        event_id: eventId,
-        user_id: core._id,
+    // Preferences apply to per-user triggers too, not only to the fan-outs.
+    const eventMuted = await seedUser('Event muted', UserRole.USER);
+    await mute(eventMuted._id, 'event');
+    const mutedReg = await seedRegistration(eventMuted._id, eventId, 'confirmed');
+    await handlers.onRegistrationCreated({
+        registration_id: mutedReg,
+        owner: { type: 'event', id: eventId },
+        user_id: eventMuted._id,
     });
     assert.strictEqual(
-        await Notification.countDocuments({ dedupe_key: dedupe.registrationConfirmed(straightIn) }),
-        1,
-        'and both names for the same good news collapse onto one card'
+        await Notification.countDocuments({ user_id: eventMuted._id }),
+        0,
+        'a user who muted `event` gets no confirmation card'
     );
 
     // A challenge registration is not a seat at an event, so it gets nothing.
@@ -243,25 +290,25 @@ async function main(): Promise<void> {
         user_id: core._id,
     });
     assert.strictEqual(
-        await Notification.countDocuments({ dedupe_key: dedupe.registrationConfirmed('challenge-registration') }),
+        await Notification.countDocuments({ dedupe_key: dedupe.registrationConfirmed('challenge-registration', 1) }),
         0,
         'a challenge registration is not an event seat'
     );
 
     // An event that does not exist must produce nothing rather than a card with a blank name.
-    await handlers.onRegistrationConfirmed({
+    await handlers.onRegistrationCreated({
         registration_id: 'nope',
-        event_id: 'missing-event',
+        owner: { type: 'event', id: 'missing-event' },
         user_id: member._id,
     });
     assert.strictEqual(
-        await Notification.countDocuments({ dedupe_key: dedupe.registrationConfirmed('nope') }),
+        await Notification.countDocuments({ dedupe_key: dedupe.registrationConfirmed('nope', 1) }),
         0,
         'a missing event notifies nobody'
     );
     console.log('✓ per-user triggers are idempotent and never render a blank name');
 
-    /* ---- points (unblocked by the Sep 27 audit) ---------------------------- */
+    /* ---- points ------------------------------------------------------------ */
 
     await handlers.onPointsEarned({
         transaction_id: 'tx-1',
@@ -290,6 +337,20 @@ async function main(): Promise<void> {
         await Notification.countDocuments({ dedupe_key: dedupe.pointsEarned('tx-1') }),
         1,
         'and the ledger row is the dedupe key, so a redelivery pays out one card'
+    );
+    // A challenge credit is already announced by the challenge-approved card.
+    await handlers.onPointsEarned({
+        transaction_id: 'tx-challenge',
+        user_id: member._id,
+        amount: 50,
+        balance_after: 175,
+        reason: 'challenge.completed',
+        source: 'challenge',
+    });
+    assert.strictEqual(
+        await Notification.countDocuments({ dedupe_key: dedupe.pointsEarned('tx-challenge') }),
+        0,
+        'a challenge credit gets no second card'
     );
     console.log('✓ a points credit produces one card, in words');
 
@@ -353,19 +414,45 @@ async function main(): Promise<void> {
         challenge_id: challengeId,
         reason: null,
     });
-    const rejected = await Notification.find({ dedupe_key: dedupe.challengeRejected(participationId) }).lean();
+    const rejected = await Notification.find({ dedupe_key: dedupe.challengeRejected(participationId, 1) }).lean();
     assert.strictEqual(rejected.length, 2, 'the roster is read from the participation, not from the payload');
     assert.ok(rejected[0].body.includes('not stated'), 'and a reviewer who gave no reason does not break the render');
 
+    // Resubmitted and rejected again, this time with an empty reason (the producer trims and accepts
+    // ''): a second notice, not a dedupe hit, and not a template throw.
+    await ChallengeParticipation.updateOne(
+        { _id: participationId },
+        { $push: { status_history: { $each: [{ to: 'rejected' }, { to: 'rejected' }] } } }
+    );
+    await handlers.onChallengeRejected({ participation_id: participationId, challenge_id: challengeId, reason: '  ' });
+    const reRejected = await Notification.find({ dedupe_key: dedupe.challengeRejected(participationId, 2) }).lean();
+    assert.strictEqual(reRejected.length, 2, 'a second rejection of the same participation is its own notice');
+    assert.ok(reRejected[0].body.includes('not stated'), "and '' reads as no reason instead of dropping the notice");
+
+    // The producer's own ordinal wins over the history count (which would say 3 here, not 7).
+    for (let i = 0; i < 2; i += 1) {
+        await handlers.onChallengeRejected({
+            participation_id: participationId,
+            challenge_id: challengeId,
+            reason: 'blurry',
+            rejection_no: 7,
+        });
+    }
+    assert.strictEqual(
+        await Notification.countDocuments({ dedupe_key: dedupe.challengeRejected(participationId, 7) }),
+        2,
+        'keyed on rejection_no, once per member however often it is replayed'
+    );
+
     await handlers.onEventCancelled({ event_id: eventId });
     const cancelled = await Notification.find({ dedupe_key: dedupe.eventCancelled(eventId) }).lean();
-    assert.ok(cancelled.length > 0, 'a cancelled event tells its confirmed registrants');
+    assert.ok(cancelled.length > 0, 'a cancelled event tells its registrants');
     assert.ok(
         cancelled.every((n) => n.category === 'event'),
         'as event notifications'
     );
     const cancelledIds = new Set(cancelled.map((n) => n.user_id));
-    assert.ok(!cancelledIds.has(waitlisted._id), 'a waitlisted user is not a confirmed registrant');
+    assert.ok(cancelledIds.has(waitlisted._id), 'a waitlisted user is told too — they were waiting on it');
     assert.ok(!cancelledIds.has(deletedUser._id), 'and a deleted account is never a recipient of any fan-out');
     console.log('✓ waitlist, challenge and cancellation triggers all reach exactly their people');
 
@@ -398,6 +485,121 @@ async function main(): Promise<void> {
         'replay does not duplicate feedback notifications'
     );
     console.log('✓ feedback ticket fan-out reaches staff and dedupes properly');
+
+    /* ---- team invites, auction sales, feedback replies --------------------- */
+
+    // Raw inserts: these consumers only READ teams and tickets, and the owning models' full
+    // invariants are another service's fixture problem.
+    const teamId = uuid();
+    const invitedAt = new Date();
+    await Team.collection.insertOne({
+        _id: teamId as never,
+        name: 'Night Owls',
+        owner: { type: 'event', id: eventId },
+        pending: [{ user_id: guestish._id, direction: 'invite', created_by: core._id, created_at: invitedAt }],
+    });
+    const invite = { team_id: teamId, owner: { type: 'event', id: eventId }, invited_by: core._id };
+    await handlers.onTeamInviteCreated({ ...invite, user_id: guestish._id });
+    await handlers.onTeamInviteCreated({ ...invite, user_id: guestish._id });
+    const inviteCards = await Notification.find({ user_id: guestish._id, type: 'team.invited' }).lean();
+    assert.strictEqual(inviteCards.length, 1, 'an invite is one card, however often replayed');
+    assert.ok(inviteCards[0].title.includes('Night Owls'), 'naming the team, read from the team');
+    await handlers.onTeamInviteCreated({ ...invite, user_id: member._id });
+    assert.strictEqual(
+        await Notification.countDocuments({ user_id: member._id, type: 'team.invited' }),
+        0,
+        'an invite that is no longer pending produces nothing'
+    );
+
+    await handlers.onPlayerSold({
+        event_id: eventId, lot_id: 'lot-1', player_user_id: teamMate._id, team_id: teamId, captain_user_id: core._id, amount: 40,
+    });
+    const playerCard = await Notification.findOne({ dedupe_key: dedupe.auctionSold('lot-1', 'player') }).lean();
+    const captainCard = await Notification.findOne({ dedupe_key: dedupe.auctionSold('lot-1', 'captain') }).lean();
+    assert.strictEqual(playerCard?.user_id, teamMate._id, 'the player is told where they went');
+    assert.ok(playerCard!.body.includes('40') && playerCard!.body.includes('Night Owls'), 'for how much, and to whom');
+    assert.strictEqual(captainCard?.user_id, core._id, 'the buying captain gets the receipt');
+    assert.ok(captainCard!.title.includes('Team mate'), 'naming the player');
+
+    await handlers.onPlayerSold({
+        event_id: eventId, lot_id: 'lot-2', player_user_id: deletedUser._id, team_id: teamId, captain_user_id: core._id, amount: 5,
+    });
+    assert.strictEqual(
+        await Notification.countDocuments({ dedupe_key: dedupe.auctionSold('lot-2', 'player') }),
+        0,
+        'a deleted player gets no card'
+    );
+    const anonymous = await Notification.findOne({ dedupe_key: dedupe.auctionSold('lot-2', 'captain') }).lean();
+    assert.ok(anonymous && !anonymous.title.includes('Gone'), 'and is not named to their buyer');
+
+    // Deleted AFTER the sale: the name comes off the captain's card.
+    const soldThenGone = await seedUser('Sold Then Gone', UserRole.USER);
+    await handlers.onPlayerSold({
+        event_id: eventId, lot_id: 'lot-3', player_user_id: soldThenGone._id, team_id: teamId, captain_user_id: core._id, amount: 9,
+    });
+    const namedKey = { dedupe_key: dedupe.auctionSold('lot-3', 'captain') };
+    assert.ok((await Notification.findOne(namedKey).lean())!.title.includes('Sold Then Gone'), 'named while live');
+    await handlers.onUserDeleted({ user_id: soldThenGone._id });
+    assert.ok((await Notification.findOne(namedKey).lean())!.title.includes('Sold Then Gone'), 'a UserDeleted for a live account (restored since) changes nothing');
+    await User.updateOne({ _id: soldThenGone._id }, { $set: { deleted_at: new Date() } });
+    // A card from an older template that named the player in the body as well.
+    await Notification.updateOne(namedKey, { $set: { body: 'Sold Then Gone joins Night Owls for 9.' } });
+    await handlers.onUserDeleted({ user_id: soldThenGone._id });
+    const erased = (await Notification.findOne(namedKey).lean())!;
+    assert.ok(!`${erased.title} ${erased.body}`.includes('Sold Then Gone'), 'the deleted player is erased from the card');
+    assert.ok(
+        (await Notification.findOne({ dedupe_key: dedupe.auctionSold('lot-1', 'captain') }).lean())!.title.includes('Team mate'),
+        'and nobody else is touched'
+    );
+    // User Service replays deletions on a timer: each replay must be an index lookup, not a scan.
+    const plan = JSON.stringify(
+        await Notification.find({ type: 'auction.sold.captain', 'data.player_user_id': soldThenGone._id }).explain()
+    );
+    assert.ok(plan.includes('data.player_user_id_1') && !plan.includes('COLLSCAN'), 'the erase query uses its index');
+
+    const ticketWithReply = uuid();
+    const respondedAt = new Date();
+    await FeedbackTicket.collection.insertOne({
+        _id: ticketWithReply as never,
+        response: { body: 'Fixed', by_user_id: core._id, at: respondedAt },
+    });
+    const reply = { ticket_id: ticketWithReply, ticket_no: 'FB-7' };
+    await handlers.onFeedbackResponded({ ...reply, reporter_user_id: member._id });
+    await handlers.onFeedbackResponded({ ...reply, reporter_user_id: member._id });
+    assert.strictEqual(
+        await Notification.countDocuments({ dedupe_key: dedupe.feedbackResponded(ticketWithReply, respondedAt.getTime()) }),
+        1,
+        'the reporter hears about a reply, once'
+    );
+    // Two replies: the producer's `responded_at` names each one, so each is its own card even when
+    // both are consumed after the second has overwritten the ticket.
+    const twoReplies = { ticket_id: uuid(), ticket_no: 'FB-8', reporter_user_id: member._id };
+    await handlers.onFeedbackResponded({ ...twoReplies, responded_at: '2026-09-26T10:00:00.000Z' });
+    await handlers.onFeedbackResponded({ ...twoReplies, responded_at: '2026-09-26T11:00:00.000Z' });
+    await handlers.onFeedbackResponded({ ...twoReplies, responded_at: '2026-09-26T11:00:00.000Z' });
+    assert.strictEqual(
+        await Notification.countDocuments({ type: 'feedback.responded', 'data.ticket_id': twoReplies.ticket_id }),
+        2,
+        'two replies are two cards, and a replay of either is not a third'
+    );
+    await Notification.deleteMany({ 'data.ticket_id': twoReplies.ticket_id });
+
+    await handlers.onFeedbackResponded({ ...reply, reporter_user_id: null });
+    assert.strictEqual(
+        await Notification.countDocuments({ type: 'feedback.responded' }),
+        1,
+        'an anonymous ticket notifies nobody in-app'
+    );
+
+    // Mutes apply to every new trigger (createOne): a reporter who muted `system` hears nothing.
+    await mute(teamMate._id, 'system');
+    await handlers.onFeedbackResponded({ ...reply, reporter_user_id: teamMate._id });
+    assert.strictEqual(
+        await Notification.countDocuments({ user_id: teamMate._id, type: 'feedback.responded' }),
+        0,
+        'a muted category silences the new triggers too'
+    );
+    console.log('✓ team invites, auction sales and feedback replies reach exactly their people');
 
     await closeScratchDb();
     console.log('\nbroadcast selfcheck: all checks passed');

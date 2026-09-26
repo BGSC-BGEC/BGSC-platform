@@ -9,7 +9,9 @@ import { Request, Response } from 'express';
 import { config } from '../config/env';
 import { UserRole } from '../models/User';
 import { requireAuth, optionalAuth, bearerToken, AuthUser } from './requireAuth';
-import { requireRole, requireSelfOr, rankOf } from './requireRole';
+import { requireRole, rankOf } from './requireRole';
+import { requireActiveUser } from './requireActiveUser';
+import { assertInternalTokenConfigured, requireServiceToken, DEV_INTERNAL_TOKEN } from './requireServiceToken';
 
 type Handler = (req: Request, res: Response, next: () => void) => void;
 
@@ -110,6 +112,7 @@ assert.strictEqual(anon.user, undefined, 'anonymous request gets no req.user');
 const bad = run(optionalAuth, bearer('not.a.jwt'));
 assert.ok(bad.passed, 'optionalAuth treats a bad token as no token');
 assert.strictEqual(bad.user, undefined, 'a bad token must not populate req.user');
+assert.ok(run(optionalAuth, { authorization: 'Bearer logged_out' }).passed, "mobile's logged-out sentinel is a guest");
 
 const signed = run(optionalAuth, bearer(good));
 assert.ok(signed.passed && signed.user?.id === 'u-1', 'optionalAuth populates a valid token');
@@ -133,18 +136,85 @@ assert.ok(!tooLow.passed && tooLow.status === 403, 'core is forbidden, not unaut
 const noUser = run(coordinatorOnly, {});
 assert.strictEqual(noUser.status, 401, 'an anonymous caller gets 401, not 403 — 403 would confirm the route exists');
 
-/* ----------------------------- requireSelfOr ---------------------------- */
+/* --------------------------- requireActiveUser --------------------------- */
 
-const selfOrCoordinator = requireSelfOr(UserRole.COORDINATOR, (req) => (req.params as Record<string, string>)?.ref);
-const withRef = (ref: string, role: UserRole) =>
-    ({ user: { id: 'u-1', role }, params: { ref } } as unknown as Partial<Request>);
+// Mounted bare (`requireActiveUser` instead of `requireActiveUser()`) it used to throw on every
+// request — the hall-of-fame routes 500'd. It now behaves as the default floor. No req.user means
+// it answers before touching the database, so this needs no DB.
+{
+    let status: number | null = null;
+    const res = { status(c: number) { status = c; return this; }, json() { return this; } } as unknown as Response;
+    const out = (requireActiveUser as unknown as (q: Request, r: Response, n: () => void) => Promise<void>)(
+        { headers: {} } as Request, res, () => {}
+    );
+    assert.ok(out && typeof out.then === 'function', 'a bare mount runs the guard instead of returning a factory');
+    assert.strictEqual(status, 401, 'and answers 401 for a missing session, not a 500');
+    assert.throws(() => requireActiveUser('nope' as UserRole), /unknown role/, 'a typo floor still fails at boot');
+}
 
-assert.ok(run(selfOrCoordinator, {}, withRef('u-1', UserRole.USER)).passed, 'a user may act on their own record');
-assert.ok(run(selfOrCoordinator, {}, withRef('u-2', UserRole.COORDINATOR)).passed, 'a coordinator may act on anyone');
+/* -------------------------- requireServiceToken -------------------------- */
 
-const other = run(selfOrCoordinator, {}, withRef('u-2', UserRole.USER));
-assert.ok(!other.passed && other.status === 403, 'a user may not act on someone else');
+{
+    const call = (token?: string) => run(requireServiceToken as Handler, {}, {
+        header: (name: string) => (name === 'x-internal-token' ? token : undefined),
+    } as unknown as Partial<Request>);
+    const saved = config.internalTokenPrevious;
+    config.internalTokenPrevious = 'old-token';
+    assert.ok(call(config.internalToken).passed, 'the current internal token passes');
+    assert.ok(call('old-token').passed, 'during a rotation the previous token passes too');
+    assert.strictEqual(call('wrong').status, 401, 'anything else is 401');
+    assert.strictEqual(call(undefined).status, 401, 'no token is 401');
+    config.internalTokenPrevious = '';
+    assert.strictEqual(call('old-token').status, 401, 'with no rotation configured the old token is dead');
+    config.internalTokenPrevious = saved;
+}
 
-assert.strictEqual(run(selfOrCoordinator, {}).status, 401, 'requireSelfOr needs requireAuth to have run');
+/* --------------------------- production guard ---------------------------- */
+
+// The guard checked the JWT and internal secrets but not the committed Mongo root
+// password or a password-less Redis — the two things that opened the database and the bus.
+{
+    const saved = { nodeEnv: config.nodeEnv, access: config.jwt.accessSecret, refresh: config.jwt.refreshSecret,
+        internal: config.internalToken, mongo: config.mongoUri, redis: config.redisUrl, redisPassword: config.redisPassword };
+    Object.assign(config, { nodeEnv: 'production', internalToken: 'x'.repeat(40) });
+    config.jwt.accessSecret = 'a'.repeat(40);
+    config.jwt.refreshSecret = 'b'.repeat(40);
+    config.mongoUri = 'mongodb://bgsc_admin:real-secret@mongodb:27017/bgsc?authSource=admin';
+    config.redisUrl = 'redis://:real-secret@redis:6379';
+    config.redisPassword = ''; // a developer's .env may set it; these cases are about the URL
+    assert.doesNotThrow(() => assertInternalTokenConfigured(), 'real secrets boot');
+
+    config.mongoUri = 'mongodb://bgsc_admin:bgsc_password@mongodb:27017/bgsc?authSource=admin';
+    assert.throws(() => assertInternalTokenConfigured(), /MONGO_URI/, 'the committed Mongo password is refused');
+    config.mongoUri = 'mongodb://bgsc_admin:real-secret@mongodb:27017/bgsc?authSource=admin';
+
+    config.redisUrl = 'redis://redis:6379';
+    assert.throws(() => assertInternalTokenConfigured(), /REDIS_URL/, 'a password-less Redis is refused');
+    config.redisUrl = 'redis://:dev_redis_password_change_me@redis:6379';
+    assert.throws(() => assertInternalTokenConfigured(), /REDIS_URL/, 'the compose fallback Redis password is refused');
+    config.redisUrl = '';
+    assert.throws(() => assertInternalTokenConfigured(), /REDIS_URL/, 'no bus at all is refused in production');
+    // The password now travels in REDIS_PASSWORD, not the URL.
+    config.redisUrl = 'redis://redis:6379';
+    config.redisPassword = 'real/secret#1';
+    assert.doesNotThrow(() => assertInternalTokenConfigured(), 'a password in REDIS_PASSWORD satisfies the guard');
+    config.redisPassword = 'dev_redis_password_change_me';
+    assert.throws(() => assertInternalTokenConfigured(), /REDIS_URL/, 'the compose fallback in REDIS_PASSWORD is refused');
+    config.redisPassword = '';
+    config.redisUrl = 'redis://:p/w#x@redis:6379';
+    assert.throws(() => assertInternalTokenConfigured(), /REDIS_URL/, 'an unparseable REDIS_URL is refused');
+    assert.doesNotThrow(
+        () => assertInternalTokenConfigured({ datastores: false }),
+        'the gateway, which holds no database or bus, is not asked for them'
+    );
+    // A rotation that parks the published dev token as "previous" keeps it verifying everywhere.
+    config.internalTokenPrevious = DEV_INTERNAL_TOKEN;
+    assert.throws(() => assertInternalTokenConfigured({ datastores: false }), /INTERNAL_API_TOKEN_PREVIOUS/, 'a published previous token is refused');
+    config.internalTokenPrevious = '';
+
+    Object.assign(config, { nodeEnv: saved.nodeEnv, internalToken: saved.internal, mongoUri: saved.mongo, redisUrl: saved.redis, redisPassword: saved.redisPassword });
+    config.jwt.accessSecret = saved.access;
+    config.jwt.refreshSecret = saved.refresh;
+}
 
 console.log('auth middleware selfcheck: all assertions passed');

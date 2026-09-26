@@ -1,16 +1,21 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { config } from '@bgsc/shared';
 
 /**
  * One-function storage interface. Spec §15.2 wants pre-signed S3 URLs, ClamAV scanning, three
- * resize targets, EXIF stripping and CDN invalidation — that is BE-1's Media Service in Week 4.
+ * resize targets, EXIF stripping and CDN invalidation; none of that exists yet, here or in
+ * media-service (which only serves the upload root). A replaced avatar is deleted by the upload
+ * handler; nothing else collects files.
  *
- * ponytail: local disk, no resize, no virus scan. Upgrade path is Media Service implementing
- * `putObject` against S3/R2; nothing that calls it changes.
+ * ponytail: local disk, no resize, no virus scan. Upgrade path is `putObject`/`deleteObject`
+ * against S3/R2; nothing that calls them changes.
  */
 
-const UPLOAD_DIR = path.resolve(__dirname, '../../uploads');
+// The platform's one upload root; media-service serves it at `/uploads`. This service writes only
+// under `avatars/` (callers pass that prefix) and serves nothing itself.
+const UPLOAD_DIR = path.resolve(config.uploadDir);
 
 /** Spec §15.1: JPG, PNG, WebP, max 10MB. */
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;

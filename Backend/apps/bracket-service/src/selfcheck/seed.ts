@@ -11,7 +11,9 @@ import {
     config,
 } from '@bgsc/shared';
 import mongoose from 'mongoose';
-import { v4 as uuid } from 'uuid';
+import { randomUUID } from 'crypto';
+
+const uuid = (): string => randomUUID();
 
 /**
  * Fixtures for the bracket selfchecks.
@@ -70,8 +72,8 @@ export async function seedEvent(title: string, opts: EventOptions = {}): Promise
         status: opts.status ?? 'ongoing',
         start_at: new Date(Date.now() + 86_400_000),
         end_at: new Date(Date.now() + 172_800_000),
-        // The model refuses a formless registration on anything but an uncapped solo 'DE'
-        // (Event.ts:308), so every seeded league carries one.
+        // The Event model refuses a formless registration on anything but an uncapped solo 'DE',
+        // so every seeded league carries one.
         registration: { closes_at: new Date(Date.now() + 43_200_000), form_id: type === 'DE' ? null : uuid() },
         teaming: teamed
             ? { is_teamed: true, team_size_min: 1, team_size_max: 5, max_teams: null, captain_application_required: false }

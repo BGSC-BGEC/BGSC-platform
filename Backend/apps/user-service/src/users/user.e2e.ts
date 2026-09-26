@@ -10,6 +10,9 @@ import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import { Server } from 'http';
 import { app } from '../index';
+import { replayDeleted } from './user.service';
+import { gatherRatingInputs } from './playerCard';
+import { seedFounder } from '../scripts/seed-founder';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { UPLOAD_DIR } from '../storage/storage';
@@ -27,10 +30,16 @@ import {
     subscribe,
 } from '@bgsc/shared';
 
-const TEST_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_e2e$2');
+// Its own scratch DB: `bgsc_e2e` was shared with announcement-service's e2e, and each dropped the
+// other's data mid-run.
+const TEST_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_e2e_user$2');
 
 let server: Server;
 let base: string;
+/** config.uploadDir is the real platform upload root, not a scratch dir: whoever uploads here is cleaned up. */
+const avatarOwners: string[] = [];
+const removeAvatars = () =>
+    Promise.all(avatarOwners.map((id) => fs.rm(path.join(UPLOAD_DIR, 'avatars', id), { recursive: true, force: true })));
 
 const token = (id: string, role: UserRole) =>
     jwt.sign({ sub: id, role }, config.jwt.accessSecret, { expiresIn: '5m' });
@@ -88,6 +97,7 @@ async function main(): Promise<void> {
         profile: { full_name: 'Ana Rao', phone_number: '+919876543210', bio: 'chess' },
         points_balance: 260,
     });
+    avatarOwners.push(ana._id);
     const bo = await User.create({
         email: 'bo@bgsc.test', username: 'bo', password_hash: 'x', profile: { full_name: 'Bo Sen' },
     });
@@ -112,6 +122,7 @@ async function main(): Promise<void> {
     assert.strictEqual(me.status, 200, 'GET /users/me');
     assert.strictEqual(me.body.email, 'ana@bgsc.test', 'self sees the real email');
     assert.ok(me.body.settings, 'self sees settings');
+    assert.strictEqual(me.body.is_phone_verified, false, 'self sees whether the phone is verified');
     assert.ok(!JSON.stringify(me.body).includes('password_hash'), 'no hash in the response');
 
     // ---- masking ----------------------------------------------------------
@@ -120,9 +131,9 @@ async function main(): Promise<void> {
     assert.strictEqual(asStranger.body.profile.phone_number, '+91******3210', 'phone masked');
     assert.strictEqual(asStranger.body.settings, undefined, 'settings withheld');
 
-    const anon = await call('GET', `/users/${ana._id}`);
-    assert.strictEqual(anon.status, 200, 'public profile readable anonymously');
-    assert.strictEqual(anon.body.email, 'a***@bgsc.test', 'anonymous also gets the masked email');
+    // "Any authed". Anonymous reads made every profile a scrapeable directory.
+    assert.strictEqual((await call('GET', `/users/${ana._id}`)).status, 401, 'profiles are not readable anonymously');
+    assert.strictEqual((await call('GET', `/users/ana/player-card`)).status, 401, 'nor are player cards');
 
     const asCoord = await call('GET', `/users/${ana._id}`, { as: coordT });
     assert.strictEqual(asCoord.body.email, 'ana@bgsc.test', 'coordinator sees full PII');
@@ -157,17 +168,27 @@ async function main(): Promise<void> {
         422, 'an over-long bio is 422');
 
     // ---- settings + privacy ----------------------------------------------
+    assert.ok((await call('GET', '/users/search?q=Rao', { as: boT })).body.users.some((u: any) => u.username === 'ana'),
+        'a public profile is found by its real name');
     await call('PATCH', '/users/me/settings', { as: anaT, body: { privacy: { is_profile_public: false } } });
+    assert.ok(!(await call('GET', '/users/search?q=Rao', { as: boT })).body.users.some((u: any) => u.username === 'ana'),
+        'a private profile is NOT found by the real name it hides');
+    const stubCard = await call('GET', `/users/ana/player-card`, { as: boT });
+    assert.strictEqual(stubCard.status, 200, 'a private profile still has a card');
+    assert.strictEqual(stubCard.body.bio, '', 'but a stranger gets the stub: no bio');
+    assert.deepStrictEqual(stubCard.body.stats, {}, 'and no rating inputs');
+    assert.strictEqual((await call('GET', `/users/ana/player-card`, { as: anaT })).body.bio, 'updated bio',
+        'the owner still sees their full card');
     const hidden = await call('GET', `/users/${ana._id}`, { as: boT });
-    assert.strictEqual(hidden.status, 200, 'a private profile still answers 200 (D9)');
+    assert.strictEqual(hidden.status, 200, 'a private profile still answers 200');
     assert.strictEqual(hidden.body.private, true, 'flagged private');
     assert.strictEqual(hidden.body.email, undefined, 'a private profile exposes no email at all');
     assert.ok(hidden.body.username, 'username survives so deep links work');
     await call('PATCH', '/users/me/settings', { as: anaT, body: { privacy: { is_profile_public: true } } });
 
     // ---- player card + rating --------------------------------------------
-    const card = await call('GET', `/users/ana/player-card`);
-    assert.strictEqual(card.status, 200, 'player card is public');
+    const card = await call('GET', `/users/ana/player-card`, { as: boT });
+    assert.strictEqual(card.status, 200, 'player card readable by any signed-in user');
     assert.strictEqual(card.body.rating, Math.floor(260 / 50), 'rating = points/50 with no events yet');
     assert.strictEqual(card.body.formula_version, 1, 'card carries the formula version');
 
@@ -182,8 +203,10 @@ async function main(): Promise<void> {
         'an avatar upload emits UserProfileUpdated so snapshots follow it'
     );
     assert.ok(up.body.avatar_url.startsWith('/uploads/avatars/'), 'avatar_url returned');
-    const served = await fetch(base + up.body.avatar_url);
-    assert.strictEqual(served.status, 200, 'uploaded avatar is served back');
+    // Written under the platform upload root, which media-service serves; this service serves nothing.
+    await fs.access(path.join(config.uploadDir, up.body.avatar_url.replace('/uploads/', '')));
+    assert.strictEqual(UPLOAD_DIR, path.resolve(config.uploadDir), 'avatars live under config.uploadDir');
+    assert.strictEqual((await fetch(base + up.body.avatar_url)).status, 404, 'user-service no longer mounts /uploads');
 
     const evil = await call('POST', '/users/me/avatar', {
         as: anaT, raw: Buffer.from('<?php system($_GET[1]); ?>'), contentType: 'image/png',
@@ -213,6 +236,19 @@ async function main(): Promise<void> {
         user: { user_id: ana._id, display_name: 'Ana Rao' },
         context: { event: { role: 'solo' } }, status: 'confirmed',
     });
+
+    // Participations are event registrations. A challenge's own form (already counted as a
+    // challenge) and a generic form are not.
+    await FormSubmission.create({
+        form_id: 'f-ch', form_version: 1, owner: { type: 'challenge', id: 'ch-1' },
+        user: { user_id: ana._id, display_name: 'Ana Rao' }, context: { challenge: { team_id: null } }, status: 'confirmed',
+    });
+    await FormSubmission.create({
+        form_id: 'f-gen', form_version: 1, owner: { type: 'generic', id: null },
+        user: { user_id: ana._id, display_name: 'Ana Rao' }, context: {}, status: 'confirmed',
+    });
+    assert.strictEqual((await gatherRatingInputs(ana)).participations, 1,
+        'only the event registration counts as a participation');
 
     const coreAfter = await call('GET', `/users/${ana._id}`, { as: coreT });
     assert.strictEqual(coreAfter.body.email, 'ana@bgsc.test', 'core sees full PII for a participant it administers');
@@ -262,6 +298,29 @@ async function main(): Promise<void> {
         (await call('PATCH', `/users/${bo._id}/role`, { as: coordT, body: { role: 'core' } })).status,
         422, 'a role change without a reason is refused');
 
+    // ---- role change: one winner, one audit row, under concurrency --------
+    const contested = await User.create({
+        email: 'contested@bgsc.test', username: 'contested', password_hash: 'x', profile: { full_name: 'Contested' },
+    });
+    const roleRace = await Promise.all(Array.from({ length: 5 }, () =>
+        call('PATCH', `/users/${contested._id}/role`, { as: coordT, body: { role: 'member', reason: 'race' } })));
+    assert.strictEqual(roleRace.filter((r) => r.status === 200).length, 1, 'exactly one concurrent role change lands');
+    assert.strictEqual(roleRace.filter((r) => r.status >= 500).length, 0, 'the losers get a 409, never a 500');
+    assert.strictEqual(await AuditLog.countDocuments({ target_id: contested._id, action: 'user.role_changed' }), 1,
+        'and exactly one audit row exists for the one change');
+    assert.ok((await AuditLog.findOne({ target_id: contested._id }))!.ip, 'the audit row records the actor ip');
+
+    // ---- an admin acts only on someone they strictly outrank --------------
+    const peer = await User.create({
+        email: 'peer@bgsc.test', username: 'peercoord', password_hash: 'x',
+        profile: { full_name: 'Peer Coord' }, role: UserRole.COORDINATOR,
+    });
+    const peerT = token(peer._id, UserRole.COORDINATOR);
+    assert.strictEqual(
+        (await call('PATCH', `/users/${coord._id}/status`, { as: peerT, body: { status: 'suspended', reason: 'coup' } })).status,
+        403, 'a coordinator cannot suspend a peer coordinator');
+    assert.strictEqual((await User.findById(coord._id))!.status, UserStatus.ACTIVE, 'and the peer is untouched');
+
     // ---- suspend ----------------------------------------------------------
     const susp = await call('PATCH', `/users/${bo._id}/status`, {
         as: coordT, body: { status: 'suspended', reason: 'abuse' },
@@ -269,10 +328,19 @@ async function main(): Promise<void> {
     assert.strictEqual(susp.status, 200, 'coordinator suspends');
     assert.ok(events.some((e) => e.type === 'UserDisabled'), 'UserDisabled emitted');
     const suspended = await User.findById(bo._id).select('+refresh_token_hash');
+    assert.strictEqual(
+        ((await AuditLog.findOne({ target_id: bo._id, action: 'user.suspended' }))!.previous_value as any).status,
+        UserStatus.ACTIVE, 'suspension audited with its true previous status');
     assert.strictEqual(suspended!.refresh_token_hash, null, 'suspension clears the refresh token');
     assert.ok(
         !(await call('GET', '/users/search?q=bo', { as: anaT })).body.users.some((u: any) => u.username === 'bo'),
         'a suspended user drops out of search');
+    const unsusp = await call('PATCH', `/users/${bo._id}/status`, {
+        as: coordT, body: { status: 'active', reason: 'appeal upheld' },
+    });
+    assert.strictEqual(unsusp.status, 200, 'coordinator lifts the suspension');
+    assert.ok(events.some((e) => e.type === 'UserEnabled'), 'lifting a suspension is announced, like imposing one');
+    assert.ok(await AuditLog.exists({ target_id: bo._id, action: 'user.reactivated' }), 'and audited as a reactivation');
 
     // ---- replacing an avatar removes the old file -------------------------
     const first = await call('POST', '/users/me/avatar', { as: anaT, raw: png });
@@ -282,7 +350,7 @@ async function main(): Promise<void> {
     assert.notStrictEqual(second.body.avatar_url, first.body.avatar_url, 'a replacement gets a new key');
     await new Promise((r) => setTimeout(r, 50));                   // cleanup is best-effort/async
     await assert.rejects(() => fs.access(firstPath), 'the replaced avatar file is deleted, not orphaned');
-    assert.strictEqual((await fetch(base + second.body.avatar_url)).status, 200, 'the new avatar still serves');
+    await fs.access(path.join(UPLOAD_DIR, second.body.avatar_url.replace('/uploads/', '')));
 
     // ---- a suspended account loses write access immediately ---------------
     const doomed = await User.create({
@@ -297,32 +365,25 @@ async function main(): Promise<void> {
     // The access token is still cryptographically valid for another 15 minutes (Spec §11.1).
     assert.strictEqual((await call('GET', '/users/me', { as: doomedT })).status, 200,
         'a suspended user may still read their own record');
-    assert.strictEqual((await call('PATCH', '/users/me', { as: doomedT, body: { bio: 'still here' } })).status, 403,
+    // 401 with no reason, like requireActiveUser: the session is dead, and why is not the caller's business.
+    const deadWrite = await call('PATCH', '/users/me', { as: doomedT, body: { bio: 'still here' } });
+    assert.deepStrictEqual([deadWrite.status, deadWrite.body], [401, { error: 'unauthorized' }],
         'a suspended user cannot write, even with a valid unexpired token');
-    assert.strictEqual((await call('POST', '/users/me/avatar', { as: doomedT, raw: png })).status, 403,
+    assert.strictEqual((await call('POST', '/users/me/avatar', { as: doomedT, raw: png })).status, 401,
         'a suspended user cannot upload');
+    // Self-deletion under suspension was irreversible (reactivate refuses a suspended prior status,
+    // and the admin status route cannot see a deleted account), so a dead session may not do it.
     assert.strictEqual(
         (await call('DELETE', '/users/me', { as: doomedT, body: { confirm: 'DELETE' } })).status,
-        202,
-        'a suspended user may still delete their account — deletion is a right, not a privilege'
+        401,
+        'a suspended user cannot self-delete'
     );
+    assert.strictEqual((await User.findById(doomed._id))!.deleted_at, null, 'and the account is untouched');
 
-    // ---- snapshots --------------------------------------------------------
+    // ---- the dead snapshot route is gone ---------------------------------
     assert.strictEqual(
-        (await call('GET', `/internal/users/snapshot?ids=${ana._id}`)).status,
-        401, '/internal is not an unauthenticated user directory');
-    assert.strictEqual(
-        (await call('GET', `/internal/users/snapshot?ids=${ana._id}`, { as: coordT })).status,
-        401, 'a user JWT is not a service token');
-
-    const snaps = await call('GET', `/internal/users/snapshot?ids=${ana._id},${bo._id}`, { service: true });
-    assert.strictEqual(snaps.body.snapshots.length, 2, 'bulk snapshot returns both');
-    assert.deepStrictEqual(
-        Object.keys(snaps.body.snapshots[0]).sort(),
-        // `deleted` joined the shape on Sep 27 (relationships.md §4): it is the only signal a
-        // client has that the account behind an embedded name is gone.
-        ['avatar_url', 'deleted', 'display_name', 'user_id'],
-        'snapshot shape matches what six collections embed');
+        (await call('GET', `/internal/users/snapshot?ids=${ana._id}`, { service: true })).status,
+        404, '/internal/users/snapshot was removed (no caller; reported deleted users as live)');
 
     // ---- pagination: ties and nulls ---------------------------------------
     const walk = async (sort: string, limit: number): Promise<string[]> => {
@@ -359,6 +420,14 @@ async function main(): Promise<void> {
     const byCreated = await walk('created_at', 3);
     assert.strictEqual(byCreated.length, total, 'date sort still walks the whole table');
 
+    // A bare date names a whole day. As `$lte` on its midnight, today's sign-ups vanished from
+    // `joined_before=<today>`.
+    const today = new Date().toISOString().slice(0, 10);
+    const joined = await call('GET', `/users?limit=100&joined_before=${today}&joined_after=${today}`, { as: coordT });
+    assert.strictEqual(joined.body.users.length, total, 'joined_before=<today> includes everyone who joined today');
+    assert.strictEqual((await call('GET', '/users?joined_before=true', { as: coordT })).status, 422,
+        'a boolean is not a date');
+
     assert.strictEqual(
         (await call('GET', '/users?cursor=not-a-cursor', { as: coordT })).status,
         422, 'a corrupt cursor is rejected, not silently ignored');
@@ -375,6 +444,15 @@ async function main(): Promise<void> {
         const r = await call('GET', `/users?sort=points_balance&cursor=${encodeURIComponent(b64(payload))}`, { as: coordT });
         assert.strictEqual(r.status, 422, `cursor with ${label} is rejected at decode`);
     }
+    // A primitive of the wrong type for the sort is a 422 too — it used to CastError into a 500.
+    for (const [label, sort, payload] of [
+        ['garbage date', 'created_at', { v: 'garbage', id: 'x' }],
+        ['number on a date sort', 'last_active_at', { v: 5, id: 'x' }],
+        ['date cursor replayed on points', 'points_balance', { v: new Date().toISOString(), id: 'x' }],
+    ] as [string, string, unknown][]) {
+        const r = await call('GET', `/users?sort=${sort}&cursor=${encodeURIComponent(b64(payload))}`, { as: coordT });
+        assert.strictEqual(r.status, 422, `cursor rejected: ${label}`);
+    }
     // A legitimate primitive cursor still works.
     assert.strictEqual(
         (await call('GET', `/users?sort=points_balance&cursor=${encodeURIComponent(b64({ v: 0, id: 'zzz' }))}`, { as: coordT })).status,
@@ -385,13 +463,29 @@ async function main(): Promise<void> {
     assert.strictEqual(hdrs.headers.get('x-content-type-options'), 'nosniff', 'nosniff is set');
     assert.strictEqual(hdrs.headers.get('x-frame-options'), 'DENY', 'framing is denied');
 
+    // ---- phone: an unchanged number is not rewritten -----------------------
+    // Rewriting it raced an OTP verification of a different number and could land the stale number
+    // under the fresh verified badge. Unchanged => not in the write; changed => badge dropped with it.
+    await User.updateOne({ _id: ana._id }, { $set: { is_phone_verified: true } });
+    const samePhone = events.length;
+    await call('PATCH', '/users/me', { as: anaT, body: { phone_number: '+919876543210', bio: 'same phone' } });
+    assert.strictEqual((await User.findById(ana._id))!.is_phone_verified, true, 're-sending the same number keeps the badge');
+    assert.deepStrictEqual((events[samePhone].payload as any).changed_fields, ['bio'], 'and does not write the phone at all');
+    await call('PATCH', '/users/me', { as: anaT, body: { phone_number: '+91 98765-43210' } });
+    assert.strictEqual((await User.findById(ana._id))!.is_phone_verified, true,
+        'the same number in another spelling is the same number: badge kept');
+    assert.strictEqual((await call('PATCH', '/users/me', { as: anaT, body: { phone_number: '98765 43210' } })).status, 422,
+        'a number without its country code is refused');
+    await call('PATCH', '/users/me', { as: anaT, body: { phone_number: '+919800000000' } });
+    assert.strictEqual((await User.findById(ana._id))!.is_phone_verified, false, 'a different number drops the badge');
+
     // ---- no-op writes emit no event ---------------------------------------
     const before = events.length;
     const noop = await call('PATCH', '/users/me', { as: anaT, body: { social_links: {} } });
     assert.strictEqual(noop.status, 200, 'an empty social_links patch is accepted');
     assert.strictEqual(events.length, before, 'a write that changes nothing emits no UserProfileUpdated');
 
-    // ---- deletion gate (D12) ----------------------------------------------
+    // ---- deletion gate ----------------------------------------------------
     const preview = await call('GET', '/users/me/deletion-preview', { as: anaT });
     assert.strictEqual(preview.status, 200, 'the client can fetch what deletion actually does');
     assert.ok(preview.body.retained_indefinitely.length > 0, 'disclosure lists what is kept');
@@ -407,7 +501,7 @@ async function main(): Promise<void> {
         'the confirmation is case-sensitive');
     assert.ok(await User.findOne({ _id: ana._id, deleted_at: null }), 'and nothing was deleted by those attempts');
 
-    // ---- restore inside the window (D11) ----------------------------------
+    // ---- restore inside the window ----------------------------------------
     const tempUser = await User.create({
         email: 'tmp@bgsc.test', username: 'tmpuser', password_hash: 'x', profile: { full_name: 'Tmp' },
     });
@@ -431,6 +525,15 @@ async function main(): Promise<void> {
     // deleted user, who holds no token.
     assert.strictEqual((await call('POST', '/users/me/restore', { as: tmpT })).status, 404,
         'user-service exposes no restore route');
+    assert.strictEqual(ownView.body.deletion.restore_with, 'POST /account/reactivate', 'and names where restore lives');
+
+    // A Google-made account has no password, and reactivation takes one: it is told to set one first.
+    const googleOnly = await User.create({ email: 'g@bgsc.test', username: 'gonly', profile: { full_name: 'G Only' } });
+    const gT = token(googleOnly._id, UserRole.USER);
+    await call('DELETE', '/users/me', { as: gT, body: { confirm: 'DELETE' } });
+    assert.strictEqual((await call('GET', '/users/me', { as: gT })).body.deletion.restore_with,
+        'POST /auth/forgot-password, then POST /account/reactivate',
+        'a passwordless account is told to set a password before reactivating');
 
     // ---- concurrency: a double-click must not fabricate audit rows --------
     const racer = await User.create({
@@ -448,15 +551,27 @@ async function main(): Promise<void> {
         1,
         'one real transition writes exactly one audit row — no fabricated entries'
     );
+    const deadAudit = await call('GET', `/users/${racer._id}/audit`, { as: coordT });
+    assert.strictEqual(deadAudit.status, 200, "a deleted account's audit trail is still readable by admins");
+    assert.ok(deadAudit.body.entries.some((e: any) => e.action === 'user.deleted'), 'including the deletion');
+
+    // Replay sweep: a UserDeleted lost on the bus is re-published while the deletion is recent.
+    const beforeReplay = events.length;
+    assert.ok((await replayDeleted()) >= 1, 'the sweep finds deletions inside the window');
+    assert.ok(events.slice(beforeReplay).some((e) => e.type === 'UserDeleted' && e.payload.user_id === racer._id),
+        'and re-publishes UserDeleted for them');
+    assert.ok(!events.slice(beforeReplay).some((e) => e.type === 'UserDeleted' && e.payload.user_id === ana._id),
+        'but never for a live account');
 
     // ---- the record survives deletion, whatever happens next --------------
     await User.updateOne({ _id: tempUser._id }, { $set: { deleted_at: null, status: UserStatus.ACTIVE, deletion: null } });
     await call('DELETE', '/users/me', { as: tmpT, body: { confirm: 'DELETE', research_consent: true } });
     const stillThere = await User.findById(tempUser._id);
-    assert.ok(stillThere, 'and the record still exists — nothing is ever erased (D10)');
+    assert.ok(stillThere, 'and the record still exists — nothing is ever erased');
     assert.strictEqual(stillThere!.deletion!.research_consent, true, 'opt-in research consent was recorded');
 
-    const consentRow = await AuditLog.findOne({ target_id: tempUser._id, action: 'user.deleted' });
+    // Newest row: tempUser was deleted twice, and the first deletion did not consent.
+    const consentRow = await AuditLog.findOne({ target_id: tempUser._id, action: 'user.deleted' }).sort({ created_at: -1 });
     assert.ok(consentRow, 'every deletion writes an audit row');
     assert.strictEqual((consentRow!.new_value as any).research_consent, true,
         'the audit row records what was consented to');
@@ -484,8 +599,6 @@ async function main(): Promise<void> {
     assert.strictEqual(ownAfterDelete.body.deletion.restorable, true, 'restore is offered inside the window');
     assert.ok(events.some((e) => e.type === 'UserDeleted'), 'UserDeleted emitted');
 
-    const snapAfter = await call('GET', `/internal/users/snapshot?ids=${ana._id}`, { service: true });
-    assert.strictEqual(snapAfter.body.snapshots.length, 1, 'snapshots still resolve a deleted user');
 
     // ---- reliability regressions ------------------------------------------
 
@@ -518,7 +631,6 @@ async function main(): Promise<void> {
     // The most consequential write on the platform was gated on the TOKEN's role claim, which stays
     // valid for up to fifteen minutes after the database says otherwise — so a coordinator who had
     // just been suspended could still promote accounts. `requireActiveUser` ranks the live document.
-    // (Whole-backend audit, Sep 27.)
     const pawn = await User.create({
         _id: randomUUID(),
         email: `pawn_${Date.now()}@bgsc.test`,
@@ -540,6 +652,10 @@ async function main(): Promise<void> {
         body: { status: 'suspended', reason: 'should not land' },
     });
     assert.strictEqual(demotedWrite.status, 403, 'nor can a demoted one suspend an account');
+    // PII scope ranks the live role too: the token still says coordinator, the account does not.
+    assert.strictEqual((await call('GET', `/users/${bo._id}`, { as: coordT })).body.email, 'b***@bgsc.test',
+        'a demoted coordinator loses full PII at once, not when the token expires');
+    assert.strictEqual((await call('GET', '/users', { as: coordT })).status, 403, 'and the admin list');
 
     assert.strictEqual(
         (await User.findById(pawn._id))!.role,
@@ -548,6 +664,20 @@ async function main(): Promise<void> {
     );
     await User.updateOne({ _id: coord._id }, { $set: { role: UserRole.COORDINATOR } });
     console.log('  ok  role and status writes rank the live user, not the token claim');
+
+    // ---- founder bootstrap (npm run seed:founder) ----------------------------
+    const seed = await User.create({
+        email: 'seed@bgsc.test', username: 'seedfounder', password_hash: 'x', profile: { full_name: 'Seed' },
+    });
+    await assert.rejects(() => seedFounder('nobody@bgsc.test'), /no live account/, 'refuses an unregistered email');
+    assert.strictEqual(await seedFounder('  SEED@bgsc.test '), 'promoted', 'promotes the registered account');
+    assert.strictEqual((await User.findById(seed._id))!.role, UserRole.FOUNDER, 'role is founder');
+    const seedRow = await AuditLog.findOne({ target_id: seed._id, action: 'user.role_changed' });
+    assert.ok(seedRow && seedRow.actor_id === null && seedRow.reason === 'bootstrap', 'audited: actor null, reason bootstrap');
+    assert.strictEqual(await seedFounder('seed@bgsc.test'), 'already_founder', 'idempotent on re-run');
+    assert.strictEqual(await AuditLog.countDocuments({ target_id: seed._id }), 1, 'and a re-run writes nothing');
+    await assert.rejects(() => seedFounder('bo@bgsc.test'), /founder already exists/,
+        'a second founder is never minted by the bootstrap');
 
     // search degrades instead of 500ing when the text index is absent
     await User.collection.dropIndexes().catch(() => undefined);
@@ -560,6 +690,7 @@ async function main(): Promise<void> {
 
 main()
     .then(async () => {
+        await removeAvatars();
         await mongoose.connection.dropDatabase();
         server?.close();
         await mongoose.disconnect();
@@ -567,6 +698,6 @@ main()
     })
     .catch(async (err) => {
         console.error(err);
-        try { await mongoose.connection.dropDatabase(); server?.close(); await mongoose.disconnect(); } catch {}
+        try { await removeAvatars(); await mongoose.connection.dropDatabase(); server?.close(); await mongoose.disconnect(); } catch {}
         process.exit(1);
     });

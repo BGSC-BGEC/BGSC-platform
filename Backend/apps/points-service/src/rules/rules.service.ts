@@ -9,7 +9,7 @@ import {
 
 /**
  * The rules engine: a table of `reason -> amount` with two override sources. No DSL
- * (be2-points-service-plan.md §4, points-model.md §3) — Spec §5.15.3's "Point Award Toggles" asks
+ * (points-model.md §3) — Spec §5.15.3's "Point Award Toggles" asks
  * for amounts and switches, and an expression language on admin input is a security surface
  * nobody asked for.
  */
@@ -52,7 +52,7 @@ export async function seedRules(): Promise<void> {
  * no transaction at all.
  *
  * Returns the expiry alongside the amount so a credit cannot be priced in one place and have its
- * clock set (or forgotten) in another (plan §4.1).
+ * clock set (or forgotten) in another.
  */
 export async function resolve(reason: string, override?: number | null): Promise<Resolved | null> {
     const rule = await PointRule.findById(reason);
@@ -74,7 +74,7 @@ export async function resolve(reason: string, override?: number | null): Promise
     };
 }
 
-/** Cheap existence check for the ledger's `reason` guard (plan §3.3). */
+/** Cheap existence check for the ledger's `reason` guard. */
 export async function ruleExists(reason: string): Promise<boolean> {
     return (await PointRule.exists({ _id: reason })) !== null;
 }
@@ -87,7 +87,7 @@ export async function listRules(): Promise<IPointRule[]> {
  * Spec §5.7's "points earning opportunities": what a user can actually go and do. `leaderboard`
  * and `admin` are not opportunities; `store` and `sponsor` are out of MVP and unseeded.
  *
- * Served by the `{ enabled: 1, source: 1 }` index (Points.ts:171).
+ * Served by the `{ enabled: 1, source: 1 }` index on `point_rules`.
  */
 const OPPORTUNITY_SOURCES: PointsSource[] = ['event', 'challenge', 'engagement'];
 
@@ -123,7 +123,7 @@ export interface RuleUpdate {
 
 /**
  * `source` and `overridable_by` are deliberately not editable: the resolver branches on them, so an
- * admin flipping `overridable_by` would produce a rule the engine silently ignores (plan D12).
+ * admin flipping `overridable_by` would produce a rule the engine silently ignores.
  *
  * Changing a rule never rewrites history — existing rows keep the amount they were issued at.
  */

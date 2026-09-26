@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { AuthController } from './auth.controller';
-import { requireAuth, validate } from '@bgsc/shared';
+import { optionalAuth, requireActiveUser, requireAuth, validate } from '@bgsc/shared';
 import {
   RegisterSchema,
   LoginSchema,
   RefreshTokenSchema,
+  LogoutSchema,
   VerifyEmailSchema,
   ResendVerificationSchema,
   ForgotPasswordSchema,
@@ -12,6 +13,7 @@ import {
   ReactivateAccountSchema,
   SendPhoneOtpSchema,
   VerifyPhoneOtpSchema,
+  GoogleExchangeSchema,
 } from './auth.schemas';
 
 /**
@@ -28,8 +30,9 @@ authRoutes.post('/register', validate({ body: RegisterSchema }), AuthController.
 authRoutes.post('/login', validate({ body: LoginSchema }), AuthController.login);
 authRoutes.post('/refresh', validate({ body: RefreshTokenSchema }), AuthController.refresh);
 
-// Protected Session
-authRoutes.post('/logout', requireAuth, AuthController.logout);
+// Logout by access token, or by refresh token once the access token has expired (optionalAuth: an
+// expired bearer is ignored rather than refused, so the refresh token in the body still counts).
+authRoutes.post('/logout', optionalAuth, validate({ body: LogoutSchema }), AuthController.logout);
 
 // Email Verification
 authRoutes.post('/verify-email', validate({ body: VerifyEmailSchema }), AuthController.verifyEmail);
@@ -53,8 +56,7 @@ authRoutes.post(
 
 // Account Lifecycle. Reactivation is unauthenticated by necessity: a deleted user cannot obtain
 // a token (login returns a status, not tokens), so this authenticates by password and issues a
-// fresh pair. It is the only working restore path — User Service's POST /users/me/restore sits
-// behind requireAuth and is unreachable once the caller's old access token expires.
+// fresh pair. It is the only restore path; User Service deliberately has none.
 accountRoutes.post(
   '/reactivate',
   validate({ body: ReactivateAccountSchema }),
@@ -64,17 +66,21 @@ accountRoutes.post(
 // Google OAuth (Co-located on same server)
 authRoutes.get('/google', AuthController.googleAuth);
 authRoutes.get('/google/callback', AuthController.googleCallback);
+authRoutes.post('/google/exchange', validate({ body: GoogleExchangeSchema }), AuthController.googleExchange);
 
-// Phone OTP Verification
+// Phone OTP Verification. requireActiveUser: a suspended or deleted account's still-valid access
+// token must not be able to claim a phone number.
 authRoutes.post(
   '/phone/send-otp',
   requireAuth,
+  requireActiveUser(),
   validate({ body: SendPhoneOtpSchema }),
   AuthController.sendPhoneOtp
 );
 authRoutes.post(
   '/phone/verify-otp',
   requireAuth,
+  requireActiveUser(),
   validate({ body: VerifyPhoneOtpSchema }),
   AuthController.verifyPhoneOtp
 );

@@ -5,7 +5,7 @@ export class MailerService {
    * Sends an email verification link.
    * In development, prints the link to stdout so local devs are not blocked.
    */
-  static async sendVerificationEmail(toEmail: string, token: string): Promise<void> {
+  static async sendVerificationEmail(userId: string, toEmail: string, token: string): Promise<void> {
     const verificationUrl = `${config.frontendUrl}/verify-email?token=${token}`;
 
     if (config.nodeEnv === 'development' || config.nodeEnv === 'test') {
@@ -19,13 +19,14 @@ export class MailerService {
     }
 
     // In production, integrate SMTP or third-party email provider (Resend/SES).
-    console.log(`[PROD EMAIL STUB] Verification sent to ${toEmail}`);
+    // User id, never the address: production logs are not a place for PII.
+    console.log(`[PROD EMAIL STUB] Verification sent to user ${userId}`);
   }
 
   /**
    * Sends a password reset email.
    */
-  static async sendPasswordResetEmail(toEmail: string, token: string): Promise<void> {
+  static async sendPasswordResetEmail(userId: string, toEmail: string, token: string): Promise<void> {
     const resetUrl = `${config.frontendUrl}/reset-password?token=${token}`;
 
     if (config.nodeEnv === 'development' || config.nodeEnv === 'test') {
@@ -38,6 +39,6 @@ export class MailerService {
       return;
     }
 
-    console.log(`[PROD EMAIL STUB] Password reset sent to ${toEmail}`);
+    console.log(`[PROD EMAIL STUB] Password reset sent to user ${userId}`);
   }
 }

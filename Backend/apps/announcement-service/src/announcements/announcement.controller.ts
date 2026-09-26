@@ -18,7 +18,7 @@ const isAdmin = (req: Request) => !!req.user && rankOf(req.user.role) >= rankOf(
 
 /**
  * The response shape, in one place. `delivery` is the composer's view of the WhatsApp/push fan-out —
- * group ids and provider error strings once Week 4 writes them — so only core+ gets it. `__v` is
+ * masked group ids and provider error strings — so only core+ gets it. `__v` is
  * Mongoose's bookkeeping, not API. Takes a lean object or a hydrated document.
  */
 type Presented = Record<string, unknown> & Pick<IAnnouncement, '_id' | 'published_at'>;
@@ -98,10 +98,10 @@ export const auditForAnnouncement = wrap(async (req, res) => {
 /* ---- read tracking ------------------------------------------------------- */
 
 export const markRead = wrap(async (req, res) => {
-    await markReadInStore(userOf(res)._id, req.params.id as string);
+    await markReadInStore(req.user!.id, req.params.id as string);
     res.status(204).end();
 });
 
 export const markAllRead = wrap(async (req, res) => {
-    res.json({ last_seen_at: await markAllReadInStore(userOf(res)._id) });
+    res.json({ last_seen_at: await markAllReadInStore(req.user!.id) });
 });

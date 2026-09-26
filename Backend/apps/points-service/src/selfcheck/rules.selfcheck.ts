@@ -3,7 +3,7 @@ import { POINT_RULE_SEED, PointRule, ServiceError } from '@bgsc/shared';
 import { listRules, opportunities, resolve, seedRules, updateRule } from '../rules/rules.service';
 import { closeScratchDb, openScratchDb, pass, resetLedger, section } from './seed';
 
-/** The rules engine (be2-points-service-plan.md §12.2). */
+/** The rules engine. */
 
 async function main(): Promise<void> {
     await openScratchDb();

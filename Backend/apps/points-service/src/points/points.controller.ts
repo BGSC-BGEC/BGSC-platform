@@ -1,4 +1,4 @@
-import { IPointTransaction, UserRole, rankOf, wrap } from '@bgsc/shared';
+import { IPointTransaction, wrap } from '@bgsc/shared';
 import { Request, Response } from 'express';
 import * as rules from '../rules/rules.service';
 import { actorOf } from './actor';
@@ -10,11 +10,9 @@ import { AdjustBodyInput, AwardBodyInput, EventLedgerQueryInput, HistoryQueryInp
  * envelope is added centrally by `createServiceApp`.
  */
 
-const isAdmin = (req: Request) => rankOf(req.user!.role) >= rankOf(UserRole.CORE);
-
 /**
  * `note` is an admin's free-text justification on a clawback and `actor.user_id` is who wrote it;
- * neither is owed to the member it happened to. Both stay for core+ (plan §8.3).
+ * neither is owed to the member it happened to. Both stay for core+.
  */
 function present(tx: IPointTransaction, admin: boolean): Record<string, unknown> {
     const row = {
@@ -67,7 +65,8 @@ export const userTransactions = wrap(async (req: Request, res: Response) => {
         (req.params as Record<string, string>).id,
         req.query as unknown as HistoryQueryInput
     );
-    res.json(presentPage(page, isAdmin(req)));
+    // Core-only route (points.routes.ts): the admin view.
+    res.json(presentPage(page, true));
 });
 
 export const eventLedger = wrap(async (req: Request, res: Response) => {
@@ -75,7 +74,7 @@ export const eventLedger = wrap(async (req: Request, res: Response) => {
         (req.params as Record<string, string>).eventId,
         req.query as unknown as EventLedgerQueryInput
     );
-    res.json(presentPage(page, isAdmin(req)));
+    res.json({ ...presentPage(page, true), podium_conflicts: page.podium_conflicts });
 });
 
 export const transactionAudit = wrap(async (req: Request, res: Response) => {

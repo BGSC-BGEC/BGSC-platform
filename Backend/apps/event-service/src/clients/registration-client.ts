@@ -1,119 +1,83 @@
-import { config, Team } from '@bgsc/shared';
-
-const TIMEOUT_MS = 5000;
+import { InternalCallError, ServiceError, callInternal, config } from '@bgsc/shared';
 
 /**
- * Service-to-service client calling Registration Service (:3004) for auction mutations.
- * If Registration Service is unreachable (e.g. isolated test environments), falls back to direct
- * database atomic updates on the shared `teams` collection so operations never silently fail.
+ * Registration Service (:3004) owns `teams` and `form_submissions` (relationships.md §1). Everything
+ * this service needs to change there goes through its `/internal` routes.
+ *
+ * There is no fallback. The old client wrote `teams` directly on ANY failure — a timeout after the
+ * debit had landed debited twice, and a deliberate `team_full` refusal was overridden by a raw
+ * `$push`. Every mutating call carries a request id derived from the thing it
+ * settles, so a retry after "outcome unknown" is safe and a second debit is impossible.
  */
 
-export async function debitTeamPurse(teamId: string, amount: number): Promise<boolean> {
-    try {
-        const res = await fetch(`${config.services.registration}/internal/teams/${teamId}/debit-purse`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Internal-Token': config.internalToken,
-            },
-            body: JSON.stringify({ amount }),
-            signal: AbortSignal.timeout(TIMEOUT_MS),
-        });
-        if (res.ok) return true;
-        console.warn(`[event-service] registration service debit-purse responded ${res.status}, falling back to atomic DB update`);
-    } catch {
-        // Fallback to direct DB update
-    }
+const base = () => config.services.registration;
 
-    const team = await Team.findById(teamId);
-    if (!team || !team.auction) return false;
-    const remaining = team.auction.purse_total - team.auction.purse_spent;
-    if (remaining < amount) return false;
+/**
+ * Not an answer from Registration: no response or a 5xx, our service token refused (401/403 — a
+ * deployment fault, not the member's session; passing it through logged the user out), the
+ * generic route-miss 404 `not_found` (its domain 404s carry their own codes, e.g.
+ * `team_not_found`), or a 422 `validation_failed` on the body we sent. The last two mean version
+ * skew or a misroute, never "no".
+ */
+export const outcomeUnknown = (err: InternalCallError): boolean =>
+    err.outcomeUnknown ||
+    err.status === 401 ||
+    err.status === 403 ||
+    (err.status === 404 && err.code === 'not_found') ||
+    (err.status === 422 && err.code === 'validation_failed');
 
-    const updated = await Team.findOneAndUpdate(
-        {
-            _id: teamId,
-            'auction.purse_spent': { $lte: team.auction.purse_total - amount },
-        },
-        {
-            $inc: { 'auction.purse_spent': amount, 'auction.version': 1 },
-        },
-        { returnDocument: 'after' }
-    );
-    return Boolean(updated);
+/** A refusal keeps its status and code; "never got an answer" is a 503 the caller can retry. */
+export function asServiceError(err: unknown): unknown {
+    if (!(err instanceof InternalCallError)) return err;
+    if (outcomeUnknown(err)) return new ServiceError(503, 'registration_service_unavailable');
+    return new ServiceError(err.status, err.code, err.details);
 }
 
-export async function refundTeamPurse(teamId: string, amount: number): Promise<boolean> {
-    try {
-        const res = await fetch(`${config.services.registration}/internal/teams/${teamId}/refund-purse`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Internal-Token': config.internalToken,
-            },
-            body: JSON.stringify({ amount }),
-            signal: AbortSignal.timeout(TIMEOUT_MS),
-        });
-        if (res.ok) return true;
-        console.warn(`[event-service] registration service refund-purse responded ${res.status}, falling back to atomic DB update`);
-    } catch {
-        // Fallback to direct DB update
-    }
+export const debitTeamPurse = (teamId: string, amount: number, requestId: string) =>
+    callInternal(base(), `/internal/teams/${encodeURIComponent(teamId)}/debit-purse`, {
+        body: { amount, request_id: requestId },
+    });
 
-    const updated = await Team.findOneAndUpdate(
-        { _id: teamId },
-        {
-            $inc: { 'auction.purse_spent': -amount, 'auction.version': 1 },
-        },
-        { returnDocument: 'after' }
-    );
-    if (updated?.auction && updated.auction.purse_spent < 0) {
-        updated.auction.purse_spent = 0;
-        await updated.save();
-    }
-    return Boolean(updated);
-}
+export const refundTeamPurse = (teamId: string, amount: number, requestId: string) =>
+    callInternal(base(), `/internal/teams/${encodeURIComponent(teamId)}/refund-purse`, {
+        body: { amount, request_id: requestId },
+    });
 
-export async function addAuctionTeamMember(
+/** `requestId` = `<lot>:<team>:add`; Registration records it with the `$push`, so a repeat is a 200. */
+export const addAuctionTeamMember = (teamId: string, userId: string, registrationId: string, requestId: string) =>
+    callInternal(base(), `/internal/teams/${encodeURIComponent(teamId)}/add-member`, {
+        body: { user_id: userId, registration_id: registrationId, request_id: requestId },
+    });
+
+/** Idempotent: sets a purse only on teams that lack one, so overridden budgets survive. */
+export const setAuctionPurses = (eventId: string, purseTotal: number) =>
+    callInternal(base(), `/internal/events/${encodeURIComponent(eventId)}/auction-purses`, {
+        body: { purse_total: purseTotal },
+    });
+
+export const setTeamAuctionBudget = (
     teamId: string,
-    userId: string,
-    registrationId: string,
-    playerSnapshot?: { display_name: string; avatar_url: string | null }
-): Promise<boolean> {
-    try {
-        const res = await fetch(`${config.services.registration}/internal/teams/${teamId}/add-member`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Internal-Token': config.internalToken,
-            },
-            body: JSON.stringify({ user_id: userId, registration_id: registrationId }),
-            signal: AbortSignal.timeout(TIMEOUT_MS),
-        });
-        if (res.ok) return true;
-        console.warn(`[event-service] registration service add-member responded ${res.status}, falling back to atomic DB update`);
-    } catch {
-        // Fallback to direct DB update
-    }
+    body: { purse_total: number; reason: string | null; overridden_by: string }
+) =>
+    callInternal<unknown>(base(), `/internal/teams/${encodeURIComponent(teamId)}/auction-budget`, {
+        method: 'PATCH',
+        body,
+    });
 
-    const updated = await Team.findOneAndUpdate(
-        {
-            _id: teamId,
-            'members.user_id': { $ne: userId },
-        },
-        {
-            $push: {
-                members: {
-                    user_id: userId,
-                    display_name: playerSnapshot?.display_name || 'Auction Player',
-                    avatar_url: playerSnapshot?.avatar_url || null,
-                    registration_id: registrationId,
-                    joined_at: new Date(),
-                    acquired_via: 'auction',
-                },
-            },
-        },
-        { returnDocument: 'after' }
-    );
-    return Boolean(updated);
-}
+export const recordAttendance = (body: {
+    event_id: string;
+    marked_by: string;
+    attendances: { registration_id: string; attended: boolean }[];
+}) =>
+    callInternal<{ updated_count: number; skipped: string[] }>(base(), '/internal/registrations/attendance', {
+        body,
+        // One bulk call may touch 500 rows.
+        timeoutMs: 15000,
+    });
+
+export const promoteRegistration = (registrationId: string, by: string) =>
+    callInternal<unknown>(base(), `/internal/registrations/${encodeURIComponent(registrationId)}/promote`, {
+        body: { by },
+        // Promote calls back into reserve-seat and publishes; 5s cut that chain off mid-flight.
+        timeoutMs: 12000,
+    });

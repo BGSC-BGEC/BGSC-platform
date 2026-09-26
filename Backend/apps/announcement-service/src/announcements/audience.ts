@@ -8,13 +8,13 @@ import {
 } from '@bgsc/shared';
 
 /**
- * Who may see which announcement (be2-announcement-service-plan.md §3).
+ * Who may see which announcement.
  *
  * Its own file because the feed, the single-doc read, the unread count and the Heads strip all
  * build the same predicate — and two copies of an authorization rule is how one of them goes stale.
  */
 
-/** Never return a soft-deleted announcement from any read path (plan §3.3). */
+/** Never return a soft-deleted announcement from any read path. */
 export const alive = { deleted_at: null };
 
 export interface Viewer {

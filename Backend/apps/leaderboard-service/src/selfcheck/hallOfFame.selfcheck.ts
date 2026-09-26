@@ -81,11 +81,19 @@ export async function runSelfcheck() {
         created_by: 'system',
     });
 
-    await handlers.onChallengeLegendAchieved({
+    const { subscribe, resetBus, ChallengeParticipation } = await import('@bgsc/shared');
+    // The Challenge Service always names the participation; the honoree comes from its snapshot.
+    const participationId = 'aaaaaaaa-2222-3333-4444-555555555555';
+    await ChallengeParticipation.collection.insertOne({
+        _id: participationId,
         challenge_id: testChallengeId,
-        participant_id: testUserId,
-        participant_type: 'user',
-    });
+        participant: { type: 'user', id: testUserId, display_name: 'Legend Runner', avatar_url: 'https://cdn.bgsc.in/legend.jpg' },
+        member_user_ids: [testUserId],
+    } as never);
+    const announced: unknown[] = [];
+    resetBus();
+    subscribe('HallOfFameEntryCreated', (e) => void announced.push(e.payload));
+    await handlers.onChallengeLegendAchieved({ challenge_id: testChallengeId, participation_id: participationId });
 
     const legendEntry = await HallOfFameEntry.findOne({
         category: 'challenge_legend',
@@ -98,11 +106,7 @@ export async function runSelfcheck() {
     assert(legendEntry.achievement.difficulty === 'legend', 'Achievement difficulty mismatch');
 
     // Replay idempotency test
-    await handlers.onChallengeLegendAchieved({
-        challenge_id: testChallengeId,
-        participant_id: testUserId,
-        participant_type: 'user',
-    });
+    await handlers.onChallengeLegendAchieved({ challenge_id: testChallengeId, participation_id: participationId });
     const countAfterReplay = await HallOfFameEntry.countDocuments({
         category: 'challenge_legend',
         'honoree.id': testUserId,
@@ -110,34 +114,116 @@ export async function runSelfcheck() {
         deleted_at: null,
     });
     assert(countAfterReplay === 1, 'ChallengeLegendAchieved duplicate created on replay');
+    resetBus();
+    // A replay re-announces the SAME entry (the first announcement may have been lost on the bus);
+    // the challenge-side consumer is an idempotent $set.
+    assert(announced.length === 2, 'the replay re-announces the existing entry');
+    assert((announced[0] as any).entry_id === (announced[1] as any).entry_id, 'both announcements name the one entry');
+    assert((await ChallengeParticipation.countDocuments({})) === 1, "challenge_participations is not this service's to write");
+
+    // Two creates of one title race to one slug: the loser takes the next slug, not a 500.
+    const racers = await Promise.all(
+        ['aaaaaaaa-1111-1111-1111-111111111111', 'bbbbbbbb-1111-1111-1111-111111111111'].map((id) =>
+            service.createEntry(
+                {
+                    category: 'custom',
+                    title: 'Same Title',
+                    honoree: { type: 'user', id, display_name: 'Racer' },
+                    source: { type: 'manual' },
+                    achievement: { year: 2026 },
+                } as never,
+                'system'
+            )
+        )
+    );
+    assert(racers[0].slug !== racers[1].slug, 'distinct slugs under a race');
+    const dupe = await service
+        .createEntry(
+            {
+                category: 'challenge_legend',
+                title: 'Again',
+                honoree: { type: 'user', id: testUserId, display_name: 'Legend Runner' },
+                source: { type: 'challenge', id: testChallengeId },
+                achievement: { year: 2026 },
+            } as never,
+            'system'
+        )
+        .then(() => 'created', (e: { code?: string }) => e.code);
+    assert(dupe === 'entry_exists', 'one live entry per (category, honoree, source)');
 
     // 8. GDPR User Profile, Deletion, and Restoration Lifecycle
     await handlers.onUserProfileUpdated({
         user_id: testUserId,
-        changed_fields: ['profile.full_name'],
+        changed_fields: ['full_name'],
     });
     // Update user profile in DB first to simulate rename
     await User.updateOne({ _id: testUserId }, { $set: { 'profile.full_name': 'Legendary Champion' } });
     await handlers.onUserProfileUpdated({
         user_id: testUserId,
-        changed_fields: ['profile.full_name'],
+        changed_fields: ['full_name'],
     });
     const renamedEntry = await HallOfFameEntry.findById(legendEntry._id);
     assert(renamedEntry?.honoree.display_name === 'Legendary Champion', 'UserProfileUpdated failed to sync HoF snapshot');
 
     await handlers.onUserDeleted({ user_id: testUserId });
     const deletedEntry = await HallOfFameEntry.findById(legendEntry._id);
-    assert(deletedEntry?.honoree.display_name === 'Deleted User', 'UserDeleted failed to anonymize HoF honoree');
+    assert(deletedEntry?.honoree.display_name === 'Deleted user' && deletedEntry?.honoree.deleted === true, 'UserDeleted failed to anonymize HoF honoree');
     assert(deletedEntry?.honoree.avatar_url === null, 'UserDeleted failed to null avatar');
 
     await handlers.onUserRestored({ user_id: testUserId });
     const restoredEntry = await HallOfFameEntry.findById(legendEntry._id);
     assert(restoredEntry?.honoree.display_name === 'Legendary Champion', 'UserRestored failed to rehydrate HoF honoree');
 
+    // 9. PATCH merges nested groups and never un-anonymizes; schemas; deleted snapshots; search.
+    await User.updateOne({ _id: testUserId }, { $set: { deleted_at: new Date() } });
+    await handlers.onUserDeleted({ user_id: testUserId });
+    const patched = await service.updateEntry(legendEntry._id, { achievement: { season: 'Monsoon' } } as never, 'system');
+    assert(patched.achievement.year === legendEntry.achievement.year, 'a nested PATCH keeps the fields it does not name');
+    assert(patched.achievement.season === 'Monsoon');
+    const renamed = await service.updateEntry(
+        legendEntry._id,
+        { honoree: { display_name: 'Real Name Again' }, members: [{ user_id: testUserId, display_name: 'Typed Member' }] } as never,
+        'system'
+    );
+    assert(
+        renamed.honoree.deleted === true &&
+            renamed.honoree.display_name === 'Deleted user' &&
+            renamed.members?.[0]?.display_name === 'Deleted user',
+        'a PATCH stores no typed name for a deleted honoree or member'
+    );
+
+    const schemas = await import('../hall-of-fame/hallOfFame.schemas');
+    const base = {
+        category: 'custom',
+        title: 'T',
+        honoree: { type: 'user', id: '9b2f7a44-1c3d-4e5f-8a6b-7c8d9e0f1a2b', display_name: 'X' },
+        source: { type: 'manual' },
+        achievement: { year: 2026 },
+    };
+    assert(!schemas.CreateHallOfFameEntrySchema.safeParse({ ...base, media_url: 'javascript:alert(1)' }).success, 'javascript: refused');
+    assert(!schemas.CreateHallOfFameEntrySchema.safeParse({ ...base, cover_url: 'data:text/html,x' }).success, 'data: refused');
+    assert(schemas.CreateHallOfFameEntrySchema.safeParse({ ...base, cover_url: '/uploads/media/a.png' }).success, '/uploads/ accepted');
+    assert(!schemas.CreateHallOfFameEntrySchema.safeParse({ ...base, title: 'x'.repeat(201) }).success, 'lengths are capped');
+
+    const anon = await service.createEntry(
+        {
+            category: 'custom',
+            title: 'Searchable Feat',
+            honoree: { type: 'user', id: testUserId, display_name: 'Should Not Be Stored' },
+            source: { type: 'manual' },
+            achievement: { year: 2026, domain: 'sports' },
+        } as never,
+        'system'
+    );
+    assert(anon.honoree.display_name === 'Deleted user' && anon.honoree.deleted === true, 'a new snapshot of a deleted user is anonymized');
+    const found = await service.listEntries({ search: 'searchable', domain: 'sports', limit: 10, page: 1 });
+    assert(found.total === 1, 'search and domain filters');
+
     // Cleanup test documents
     await HallOfFameEntry.deleteMany({});
     await User.deleteOne({ _id: testUserId });
     await Challenge.deleteOne({ _id: testChallengeId });
+    await ChallengeParticipation.collection.deleteOne({ _id: participationId } as never);
 
     console.log('[selfcheck] HallOfFame selfcheck passed.');
 }

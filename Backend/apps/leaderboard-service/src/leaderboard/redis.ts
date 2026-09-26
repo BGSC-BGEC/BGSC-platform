@@ -1,122 +1,102 @@
 import Redis from 'ioredis';
-import { config, ServiceError } from '@bgsc/shared';
+import { config, redisOptions, ServiceError } from '@bgsc/shared';
 
 let redisClient: Redis | null = null;
-let isConnected = false;
+let announcedDown = false;
 
+/**
+ * The cache's Redis client, or null while it is not ready (callers then run database-only).
+ *
+ * One client for the life of the process, reconnecting in the background: the old one gave up on
+ * its first failure (`retryStrategy: () => null`) and then cached "unavailable" forever, so one Redis
+ * blip disabled the cache and the rate limit until a restart. Commands fail fast while it is down
+ * (no offline queue) instead of piling up behind a dead socket. Connection options, password
+ * included, come from `redisOptions()` — REDIS_URL no longer carries the password.
+ */
 export async function getRedisClient(): Promise<Redis | null> {
     if (!config.redisUrl) return null;
-    if (redisClient) return isConnected ? redisClient : null;
-
-    try {
-        const client = new Redis(config.redisUrl, {
+    if (!redisClient) {
+        const client = new Redis({
+            ...redisOptions(),
             maxRetriesPerRequest: 1,
-            lazyConnect: true,
             connectTimeout: 2000,
-            retryStrategy: () => null,
             enableOfflineQueue: false,
+            retryStrategy: (times) => Math.min(times * 500, 10_000),
         });
-
-        client.on('connect', () => {
-            isConnected = true;
+        client.on('ready', () => {
+            if (announcedDown) console.log('[leaderboard-service] Redis reconnected.');
+            announcedDown = false;
         });
-
         client.on('error', (err) => {
-            isConnected = false;
-            console.error('[leaderboard-service] Redis error:', err.message);
+            // Once per outage, not once per retry.
+            if (!announcedDown) console.error('[leaderboard-service] Redis unavailable; database-only until it returns:', err.message);
+            announcedDown = true;
         });
-
-        client.on('close', () => {
-            isConnected = false;
-        });
-
-        await client.connect();
         redisClient = client;
-        isConnected = true;
-        return redisClient;
-    } catch (err) {
-        console.warn('[leaderboard-service] Redis unavailable; proceeding with database-only mode.');
-        redisClient = null;
-        isConnected = false;
-        return null;
+        // The first caller waits briefly for the first connection; later callers never wait.
+        await new Promise<void>((resolve) => {
+            const done = () => resolve();
+            client.once('ready', done);
+            client.once('error', done);
+            setTimeout(done, 2000).unref();
+        });
     }
+    return redisClient.status === 'ready' ? redisClient : null;
 }
 
 export async function closeRedis(): Promise<void> {
     if (redisClient) {
-        try {
-            await redisClient.quit();
-        } catch {
-            // Ignore quit error
-        }
+        const client = redisClient;
         redisClient = null;
-        isConnected = false;
-    }
-}
-
-/**
- * Cache event leaderboard entries in Redis ZSET + metadata HASH (Spec §2.3, leaderboard-model.md §8).
- */
-export async function cacheEventLeaderboard(
-    eventId: string,
-    entries: { participant_id: string; final_score: number }[],
-    isFrozen = false
-): Promise<void> {
-    const redis = await getRedisClient();
-    if (!redis) return;
-
-    const zKey = `lb:event:${eventId}`;
-    const metaKey = `lb:event:${eventId}:meta`;
-
-    try {
-        const pipeline = redis.pipeline();
-        pipeline.del(zKey);
-
-        if (entries.length > 0) {
-            const zaddArgs: (string | number)[] = [];
-            for (const e of entries) {
-                zaddArgs.push(e.final_score, e.participant_id);
-            }
-            pipeline.zadd(zKey, ...zaddArgs);
+        try {
+            await client.quit();
+        } catch {
+            client.disconnect();
         }
-
-        pipeline.hset(metaKey, {
-            updated_at: new Date().toISOString(),
-            frozen: isFrozen ? 'true' : 'false',
-            count: entries.length.toString(),
-        });
-
-        await pipeline.exec();
-    } catch (err) {
-        console.error(`[leaderboard-service] Failed to cache event leaderboard for ${eventId}:`, err);
     }
 }
 
+/** Bumped by every eviction: a board aggregated before one must not be cached after it. */
+let globalGeneration = 0;
+export const globalCacheGeneration = (): number => globalGeneration;
+
 /**
- * Delete event leaderboard cache in Redis.
+ * Drop every cached global board (all periods, domains and sources).
+ *
+ * Without this the global board trailed the ledger by up to the 10-minute TTL. Called from the
+ * PointsEarned / PointsAdjusted consumers; the next read rebuilds from the ledger.
  */
-export async function evictEventLeaderboard(eventId: string): Promise<void> {
+export async function evictGlobalLeaderboards(): Promise<void> {
+    globalGeneration++;
     const redis = await getRedisClient();
     if (!redis) return;
 
     try {
-        await redis.del(`lb:event:${eventId}`, `lb:event:${eventId}:meta`);
+        let cursor = '0';
+        do {
+            const [next, keys] = await redis.scan(cursor, 'MATCH', 'lb:global:*', 'COUNT', 200);
+            if (keys.length > 0) await redis.del(...keys);
+            cursor = next;
+        } while (cursor !== '0');
     } catch (err) {
-        console.error(`[leaderboard-service] Failed to evict event leaderboard cache for ${eventId}:`, err);
+        console.error('[leaderboard-service] Failed to evict global leaderboard cache:', err);
     }
 }
 
 /**
- * Cache global leaderboard in Redis ZSET.
+ * Cache global leaderboard in Redis ZSET. `generation` is `globalCacheGeneration()` from before the
+ * aggregate: if an eviction ran since, the aggregate may predate the points it evicted for, and
+ * caching it would serve that stale board for the whole TTL.
  */
 export async function cacheGlobalLeaderboard(
     period: string,
     domain: string,
     source: string,
-    userScores: { user_id: string; total_points: number }[]
+    userScores: { user_id: string; total_points: number }[],
+    generation: number
 ): Promise<void> {
     const redis = await getRedisClient();
-    if (!redis) return;
+    if (!redis || generation !== globalGeneration) return;
 
     const zKey = `lb:global:${period}:${domain}:${source}`;
     try {
@@ -180,10 +160,10 @@ export async function checkInvestmentRateLimit(userId: string, eventId: string):
 
     const key = `lb:ratelimit:invest:${userId}:${eventId}`;
     try {
+        // Window first, then count: an INCR whose follow-up EXPIRE was lost (crash, blip) left a key
+        // that never expired — a user locked out of investing for good. SET NX EX is atomic.
+        await redis.set(key, 0, 'EX', 3600, 'NX');
         const count = await redis.incr(key);
-        if (count === 1) {
-            await redis.expire(key, 3600);
-        }
         if (count > 5) {
             throw new ServiceError(429, 'rate_limit_exceeded', {
                 message: 'Maximum 5 investments per user per event per hour',
@@ -194,45 +174,3 @@ export async function checkInvestmentRateLimit(userId: string, eventId: string):
         console.error('[leaderboard-service] Rate limit check error:', err);
     }
 }
-
-/**
- * Acquire distributed lock for an entry during concurrent point investments.
- * Resolves to a lockId or null if locked.
- */
-export async function acquireEntryLock(entryId: string, ttlMs = 5000): Promise<string | null> {
-    const redis = await getRedisClient();
-    if (!redis) return 'db-fallback-lock';
-
-    const lockId = Math.random().toString(36).substring(2) + Date.now().toString(36);
-    const key = `lb:lock:entry:${entryId}`;
-    try {
-        const result = await redis.set(key, lockId, 'PX', ttlMs, 'NX');
-        return result === 'OK' ? lockId : null;
-    } catch {
-        return 'db-fallback-lock';
-    }
-}
-
-/**
- * Release distributed lock for an entry using atomic Lua CAS.
- */
-export async function releaseEntryLock(entryId: string, lockId: string): Promise<void> {
-    if (lockId === 'db-fallback-lock') return;
-    const redis = await getRedisClient();
-    if (!redis) return;
-
-    const key = `lb:lock:entry:${entryId}`;
-    const luaScript = `
-        if redis.call("get", KEYS[1]) == ARGV[1] then
-            return redis.call("del", KEYS[1])
-        else
-            return 0
-        end
-    `;
-    try {
-        await redis.eval(luaScript, 1, key, lockId);
-    } catch {
-        // Suppress release error
-    }
-}
-

@@ -12,7 +12,7 @@ import { matchRoutes } from './matches/match.routes';
  * results come in. Everything it needs from another domain is a read — `events`, `teams`,
  * `form_submissions` — so it makes no outbound service calls at all, and it writes nothing outside
  * its own two collections: the reserved `events.bracket` slot stays null by decision, not by
- * omission (be2-feedback-bracket-plan.md D3).
+ * omission.
  */
 
 const NAME = 'bracket-service';
@@ -21,6 +21,7 @@ const PORT = parseInt(process.env.PORT || '3012', 10);
 const options = {
     name: NAME,
     port: PORT,
+    models: ['Bracket', 'Match'],
     routes(app: express.Express) {
         app.use('/brackets', bracketRoutes);
         app.use('/matches', matchRoutes);
@@ -28,7 +29,7 @@ const options = {
     },
     async onReady() {
         // A bracket is drawn when an organiser says so, never in reaction to an event — the one
-        // thing this service listens for is an account being deleted out from under a draw.
+        // thing this service listens for is the account behind a seed changing (deleted, renamed, restored).
         initializeConsumers();
     },
 };

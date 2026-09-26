@@ -57,6 +57,9 @@ export interface ITeam extends Document<string> {
 
     status: TeamStatus;
 
+    /** request_ids of auction add-member calls applied (`<lot>:<team_id>:add`), recorded with the `$push`. */
+    member_ops?: string[];
+
     auction: {
         purse_total: number;
         purse_spent: number;
@@ -64,6 +67,8 @@ export interface ITeam extends Document<string> {
         is_overridden?: boolean;
         override_reason?: string | null;
         overridden_by?: string | null;
+        /** request_ids of debits/refunds already applied — what makes a retried purse op a no-op. */
+        applied_ops?: string[];
     } | null;
 
     created_at: Date;
@@ -114,6 +119,7 @@ const TeamSchema = new Schema<ITeam>(
         size_max: { type: Number, required: true, min: 1 },
 
         pending: { type: [PendingSchema], default: [] },
+        member_ops: { type: [String], default: [] },
 
         status: { type: String, enum: TEAM_STATUS, default: 'forming' },
 
@@ -127,6 +133,8 @@ const TeamSchema = new Schema<ITeam>(
                     is_overridden: { type: Boolean, default: false },
                     override_reason: { type: String, default: null },
                     overridden_by: { type: String, default: null },
+                    // ponytail: grows by two ids per lot sold; an auction has tens of lots, not thousands.
+                    applied_ops: { type: [String], default: [] },
                 },
                 { _id: false }
             ),
@@ -175,13 +183,45 @@ TeamSchema.pre('validate', function (this: ITeam) {
 });
 
 TeamSchema.index({ 'owner.type': 1, 'owner.id': 1, status: 1 });
-TeamSchema.index({ 'owner.id': 1, name_lower: 1 }, { unique: true }); // unique team names per event/challenge
+// Unique team names per event/challenge among teams that still exist: a disbanded team's name is
+// free again. Named, because the key pattern is the old full-collection index's — an existing
+// database must drop `owner.id_1_name_lower_1` for disbanded names to become reusable.
+TeamSchema.index(
+    { 'owner.id': 1, name_lower: 1 },
+    { unique: true, name: 'team_name_per_owner_live', partialFilterExpression: { status: { $in: ['forming', 'complete', 'locked'] } } }
+);
 TeamSchema.index({ invite_code: 1 }, { unique: true });
 TeamSchema.index({ 'members.user_id': 1, 'owner.id': 1 }); // "my team here"; backs the duplicate-membership check
 TeamSchema.index({ 'owner.id': 1, join_policy: 1, status: 1 }); // team search: open teams still forming
 
-// ponytail: one-team-per-user-per-owner is a check-then-write inside a transaction in the Registration Service —
-// a multikey index cannot express it. If the chosen DB has no transactions, add a `team_memberships`
-// side collection with a unique { owner_id, user_id }.
-
 export const Team = model<ITeam>('Team', TeamSchema, 'teams');
+
+/**
+ * One team per user per owner. A multikey index on `teams.members.user_id` cannot express "unique
+ * across documents", and the database has no transactions, so two concurrent joins both passed the
+ * read-then-write check and put one user on two rosters. The claim's
+ * `_id` is `<owner_id>:<user_id>`, so the primary key is the lock: the second insert is an E11000.
+ *
+ * Registration Service is the only writer, alongside `teams`.
+ */
+export interface ITeamMembership extends Document<string> {
+    _id: string;
+    owner_id: string;
+    user_id: string;
+    team_id: string;
+    created_at: Date;
+}
+
+const TeamMembershipSchema = new Schema<ITeamMembership>(
+    {
+        _id: { type: String, required: true },
+        owner_id: { type: String, required: true },
+        user_id: { type: String, required: true },
+        team_id: { type: String, required: true },
+    },
+    { timestamps: { createdAt: 'created_at', updatedAt: false }, versionKey: false }
+);
+
+TeamMembershipSchema.index({ team_id: 1 }); // released wholesale on disband
+
+export const TeamMembership = model<ITeamMembership>('TeamMembership', TeamMembershipSchema, 'team_memberships');

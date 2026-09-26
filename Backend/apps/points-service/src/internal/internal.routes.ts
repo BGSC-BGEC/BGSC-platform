@@ -25,6 +25,8 @@ internalRoutes.post(
     })
 );
 
+// Bound to the spend `request_id` made: same user, exactly its amount, at most once across this
+// route and the event-cancel sweep (they share `idempotencyKey.investmentRefund`).
 internalRoutes.post(
     '/points/refund',
     validate({ body: RefundBody }),

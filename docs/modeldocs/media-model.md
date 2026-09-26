@@ -1,7 +1,7 @@
 # Media Model
 
 **Owner service:** Media Service, :3009 (plan Week 4 Saturday, BE-1)
-**Collections:** `media`, `media_albums`
+**Collections:** `media`, `media_albums`, `media_likes`
 **Spec refs:** §2.1 Media Service (`:3009`), §2.3 File Storage (`/uploads/` -> S3/R2), §5.11 F: Media Page (Event Albums, Community Uploads, Memories, Sponsor Galleries, Moderation, Permissions), §15.1 Media Uploads (JPEG, PNG, WebP, max 10MB images; MP4, WebM max 50MB videos/clips).
 **MVP plan refs:** Week 4 Saturday BE-1 — Media upload, media gallery management, categorization, approval workflow, static file delivery, metadata/tagging.
 
@@ -16,14 +16,21 @@ Prior to Week 4, individual services (`user-service`, `event-service`, `registra
 ### Storage Layout & Partitioning
 ```
 uploads/
-  avatars/          # User avatars (managed via user-service / media-service)
-  events/           # Event banners, logos, posters
-  registrations/    # Form submission attachments
-  media/            # Platform media gallery (albums, community clips)
-    2026/
-      09/
+  avatars/          # User avatars (user-service)
+  events/           # Event banners, logos, posters (event-service)
+  media/            # Platform media gallery, approved items only
+    event/<event_id>/
+    <category>/
+  .pending/media/   # Gallery uploads awaiting moderation — never served statically
+  .private/registrations/   # Form submission attachments (registration-service) — never served statically
 ```
-All static delivery (`GET /uploads/*`) is served by `media-service` with strict HTTP headers (`X-Content-Type-Options: nosniff`, `Cache-Control: public, max-age=604800, immutable`, directory browsing denied, dotfiles denied).
+All static delivery (`GET /uploads/*`) is served by `media-service`: `X-Content-Type-Options: nosniff`; `Cache-Control: public, max-age=300` under `media/` (moderation can withdraw a gallery file) and a 7-day immutable cache for the other prefixes (uuid names that never change meaning); no directory listing, no directory redirect (a directory is a 404 like any missing file); dot-directories ignored → 404, not 403, so a pending or private file's existence is not confirmed.
+
+**As built (Sep 26):** one upload root for the platform, `config.uploadDir` (`UPLOAD_DIR`; compose mounts one named volume `uploads` at `/app/uploads` in user, event, registration and media). Each writer keeps its own prefix (`avatars/`, `events/`, `media/`; registration files under `.private/registrations/`, fetched only through registration-service); **only Media Service serves `/uploads`** — the static mounts in user/event/registration are gone, so a file is reachable at exactly one gateway route. Unapproved gallery uploads live in `.pending/` on the same volume (never served; dotfiles answer 404, not 403, so a pending file's existence is not confirmed) and are moved into `media/` on approval, back on withdrawal.
+
+**Reading a file that is not public yet:** `GET /media/:id/file` (signed in) streams an item's file from whichever tree holds it, for anyone who may see the item — its uploader and core while pending, anyone once approved. The path comes from the stored row, never the request; the response carries the stored `mime_type`, `nosniff` and `Cache-Control: private, no-store`. Each item in `GET /media/moderation/pending` carries `preview_url` pointing there.
+
+**Draft events:** a draft event's albums and media — filed under it directly or through its album — exist only for its admins (creator, `core_admins`, coordinator+), exactly as the event does. To everyone else, core included, they are left out of every list, and a filter or read that targets one is a 404.
 
 ---
 
@@ -32,12 +39,13 @@ All static delivery (`GET /uploads/*`) is served by `media-service` with strict 
 ```jsonc
 {
   _id: uuid,                          // string UUID v4
-  uploader: {
+  uploader: {                         // the shared UserSnapshot (relationships.md §4)
     user_id: string,
     display_name: string,
-    avatar_url: string | null
+    avatar_url: string | null,
+    deleted: boolean
   },
-  url: string,                        // e.g. "/uploads/media/2026/09/uuid.webp"
+  url: string,                        // e.g. "/uploads/media/2026/09/uuid.webp"; a pending item's file is in .pending/ until approved
   thumbnail_url: string | null,
   original_filename: string,
   mime_type: string,                  // "image/jpeg" | "image/png" | "image/webp" | "video/mp4" | "video/webm"
@@ -58,7 +66,7 @@ All static delivery (`GET /uploads/*`) is served by `media-service` with strict 
     duration_seconds?: number
   },
   views_count: number,                // default: 0
-  likes_count: number,                // default: 0
+  likes_count: number,                // default: 0; moved only when a media_likes row is inserted/removed
   created_at: Date,
   updated_at: Date
 }
@@ -69,12 +77,14 @@ All static delivery (`GET /uploads/*`) is served by `media-service` with strict 
    - JPEG: `FF D8 FF`
    - PNG: `89 50 4E 47 0D 0A 1A 0A`
    - WebP: `RIFF .... WEBP`
-   - MP4: `ftyp` box marker at offset 4–8 (`isom`, `mp42`, etc.)
+   - MP4: `ftyp` box marker at offset 4–8, and a major brand at 8–12 from an allow-list (`isom`, `iso2`, `iso4`–`iso6`, `mp41`, `mp42`, `avc1`, `dash`, `M4V `). Any other brand (HEIC, AVIF, QuickTime, 3GP…) is refused (415).
    - WebM: `1A 45 DF A3` (EBML ID)
 2. **Payload Ceilings:** Max 10MB for images (`IMAGE_MAX_BYTES = 10 * 1024 * 1024`), Max 50MB for video clips (`VIDEO_MAX_BYTES = 50 * 1024 * 1024`).
 3. **Approval Status Invariant:**
-   - Uploads by `CORE`, `COORDINATOR`, `FOUNDER` default to `status: 'approved'`.
-   - Uploads by `USER`, `MEMBER` default to `status: 'pending'` (must be reviewed via `/media/moderation/pending`).
+   - Uploads by `CORE`, `COORDINATOR`, `FOUNDER` default to `status: 'approved'` — except into an event's gallery (`event_id`, or an album with an `event_id`), where only that event's admins (creator, `core_admins`, coordinator+) publish on arrival.
+   - Everything else defaults to `status: 'pending'` (reviewed via `/media/moderation/pending`) and counts toward the uploader's pending quota.
+   - Moderating, and editing or deleting someone else's item, follow the same rule: core for the general gallery, the event's admins for an event's.
+   - The upload body is read raw with no decompression: a `Content-Encoding: gzip` body is refused (415).
 4. **Path Sanitization:** Refuses any path traversal (`..` or absolute path injection).
 
 ---
@@ -89,14 +99,25 @@ All static delivery (`GET /uploads/*`) is served by `media-service` with strict 
   description: string | null,
   category: 'event' | 'community' | 'memories' | 'sponsor' | 'hall_of_fame' | 'general',
   cover_media_id: string | null,
-  event_id: string | null,            // indexed
+  event_id: string | null,            // many manual albums per event; one SYSTEM album (`event_id_system_unique`, partial on created_by: 'system')
   created_by: string,                 // user_id
-  media_count: number,                // default: 0
+  media_count: number,                // default: 0; APPROVED items only
   is_public: boolean,                 // default: true
   created_at: Date,
   updated_at: Date
 }
 ```
+
+---
+
+## 3.1 `media_likes` Collection (Sep 26)
+
+```jsonc
+{ _id: uuid, media_id: string, user_id: string, created_at: Date, updated_at: Date }
+// index: { media_id: 1, user_id: 1 } unique
+```
+
+**Decision:** a like is a toggle, not a counter anybody can spin — `POST /media/:id/like` used to `$inc likes_count` on every call. One row per (media, user); `likes_count` is the denormalized total. Media Service is the only writer.
 
 ---
 
@@ -108,6 +129,9 @@ All static delivery (`GET /uploads/*`) is served by `media-service` with strict 
   - `MediaRejected`: `{ media_id, reason, rejected_by }`
   - `MediaDeleted`: `{ media_id, url }`
 - **Consumes:**
-  - `UserProfileUpdated`: Refreshes uploader snapshot (`display_name`, `avatar_url`) in `media`.
-  - `UserDeleted`: Anonymizes uploader snapshots per GDPR (`display_name = 'Deleted User'`, `avatar_url = null`).
-  - `EventCompleted`: Auto-initializes an official Event Album in `media_albums` if not already present.
+  - `UserProfileUpdated`: Refreshes uploader snapshot (`display_name`, `avatar_url`) in `media` (gated on those fields).
+  - `UserDeleted`: `anonymizedSnapshot('uploader.')` — `Deleted user`, `avatar_url: null`, `deleted: true`, the same wording as every other collection.
+  - `UserRestored`: re-snapshot from `users`, `deleted: false`.
+  - `EventCompleted { event_id, title }`: creates the event's system album (titled from the event) if absent; a second delivery hits `event_id_system_unique` and is ignored.
+
+**Upgrading an older database:** one created before manual albums per event may still hold the all-albums `event_id_unique` index, which refuses a second manual album. Drop it by hand: `db.media_albums.dropIndex('event_id_unique')`.

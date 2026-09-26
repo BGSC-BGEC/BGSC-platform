@@ -1,4 +1,4 @@
-import { FormDefinition, FormDefinitionVersion, IFormDefinition, ServiceError, publish } from '@bgsc/shared';
+import { FormDefinition, FormDefinitionVersion, FormField, IFormDefinition, ServiceError, publish } from '@bgsc/shared';
 import { v4 as uuid } from 'uuid';
 
 interface CreateFormInput {
@@ -34,6 +34,19 @@ export async function createForm(input: CreateFormInput): Promise<IFormDefinitio
     return form;
 }
 
+/**
+ * The form model has `optimisticConcurrency`: a save whose read went stale (another admin edited,
+ * published or archived in between) throws VersionError instead of silently overwriting.
+ */
+async function saveForm(form: IFormDefinition): Promise<void> {
+    try {
+        await form.save();
+    } catch (err) {
+        if ((err as Error)?.name === 'VersionError') throw new ServiceError(409, 'form_changed');
+        throw err;
+    }
+}
+
 export async function getForm(formId: string): Promise<IFormDefinition> {
     const form = await FormDefinition.findById(formId);
     if (!form) {
@@ -46,13 +59,15 @@ export async function listForms(filter: {
     owner_type?: string;
     owner_id?: string;
     status?: string;
+    limit: number;
+    offset: number;
 }): Promise<IFormDefinition[]> {
-    const query: any = {};
+    const query: Record<string, unknown> = {};
     if (filter.owner_type) query['owner.type'] = filter.owner_type;
     if (filter.owner_id) query['owner.id'] = filter.owner_id;
     if (filter.status) query.status = filter.status;
 
-    return FormDefinition.find(query).sort({ created_at: -1 });
+    return FormDefinition.find(query).sort({ created_at: -1, _id: 1 }).skip(filter.offset).limit(filter.limit);
 }
 
 export async function updateForm(
@@ -69,19 +84,16 @@ export async function updateForm(
 ): Promise<IFormDefinition> {
     const form = await getForm(formId);
 
-    // If form is published and fields are being changed, bump version and archive old fields
-    if (form.status === 'published' && updates.fields) {
-        // Archive current version
-        const version = new FormDefinitionVersion({
-            _id: uuid(),
-            form_id: form._id,
-            version: form.version,
-            fields: form.fields,
-            published_at: form.published_at!,
-        });
-        await version.save();
+    // An archived form's field set is what its submissions were validated against; editing it in
+    // place (no version bump — it is not `published`) rewrote their history.
+    if (form.status === 'archived') throw new ServiceError(409, 'form_archived');
 
-        // Bump version
+    // Fields are immutable once published: editing freezes the current set and bumps the version.
+    const archive =
+        form.status === 'published' && updates.fields
+            ? { form_id: form._id, version: form.version, fields: form.toObject().fields as FormField[], published_at: form.published_at! }
+            : null;
+    if (archive) {
         form.version += 1;
         form.published_at = null; // needs republish
         form.status = 'draft';
@@ -99,31 +111,48 @@ export async function updateForm(
         }
     }
 
-    await form.save();
+    /**
+     * Validate BEFORE the archive row is written, and write the archive idempotently. The old order
+     * (archive, then a save that could still fail its invariants) left a row for version N behind,
+     * and every later edit tried to insert version N again, hit the unique index and 500'd — the
+     * form was frozen for good.
+     */
+    try {
+        await form.validate();
+    } catch (err) {
+        throw new ServiceError(422, 'validation_failed', [{ key: 'fields', code: 'invalid_form', message: (err as Error).message }]);
+    }
+    if (archive) {
+        await FormDefinitionVersion.updateOne(
+            { form_id: archive.form_id, version: archive.version },
+            { $setOnInsert: { _id: uuid(), ...archive } },
+            { upsert: true }
+        );
+    }
+
+    await saveForm(form);
     return form;
 }
 
 export async function publishForm(formId: string): Promise<IFormDefinition> {
     const form = await getForm(formId);
 
+    // Publishing used to silently un-archive a form and re-announce an already published one.
+    if (form.status === 'archived') throw new ServiceError(409, 'form_archived');
+    if (form.status === 'published') return form;
     if (form.fields.length === 0) {
         throw new ServiceError(400, 'cannot_publish_empty_form');
     }
 
     form.status = 'published';
     form.published_at = new Date();
+    await saveForm(form);
 
-    await form.save();
-
-    await publish(
-        'FormPublished',
-        'registration-service',
-        {
-            form_id: form._id,
-            owner: form.owner,
-            version: form.version,
-        }
-    );
+    publish('FormPublished', 'registration-service', {
+        form_id: form._id,
+        owner: form.owner,
+        version: form.version,
+    });
 
     return form;
 }
@@ -131,28 +160,25 @@ export async function publishForm(formId: string): Promise<IFormDefinition> {
 export async function archiveForm(formId: string): Promise<IFormDefinition> {
     const form = await getForm(formId);
     form.status = 'archived';
-    await form.save();
+    await saveForm(form);
     return form;
 }
 
 /**
- * The archived field set a submission was validated against.
+ * The field set a submission was validated against. Editing a published form archives the old
+ * fields and bumps the version; the current version is answered from the form itself.
  *
- * Editing a published form archives the old fields and bumps the version (§D7), so a submission
- * made against v1 still knows what it answered. That archive was write-only until this had a
- * route: the rows were being written and nothing could ever read them back, which is the whole
- * point of keeping them.
- *
- * The current version lives on the form itself, so it is answered from there rather than from an
- * archive row that only exists once the form has been edited at least once.
+ * `includeDraft: false` (a non-admin) does not see the current version of a form that is still a
+ * draft — that is an unpublished field set, not something anyone was asked.
  */
-export async function getFormVersion(formId: string, version: number) {
+export async function getFormVersion(formId: string, version: number, includeDraft = true) {
     const form = await getForm(formId);
     if (form.version === version) {
-        return { form_id: form._id, version: form.version, fields: form.fields, published_at: form.published_at };
+        if (!includeDraft && form.status === 'draft') throw new ServiceError(404, 'form_version_not_found');
+        return { form_id: form._id, version: form.version, fields: form.toObject().fields as FormField[], published_at: form.published_at };
     }
 
-    const archived = await FormDefinitionVersion.findOne({ form_id: formId, version });
+    const archived = await FormDefinitionVersion.findOne({ form_id: formId, version }).lean();
     if (!archived) {
         throw new ServiceError(404, 'form_version_not_found');
     }

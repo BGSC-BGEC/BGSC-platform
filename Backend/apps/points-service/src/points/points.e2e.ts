@@ -13,6 +13,7 @@ import {
     AuditLog,
     Event,
     EventStatus,
+    FormSubmission,
     LeaderboardEntry,
     PointRule,
     PointTransaction,
@@ -81,7 +82,7 @@ async function seedUser(balance = 0, role: UserRole = UserRole.USER): Promise<st
     return id;
 }
 
-async function seedEvent(status: EventStatus = 'past'): Promise<string> {
+async function seedEvent(status: EventStatus = 'past', core_admins: string[] = []): Promise<string> {
     const id = uuid();
     await Event.create({
         _id: id,
@@ -95,8 +96,21 @@ async function seedEvent(status: EventStatus = 'past'): Promise<string> {
         end_at: new Date(Date.now() - 86_400_000),
         registration: { closes_at: new Date(Date.now() - 200_000_000) },
         created_by: uuid(),
+        core_admins,
     });
     return id;
+}
+
+/** A confirmed registration: the podium pays only someone who was in the event. */
+async function seedRegistration(event_id: string, user_id: string): Promise<void> {
+    await FormSubmission.create({
+        form_id: uuid(),
+        form_version: 1,
+        owner: { type: 'event', id: event_id },
+        user: { user_id, display_name: 'E2E User' },
+        context: { event: { role: 'solo' } },
+        status: 'confirmed',
+    });
 }
 
 /** BE-1's collection: the debit refuses a reference that names nothing. */
@@ -182,6 +196,11 @@ async function main(): Promise<void> {
         assert.strictEqual(replay.body.transaction.id, ok.body.transaction.id);
         assert.strictEqual((await call('GET', '/points/me', { as: member })).body.balance, 150, 'and moves nothing');
         pass('the same request_id twice writes one row');
+
+        const reused = await call('POST', '/points/adjust', { as: coord, body: { ...body, amount: 70 } });
+        assert.strictEqual(reused.status, 409, 'a reused request_id with a different amount is not a replay');
+        assert.strictEqual(reused.body.error, 'request_id_reused');
+        pass('a request_id reused for a different adjustment is refused');
     }
 
     section('mass assignment and validation');
@@ -233,7 +252,7 @@ async function main(): Promise<void> {
         pass('a clawback below zero is refused and moves nothing');
     }
 
-    section('the live-role gate (D19)');
+    section('the live-role gate');
     {
         const demotedId = await seedUser(0, UserRole.USER);
         // A token that still claims coordinator, for a user who is not one any more.
@@ -257,7 +276,7 @@ async function main(): Promise<void> {
     section('podium award');
     {
         const winnerId = await seedUser(0);
-        const upcoming = await seedEvent('upcoming');
+        const upcoming = await seedEvent('upcoming', [coreId]);
         const early = await call('POST', '/points/award', {
             as: core,
             body: { user_id: winnerId, event_id: upcoming, place: 1 },
@@ -265,7 +284,15 @@ async function main(): Promise<void> {
         assert.strictEqual(early.status, 409);
         assert.strictEqual(early.body.error, 'event_not_completed');
 
-        const done = await seedEvent('past');
+        const done = await seedEvent('past', [coreId]);
+        await seedRegistration(done, winnerId);
+        const notMine = await seedEvent('past');
+        await seedRegistration(notMine, winnerId);
+        const foreign = await call('POST', '/points/award', {
+            as: core,
+            body: { user_id: winnerId, event_id: notMine, place: 1 },
+        });
+        assert.strictEqual(foreign.status, 403, 'core pays out only on events it administers');
         assert.strictEqual(
             (await call('POST', '/points/award', { as: member, body: { user_id: winnerId, event_id: done, place: 1 } }))
                 .status,
@@ -313,7 +340,8 @@ async function main(): Promise<void> {
     section('the internal debit');
     {
         const investorId = await seedUser(60);
-        const entryId = await seedEntry(await seedEvent('ongoing'), investorId);
+        const investEventId = await seedEvent('ongoing');
+        const entryId = await seedEntry(investEventId, investorId);
         const body = {
             user_id: investorId,
             amount: 40,
@@ -336,6 +364,14 @@ async function main(): Promise<void> {
         const replay = await call('POST', '/internal/points/spend', { body, service: true });
         assert.strictEqual(replay.body.transaction_id, ok.body.transaction_id, 'same request_id, same row');
         assert.strictEqual(replay.body.replayed, true);
+
+        // A retry of a spend that landed, arriving after the event moved on: still that spend. A
+        // refusal here would read to the caller as "nothing taken" and the points would be lost.
+        await Event.updateOne({ _id: investEventId }, { $set: { status: 'past' } });
+        const late = await call('POST', '/internal/points/spend', { body, service: true });
+        assert.strictEqual(late.status, 200, 'answered from the key, not the event status');
+        assert.strictEqual(late.body.transaction_id, ok.body.transaction_id);
+        await Event.updateOne({ _id: investEventId }, { $set: { status: 'ongoing' } });
 
         const broke = await call('POST', '/internal/points/spend', {
             service: true,
@@ -371,9 +407,29 @@ async function main(): Promise<void> {
         assert.strictEqual(stored?.reason, 'leaderboard.investment', 'and the reason is not the caller’s to choose');
         assert.strictEqual(
             stored?.idempotency_key,
-            idempotencyKey.leaderboardInvestment(body.request_id)
+            idempotencyKey.leaderboardInvestment(investorId, entryId, body.request_id)
         );
         pass('the debit is token-gated, idempotent, signed server-side');
+
+        const refundBody = { user_id: investorId, reference: body.reference, request_id: body.request_id };
+        const refund = await call('POST', '/internal/points/refund', { service: true, body: refundBody });
+        assert.strictEqual(refund.status, 200);
+        assert.strictEqual(refund.body.balance_after, 60, 'exactly what the spend took');
+        const again = await call('POST', '/internal/points/refund', { service: true, body: refundBody });
+        assert.strictEqual(again.body.replayed, true, 'one spend, one refund');
+        const totals = (await call('GET', `/points/users/${investorId}`, { as: core })).body;
+        assert.strictEqual(totals.lifetime_earned, 0, 'a refund is a spend given back, not earnings');
+        assert.strictEqual(totals.lifetime_spent, 0, 'and it nets the spend out');
+        const respend = await call('POST', '/internal/points/spend', { service: true, body });
+        assert.strictEqual(respend.status, 409, 'a refunded spend is not replayed as a live debit');
+        assert.strictEqual(respend.body.error, 'request_voided');
+        const minted = await call('POST', '/internal/points/refund', {
+            service: true,
+            body: { ...refundBody, request_id: uuid(), amount: 100_000 },
+        });
+        assert.strictEqual(minted.status, 404, 'no spend, no refund');
+        assert.strictEqual(minted.body.error, 'spend_not_found');
+        pass('the refund is bound to its spend');
     }
 
     section('history, breakdown and pagination');

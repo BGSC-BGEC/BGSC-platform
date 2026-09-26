@@ -103,6 +103,19 @@ async function main(): Promise<void> {
     assert.strictEqual(contact.status, 201, 'contact-us is its own front door');
     pass('anonymous submission works without a token, and refuses without a reply address');
 
+    // A dead token is a guest (optionalAuth is lenient while the clients cannot refresh): the ticket
+    // needs a reply address like any anonymous one, and never lands under the token's user.
+    const expired = jwt.sign({ sub: reporter, role: UserRole.USER, exp: Math.floor(Date.now() / 1000) - 60 }, config.jwt.accessSecret);
+    for (const bad of [expired, 'not-a-jwt']) {
+        const refused = await call('POST', '/feedback', { as: bad, body: submission({ is_anonymous: true }) });
+        assert.strictEqual(refused.status, 422, 'a dead token is a guest: no reply address is refused');
+        const filed = await call('POST', '/feedback', { as: bad, body: submission({ is_anonymous: true, contact_email: 'x@example.org' }) });
+        assert.strictEqual(filed.status, 201, 'and with one it is filed anonymously');
+        const row = await FeedbackTicket.findOne({ ticket_no: filed.body.ticket_no }).lean();
+        assert.strictEqual(row?.reporter ?? null, null, 'never attributed to the dead token');
+    }
+    pass('an expired or invalid bearer on the public submit route files as a guest');
+
     console.log('\n-- what a client may not set --');
     const attributed = await call('POST', '/feedback', {
         as: reporterT,

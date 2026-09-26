@@ -1,4 +1,4 @@
-import { createProxyMiddleware, Options } from 'http-proxy-middleware';
+import { createProxyMiddleware, fixRequestBody, Options } from 'http-proxy-middleware';
 import { Request, Response } from 'express';
 import { LIVE_SERVICES, ROUTES, startsWithSegment } from './routing';
 
@@ -35,12 +35,22 @@ export function createServiceProxy(key: string, target: string, prefixes: string
         // (verified — '/users/**' never fires), and this shares the routing rule rather than
         // restating it in a second syntax.
         pathFilter: (path: string) => prefixes.some((prefix) => startsWithSegment(path, prefix)),
-        // Streams the body straight through; the gateway never parses request bodies.
+        // Streams the body straight through. The one exception is the strict auth paths, whose small
+        // JSON body the rate limiter parses (rateLimit.ts) — `fixRequestBody` re-writes it below.
         proxyTimeout: 30_000,
         timeout: 30_000,
         on: {
-            proxyReq: (proxyReq) => {
+            proxyReq: (proxyReq, req) => {
                 for (const header of CLIENT_FORBIDDEN_HEADERS) proxyReq.removeHeader(header);
+                // A consumed stream would otherwise forward an empty body and hang the service. The
+                // parser already un-chunked and inflated it, so the client's Transfer-Encoding and
+                // Content-Encoding no longer describe what is sent: kept, a chunked or gzip login
+                // reached the service as a 400. fixRequestBody sets Content-Length.
+                if ((req as Request).body !== undefined) {
+                    proxyReq.removeHeader('transfer-encoding');
+                    proxyReq.removeHeader('content-encoding');
+                }
+                fixRequestBody(proxyReq, req as Request);
             },
             error: (err, _req, res) => {
                 // A downstream being down is a 502, not a gateway crash.

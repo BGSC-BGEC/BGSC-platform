@@ -10,6 +10,7 @@ import * as part from './participation.service';
  */
 
 const actorOfRequest = (req: Request) => ({ id: req.user!.id, ip: req.ip ?? null });
+const isAdmin = (req: Request) => rankOf(req.user!.role) >= rankOf(UserRole.CORE);
 
 /**
  * Spec §5.7: a digital challenge's full brief may be hidden until acceptance. Stripped here rather
@@ -48,8 +49,8 @@ export const remove = wrap(async (req: Request, res: Response) => {
 });
 
 export const list = wrap(async (req: Request, res: Response) => {
-    const page = await catalog.listChallenges(req.query as never);
-    const admin = rankOf(req.user!.role) >= rankOf(UserRole.CORE);
+    const admin = isAdmin(req);
+    const page = await catalog.listChallenges(req.query as never, { admin });
     res.json({
         challenges: page.rows.map((c) => present(c, { revealBrief: admin })),
         next_cursor: page.next_cursor,
@@ -57,14 +58,14 @@ export const list = wrap(async (req: Request, res: Response) => {
 });
 
 export const detail = wrap(async (req: Request, res: Response) => {
-    const challenge = await catalog.getByKey(req.params.key as string);
+    const admin = isAdmin(req);
+    const challenge = await catalog.getByKey(req.params.key as string, { admin });
     // One extra indexed read, and it is what turns the browser card into a stateful one: accepted,
     // submitted, approved. Served by { member_user_ids, status, accepted_at }.
     const mine = await ChallengeParticipation.findOne({
         challenge_id: challenge._id,
         member_user_ids: req.user!.id,
     });
-    const admin = rankOf(req.user!.role) >= rankOf(UserRole.CORE);
     res.json({
         challenge: present(challenge, { revealBrief: admin || mine != null }),
         my_participation: mine ? await part.fillRewardIds(mine) : null,
@@ -72,7 +73,7 @@ export const detail = wrap(async (req: Request, res: Response) => {
 });
 
 export const accept = wrap(async (req: Request, res: Response) => {
-    const participation = await part.accept(req.params.id as string, req.body, actorOfRequest(req));
+    const participation = await part.accept(req.params.id as string, req.body, actorOf(res));
     res.status(201).json(participation);
 });
 
@@ -82,7 +83,7 @@ export const progress = wrap(async (req: Request, res: Response) => {
 });
 
 export const submit = wrap(async (req: Request, res: Response) => {
-    const participation = await part.submit(req.params.id as string, req.body, actorOfRequest(req));
+    const participation = await part.submit(req.params.id as string, req.body, actorOf(res));
     res.json(participation);
 });
 

@@ -1,11 +1,4 @@
-import {
-    IUser,
-    ROLE_RANK,
-    RoleName,
-    UserRole,
-    UserSnapshot,
-    userSnapshotOf,
-} from '@bgsc/shared';
+import { IUser, UserRole, rankOf } from '@bgsc/shared';
 
 /**
  * The single field-masking boundary (Spec §11.2, §7.2 "Field-Level").
@@ -38,13 +31,16 @@ export function maskEmail(email: string): string {
     return `${email[0]}***${email.slice(at)}`;
 }
 
-/** `+919876543210` -> `+91******3210`. Last four only, the convention people already expect. */
+/**
+ * `+919876543210` -> `+91******3210`. Last four only, the convention people already expect. Built
+ * from the digits alone, so a number stored with separators (`+91 98765-43210`, from before
+ * numbers were normalised) masks the same way instead of leaking its layout.
+ */
 export function maskPhone(phone: string): string {
     const digits = phone.replace(/\D/g, '');
     if (digits.length < 4) return '***';
-    const tail = digits.slice(-4);
-    const head = phone.startsWith('+') ? phone.slice(0, phone.length - digits.length + 2) : '';
-    return `${head}******${tail}`;
+    const head = phone.trimStart().startsWith('+') ? `+${digits.slice(0, 2)}` : '';
+    return `${head}******${digits.slice(-4)}`;
 }
 
 /**
@@ -57,11 +53,11 @@ export function visibilityFor(
     elevated = false
 ): Visibility {
     if (viewer && viewer.id === user._id) return 'full';
-    if (viewer && ROLE_RANK.indexOf(viewer.role as RoleName) >= ROLE_RANK.indexOf(PII_MIN_ROLE as RoleName)) {
+    if (viewer && rankOf(viewer.role) >= rankOf(PII_MIN_ROLE)) {
         return 'full';
     }
     if (viewer && elevated) return 'full';
-    // D9: a private profile still answers 200 with a card stub, so deep links keep working.
+    // A private profile still answers 200 with a card stub, so deep links keep working.
     if (user.settings?.privacy?.is_profile_public === false) return 'minimal';
     return 'public';
 }
@@ -73,6 +69,7 @@ export interface SerializedUser {
     status?: string;
     email?: string;
     is_email_verified?: boolean;
+    is_phone_verified?: boolean;
     profile: {
         full_name?: string;
         avatar_url: string | null;
@@ -133,6 +130,7 @@ export function serializeUser(user: IUser, viewer?: Viewer, elevated = false): S
     if (level === 'full') {
         base.email = user.email;
         base.is_email_verified = user.is_email_verified;
+        base.is_phone_verified = user.is_phone_verified ?? false;
         base.profile.phone_number = p.phone_number ?? null;
         base.profile.social_links = (p.social_links ?? {}) as Record<string, string | null>;
         base.settings = user.settings;
@@ -147,11 +145,3 @@ export function serializeUser(user: IUser, viewer?: Viewer, elevated = false): S
     base.profile.social_links = (p.social_links ?? {}) as Record<string, string | null>;
     return base;
 }
-
-/**
- * `{ user_id, display_name, avatar_url }` — the shape six BE-2 collections embed.
- * Defined next to the User model in @bgsc/shared so the services that read `users` directly
- * (relationships.md §1: every service reads, only this one writes) cannot drift from it.
- */
-export type UserSnapshotDTO = UserSnapshot;
-export const snapshotOf = userSnapshotOf;

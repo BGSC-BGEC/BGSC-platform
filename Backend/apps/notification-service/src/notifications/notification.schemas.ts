@@ -4,7 +4,7 @@ import { z } from 'zod';
 /**
  * Request schemas. Zod strips unknown keys, which is the sanitization half of the job: a client
  * cannot set `user_id`, `read_at` or `dedupe_key` by adding the field to a body — every one of
- * those is the server's (be2-broadcast-service-plan.md §2).
+ * those is the server's.
  */
 
 /** Uncapped, one client asks for 100000 rows and the index stops protecting anything. */

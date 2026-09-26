@@ -18,6 +18,12 @@ export function initializeConsumers(): void {
         void handleUserDeleted(event.payload as unknown as { user_id: string });
     });
 
+    // Deletion is restorable (Spec §11.2.1). Without this a restored coordinator stays "[deleted]"
+    // on everything they signed, however many times they later edit their profile.
+    subscribe('UserRestored', (event) => {
+        void resnapshot((event.payload as { user_id?: string }).user_id, { restoring: true });
+    });
+
     console.log('[announcement-service] Event consumers initialized');
 }
 
@@ -34,26 +40,36 @@ interface ProfileUpdatedPayload {
  * announcement stays signed by the role its author held when they wrote it.
  */
 async function handleUserProfileUpdated(payload: ProfileUpdatedPayload): Promise<void> {
-    const { user_id, changed_fields } = payload;
-    if (!user_id) return;
+    const { changed_fields } = payload;
 
     // changed_fields is load-bearing: user-service emits this for any profile write, and a bio
     // edit must not trigger a collection-wide update.
-    const touchesSnapshot =
-        !changed_fields || changed_fields.some((f) => f === 'full_name' || f === 'avatar_url');
-    if (!touchesSnapshot) return;
+    if (!changed_fields?.some((f) => f === 'full_name' || f === 'avatar_url')) return;
+    await resnapshot(payload.user_id, { restoring: false });
+}
 
+/**
+ * Re-copy the author snapshot from the live user — the profile refresh and the restore share it.
+ *
+ * `deleted: false` is written every time: `handleUserDeleted` sets it, and a refresh that only
+ * copied the name left a restored author flagged deleted forever. A user who is currently deleted
+ * is never read (`deleted_at: null`), so a late profile event cannot un-anonymize
+ * them — and only the restore itself may touch rows already flagged deleted.
+ */
+async function resnapshot(user_id: string | undefined, opts: { restoring: boolean }): Promise<void> {
+    if (!user_id) return;
     try {
-        const user = await User.findById(user_id);
+        const user = await User.findOne({ _id: user_id, deleted_at: null });
         if (!user) return;
         const snapshot = userSnapshotOf(user);
 
         await Announcement.updateMany(
-            { 'author.user_id': user_id },
+            opts.restoring ? { 'author.user_id': user_id } : { 'author.user_id': user_id, 'author.deleted': { $ne: true } },
             {
                 $set: {
                     'author.display_name': snapshot.display_name,
                     'author.avatar_url': snapshot.avatar_url,
+                    'author.deleted': false,
                 },
             }
         );

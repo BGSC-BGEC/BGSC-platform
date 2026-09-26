@@ -1,6 +1,5 @@
-import { UserRole, requireAuth, validate } from '@bgsc/shared';
+import { UserRole, requireActiveUser, requireAuth, validate } from '@bgsc/shared';
 import { Router } from 'express';
-import { requireActiveUser } from './actor';
 import * as c from './challenge.controller';
 import {
     AcceptBody,
@@ -18,7 +17,7 @@ import {
 } from './challenge.schemas';
 
 /**
- * Mounted at `/challenges` — the prefix the gateway forwards unchanged (routing.ts:30).
+ * Mounted at `/challenges` — the prefix the gateway forwards unchanged (gateway routing.ts).
  *
  * Spec §5.7 marks the whole Point System & Challenge page "Visibility: Authenticated only", so
  * there is one floor for the entire prefix and no `optionalAuth` anywhere in this service.
@@ -41,7 +40,14 @@ challengeRoutes.patch(
     validate({ params: IdParams, body: ProgressBody }),
     c.progress
 );
-challengeRoutes.post('/participations/:id/submit', validate({ params: IdParams, body: SubmitBody }), c.submit);
+// The live user document, like review: on an auto-approve challenge a submit IS the payout, so a
+// suspended account must not mint points on a token that has not expired yet.
+challengeRoutes.post(
+    '/participations/:id/submit',
+    requireActiveUser(UserRole.GUEST),
+    validate({ params: IdParams, body: SubmitBody }),
+    c.submit
+);
 challengeRoutes.post(
     '/participations/:id/review',
     // No rank floor: `challenge.reviewers[]` may name anyone, so the only authority on who may
@@ -76,7 +82,7 @@ challengeRoutes.post('/:id/activate', requireActiveUser(UserRole.CORE), validate
 challengeRoutes.post('/:id/complete', requireActiveUser(UserRole.CORE), validate({ params: IdParams }), c.complete);
 challengeRoutes.post('/:id/archive', requireActiveUser(UserRole.CORE), validate({ params: IdParams }), c.archive);
 
-challengeRoutes.post('/:id/accept', validate({ params: IdParams, body: AcceptBody }), c.accept);
+challengeRoutes.post('/:id/accept', requireActiveUser(UserRole.GUEST), validate({ params: IdParams, body: AcceptBody }), c.accept);
 // No rank floor here either: a 403 would tell a stranger the queue exists and that they merely
 // lack the rank. The controller answers 404 for anyone who may not review this challenge.
 challengeRoutes.get('/:id/participations', validate({ params: IdParams, query: QueueQuery }), c.queue);

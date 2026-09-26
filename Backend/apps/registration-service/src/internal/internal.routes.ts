@@ -1,105 +1,138 @@
-import { ServiceError, requireServiceToken } from '@bgsc/shared';
+import { ServiceError, requireServiceToken, validate, wrap } from '@bgsc/shared';
 import { Router } from 'express';
+import { z } from 'zod';
 import * as registrationService from '../registrations/registration.service';
 import * as teamService from '../teams/team.service';
-import { Request, Response, NextFunction } from 'express';
+
+/**
+ * Service-to-service routes. Registration Service is the only writer of
+ * `form_submissions` and `teams`; the Event Service asks through these instead of writing them.
+ *
+ * Removed: `/internal/registrations/confirm` (no caller, and it confirmed rejected or unapproved
+ * rows without a seat) and `/internal/teams/snapshot` (no caller).
+ */
 
 export const internalRoutes = Router();
 
-// All internal routes require service token
 internalRoutes.use(requireServiceToken);
 
-// POST /internal/registrations/confirm - mark submission confirmed (called by Event Service)
-internalRoutes.post('/registrations/confirm', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const registrationId = typeof req.body?.registration_id === 'string' ? req.body.registration_id : '';
-        if (!registrationId) {
-            throw new ServiceError(400, 'registration_id_required');
-        }
-        const registration = await registrationService.getRegistration(registrationId);
+const Id = z.string().uuid();
+const IdParams = z.object({ id: Id });
+const EventParams = z.object({ eventId: Id });
 
-        // Same refusals the admin route makes. This one is reached with a service token rather
-        // than a session, which is a reason to be stricter about it, not looser.
-        if (registration.status === 'cancelled') {
-            throw new ServiceError(409, 'registration_cancelled');
-        }
-        if (registration.status === 'confirmed') {
-            // Already done. Idempotent for a retrying caller rather than a second history row.
-            res.json(registration);
-            return;
-        }
+// POST /internal/registrations/attendance - mark attendance on confirmed registrations of an event
+internalRoutes.post(
+    '/registrations/attendance',
+    validate({
+        body: z.object({
+            event_id: Id,
+            marked_by: z.string().min(1).max(64),
+            attendances: z.array(z.object({ registration_id: Id, attended: z.boolean() })).min(1).max(1000),
+        }),
+    }),
+    wrap(async (req, res) => {
+        const { event_id, marked_by, attendances } = req.body;
+        res.json(await registrationService.recordAttendance(event_id, marked_by, attendances));
+    })
+);
 
-        // Via the shared transition so this path clears waitlist_position and records the real
-        // `from` status, exactly like every other status change.
-        await registrationService.transition(registration, 'confirmed', 'system', 'internal_confirmation');
-        await registration.save();
-        res.json(registration);
-    } catch (err) {
-        next(err);
-    }
-});
+// POST /internal/registrations/:id/promote - waitlisted -> (seat) -> confirmed
+internalRoutes.post(
+    '/registrations/:id/promote',
+    validate({ params: IdParams, body: z.object({ by: z.string().min(1).max(64) }) }),
+    wrap(async (req, res) => {
+        const registration = await registrationService.getRegistration(req.params.id as string);
+        if (registration.status !== 'waitlisted') throw new ServiceError(409, 'not_waitlisted');
 
-// POST /internal/teams/:id/debit-purse - debit team purse (called by Event Service for auction)
-internalRoutes.post('/teams/:id/debit-purse', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const teamId = req.params.id as string;
-        const amount = typeof req.body?.amount === 'number' ? req.body.amount : 0;
-        if (!amount || amount <= 0) {
-            throw new ServiceError(400, 'invalid_amount');
-        }
+        const result = await registrationService
+            .promoteRegistration(registration, req.body.by, 'admin_promoted_from_waitlist')
+            .catch((err) => {
+                throw registrationService.seatCallError(err);
+            });
+        if (result.outcome === 'refused' || result.outcome === 'skipped') throw new ServiceError(409, result.reason);
+        if (result.outcome === 'raced') throw new ServiceError(409, 'not_waitlisted');
+        res.json(result.registration);
+    })
+);
 
-        const team = await teamService.debitPurse(teamId, amount);
-        res.json(team);
-    } catch (err) {
-        next(err);
-    }
-});
+const Amount = z.object({ amount: z.number().positive().finite(), request_id: z.string().min(1).max(200) });
 
-// POST /internal/teams/:id/refund-purse - refund team purse (called by Event Service for auction compensation)
-internalRoutes.post('/teams/:id/refund-purse', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const teamId = req.params.id as string;
-        const amount = typeof req.body?.amount === 'number' ? req.body.amount : 0;
-        if (!amount || amount <= 0) {
-            throw new ServiceError(400, 'invalid_amount');
-        }
+// POST /internal/teams/:id/debit-purse - idempotent on request_id (`<lot>:<team_id>:debit`)
+internalRoutes.post(
+    '/teams/:id/debit-purse',
+    validate({ params: IdParams, body: Amount }),
+    wrap(async (req, res) => {
+        res.json(await teamService.debitPurse(req.params.id as string, req.body.amount, req.body.request_id));
+    })
+);
 
-        const team = await teamService.refundPurse(teamId, amount);
-        res.json(team);
-    } catch (err) {
-        next(err);
-    }
-});
+// POST /internal/teams/:id/refund-purse - idempotent on request_id (`<lot>:<team_id>:refund`); never clamps
+internalRoutes.post(
+    '/teams/:id/refund-purse',
+    validate({ params: IdParams, body: Amount }),
+    wrap(async (req, res) => {
+        res.json(await teamService.refundPurse(req.params.id as string, req.body.amount, req.body.request_id));
+    })
+);
 
-// POST /internal/teams/:id/add-member - add member to team (called by Event Service for auction)
-internalRoutes.post('/teams/:id/add-member', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const teamId = req.params.id as string;
-        const userId = typeof req.body?.user_id === 'string' ? req.body.user_id : '';
-        const registrationId = typeof req.body?.registration_id === 'string' ? req.body.registration_id : '';
+// POST /internal/teams/:id/add-member - auction seat, idempotent on request_id (`<lot>:<team_id>:add`)
+internalRoutes.post(
+    '/teams/:id/add-member',
+    validate({ params: IdParams, body: z.object({ user_id: Id, registration_id: Id, request_id: z.string().min(1).max(200) }) }),
+    wrap(async (req, res) => {
+        res.json(
+            await teamService.addMemberToTeam(
+                req.params.id as string,
+                req.body.user_id,
+                req.body.registration_id,
+                'auction',
+                req.body.request_id
+            )
+        );
+    })
+);
 
-        if (!userId || !registrationId) {
-            throw new ServiceError(400, 'user_id_and_registration_id_required');
-        }
+// POST /internal/events/:eventId/auction-purses - default purse on every live team lacking one
+internalRoutes.post(
+    '/events/:eventId/auction-purses',
+    validate({ params: EventParams, body: z.object({ purse_total: z.number().min(0).finite() }) }),
+    wrap(async (req, res) => {
+        res.json(await teamService.setAuctionPurses(req.params.eventId as string, req.body.purse_total));
+    })
+);
 
-        const team = await teamService.addMemberToTeam(teamId, userId, registrationId, 'auction');
-        res.json(team);
-    } catch (err) {
-        next(err);
-    }
-});
+// PATCH /internal/teams/:id/auction-budget - a captain's budget override
+internalRoutes.patch(
+    '/teams/:id/auction-budget',
+    validate({
+        params: IdParams,
+        body: z.object({
+            purse_total: z.number().min(0).finite(),
+            reason: z.string().max(500).nullable().optional(),
+            overridden_by: z.string().min(1).max(64),
+        }),
+    }),
+    wrap(async (req, res) => {
+        res.json(
+            await teamService.setAuctionBudget(req.params.id as string, {
+                purse_total: req.body.purse_total,
+                reason: req.body.reason ?? null,
+                overridden_by: req.body.overridden_by,
+            })
+        );
+    })
+);
 
 /**
  * POST /internal/teams/:id/lock - freeze a roster (called by Challenge Service on team acceptance).
- *
- * The Challenge Service snapshots `member_user_ids` when a team accepts, and the Points Service
- * pays exactly that list. A roster that keeps moving afterwards produces members who did the work
- * and are paid nothing (challenge-model.md §3.1).
+ * The Points Service pays exactly the roster snapshotted at acceptance, so it must stop moving.
  */
-internalRoutes.post('/teams/:id/lock', async (req: Request, res: Response, next: NextFunction) => {
-    try {
+internalRoutes.post(
+    '/teams/:id/lock',
+    validate({ params: IdParams }),
+    wrap(async (req, res) => {
         const teamId = req.params.id as string;
-        const lockedBy = typeof req.body?.locked_by === 'string' ? req.body.locked_by : 'system';
+        const lockedBy = typeof req.body?.locked_by === 'string' ? req.body.locked_by.slice(0, 64) : 'system';
 
         const team = await teamService.getTeam(teamId);
         // Already done. Idempotent for a retrying caller rather than a 400 it has to special-case.
@@ -107,21 +140,6 @@ internalRoutes.post('/teams/:id/lock', async (req: Request, res: Response, next:
             res.json(team);
             return;
         }
-
         res.json(await teamService.lockTeam(teamId, lockedBy));
-    } catch (err) {
-        next(err);
-    }
-});
-
-// GET /internal/teams/snapshot?ids=id1,id2 - bulk team snapshots
-internalRoutes.get('/teams/snapshot', async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const idsParam = typeof req.query.ids === 'string' ? req.query.ids : '';
-        const ids = idsParam.split(',').filter(Boolean);
-        const snapshots = await teamService.getTeamSnapshots(ids);
-        res.json(snapshots);
-    } catch (err) {
-        next(err);
-    }
-});
+    })
+);

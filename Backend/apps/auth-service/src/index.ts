@@ -1,6 +1,10 @@
 import express from 'express';
 import { createServiceApp, startService } from '@bgsc/shared';
 import { authRoutes, accountRoutes } from './auth/auth.routes';
+import { AuthService } from './auth/auth.service';
+
+/** UserRestored replay cadence. */
+export const REPLAY_INTERVAL_MS = 5 * 60 * 1000;
 
 /**
  * Auth Service — :3001. Credentials, sessions, email/phone verification, password reset, Google
@@ -23,10 +27,19 @@ const PORT = parseInt(process.env.PORT || '3001', 10);
 const options = {
     name: NAME,
     port: PORT,
+    // Shares `users` with User Service (auth fields here, profile fields there).
+    models: ['User'],
     routes(app: express.Express) {
         app.use('/auth', authRoutes);
         // Its own prefix, matching the gateway's routing table rather than nesting under /auth.
         app.use('/account', accountRoutes);
+    },
+    async onReady() {
+        // ponytail: in-process timer in every instance; replays are idempotent, so N instances only
+        // cost N× the publishes. unref'd so it never holds the process open.
+        setInterval(() => {
+            AuthService.replayRestored().catch((err) => console.error(`[${NAME}] UserRestored replay failed:`, err));
+        }, REPLAY_INTERVAL_MS).unref();
     },
 };
 

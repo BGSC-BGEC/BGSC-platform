@@ -4,12 +4,11 @@ import { TICKET_NO_PATTERN } from './ticketNo';
 
 /**
  * Request schemas. Zod strips unknown keys, so a client cannot set `status`, `reporter`,
- * `ticket_no` or `response` by adding the field to a submission — all four are the server's
- * (be2-feedback-bracket-plan.md §3).
+ * `ticket_no` or `response` by adding the field to a submission — all four are the server's.
  */
 
 /**
- * Attachments are URLs, never uploads (plan D7) — and never `javascript:` or `data:`, which round
+ * Attachments are URLs, never uploads — and never `javascript:` or `data:`, which round
  * trip through a bare `z.string()` and land in an admin's browser. The same rule
  * `announcement.schemas.ts` applies to `media_url`, for the same reason.
  */
@@ -28,7 +27,11 @@ const AttachmentUrl = z
     }, 'attachment must be an http(s) URL or an /uploads path');
 
 const Base = {
-    subject: z.string().trim().min(1).max(140),
+    // One line: the subject is the receipt's mail subject, and a CR/LF there is a header injection.
+    subject: z
+        .string()
+        .transform((v) => v.replace(/[\r\n]+/g, ' ').trim())
+        .pipe(z.string().min(1).max(140)),
     description: z.string().trim().min(1).max(5000),
     attachments: z.array(AttachmentUrl).max(5).optional(),
     event_id: z.string().uuid().nullable().optional(),

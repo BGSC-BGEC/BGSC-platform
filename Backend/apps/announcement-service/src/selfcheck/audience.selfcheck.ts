@@ -106,7 +106,7 @@ async function main(): Promise<void> {
         'and hidden again after it is cancelled');
     console.log('✓ event scoping follows the real registration');
 
-    /* ---- 4. soft delete (plan §3.3 — no index mentions deleted_at) ------ */
+    /* ---- 4. soft delete (no index mentions deleted_at) ------ */
     console.log('4. Soft delete...');
     const deleted = await post({ status: 'published', published_at: new Date() });
     await svc.remove(deleted._id, ACTOR);
@@ -144,7 +144,7 @@ async function main(): Promise<void> {
     assert(ids(asComposer).includes(scoped._id), 'core+ lists an event-scoped announcement without a registration');
     console.log('✓ the list is not audience-filtered for core+');
 
-    /* ---- 6. the $or collision (plan §0.7) — page two is where it shows --- */
+    /* ---- 6. the $or collision — page two is where it shows --- */
     console.log('6. Paginated audience gate...');
     const base = Date.now() - 10_000_000;
     const publicIds: string[] = [];

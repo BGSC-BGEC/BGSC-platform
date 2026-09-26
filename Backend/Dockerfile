@@ -73,7 +73,9 @@ COPY --from=builder --chown=app:app /app/apps/bracket-service/package.json ./app
 COPY --from=builder --chown=app:app /app/apps/media-service/dist ./apps/media-service/dist
 COPY --from=builder --chown=app:app /app/apps/media-service/package.json ./apps/media-service/package.json
 
-# Avatar uploads land here; compose mounts a volume so they survive a restart.
+# The platform's one upload root (config.uploadDir, UPLOAD_DIR=/app/uploads in compose). Compose
+# mounts the shared `uploads` volume here; a fresh named volume copies this directory's ownership,
+# which is what lets the non-root `app` user write to it.
 RUN mkdir -p /app/uploads && chown -R app:app /app/uploads
 
 USER app

@@ -9,9 +9,9 @@ import { uuidId, timestamps } from './shared';
  * a user must already hold a BGSC account before they can link one. Nothing here participates in
  * authentication.
  *
- * Owned by the Challenge Service (be2-challenge-service-plan.md D1) — physical challenges are what
- * the activities are proof for. They have a second reader, the user profile, which queries
- * `strava_activities` directly rather than through an API (adding-a-service.md §6.5).
+ * Owned by the Challenge Service — physical challenges are what the activities are proof for. The
+ * profile screen's feed is served by the same service (`GET /strava/users/:id/activities`); no other
+ * service reads these collections.
  *
  * docs/SystemDesignDocs/strava-integration.md describes these as TypeORM entities on Postgres with
  * a `raw` jsonb column. The stack is Mongoose on Mongo and the blob is deliberately not stored:
@@ -31,6 +31,8 @@ export interface IStravaCredential extends Document<string> {
     scope: string;
     /** Watermark for the next sync's `after=`. Null until the first successful sync. */
     last_synced_at: Date | null;
+    /** When the last sync was allowed to start: the per-user cooldown is a CAS on this. */
+    last_sync_started_at: Date | null;
     created_at: Date;
     updated_at: Date;
 }
@@ -45,6 +47,7 @@ const StravaCredentialSchema = new Schema<IStravaCredential>(
         expires_at: { type: Date, required: true },
         scope: { type: String, default: '' },
         last_synced_at: { type: Date, default: null },
+        last_sync_started_at: { type: Date, default: null },
     },
     timestamps
 );

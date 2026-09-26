@@ -18,7 +18,8 @@ function findEnvFile(from: string): string | undefined {
     return undefined;
 }
 
-dotenv.config({ path: findEnvFile(__dirname) });
+const ENV_FILE = findEnvFile(__dirname);
+dotenv.config({ path: ENV_FILE });
 
 /** A positive integer, or the fallback. NaN and zero both mean "the value was not usable". */
 function positiveIntOr(raw: string | undefined, fallback: number): number {
@@ -60,8 +61,6 @@ function parseGroupMap(raw: string | undefined): Record<string, string> {
 }
 
 export const config = {
-  /** Overridden per service; each passes its own port to startService(). */
-  port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   mongoUri: process.env.MONGO_URI || 'mongodb://bgsc_admin:bgsc_password@localhost:27017/bgsc_dev?authSource=admin',
   jwt: {
@@ -123,8 +122,8 @@ export const config = {
    * Business account is registered.
    *
    * `groupMap` maps an announcement category to the destination that category broadcasts to.
-   * The Cloud API addresses phone numbers, not WhatsApp groups (be2-broadcast-service-plan.md
-   * §0.3), so the value is an opaque destination string the provider hands to the API — swap the
+   * The Cloud API addresses phone numbers, not WhatsApp groups, so
+   * the value is an opaque destination string the provider hands to the API — swap the
    * provider, keep the map.
    */
   whatsapp: {
@@ -160,7 +159,7 @@ export const config = {
 
   /**
    * Downstream service addresses, used by the gateway to route and by services to call each other.
-   * Ordered by the week each is built (docs/be2-user-service-plan.md); no slots for sponsor,
+   * Ordered by the week each is built; no slots for sponsor,
    * social or union — out of MVP scope.
    */
   services: {
@@ -178,8 +177,25 @@ export const config = {
     bracket:      process.env.BRACKET_SERVICE_URL      || 'http://localhost:3012',
   },
 
+  /**
+   * Where every service that stores files writes them, and where media-service serves `/uploads`
+   * from. ONE directory for the platform: four services each wrote a private
+   * `apps/<svc>/uploads`, which was neither the mounted volume nor the directory the gateway's
+   * `/uploads` route reads. Compose sets `/app/uploads` (one shared volume); on the host it is
+   * `Backend/uploads`, beside the `.env`. Each service writes under its own prefix.
+   */
+  uploadDir: process.env.UPLOAD_DIR || path.join(ENV_FILE ? path.dirname(ENV_FILE) : process.cwd(), 'uploads'),
+
   /** Cross-process event bus. Absent => the in-process emitter only (single-service dev). */
   redisUrl: process.env.REDIS_URL || '',
+  /**
+   * The Redis password, kept OUT of the URL. Pasted raw into `REDIS_URL`, a password containing
+   * `/ # ? %` made the URL unparseable (every service crash-looped) and `%40` silently failed auth.
+   * Set here it overrides any password in the URL. See `redisOptions()`.
+   */
+  redisPassword: process.env.REDIS_PASSWORD || '',
+  /** Verification-only previous key (bus + /internal), for rotating INTERNAL_API_TOKEN. Blank = no rotation. */
+  internalTokenPrevious: process.env.INTERNAL_API_TOKEN_PREVIOUS || '',
 
   /**
    * Allowed CORS origins. Defaults to dev localhost only. In production the env var must be set;

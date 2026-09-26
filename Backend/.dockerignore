@@ -50,4 +50,4 @@ packages/*/node_modules/
 apps/*/node_modules/
 
 # Local upload storage — never bake user files into an image
-uploads/
+**/uploads/

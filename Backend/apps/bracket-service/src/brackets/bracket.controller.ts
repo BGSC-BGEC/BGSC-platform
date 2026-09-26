@@ -1,7 +1,5 @@
 import { IBracket, IMatch, wrap } from '@bgsc/shared';
-import { RoleName } from '@bgsc/shared';
-import { Request } from 'express';
-import { Viewer, actorOf } from './actor';
+import { actorOf, strip, viewerOf } from './actor';
 import * as svc from './bracket.service';
 import { GenerateBracketInput } from './bracket.schemas';
 import { standingsOf } from './standings';
@@ -13,19 +11,7 @@ import { standingsOf } from './standings';
  * §5.5 makes the spectator bracket view a public screen.
  */
 
-const viewerOf = (req: Request): Viewer => ({ id: req.user?.id ?? null, role: req.user?.role as RoleName | undefined });
-
-const strip = <T extends object>(doc: T): Omit<T, '__v'> => {
-    const { __v, ...rest } = doc as T & { __v?: number };
-    return rest as Omit<T, '__v'>;
-};
-
-const present = (bracket: IBracket, matches: IMatch[]) => ({
-    bracket: strip(typeof (bracket as { toObject?: unknown }).toObject === 'function'
-        ? (bracket as unknown as { toObject: () => IBracket }).toObject()
-        : bracket),
-    matches: matches.map(strip),
-});
+const present = (bracket: IBracket, matches: IMatch[]) => ({ bracket: strip(bracket), matches: matches.map(strip) });
 
 export const generate = wrap(async (req, res) => {
     const { bracket, matches } = await svc.generateBracket(req.body as GenerateBracketInput, actorOf(req));

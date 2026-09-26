@@ -53,16 +53,10 @@ export function bearerToken(header: string | undefined): string | null {
     return token;
 }
 
-/**
- * Verifies the token and populates `req.user`. Rejects with 401 and never leaks why beyond
- * a generic code — an attacker learns nothing from "expired" vs "bad signature".
- */
-export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-    const token = bearerToken(req.headers.authorization);
-    if (!token) {
-        res.status(401).json({ error: 'unauthorized' });
-        return;
-    }
+/** The session a Bearer header carries: null when there is none, 'invalid' when it does not verify. */
+function sessionOf(header: string | undefined): AuthUser | null | 'invalid' {
+    const token = bearerToken(header);
+    if (!token) return header ? 'invalid' : null;
 
     let payload: AccessTokenPayload;
     try {
@@ -70,36 +64,40 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
             algorithms: TOKEN_ALGORITHMS,
         }) as AccessTokenPayload;
     } catch {
-        res.status(401).json({ error: 'unauthorized' });
-        return;
+        return 'invalid';
     }
 
     // A token that verifies but carries a shape we do not recognise is not a valid session.
-    if (typeof payload.sub !== 'string' || !payload.sub || !ROLES.has(payload.role)) {
+    if (typeof payload.sub !== 'string' || !payload.sub || !ROLES.has(payload.role)) return 'invalid';
+    return { id: payload.sub, role: payload.role };
+}
+
+/**
+ * Verifies the token and populates `req.user`. Rejects with 401 and never leaks why beyond
+ * a generic code — an attacker learns nothing from "expired" vs "bad signature".
+ */
+export function requireAuth(req: Request, res: Response, next: NextFunction): void {
+    const session = sessionOf(req.headers.authorization);
+    if (session === null || session === 'invalid') {
         res.status(401).json({ error: 'unauthorized' });
         return;
     }
-
-    req.user = { id: payload.sub, role: payload.role };
+    req.user = session;
     next();
 }
 
 /**
- * Optional auth: populates `req.user` when a valid token is present, but does not reject.
- * For endpoints whose response differs for a signed-in viewer (field masking, Spec §11.2).
+ * Optional auth: populates `req.user` when a valid token is present and never rejects — a missing,
+ * expired or garbage token is a guest. For endpoints whose response differs for a signed-in viewer
+ * (field masking, Spec §11.2), for the gateway (which only keys rate limits on it), and for
+ * `/auth/logout`, where an expired access token must not stop a refresh-token logout.
+ *
+ * ponytail: lenient on purpose. Both clients send stale tokens today (mobile keeps a 'logged_out'
+ * sentinel; web never refreshes), so a 401 here would break every public page. Make it strict once
+ * they refresh on 401.
  */
 export function optionalAuth(req: Request, _res: Response, next: NextFunction): void {
-    const token = bearerToken(req.headers.authorization);
-    if (!token) return next();
-    try {
-        const payload = jwt.verify(token, config.jwt.accessSecret, {
-            algorithms: TOKEN_ALGORITHMS,
-        }) as AccessTokenPayload;
-        if (typeof payload.sub === 'string' && payload.sub && ROLES.has(payload.role)) {
-            req.user = { id: payload.sub, role: payload.role };
-        }
-    } catch {
-        // A bad token on an optional route is treated as no token, not as an error.
-    }
+    const session = sessionOf(req.headers.authorization);
+    if (session && session !== 'invalid') req.user = session;
     next();
 }

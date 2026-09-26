@@ -37,8 +37,9 @@ Official, editorial, short-lived posts. One document per announcement. Delivery 
   author: {
     user_id: string,
     display_name: string,                 // snapshot
-    role_label: string,                   // "Coordinator", "BGEC Core"
-    avatar_url: string | null
+    role_label: string,                   // "Coordinator", "BGEC Core" — historical, never refreshed
+    avatar_url: string | null,
+    deleted: boolean                      // raised by UserDeleted, lowered by UserRestored
   },
 
   // ---- lifecycle & scheduling (Spec §6.4 "Send Now / Schedule for Later") ----
@@ -54,14 +55,15 @@ Official, editorial, short-lived posts. One document per announcement. Delivery 
       requested: boolean,
       per_category: {
         category: string,
-        group_id: string,                 // WhatsApp community group mapped to this category
+        group_id: string,                 // MASKED label of the destination (`••••1234`), never the raw value — PII served to core+
         status: 'pending' | 'sent' | 'failed' | 'rate_limited' | 'skipped',
         message_id: string | null,
         attempted_at: Date | null,
-        error: string | null
+        error: string | null,
+        revision: number                  // sender's dispatch-row revision; an older receipt never overwrites a newer one
       }[]
     },
-    push: { requested: boolean, status: 'pending' | 'sent' | 'failed' | 'skipped', sent_count: number | null }
+    push: { requested: boolean, status: 'pending' | 'sent' | 'failed' | 'skipped', sent_count: number | null, revision: number }
   },
 
   created_at: Date,
@@ -94,8 +96,8 @@ draft ──publish now──> published ──(expires_at)──> archived ─�
 | create draft | Core+ (Spec §6.4 "Core with permission" — no per-user permission field exists on `users`, so it collapses to the role gate) | — | — |
 | draft → published | same | `categories.length ≥ 1`; if `'teams'` then author role ≥ core; sets `published_at = now`, `expires_at = +4mo`, derives `audience.min_role`, sets `delivery.*.requested = true` (Spec §6.4: WhatsApp auto-sends on publish) | `AnnouncementPublished` |
 | draft / scheduled → scheduled | same | `scheduled_for > now`; from `scheduled` it is a reschedule | `AnnouncementScheduled` |
-| scheduled → published | scheduler | — | `AnnouncementPublished` |
-| published → archived | scheduler | `now ≥ expires_at` | none — one `updateMany`, nothing consumes it before Week 4 (plan D13) |
+| scheduled → published | scheduler | — ; `pinned_until` is capped at the new `expires_at` (the pin was checked against `scheduled_for`, and a later publish at a clamped month end can expire earlier) | `AnnouncementPublished` |
+| published → archived | scheduler | `now ≥ expires_at` | none — one `updateMany`, nothing consumes it before Week 4 |
 | edit published / scheduled | Core+ | title/body/media/priority/tags/pinned_until; `categories` and `audience` frozen once out of `draft` (WhatsApp fan-out keys off them) | `AnnouncementUpdated` |
 | delete | Coordinator+ | soft (`deleted_at`). A deleted draft/scheduled item never gets `expires_at`, so the scheduler hard-purges it 1 year after `deleted_at` | `AnnouncementDeleted` |
 
@@ -104,6 +106,8 @@ draft ──publish now──> published ──(expires_at)──> archived ─�
 - `categories` non-empty, unique values
 - `status == 'scheduled'` ⇔ `scheduled_for != null && published_at == null`
 - `status ∈ {published, archived}` ⇒ `published_at != null && expires_at == published_at + 4 months`
+  — calendar months in UTC, the day clamped to the target month's last day (Oct 31 → Feb 28/29), so
+  the value is the same on every host and never earlier for a later publish in a different month
 - `status ∈ {draft, scheduled}` ⇒ `published_at == null && expires_at == null`
 - `pinned_until != null` ⇒ `pinned_until <= expires_at`
 - `'teams' ∈ categories` ⇒ `audience.min_role ∈ {core, coordinator}`
@@ -113,7 +117,7 @@ draft ──publish now──> published ──(expires_at)──> archived ─�
 
 | Index | Serves |
 |---|---|
-| `{ status: 1, published_at: -1 }` | announcements feed (newest first, `status: 'published'`). `audience.min_role` is filtered **in the query** as a `$in` over the viewer's allowed prefix of `ROLE_RANK` — not in memory, which would break `limit` and keyset pagination (plan D1). It is not an index key: ≤ a few hundred live docs (4-month window), the `{ status, published_at }` scan does the work |
+| `{ status: 1, published_at: -1 }` | announcements feed (newest first, `status: 'published'`). `audience.min_role` is filtered **in the query** as a `$in` over the viewer's allowed prefix of `ROLE_RANK` — not in memory, which would break `limit` and keyset pagination. It is not an index key: ≤ a few hundred live docs (4-month window), the `{ status, published_at }` scan does the work |
 | `{ status: 1, categories: 1, published_at: -1 }` | category filter chips |
 | `{ status: 1, 'audience.event_id': 1, published_at: -1 }` | event-scoped announcements on event detail |
 | `{ 'author.user_id': 1, status: 1, published_at: -1 }` | "What Our Heads Have to Say": latest per coordinator (Spec §5.2 Tab 1) |
@@ -121,6 +125,9 @@ draft ──publish now──> published ──(expires_at)──> archived ─�
 | `{ status: 1, expires_at: 1 }` | archive + purge jobs |
 | `{ status: 1, pinned_until: 1 }` | homepage banner |
 | `{ title: 'text', body: 'text' }` | `q` search (MVP stand-in for Elasticsearch, Spec §13) |
+| `{ deleted_at: -1 }` partial (`deleted_at` is a date) | Notification Service's sweep for deletes whose `AnnouncementDeleted` it never heard (pub/sub has no replay) |
+
+`tags` declares `lowercase`/`trim` on the array element; on the array path Mongoose ignored them (Sep 26).
 
 ## 3. Read / unread (plan Week 2: "read/unread status")
 
@@ -136,6 +143,8 @@ users.announcements = {
 - `last_seen_at` is a watermark (opening the tab / "read all" sets it); `read_ids` holds cards opened one at a time.
 - Unread count = `count({ status: 'published', published_at > last_seen_at, audience matches })` — one indexed count.
 - Per-card dot = `published_at > last_seen_at && _id ∉ read_ids`. Both halves, or "read all" clears the badge but leaves every dot lit.
+- `POST /announcements/:id/read` and `/read-all` take `requireAuth` only: they write the caller's own user document and nothing else, so there is no authority to re-check against the live user.
+- `GET /announcements/unread-count` answers `{ count }` — the same shape as `GET /notifications/unread-count`.
 
 ponytail: `read_ids` array capped at 200 on the user doc; 4-month retention means the active set is small. If per-announcement read analytics are ever needed, add `announcement_reads { announcement_id, user_id, read_at }`.
 
@@ -148,7 +157,7 @@ visible(a, viewer) :=
   && (a.audience.event_id == null || viewer registered (confirmed) for that event)
 ```
 
-Guests: `role = guest`. The event-scoped check is **server-side**: Announcement Service reads the viewer's confirmed event IDs straight from `form_submissions` (`distinct('owner.id', { 'user.user_id', 'owner.type': 'event', status: 'confirmed' })` — a read, so no internal endpoint and no cache, plan D3) and adds `{ $or: [{ 'audience.event_id': null }, { 'audience.event_id': { $in: my_event_ids } }] }` to the query. Never trust a client-supplied list. Every read path also carries `deleted_at: null`.
+Guests: `role = guest`. The event-scoped check is **server-side**: Announcement Service reads the viewer's confirmed event IDs straight from `form_submissions` (`distinct('owner.id', { 'user.user_id', 'owner.type': 'event', status: 'confirmed' })` — a read, so no internal endpoint and no cache) and adds `{ $or: [{ 'audience.event_id': null }, { 'audience.event_id': { $in: my_event_ids } }] }` to the query. Never trust a client-supplied list. Every read path also carries `deleted_at: null`.
 
 Core+ bypasses the **status and event** gates on `GET /:id` and on the list: a composer has to be able to open its own drafts and find a published announcement it scoped to an event it is not registered for. The **rank** gate is never bypassed — a core member does not see a coordinator- or founder-only announcement, on reads or on writes.
 
@@ -158,7 +167,7 @@ Core+ bypasses the **status and event** gates on `GET /:id` and on the list: a c
 AnnouncementPublished   { announcement_id, categories[], priority, author_user_id, audience }   // Notification + Broadcast consume
 AnnouncementScheduled   { announcement_id, scheduled_for }
 AnnouncementUpdated     { announcement_id, changed_fields[] }
-AnnouncementArchived    { announcement_id }                                                    // NOT emitted: archiving is one updateMany (plan D13)
+AnnouncementArchived    { announcement_id }                                                    // NOT emitted: archiving is one updateMany
 AnnouncementDeleted     { announcement_id, deleted_by }
 AnnouncementDelivered   { announcement_id, channel: 'whatsapp' | 'push', category | null, status }
 ```
@@ -166,12 +175,21 @@ AnnouncementDelivered   { announcement_id, channel: 'whatsapp' | 'push', categor
 **Shipped Sep 26, 2026 (Week 4 Saturday).** The Notification Service (:3010) subscribes to
 `AnnouncementPublished`, fans out in-app notifications to the resolved audience, sends one WhatsApp
 message per category, and writes the outcome back through
-`PATCH /internal/announcements/:id/delivery` — the route that closes plan D7. `AnnouncementDelivered`
+`PATCH /internal/announcements/:id/delivery` — an internal route, built once it had a caller. `AnnouncementDelivered`
 is emitted **by this service** on that writeback, one event per channel, because the owner of a
 collection emits the events about it.
 
+**Writeback ordering (Sep 26).** The inline writeback and the sweep's can land out of order, so every
+row carries the dispatch `revision` and the receiver applies a row only if it is newer than the one it
+holds. The client treats only `404` (deleted) and `409` (not published) as permanent; `401`/`422` are
+deploy faults and are retried (and logged), not stamped done.
+
+Consumed: `UserProfileUpdated` (gated on `full_name`/`avatar_url`; a currently-deleted author is left
+alone), `UserDeleted` (`anonymizedSnapshot('author.')`), `UserRestored` (re-snapshot, `deleted: false`).
+`role_label` is never refreshed.
+
 One rule that belongs here rather than only in the broadcaster: **an announcement whose
-`audience.min_role` is above `user`, or which is scoped to an event, is never sent to a WhatsApp
+`audience.min_role` is above `guest`, or which is scoped to an event, is never sent to a WhatsApp
 group.** The `teams` tag raises `min_role` to `core` (§2.3), and a community group is a public
 destination — see `notification-model.md §4.1`.
 

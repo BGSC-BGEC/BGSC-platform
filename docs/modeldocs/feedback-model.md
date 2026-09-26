@@ -4,7 +4,6 @@
 **Collections:** `feedback_tickets`, `feedback_throttle`
 **Spec refs:** §4.1 `FeedbackTicket`, §5.12 Feedback & Contact Us (categories, severity, anonymous toggle, attachments, auto-reply with ticket ID, Submitted → Under Review → Resolved → Closed)
 **MVP plan refs:** Week 4 Sunday BE-2 — feedback submission endpoint, contact-us form endpoint, categorization, email notification.
-**Service plan:** `docs/be2-feedback-bracket-plan.md`
 
 ---
 
@@ -59,7 +58,7 @@ triage screen asks for it.
 | `is_anonymous` / `reporter` | Spec §5.12's toggle, enforced as an invariant: `reporter` is null **exactly when** `is_anonymous`. A signed-out submitter is anonymous by construction, whatever the flag says |
 | `contact_email` | Required when anonymous — otherwise the receipt has nowhere to go. For an attributed ticket it defaults to the account's address |
 | `severity` | The reporter's claim, and staff re-triage it (`PATCH /:ticket_no/severity`). A reporter's "critical" is a wish |
-| `attachments` | URLs, never uploads (plan D7) — and refused unless they are `http(s)` or an `/uploads` path, the same rule `announcement.schemas.ts` applies to `media_url` |
+| `attachments` | URLs, never uploads — and refused unless they are `http(s)` or an `/uploads` path, the same rule `announcement.schemas.ts` applies to `media_url` |
 | `status_history` | The shared `StatusHistorySchema`, as registrations and challenge participations use |
 
 ### 2.2 Invariants
@@ -90,7 +89,7 @@ person believed it. So on that path:
 | `{ status: 1, severity: 1, created_at: -1 }` | the staff inbox, filtered by status and severity |
 | `{ 'reporter.user_id': 1, created_at: -1 }` | "my tickets" |
 | `{ kind: 1, category: 1, created_at: -1 }` | the inbox filters |
-| `{ event_id: 1, created_at: -1 }` sparse | complaints about one event |
+| `{ event_id: 1, created_at: -1 }` | complaints about one event (declared `sparse`, which excludes nothing: `event_id` is stored as `null`, not omitted) |
 
 ---
 
@@ -118,7 +117,11 @@ Emitted:
 ```
 FeedbackSubmitted      { ticket_id, ticket_no, kind, category, severity, subject }
 FeedbackStatusChanged  { ticket_id, ticket_no, from, to }
+FeedbackResponded      { ticket_id, ticket_no, reporter_user_id, responded_at }   // attributed tickets only
 ```
+
+`responded_at` is the ISO timestamp the reply was stored with (`response.at`). Notification keys its
+dedupe on it; reading `response.at` at consume time let two quick replies collapse into one notice.
 
 `FeedbackSubmitted` exists so staff can be told in-app without this service learning who staff are —
 the Notification Service already knows how to fan out to a role floor (`notification-model.md §4`).
@@ -127,7 +130,9 @@ Consumed:
 
 ```
 UserProfileUpdated { user_id, changed_fields }  → rename the reporter snapshot
-UserDeleted        { user_id }                  → erase it (relationships.md §4.1)
+UserDeleted        { user_id }                  → erase it (relationships.md §4.1) and null contact_email (the account's own address);
+                                                  only while the account is deleted NOW — a late copy after UserRestored is a no-op
+UserRestored       { user_id }                  → re-snapshot with deleted: false; refill contact_email from users where it was nulled
 ```
 
 An anonymous ticket has no reporter, so it has nothing to rename and nothing to erase — which is
@@ -139,8 +144,8 @@ the one case where these consumers do nothing, and the point of the toggle.
 
 | Deferred | Why / upgrade path |
 |---|---|
-| Real email | There is no SMTP provider anywhere in this repo; `mailer.ts` is dev-console + prod stub, the same shape as `auth-service`'s. When a provider lands, one module replaces two (plan D5) |
-| Attachment upload | Media Service, BE-1's Week 4 Saturday task (plan D7) |
-| Contact directory, FAQ (Spec §5.12) | Not in the plan's bullets; the directory is a PII policy decision for the spec owner (plan D6) |
+| Real email | There is no SMTP provider anywhere in this repo; `mailer.ts` is dev-console + prod stub, the same shape as `auth-service`'s. When a provider lands, one module replaces two |
+| Attachment upload | Media Service, BE-1's Week 4 Saturday task |
+| Contact directory, FAQ (Spec §5.12) | Not in the MVP plan's bullets; the directory is a PII policy decision for the spec owner |
 | Assignment / ownership of a ticket | Spec does not model a triage queue beyond status. `status_history` records who moved it |
 | Reporter-visible threading | One `response` field, not a conversation. A second exchange is an email reply today |

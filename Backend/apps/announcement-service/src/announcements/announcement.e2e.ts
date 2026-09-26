@@ -21,7 +21,9 @@ import {
     subscribe,
 } from '@bgsc/shared';
 
-const TEST_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_e2e$2');
+// Its own scratch DB: the shared `bgsc_e2e` was also user-service's, so the two e2e runs dropped
+// each other's fixtures when they overlapped.
+const TEST_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_e2e_announcement$2');
 
 let server: Server;
 let base: string;
@@ -254,7 +256,16 @@ async function main(): Promise<void> {
         });
         assert.strictEqual(past.status, 422);
         assert.strictEqual(past.body.error, 'scheduled_for_must_be_future');
-        console.log('✓ past scheduled_for → 422');
+        // `z.coerce.date()` read `true` as 1 ms past the epoch and a number as a timestamp.
+        for (const bad of [true, 1_900_000_000_000, '2030-01-01T10:00']) {
+            const r = await call('POST', `/announcements/${forSched.body._id}/publish`, {
+                as: coordTok,
+                body: { scheduled_for: bad },
+            });
+            assert.strictEqual(r.status, 422, `scheduled_for ${JSON.stringify(bad)} is not a zoned ISO date`);
+            assert.strictEqual(r.body.error, 'validation_failed');
+        }
+        console.log('✓ past scheduled_for → 422, and only a zoned ISO timestamp is a date');
 
         // ---- 10. unschedule writes audit + nulls scheduled_for --------------
         console.log('10. Unschedule...');
@@ -269,7 +280,7 @@ async function main(): Promise<void> {
         assert.strictEqual(unsched.body.scheduled_for, null, 'scheduled_for was nulled');
 
         const afterUnsched = await Announcement.findById(forSched.body._id);
-        // The §4.2 invariant trap: if scheduled_for were left set, every later save would throw.
+        // The invariant trap: if scheduled_for were left set, every later save would throw.
         afterUnsched!.title = 'Edited after unschedule';
         await afterUnsched!.save();
         const auditUnsched = await AuditLog.countDocuments({
@@ -451,6 +462,9 @@ async function main(): Promise<void> {
         // Read still works — revoke does not block reads.
         const stillReads = await call('GET', `/announcements/${toPublish.body._id}`);
         assert.strictEqual(stillReads.status, 200, 'reads still work for suspended user');
+        // Read state is the caller's own document and needs no live-user lookup: requireAuth only.
+        const ownRead = await call('POST', `/announcements/${toPublish.body._id}/read`, { as: coordTok });
+        assert.strictEqual(ownRead.status, 204, 'marking read is not a privileged write');
         console.log('✓ suspended user 401 on write, 200 on read');
 
         // ---- 18. the composer bypass never crosses the rank gate ------------
@@ -504,7 +518,7 @@ async function main(): Promise<void> {
         assert.strictEqual(demoted.status, 403, 'the live role is ranked, not the token claim');
         console.log('✓ demoted user with a core token → 403');
 
-        // ---- 21. the delivery writeback (Week 4 broadcast, plan D7) ----------
+        // ---- 21. the delivery writeback from the broadcast ----------
         console.log('21. Internal delivery writeback...');
         const pub = await call('POST', '/announcements', {
             as: founderTok,
@@ -517,8 +531,8 @@ async function main(): Promise<void> {
         assert.strictEqual(published.status, 200, `publish failed: ${JSON.stringify(published.body)}`);
 
         const deliveryBody = {
-            whatsapp: [{ category: 'bgec', group_id: 'dest-1', status: 'sent', message_id: 'wamid.1' }],
-            push: { status: 'skipped', sent_count: null },
+            whatsapp: [{ category: 'bgec', group_id: '••••st-1', status: 'sent', message_id: 'wamid.1', revision: 2 }],
+            push: { status: 'skipped', sent_count: null, revision: 1 },
         };
 
         assert.strictEqual(
@@ -555,14 +569,27 @@ async function main(): Promise<void> {
         // A second writeback for the same category updates in place: the composer must never see
         // the same tag twice, and a retried writeback is the normal case, not an error.
         const again = await call('PATCH', `/internal/announcements/${pubId}/delivery`, {
-            body: { whatsapp: [{ category: 'bgec', group_id: 'dest-1', status: 'failed', error: 'http 500' }] },
+            body: {
+                whatsapp: [{ category: 'bgec', group_id: '••••st-1', status: 'failed', error: 'http 500', revision: 3 }],
+            },
             service: true,
         });
         assert.strictEqual(again.body.delivery.whatsapp.per_category.length, 1, 'still one row');
         assert.strictEqual(again.body.delivery.whatsapp.per_category[0].status, 'failed', 'updated in place');
 
+        // Out of order: the sweep's older snapshot arrives after the newer one. It must not put the
+        // composer's view back in time.
+        const staleReceipt = await call('PATCH', `/internal/announcements/${pubId}/delivery`, {
+            body: { whatsapp: [{ category: 'bgec', group_id: '••••st-1', status: 'pending', revision: 1 }] },
+            service: true,
+        });
+        const kept = staleReceipt.body.delivery.whatsapp.per_category[0];
+        assert.strictEqual(staleReceipt.status, 200, 'a stale receipt is accepted, not an error');
+        assert.strictEqual(kept.status, 'failed', 'but changes nothing');
+        assert.strictEqual(kept.revision, 3, 'the newest revision stays');
+
         const wrongCategory = await call('PATCH', `/internal/announcements/${pubId}/delivery`, {
-            body: { whatsapp: [{ category: 'deuce', group_id: 'x', status: 'sent' }] },
+            body: { whatsapp: [{ category: 'deuce', group_id: 'x', status: 'sent', revision: 1 }] },
             service: true,
         });
         assert.strictEqual(wrongCategory.status, 422, 'a category not on the announcement is a 422');

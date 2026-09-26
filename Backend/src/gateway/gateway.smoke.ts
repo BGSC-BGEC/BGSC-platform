@@ -117,11 +117,18 @@ async function main(): Promise<void> {
     check('GET /bracketsfoo', await status('GET', '/bracketsfoo', auth), 404);
     check('GET /nope', await status('GET', '/nope', auth), 404);
 
-    console.log('\n-- uploads reach the service that stores them, not the unbuilt media service --');
-    // 404 = the service answered and the file is absent. 503 would mean it went to media.
+    console.log('\n-- every upload is served by media-service from the one shared upload root --');
+    // 404 = media-service answered and the file is absent; a 502/503 would mean nothing serves it.
     check('GET /uploads/avatars/<missing>', await status('GET', '/uploads/avatars/nope.png'), 404);
     check('GET /uploads/registrations/<missing>', await status('GET', '/uploads/registrations/nope.pdf'), 404);
-    check('GET /uploads/<anything else> -> media', await status('GET', '/uploads/other/x.png'), 503);
+    check('GET /uploads/events/<missing>', await status('GET', '/uploads/events/nope.png'), 404);
+
+    console.log('\n-- the routing table is operator information --');
+    check('GET /gateway/services anonymous', await status('GET', '/gateway/services'), 401);
+    check('GET /gateway/services as core', await status('GET', '/gateway/services', auth), 403);
+    check('GET /gateway/services as coordinator', await status('GET', '/gateway/services', {
+        authorization: `Bearer ${token('coordinator')}`,
+    }), 200);
 
     console.log('\n-- forged gateway identity headers are stripped before proxying --');
     check(
@@ -141,6 +148,8 @@ async function main(): Promise<void> {
     let last = 0;
     for (let i = 0; i < 7; i++) last = await status('POST', '/account/reactivate');
     check('7x POST /account/reactivate is throttled', last, 429);
+    // Express matches case-insensitively and ignores a trailing slash; the limiter must too.
+    check('POST /Account/Reactivate/ shares the bucket', await status('POST', '/Account/Reactivate/'), 429);
 
     if (failures.length > 0) {
         console.error(`\ngateway smoke: ${failures.length} failed:\n  - ${failures.join('\n  - ')}`);
