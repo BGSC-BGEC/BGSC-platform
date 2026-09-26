@@ -44,7 +44,7 @@ async function main(): Promise<void> {
         section('normalization keeps a valid request out of the model hook');
 
         // The schema default fills proof_types with ['url','text'] while requires_proof is false,
-        // which the model hook (Challenge.ts:173) throws about as a plain Error -> 500.
+        // which the model hook (Challenge.ts) throws about as a plain Error -> 500.
         const noProof = await catalog.createChallenge(
             challengeInput({ submission: { requires_proof: false, max_files: 0, auto_approve: false } }) as never,
             actor
@@ -216,6 +216,8 @@ async function main(): Promise<void> {
             accepted_at: new Date(),
             review: { reviewer_user_id: admin._id, decision: 'approved', reason: null, reviewed_at: new Date() },
         });
+        // What the service's approval always does alongside the row: the delete guard reads this.
+        await Challenge.updateOne({ _id: priced._id }, { $inc: { 'counts.approved': 1 } });
 
         await refuses(409, 'challenge_has_participations', () =>
             catalog.updateChallenge(priced._id, { award_points: 30 } as never, actor)
@@ -223,6 +225,10 @@ async function main(): Promise<void> {
         pass('repricing is refused once a participation snapshotted the old amount');
 
         await refuses(409, 'challenge_has_approved_participations', () => catalog.softDelete(priced._id, actor));
+        // An approval whose reply was lost gave its reservation back: the row stands, the count is 0.
+        await Challenge.updateOne({ _id: priced._id }, { $set: { 'counts.approved': 0 } });
+        await refuses(409, 'challenge_has_approved_participations', () => catalog.softDelete(priced._id, actor));
+        await Challenge.updateOne({ _id: priced._id }, { $set: { 'counts.approved': 1 } });
         pass('deleting is refused while an approved participation stands — the ledger references it');
 
         // Same-value patch must not trip the participation guard: it changes nothing.

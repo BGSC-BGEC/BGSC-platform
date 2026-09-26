@@ -96,7 +96,7 @@ draft ──publish now──> published ──(expires_at)──> archived ─�
 | create draft | Core+ (Spec §6.4 "Core with permission" — no per-user permission field exists on `users`, so it collapses to the role gate) | — | — |
 | draft → published | same | `categories.length ≥ 1`; if `'teams'` then author role ≥ core; sets `published_at = now`, `expires_at = +4mo`, derives `audience.min_role`, sets `delivery.*.requested = true` (Spec §6.4: WhatsApp auto-sends on publish) | `AnnouncementPublished` |
 | draft / scheduled → scheduled | same | `scheduled_for > now`; from `scheduled` it is a reschedule | `AnnouncementScheduled` |
-| scheduled → published | scheduler | — | `AnnouncementPublished` |
+| scheduled → published | scheduler | — ; `pinned_until` is capped at the new `expires_at` (the pin was checked against `scheduled_for`, and a later publish at a clamped month end can expire earlier) | `AnnouncementPublished` |
 | published → archived | scheduler | `now ≥ expires_at` | none — one `updateMany`, nothing consumes it before Week 4 |
 | edit published / scheduled | Core+ | title/body/media/priority/tags/pinned_until; `categories` and `audience` frozen once out of `draft` (WhatsApp fan-out keys off them) | `AnnouncementUpdated` |
 | delete | Coordinator+ | soft (`deleted_at`). A deleted draft/scheduled item never gets `expires_at`, so the scheduler hard-purges it 1 year after `deleted_at` | `AnnouncementDeleted` |
@@ -106,6 +106,8 @@ draft ──publish now──> published ──(expires_at)──> archived ─�
 - `categories` non-empty, unique values
 - `status == 'scheduled'` ⇔ `scheduled_for != null && published_at == null`
 - `status ∈ {published, archived}` ⇒ `published_at != null && expires_at == published_at + 4 months`
+  — calendar months in UTC, the day clamped to the target month's last day (Oct 31 → Feb 28/29), so
+  the value is the same on every host and never earlier for a later publish in a different month
 - `status ∈ {draft, scheduled}` ⇒ `published_at == null && expires_at == null`
 - `pinned_until != null` ⇒ `pinned_until <= expires_at`
 - `'teams' ∈ categories` ⇒ `audience.min_role ∈ {core, coordinator}`
@@ -141,6 +143,8 @@ users.announcements = {
 - `last_seen_at` is a watermark (opening the tab / "read all" sets it); `read_ids` holds cards opened one at a time.
 - Unread count = `count({ status: 'published', published_at > last_seen_at, audience matches })` — one indexed count.
 - Per-card dot = `published_at > last_seen_at && _id ∉ read_ids`. Both halves, or "read all" clears the badge but leaves every dot lit.
+- `POST /announcements/:id/read` and `/read-all` take `requireAuth` only: they write the caller's own user document and nothing else, so there is no authority to re-check against the live user.
+- `GET /announcements/unread-count` answers `{ count }` — the same shape as `GET /notifications/unread-count`.
 
 ponytail: `read_ids` array capped at 200 on the user doc; 4-month retention means the active set is small. If per-announcement read analytics are ever needed, add `announcement_reads { announcement_id, user_id, read_at }`.
 
@@ -185,7 +189,7 @@ alone), `UserDeleted` (`anonymizedSnapshot('author.')`), `UserRestored` (re-snap
 `role_label` is never refreshed.
 
 One rule that belongs here rather than only in the broadcaster: **an announcement whose
-`audience.min_role` is above `user`, or which is scoped to an event, is never sent to a WhatsApp
+`audience.min_role` is above `guest`, or which is scoped to an event, is never sent to a WhatsApp
 group.** The `teams` tag raises `min_role` to `core` (§2.3), and a community group is a public
 destination — see `notification-model.md §4.1`.
 

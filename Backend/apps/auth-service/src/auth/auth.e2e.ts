@@ -12,8 +12,10 @@ import {
     subscribe,
 } from '@bgsc/shared';
 import jwt from 'jsonwebtoken';
-import { v4 as uuid } from 'uuid';
-import { AuthService, OTP_MAX_ATTEMPTS, sha256 } from './auth.service';
+import { randomUUID as uuid } from 'crypto';
+import { Server } from 'http';
+import { app } from '../index';
+import { AuthService, OTP_MAX_ATTEMPTS, REFRESH_REUSE_GRACE_MS, sha256 } from './auth.service';
 
 /**
  * Auth Service e2e: the account lifecycle this service owns.
@@ -31,6 +33,26 @@ const TEST_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_e2e_auth$2');
 
 const PASSWORD = 'Str0ng!Passw0rd';
 const events: DomainEvent[] = [];
+let server: Server | undefined;
+let base = '';
+
+/** One HTTP call to the real app; the success envelope is unwrapped, errors pass through as sent. */
+async function call(method: string, path: string, opts: { as?: string; body?: unknown; accept?: string } = {}) {
+    const headers: Record<string, string> = {};
+    if (opts.as) headers.authorization = `Bearer ${opts.as}`;
+    if (opts.accept) headers.accept = opts.accept;
+    if (opts.body !== undefined) headers['content-type'] = 'application/json';
+    const r = await fetch(base + path, {
+        method, headers, redirect: 'manual', body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+    });
+    const text = await r.text();
+    const parsed = text && r.headers.get('content-type')?.includes('json') ? JSON.parse(text) : null;
+    const body = parsed?.success === true && 'data' in parsed ? parsed.data : parsed;
+    return { status: r.status, body, location: r.headers.get('location') };
+}
+
+const accessToken = (id: string, extra: Record<string, unknown> = {}) =>
+    jwt.sign({ sub: id, role: UserRole.USER, ...extra }, config.jwt.accessSecret);
 
 async function seedDeletedUser(daysAgo: number) {
     const id = uuid();
@@ -248,7 +270,7 @@ async function main() {
     const first = AuthService.generateTokenPair(rtUser);
     const olderDevice = AuthService.generateTokenPair(rtUser); // another sign-in = another family (sid)
     await User.updateOne({ _id: rtId }, { $set: AuthService.sessionSet(first) });
-    // C3: under bcrypt every refresh token of one user matched, because bcrypt reads 72 bytes.
+    // Under bcrypt every refresh token of one user matched, because bcrypt reads 72 bytes.
     await assert.rejects(() => AuthService.refreshToken(olderDevice.refresh_token), (e: any) => e.status === 401,
         'a different refresh token of the same user does not match the stored digest');
     assert.strictEqual(await hashOf(), sha256(first.refresh_token),
@@ -257,13 +279,27 @@ async function main() {
     const rotated = await AuthService.refreshToken(first.refresh_token);
     const sidOf = (t: string) => (jwt.decode(t) as { sid: string }).sid;
     assert.strictEqual(sidOf(rotated.refresh_token), sidOf(first.refresh_token), 'rotation keeps the session family');
+    // The stale-read race: a second tab refreshing with the same token reads the account AFTER the
+    // first tab's rotation. It loses, and that must not log the user out.
     await assert.rejects(() => AuthService.refreshToken(first.refresh_token), (e: any) => e.status === 401,
         'a rotated-out refresh token is dead');
-    assert.strictEqual(await hashOf(), null, 'and replaying one of the CURRENT family ends that session (theft signal)');
+    assert.strictEqual(await hashOf(), sha256(rotated.refresh_token),
+        'but the token rotated out moments ago is a late tab, not a theft: the session survives');
+    await User.updateOne({ _id: rtId }, { $set: { refresh_rotated_at: new Date(Date.now() - REFRESH_REUSE_GRACE_MS - 1000) } });
+    await assert.rejects(() => AuthService.refreshToken(first.refresh_token), (e: any) => e.status === 401);
+    assert.strictEqual(await hashOf(), null, 'past the grace, replaying one of the CURRENT family ends that session (theft signal)');
+
+    // Two rotations back is never a late tab, grace or not.
+    await User.updateOne({ _id: rtId }, { $set: AuthService.sessionSet(rotated) });
+    const r2 = await AuthService.refreshToken(rotated.refresh_token);
+    await AuthService.refreshToken(r2.refresh_token);
+    await assert.rejects(() => AuthService.refreshToken(rotated.refresh_token), (e: any) => e.status === 401);
+    assert.strictEqual(await hashOf(), null, 'an older token of the live family ends the session even inside the grace');
 
     await User.updateOne({ _id: rtId }, { $set: AuthService.sessionSet(rotated) });
     const racing = await Promise.all(Array.from({ length: 5 }, () => outcome(AuthService.refreshToken(rotated.refresh_token))));
     assert.strictEqual(racing.filter((r) => r === 'ok').length, 1, 'concurrent refreshes of one token: exactly one wins');
+    assert.ok(await hashOf(), 'and the losers do not end the session the winner just rotated');
 
     // ---- login discloses nothing without the password ------------------------
     const quietId = await seedDeletedUser(5);
@@ -427,13 +463,139 @@ async function main() {
     await assert.rejects(() => AuthService.exchangeLoginCode('d'.repeat(64)), (e: any) => e.status === 403,
         'a login code does not outlive a suspension');
 
+    // ---- past the restore window, a tombstone gives up its unique keys ------------
+    const expired = await seedDeletedUser(ACCOUNT_DELETION_GRACE_DAYS + 1);
+    const tomb = (await User.findById(expired))!;
+    const restorable = await seedDeletedUser(3);
+    await assert.rejects(
+        () => AuthService.register({ email: `${restorable}@authe2e.local`, username: 'fresh_one', password: PASSWORD, full_name: 'Too Soon' }),
+        (e: any) => e.status === 409, 'an account still inside its restore window keeps its email');
+    const reborn = await AuthService.register({ email: tomb.email, username: tomb.username, password: PASSWORD, full_name: 'Reborn' });
+    assert.notStrictEqual(reborn.user.id, expired, 'an expired account no longer blocks its email and username');
+    const released = (await User.findById(expired))!;
+    assert.deepStrictEqual([released.email, released.username], [`deleted+${expired}@invalid`, `deleted_${expired}`],
+        'the tombstone now holds keys nobody can register');
+    const releasedRow = await AuditLog.findOne({ target_id: expired, action: 'user.keys_released' });
+    assert.strictEqual((releasedRow!.previous_value as any).email, tomb.email, 'and the original email is kept in the audit row');
+
+    const phoneTomb = await seedDeletedUser(ACCOUNT_DELETION_GRACE_DAYS + 1);
+    const heldPhone = `+9166${Date.now().toString().slice(-8)}`;
+    await User.updateOne({ _id: phoneTomb }, { $set: { 'profile.phone_number': heldPhone, is_phone_verified: true } });
+    const claimant = await activeUser();
+    await AuthService.sendPhoneOtp(claimant, heldPhone);
+    await User.updateOne({ _id: claimant }, { $set: { phone_verification_otp_hash: await bcrypt.hash('444444', 4) } });
+    await AuthService.verifyPhoneOtp(claimant, heldPhone, '444444');
+    assert.strictEqual((await User.findById(claimant))!.is_phone_verified, true, 'an expired account gives up its verified phone');
+    assert.strictEqual((await User.findById(phoneTomb))!.is_phone_verified, false, 'and loses the badge');
+
+    const googleTomb = await seedDeletedUser(ACCOUNT_DELETION_GRACE_DAYS + 1);
+    await User.updateOne({ _id: googleTomb }, { $set: { google_id: 'g-tomb' } });
+    const newcomer = await AuthService.upsertGoogleUser({ id: 'g-tomb', email: `${googleTomb}@authe2e.local`, verified_email: true });
+    assert.notStrictEqual(newcomer._id, googleTomb, 'Google sign-in past the window starts a new account, not a 403');
+
+    // A Google-only account inside its window is told how to come back: it has no password to reactivate with.
+    const gDeleted = await seedDeletedUser(2);
+    await User.updateOne({ _id: gDeleted }, { $set: { google_id: 'g-deleted' }, $unset: { password_hash: 1 } });
+    await assert.rejects(() => AuthService.upsertGoogleUser({ id: 'g-deleted', email: `${gDeleted}@authe2e.local`, verified_email: true }),
+        (e: any) => e.status === 403 && e.code === 'account_deactivated' &&
+            e.details.restore_with === 'POST /auth/forgot-password, then POST /account/reactivate',
+        'a deleted Google-only account is pointed at a password reset before reactivation');
+
+    // Google-made usernames follow the register rules.
+    const reservedLocal = await AuthService.upsertGoogleUser({ id: 'g-me', email: 'me@authe2e.local', verified_email: true });
+    assert.strictEqual(reservedLocal.username, 'user_me', 'a reserved local part is never a username');
+    const longLocal = await AuthService.upsertGoogleUser({ id: 'g-long', email: `${'Long.Name-'.repeat(5)}@authe2e.local`, verified_email: true });
+    assert.ok(/^[a-z0-9_]{3,30}$/.test(longLocal.username), `a long local part is cut to the username rules: ${longLocal.username}`);
+
+    await httpChecks();
+
     await mongoose.connection.dropDatabase();
+    server?.close();
     await mongoose.disconnect().catch(() => {});
     console.log('auth service e2e: all assertions passed');
 }
 
+/** The same service over HTTP: routing, validation, middleware and response shapes. */
+async function httpChecks(): Promise<void> {
+    server = app.listen(0);
+    base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+
+    // ---- register validates what it stores ----------------------------------
+    const signup = { email: `  Http_${Date.now()}@AuthE2E.local `, username: `http_${Date.now()}`, password: PASSWORD, full_name: 'Http User' };
+    for (const [label, over, key] of [
+        ['a whitespace name', { full_name: '   ' }, 'full_name'],
+        ['a reserved username', { username: 'search' }, 'username'],
+        ['a password past 72 bytes', { password: 'p'.repeat(73) }, 'password'],
+        ['a bad email', { email: 'nope' }, 'email'],
+    ] as [string, Record<string, unknown>, string][]) {
+        const r = await call('POST', '/auth/register', { body: { ...signup, ...over } });
+        assert.strictEqual(r.status, 422, `register refuses ${label} with 422, not a 500`);
+        assert.ok(r.body.fields.some((f: any) => f.key === key), `and names the field: ${key}`);
+    }
+    const created = await call('POST', '/auth/register', { body: signup });
+    assert.strictEqual(created.status, 201, 'a valid sign-up is created');
+    assert.strictEqual(created.body.user.email, signup.email.trim().toLowerCase(), 'with the email trimmed and lowercased');
+    assert.strictEqual(created.body.user.is_phone_verified, false, 'and the phone badge in the user payload');
+
+    // ---- login's 403 for a pending deletion ---------------------------------
+    const pendingId = await seedDeletedUser(5);
+    const pending = await call('POST', '/auth/login', { body: { login: `${pendingId}@authe2e.local`, password: PASSWORD } });
+    assert.strictEqual(pending.status, 403, 'a deleted account in its window gets a 403');
+    assert.deepStrictEqual(Object.keys(pending.body).sort(), ['account_status', 'days_remaining', 'error', 'message'],
+        '403 body shape');
+    assert.strictEqual(pending.body.error, 'account_deactivated');
+    assert.strictEqual(pending.body.days_remaining, ACCOUNT_DELETION_GRACE_DAYS - 5);
+
+    // ---- two tabs refresh with one token --------------------------------------
+    const tabsId = await activeUser();
+    const login = await call('POST', '/auth/login', { body: { login: `${tabsId}@authe2e.local`, password: PASSWORD } });
+    assert.strictEqual(login.status, 200, 'login over HTTP');
+    const tabs = await Promise.all(Array.from({ length: 5 }, () =>
+        call('POST', '/auth/refresh', { body: { refresh_token: login.body.tokens.refresh_token } })));
+    const winners = tabs.filter((t) => t.status === 200);
+    assert.strictEqual(winners.length, 1, 'one of five same-token refreshes wins');
+    assert.ok(tabs.every((t) => t.status === 200 || t.status === 401), 'the rest are 401');
+    const after = await call('POST', '/auth/refresh', { body: { refresh_token: winners[0].body.tokens.refresh_token } });
+    assert.strictEqual(after.status, 200, "the losers did not log the user out: the winner's token still refreshes");
+
+    // ---- logout without a live access token ------------------------------------
+    const current = after.body.tokens.refresh_token;
+    const expired = accessToken(tabsId, { exp: Math.floor(Date.now() / 1000) - 60 });
+    assert.strictEqual((await call('POST', '/auth/logout')).status, 401, 'logout with no credentials at all is 401');
+    const out = await call('POST', '/auth/logout', { as: expired, body: { refresh_token: current } });
+    assert.strictEqual(out.status, 200, 'an expired access token plus the refresh token logs out');
+    assert.strictEqual((await call('POST', '/auth/refresh', { body: { refresh_token: current } })).status, 401,
+        'and that refresh token is dead afterwards');
+    assert.strictEqual((await call('POST', '/auth/logout', { body: { refresh_token: 'garbage' } })).status, 401,
+        'a forged refresh token logs nothing out');
+
+    // ---- phone routes need a live account, and store one spelling -----------------
+    const phoneUser = await activeUser();
+    const spaced = `+91 70 ${Date.now().toString().slice(-8)}`;
+    const sent = await call('POST', '/auth/phone/send-otp', { as: accessToken(phoneUser), body: { phone_number: spaced } });
+    assert.strictEqual(sent.status, 200, 'an active user can ask for an OTP');
+    assert.strictEqual((await User.findById(phoneUser).select('+pending_phone_number'))!.pending_phone_number,
+        spaced.replace(/\s/g, ''), 'the pending number is stored normalised');
+    await User.updateOne({ _id: phoneUser }, { $set: { status: UserStatus.SUSPENDED } });
+    for (const route of ['send-otp', 'verify-otp']) {
+        const r = await call('POST', `/auth/phone/${route}`, { as: accessToken(phoneUser), body: { phone_number: spaced, otp: '123456' } });
+        assert.strictEqual(r.status, 401, `a suspended account's still-valid token cannot use /auth/phone/${route}`);
+    }
+
+    // ---- forgot-password answers the same for known and unknown addresses ----------
+    const known = await call('POST', '/auth/forgot-password', { body: { email: `${phoneUser}@authe2e.local` } });
+    const unknown = await call('POST', '/auth/forgot-password', { body: { email: 'nobody@authe2e.local' } });
+    assert.deepStrictEqual([known.status, known.body], [unknown.status, unknown.body], 'no enumeration by response');
+
+    // ---- a browser's failed Google callback lands back in the app ---------------------
+    const cb = await call('GET', '/auth/google/callback', { accept: 'text/html' });
+    assert.strictEqual(cb.status, 302, 'a browser is redirected, not shown JSON');
+    assert.strictEqual(cb.location, `${config.frontendUrl}/auth/callback?error=missing_authorization_code`, 'with the reason');
+    assert.strictEqual((await call('GET', '/auth/google/callback')).status, 400, 'an API caller still gets the JSON error');
+}
+
 main().catch(async (err) => {
     console.error('auth service e2e failed:', err);
-    try { await mongoose.connection.dropDatabase(); await mongoose.disconnect(); } catch {}
+    try { server?.close(); await mongoose.connection.dropDatabase(); await mongoose.disconnect(); } catch {}
     process.exit(1);
 });

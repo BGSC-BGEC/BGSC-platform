@@ -1,8 +1,9 @@
 import { FormField } from '@bgsc/shared';
 import vm from 'vm';
 
+/** The canonical per-field error shape, the same as a zod issue's: `{ key, code, message }`. */
 export interface ValidationError {
-    field_key: string;
+    key: string;
     code: string;
     message: string;
 }
@@ -63,23 +64,22 @@ export function validateAnswers(
     for (const key of filesByKey.keys()) {
         const field = fieldMap.get(key);
         if (!field) {
-            errors.push({ field_key: key, code: 'unknown_field', message: `Field '${key}' not in form` });
+            errors.push({ key: key, code: 'unknown_field', message: `Field '${key}' not in form` });
         } else if (field.type !== 'file') {
-            errors.push({ field_key: key, code: 'not_a_file_field', message: `${field.label} does not take a file` });
+            errors.push({ key: key, code: 'not_a_file_field', message: `${field.label} does not take a file` });
         }
     }
 
     for (const key of Object.keys(answers)) {
         if (!fieldMap.has(key)) {
-            errors.push({ field_key: key, code: 'unknown_field', message: `Field '${key}' not in form` });
+            errors.push({ key: key, code: 'unknown_field', message: `Field '${key}' not in form` });
         }
     }
 
     /**
      * Every answer is coerced once, up front, and visibility reads the coerced value of a
      * *visible* controller. Reading raw answers let a hidden controller's answer still hide a
-     * required field, and let `"20"` fail a `visible_if … eq 20` that the stored `20` would pass
-     * (backend-audit-2026-09-26 H4).
+     * required field, and let `"20"` fail a `visible_if … eq 20` that the stored `20` would pass.
      */
     const coerced = new Map<string, Coerced>();
     const valueOf = (field: FormField): unknown => {
@@ -121,7 +121,7 @@ export function validateAnswers(
         if (field.admin_only && !context.isAdmin) {
             const supplied = !isEmptyValue(own(answers, field.key)) || (filesByKey.get(field.key)?.length ?? 0) > 0;
             if (supplied) {
-                errors.push({ field_key: field.key, code: 'admin_only', message: `${field.label} can only be set by admin` });
+                errors.push({ key: field.key, code: 'admin_only', message: `${field.label} can only be set by admin` });
             }
             delete answers[field.key];
             continue;
@@ -145,20 +145,20 @@ export function validateAnswers(
         const empty = c.kind === 'empty' || (field.type === 'checkbox' && c.kind === 'ok' && c.value === false);
         if (empty) {
             if (field.required) {
-                errors.push({ field_key: field.key, code: 'required', message: `${field.label} is required` });
+                errors.push({ key: field.key, code: 'required', message: `${field.label} is required` });
             }
             if (c.kind === 'empty') delete answers[field.key];
             else answers[field.key] = false;
             continue;
         }
         if (c.kind === 'error') {
-            errors.push({ field_key: field.key, code: c.code, message: `${field.label} ${c.message}` });
+            errors.push({ key: field.key, code: c.code, message: `${field.label} ${c.message}` });
             continue;
         }
 
         answers[field.key] = c.value;
         const ruleError = validateRules(field, c.value, budget);
-        if (ruleError) errors.push({ field_key: field.key, ...ruleError });
+        if (ruleError) errors.push({ key: field.key, ...ruleError });
     }
 
     return errors;
@@ -267,6 +267,24 @@ function evaluateVisibleIf(cond: NonNullable<FormField['visible_if']>, refValue:
     }
 }
 
+/**
+ * A `visible_if.value` as `evaluateVisibleIf` will compare it: coerced the way the controller's
+ * answers are (a date to its ISO instant, `"20"` to 20), each element for `in`. Stored raw, a
+ * date or number condition compared `===` against a coerced answer and never matched. Null when
+ * no answer to that controller could ever equal it — refused at form save.
+ */
+export function visibleIfValue(controller: FormField, op: string, value: unknown): { value: unknown } | null {
+    const one = (raw: unknown): { value: unknown } | null => {
+        if (controller.type === 'multi_select') return null; // an array answer never equals a value
+        const c = coerce(controller, raw);
+        return c.kind === 'ok' ? { value: c.value instanceof Date ? c.value.toISOString() : c.value } : null;
+    };
+    if (op !== 'in') return one(value);
+    if (!Array.isArray(value)) return null;
+    const each = value.map(one);
+    return each.every((c) => c) ? { value: each.map((c) => c!.value) } : null;
+}
+
 function dropFiles(files: SubmissionFile[], key: string): void {
     for (let i = files.length - 1; i >= 0; i--) if (files[i].field_key === key) files.splice(i, 1);
 }
@@ -280,26 +298,26 @@ function validateFiles(field: FormField, uploaded: SubmissionFile[]): Validation
 
     if (uploaded.length === 0) {
         if (field.required) {
-            errors.push({ field_key: field.key, code: 'required', message: `${field.label} is required` });
+            errors.push({ key: field.key, code: 'required', message: `${field.label} is required` });
         }
         return errors;
     }
 
     // One upload per field: nothing in the form model expresses a multi-file field.
     if (uploaded.length > 1) {
-        errors.push({ field_key: field.key, code: 'too_many', message: `${field.label} takes one file` });
+        errors.push({ key: field.key, code: 'too_many', message: `${field.label} takes one file` });
         return errors;
     }
 
     const [file] = uploaded;
     const accept = field.validation?.accept;
     if (accept && accept.length > 0 && !accept.includes(file.mime)) {
-        errors.push({ field_key: field.key, code: 'invalid_mime', message: `${field.label} must be one of: ${accept.join(', ')}` });
+        errors.push({ key: field.key, code: 'invalid_mime', message: `${field.label} must be one of: ${accept.join(', ')}` });
     }
 
     const maxBytes = field.validation?.max_size_bytes;
     if (maxBytes !== null && maxBytes !== undefined && file.size > maxBytes) {
-        errors.push({ field_key: field.key, code: 'too_large', message: `${field.label} must be at most ${maxBytes} bytes` });
+        errors.push({ key: field.key, code: 'too_large', message: `${field.label} must be at most ${maxBytes} bytes` });
     }
 
     return errors;
@@ -359,11 +377,11 @@ function validateRules(field: FormField, value: unknown, budget: RegexBudget): {
 
 /**
  * A pattern is written by an admin and run against every submitter's input, so one catastrophic
- * `^(a+)+$` froze the whole service for any user who typed 30 characters (audit H3). Four layers,
+ * `^(a+)+$` froze the whole service for any user who typed 30 characters. Four layers,
  * no new dependency:
  *  1. `patternProblem` refuses invalid, over-long and backreferencing patterns at form save, and
  *     any quantified group whose body is itself quantified or holds an alternation — `(a+)+`,
- *     `(a|a)+`, `(\w|\d)*` — the shapes that backtrack exponentially (audit #2);
+ *     `(a|a)+`, `(\w|\d)*` — the shapes that backtrack exponentially;
  *  2. `TEXT_CAP` bounds the input before any pattern sees it;
  *  3. each match runs under a vm timeout, which V8 honours inside the regex engine;
  *  4. one request shares a total budget (`REGEX_BUDGET_MS`) across ALL its fields, so a form with
@@ -371,7 +389,7 @@ function validateRules(field: FormField, value: unknown, budget: RegexBudget): {
  *     `pattern_timeout` field error (422), never the event loop.
  */
 export const PATTERN_MAX_LENGTH = 200;
-export const REGEX_BUDGET_MS = 100;
+const REGEX_BUDGET_MS = 100;
 const PER_MATCH_MS = 50;
 
 export interface RegexBudget {

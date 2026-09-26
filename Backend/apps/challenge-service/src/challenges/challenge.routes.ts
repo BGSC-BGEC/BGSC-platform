@@ -1,6 +1,5 @@
-import { UserRole, requireAuth, validate } from '@bgsc/shared';
+import { UserRole, requireActiveUser, requireAuth, validate } from '@bgsc/shared';
 import { Router } from 'express';
-import { requireActiveUser } from './actor';
 import * as c from './challenge.controller';
 import {
     AcceptBody,
@@ -18,7 +17,7 @@ import {
 } from './challenge.schemas';
 
 /**
- * Mounted at `/challenges` — the prefix the gateway forwards unchanged (routing.ts:30).
+ * Mounted at `/challenges` — the prefix the gateway forwards unchanged (gateway routing.ts).
  *
  * Spec §5.7 marks the whole Point System & Challenge page "Visibility: Authenticated only", so
  * there is one floor for the entire prefix and no `optionalAuth` anywhere in this service.

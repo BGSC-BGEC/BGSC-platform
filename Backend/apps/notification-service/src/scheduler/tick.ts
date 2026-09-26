@@ -24,6 +24,12 @@ export const TICK_INTERVAL_MS = 60_000;
 export const RECONCILE_WINDOW_MS = 24 * 3_600_000;
 
 /**
+ * How old a publish must be before reconciliation may call it lost. A fan-out still running in the
+ * consumer has fewer rows than channels too, and re-running it underneath itself is wasted work.
+ */
+export const RECONCILE_GRACE_MS = 2 * 60_000;
+
+/**
  * Work cap per sweep per tick. A bounded page rather than "drain the queue": the next tick is 60
  * seconds away, and a loop that re-queries until it finds nothing can spin forever on a row it
  * keeps failing to claim.
@@ -129,7 +135,10 @@ export async function reconcile(now: Date = new Date()): Promise<number> {
         status: 'published',
         deleted_at: null,
         'delivery.whatsapp.requested': true,
-        published_at: { $gte: new Date(now.getTime() - RECONCILE_WINDOW_MS) },
+        published_at: {
+            $gte: new Date(now.getTime() - RECONCILE_WINDOW_MS),
+            $lte: new Date(now.getTime() - RECONCILE_GRACE_MS),
+        },
     })
         .sort({ published_at: -1 })
         .select('_id categories')
@@ -187,14 +196,30 @@ export async function retractDeleted(now: Date = new Date()): Promise<number> {
  *
  * `writeback_at` is cleared by every `settle`, so this picks up both a writeback that failed and
  * one whose row has changed since — the composer's view catches up within a tick either way.
+ *
+ * Least recently tried first (never-tried rows sort first: null is lowest), and every row taken is
+ * stamped before its attempt. Unsorted, the bounded page could be the same fifty rows every tick —
+ * ones whose writeback keeps answering `retry` — and the rows behind them never got a turn.
+ *
+ * ponytail: the sort is in memory over the `writeback_at: null` set, which is small unless the
+ * Announcement Service is down. Index `{ writeback_at: 1, writeback_tried_at: 1 }` if it is not.
  */
-export async function retryWritebacks(): Promise<number> {
+export async function retryWritebacks(now: Date = new Date()): Promise<number> {
     const stale = await NotificationDispatch.find({ writeback_at: null })
+        .sort({ writeback_tried_at: 1, _id: 1 })
         .select('source')
         .limit(SWEEP_LIMIT)
-        .lean<Pick<INotificationDispatch, 'source'>[]>();
+        .lean<Pick<INotificationDispatch, '_id' | 'source'>[]>();
+    if (stale.length === 0) return 0;
 
     const announcementIds = [...new Set(stale.map((r) => r.source.id))];
+    // Every unstamped row of each announcement, not just the ones in the page: the writeback below
+    // reports all of them, so they have all had their turn.
+    await NotificationDispatch.updateMany(
+        { 'source.id': { $in: announcementIds }, writeback_at: null },
+        { $set: { writeback_tried_at: now } }
+    );
+
     let written = 0;
     for (const id of announcementIds) {
         try {
@@ -221,7 +246,7 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     const abandoned = await settleAbandoned(now);
     const reconciled = await reconcile(now);
     const retracted = await retractDeleted(now);
-    const written_back = await retryWritebacks();
+    const written_back = await retryWritebacks(now);
     return { retried, abandoned, reconciled, retracted, written_back };
 }
 

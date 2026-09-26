@@ -101,8 +101,8 @@ Run from `Backend/`. Anything with `--workspace` also works without it, from tha
 | `npm run e2e` | End-to-end suites across every workspace. Needs MongoDB. |
 | `npm test` | `selfcheck` then `e2e`. |
 | `npm run smoke` | Gateway checks against a **running** stack. See below. |
+| `npm run live-check` | Starts the whole stack on the host against a throwaway `bgsc_live` DB, calls every route through the gateway (auth refusals, 422 shapes, no 5xx) and runs the cross-service journeys (registration → seat → attendance → points → leaderboard, auction, challenges, notifications, media, brackets, deletion). ~3 min; needs compose `mongodb` + `redis`; report in `scripts/live-check/.run/report.txt`. |
 | `npm run seed:founder` | One-time bootstrap: promotes the registered, active account `FOUNDER_EMAIL` to founder (audited; re-running for the same account is a no-op). Refuses an unknown or inactive account, or when a different founder already exists. In the image: `docker compose run --rm -e FOUNDER_EMAIL=you@example.com user-service node apps/user-service/dist/scripts/seed-founder.js`. |
-| `npm run migrate:audit2` | Data migration for a database that was **not** wiped (dry run; `-- --apply` writes). See Upgrading. |
 | `npm run dev` | Gateway with reload. |
 | `npm start` | Gateway from `dist/` (what the container runs). |
 
@@ -123,7 +123,7 @@ needed), and each service's own rules. Model-backed checks use a scratch databas
 ```bash
 npm run selfcheck                                     # everything
 npm run selfcheck --workspace @bgsc/registration-service
-npx tsx apps/registration-service/src/selfcheck/teams.selfcheck.ts   # one file
+npx ts-node apps/registration-service/src/selfcheck/teams.selfcheck.ts   # one file
 ```
 
 ### 2. `npm run e2e` — services over HTTP and across collections
@@ -219,10 +219,13 @@ Success, from every service:
 Failure, from every service:
 
 ```json
-{ "error": "code", "details": [] }
+{ "error": "code" }
+{ "error": "validation_failed", "fields": [{ "key": "email", "code": "invalid_format" }] }
 ```
 
-`details` appears only when there is something per-field to say. `/health` is deliberately
+A `422 validation_failed` always lists its per-field reasons under `fields`, whether zod or a
+service rule (the form engine, which adds a `message`) refused. Other refusals may carry `details` when there is more to
+say. `/health` is deliberately
 unwrapped, because orchestrators parse it directly. The envelope is applied once in
 `createServiceApp` — handlers return bare payloads and never wrap by hand. A body counts as already
 wrapped only when `error` is a string or it is `{ success: true, data }`; a payload that merely
@@ -278,7 +281,8 @@ Miss step 3 and the gateway will keep answering 503 for a service that is runnin
   `end_at`); otherwise `409 attendance_window_closed`.
 - **Deferred to post-MVP / launch blockers.** Mail is a dev logger (verification, reset and feedback
   mail print to the log — a **launch blocker** until a provider is wired). WhatsApp broadcast and
-  push are deferred: the code stays, broadcast is disabled, in-app delivery is the channel.
+  push are deferred: the code stays, and WhatsApp stays off unless `WHATSAPP_*` is configured —
+  in-app delivery is the channel.
 - **Indexes** are built at boot for the models a service owns (`models:`) and awaited before it
   listens — and only there: `autoIndex` is off. A failure is fatal on purpose: `form_submissions`
   relies on a unique partial index to reject duplicate registrations, and serving without it means
@@ -288,21 +292,7 @@ Miss step 3 and the gateway will keep answering 503 for a service that is runnin
 
 ---
 
-## Upgrading a database that was not wiped
+## Databases created before the Sep 26 fixes
 
-`docs/backend-audit-2-2026-09-26.md` §6 is the checklist. In order:
-
-1. Stop every app container (a mixed old/new fleet drops each other's bus messages).
-2. Passwords: `changeUserPassword` inside Mongo if you set a new `MONGO_ROOT_PASSWORD` (it only
-   applies to a fresh volume); set `REDIS_PASSWORD`, `CORS_ORIGIN` and real secrets.
-3. `npm run migrate:audit2` — a dry run that prints every change and the database it targets — then
-   `npm run migrate:audit2 -- --apply` (add `--drop-orphan-indexes` to remove the three indexes
-   earlier schemas left behind). Inside the image:
-   `docker compose run --rm user-service node scripts/migrate-audit2.js --apply`. It dedupes what the
-   new unique indexes refuse (auto-albums per event, active lots, lot order, live Hall of Fame
-   entries), rewrites retired refund keys (reporting any spend refunded twice — fix those by hand),
-   moves ended `upcoming` events to `past`, backfills `seat_holders` and `form_uploads`, unsets
-   `counts.registrations_waitlisted`, lowercases tags, then builds the indexes. Running it twice is
-   a no-op.
-4. Copy files from the old per-service upload volumes into the `uploads` volume; `chown app:app`.
-5. Start everything at once. Everyone signs in again; old verify/reset links are void.
+There is no migration: no production data exists yet. Wipe a dev database that predates them
+(`docker compose down -v`, or drop `bgsc_dev`), then register and `seed:founder` again.

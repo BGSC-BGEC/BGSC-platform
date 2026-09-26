@@ -4,7 +4,7 @@ import { NextFunction, Request, Response } from 'express';
 /**
  * Per-user sliding window. A submit or edit runs the form's admin patterns, and a 422 costs the
  * caller nothing — so without a limit one user could spend the regex budget as fast as they can
- * send requests (audit #2 H: ReDoS).
+ * send requests.
  *
  * ponytail: in-process memory, so the limit is per instance (N instances allow N× the rate).
  * Move to Redis when the service runs more than a couple of replicas.

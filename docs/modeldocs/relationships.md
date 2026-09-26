@@ -261,7 +261,7 @@ Payloads are what the producer sends; a consumer's TypeScript type is only a cla
 | Event | Producer | Payload | Consumers |
 |---|---|---|---|
 | `UserProfileUpdated` | User | `{ user_id, changed_fields[] }` | the 8 snapshot owners: Registration, Event, Challenge, Leaderboard, Announcement, Feedback, Bracket, Media (gated on `full_name`/`avatar_url`) |
-| `UserDeleted` | User | `{ user_id, research_consent, restorable_until }` | same 8 → `anonymizedSnapshot()`; Challenge also unlinks Strava |
+| `UserDeleted` | User | `{ user_id, research_consent, restorable_until }` | same 8 → `anonymizedSnapshot()`; Challenge also unlinks Strava; Notification erases the player's name from captain auction cards |
 | `UserRestored` | Auth (`/account/reactivate`) | `{ user_id }` | same 8 → re-snapshot, `deleted: false` (was Leaderboard only) |
 | `UserRegistered/LoggedIn/EmailVerified/PhoneVerified` | Auth | — | — |
 | `UserRoleChanged`, `UserDisabled`, `UserEnabled` | User | `{ user_id, …, reason, *_by }` | — (status/role are read live per request by `requireActiveUser`, so nothing caches them) |
@@ -269,7 +269,7 @@ Payloads are what the producer sends; a consumer's TypeScript type is only a cla
 | `EventCompleted` | Event | `{ event_id, title }` | Leaderboard (final freeze + podium), Media (event album) |
 | `EventCancelled` | Event | `{ event_id, title }` | Points (refund investments, then reverse credits), Leaderboard (freeze, **keep** entries), Notification |
 | `CaptainApproved` | Registration (seat held), Event (admin add) | `{ event_id, user_id, approved_by, registration_id? }` | Event (`auction.captain_user_ids`, `ALL` events only) |
-| `AuctionStarted/Closed`, `BidPlaced`, `BidClosed`, `PlayerSold`, `PlayerUnsold` | Event | per event-model.md §9 | — |
+| `AuctionStarted/Closed`, `BidPlaced`, `BidClosed`, `PlayerSold`, `PlayerUnsold` | Event | per event-model.md §9 | Notification (`PlayerSold` only: player + captain cards) |
 | `RegistrationCreated` | Registration | `{ registration_id, owner, user_id, role }` — **every** entry into `confirmed` | Leaderboard (solo entry), Notification |
 | `RegistrationWaitlisted` | Registration | `{ registration_id, owner, user_id, position }` | Notification |
 | `RegistrationCancelled` | Registration | `{ registration_id, owner, user_id, previous_status, status, freed_seat, reason }` — every cancel and every exit from `confirmed` | Registration (`freed_seat` → promote next), Leaderboard (withdraw), Points (reverse credit), Event (idempotent release) |
@@ -278,19 +278,20 @@ Payloads are what the producer sends; a consumer's TypeScript type is only a cla
 | `FormPublished` | Registration | `{ form_id, owner, version }` | — |
 | `TeamLocked` | Registration | `{ team_id, owner, locked_by }` (`owner` new) | Leaderboard (team entry) |
 | `TeamDisbanded` | Registration | `{ team_id, owner, reason }` | Leaderboard (withdraw) |
-| `TeamCreated`, `TeamMemberAdded`, `TeamMemberRemoved`, `TeamInviteCreated` (new) | Registration | all carry `team_id, owner` | — |
-| `PointsEarned` / `PointsAdjusted` | Points (`ledger.ts`, computed name `EVENT_FOR[tx.type]`) | `{ transaction_id, user_id, amount, balance_after, … }` | Notification (`Earned` only); Leaderboard (both: global-board eviction) |
+| `TeamCreated`, `TeamMemberAdded`, `TeamMemberRemoved`, `TeamInviteCreated` (new) | Registration | all carry `team_id, owner` | Notification (`TeamInviteCreated` only) |
+| `PointsEarned` / `PointsAdjusted` | Points (`ledger.ts`, computed name `EVENT_FOR[tx.type]`) | `{ transaction_id, user_id, amount, balance_after, … }` | Notification (`Earned` only, not for source `challenge` — the approval card covers it); Leaderboard (both: global-board eviction) |
 | `PointsSpent/Refunded/Expired` | Points | same shape | — |
 | `LeaderboardFrozen` | Leaderboard | `{ event_id, reason: 'below_threshold' \| 'final', podium? }`, `podium: [{ place, participant: { type, id }, user_ids[] }]` on `final` | Points (`event.podium.<place>` per user) |
 | `LeaderboardUpdated`, `LeaderboardInvestmentMade` | Leaderboard | per leaderboard-model.md §9 | — |
 | `HallOfFameEntryCreated` | Leaderboard (new) | `{ entry_id, slug, category, honoree, source, participation_id }` | Challenge (`reward.hall_of_fame_entry_id`) |
 | `ChallengeCompleted` | Challenge | `{ participation_id, challenge_id, participant, member_user_ids[], award_points }` | Points, Notification |
-| `ChallengeRejected` | Challenge | `{ participation_id, challenge_id, reason }` | Notification |
+| `ChallengeRejected` | Challenge | `{ participation_id, challenge_id, reason, rejection_no }` | Notification (one card per `rejection_no`) |
 | `ChallengeLegendAchieved` | Challenge | `{ participation_id, challenge_id, member_user_ids[] }` | Leaderboard (Hall of Fame entry) |
 | `ChallengeCreated/Updated/Accepted/Submitted/Expired`, `Strava*` | Challenge | — | — |
 | `AnnouncementPublished/Updated/Deleted` | Announcement | per announcement-model.md §5 | Notification |
 | `AnnouncementScheduled/Delivered` | Announcement | — | — |
 | `FeedbackSubmitted` | Feedback | `{ ticket_id, ticket_no, kind, category, severity, subject }` | Notification (staff notice) |
+| `FeedbackResponded` | Feedback | `{ ticket_id, ticket_no, reporter_user_id, responded_at }` | Notification (keyed per `responded_at`) |
 | `FeedbackStatusChanged` | Feedback | — | — |
 | `BracketGenerated`, `MatchScheduled`, `MatchCompleted`, `BracketCompleted` | Bracket | per bracket-model.md | — (Leaderboard `stats` and Hall of Fame are the planned consumers) |
 | `MediaUploaded/Approved/Rejected/Deleted` | Media | per media-model.md §4 | — |

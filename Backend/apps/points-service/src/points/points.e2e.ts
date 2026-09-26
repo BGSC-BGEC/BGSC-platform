@@ -340,7 +340,8 @@ async function main(): Promise<void> {
     section('the internal debit');
     {
         const investorId = await seedUser(60);
-        const entryId = await seedEntry(await seedEvent('ongoing'), investorId);
+        const investEventId = await seedEvent('ongoing');
+        const entryId = await seedEntry(investEventId, investorId);
         const body = {
             user_id: investorId,
             amount: 40,
@@ -363,6 +364,14 @@ async function main(): Promise<void> {
         const replay = await call('POST', '/internal/points/spend', { body, service: true });
         assert.strictEqual(replay.body.transaction_id, ok.body.transaction_id, 'same request_id, same row');
         assert.strictEqual(replay.body.replayed, true);
+
+        // A retry of a spend that landed, arriving after the event moved on: still that spend. A
+        // refusal here would read to the caller as "nothing taken" and the points would be lost.
+        await Event.updateOne({ _id: investEventId }, { $set: { status: 'past' } });
+        const late = await call('POST', '/internal/points/spend', { body, service: true });
+        assert.strictEqual(late.status, 200, 'answered from the key, not the event status');
+        assert.strictEqual(late.body.transaction_id, ok.body.transaction_id);
+        await Event.updateOne({ _id: investEventId }, { $set: { status: 'ongoing' } });
 
         const broke = await call('POST', '/internal/points/spend', {
             service: true,
@@ -408,6 +417,9 @@ async function main(): Promise<void> {
         assert.strictEqual(refund.body.balance_after, 60, 'exactly what the spend took');
         const again = await call('POST', '/internal/points/refund', { service: true, body: refundBody });
         assert.strictEqual(again.body.replayed, true, 'one spend, one refund');
+        const totals = (await call('GET', `/points/users/${investorId}`, { as: core })).body;
+        assert.strictEqual(totals.lifetime_earned, 0, 'a refund is a spend given back, not earnings');
+        assert.strictEqual(totals.lifetime_spent, 0, 'and it nets the spend out');
         const respend = await call('POST', '/internal/points/spend', { service: true, body });
         assert.strictEqual(respend.status, 409, 'a refunded spend is not replayed as a live debit');
         assert.strictEqual(respend.body.error, 'request_voided');

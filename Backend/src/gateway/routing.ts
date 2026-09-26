@@ -72,13 +72,6 @@ export const LIVE_SERVICES = new Set([
 export const startsWithSegment = (path: string, prefix: string) =>
     path === prefix || path.startsWith(prefix + '/') || path.startsWith(prefix + '?');
 
-export function resolveService(path: string): { key: string; route: Route } | null {
-    for (const [key, route] of Object.entries(ROUTES)) {
-        if (route.prefixes.some((p) => startsWithSegment(path, p))) return { key, route };
-    }
-    return null;
-}
-
 /**
  * Auth endpoints that get the strict limit (Spec §11.1: 5 attempts / 15 min). Anything
  * brute-forceable or that sends mail/SMS belongs here, not just login — a reset-password endpoint in
@@ -90,7 +83,7 @@ export function resolveService(path: string): { key: string; route: Route } | nu
  *  - SEND paths trigger an email or SMS and answer 200 whatever the outcome (anti-enumeration), so
  *    every call counts, or the limit never bites.
  *
- * Audit Sep 26: the list named two routes that do not exist (`/auth/resend-otp`, `/auth/totp/verify`)
+ * The list named two routes that do not exist (`/auth/resend-otp`, `/auth/totp/verify`)
  * and missed the three that do.
  */
 export const CREDENTIAL_ATTEMPT_PATHS = [
@@ -116,7 +109,7 @@ export const AUTH_ATTEMPT_PATHS = [...CREDENTIAL_ATTEMPT_PATHS, ...SEND_ATTEMPT_
 /**
  * The path as the downstream router will match it. Express routes case-insensitively and ignores a
  * trailing slash, so an exact compare let `POST /auth/Login` and `/auth/login/` reach the login
- * handler through the 100/min general bucket instead of this one (audit Sep 26).
+ * handler through the 100/min general bucket instead of this one.
  */
 export const normalizePath = (path: string) => path.toLowerCase().replace(/\/+$/, '') || '/';
 

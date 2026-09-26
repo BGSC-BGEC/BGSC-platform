@@ -11,14 +11,24 @@ import {
     ServiceError,
     User,
     UserRole,
+    idempotencyKey,
     normalize,
     rawScore,
     resetBus,
     subscribe,
 } from '@bgsc/shared';
+import { createServer } from 'http';
 import { v4 as uuid } from 'uuid';
 import * as svc from '../leaderboard/leaderboard.service';
-import { closeRedis } from '../leaderboard/redis';
+import {
+    cacheGlobalLeaderboard,
+    closeRedis,
+    evictGlobalLeaderboards,
+    getCachedGlobalLeaderboard,
+    getRedisClient,
+    globalCacheGeneration,
+} from '../leaderboard/redis';
+import { InvestPointsSchema, QueryGlobalLeaderboardSchema } from '../leaderboard/leaderboard.schemas';
 import { handlers } from '../events/consumers';
 import {
     closeScratchDb,
@@ -220,9 +230,9 @@ async function main(): Promise<void> {
     }
 
     /*  *
-     * 3. Points investment eligibility, cap enforcement, and OCC version locking
+     * 3. Points investment eligibility, cap enforcement, and concurrent investments
      *  */
-    section('3. Points investment eligibility, cap enforcement, and OCC version locking');
+    section('3. Points investment eligibility, cap enforcement, and concurrent investments');
     {
         await resetCollections();
         const user = await seedUser(500, UserRole.USER, 'Investor User');
@@ -251,13 +261,10 @@ async function main(): Promise<void> {
             'investment from non-participant'
         );
 
-        // 3.2 Investment below 10 rejected
-        await refuses(
-            svc.investPoints(event._id, { id: user._id }, 5),
-            400,
-            'minimum_investment_not_met',
-            'investment below minimum 10 points'
-        );
+        // 3.2 Investment below 10 rejected (by the body schema, the one place the floor lives)
+        assert.strictEqual(InvestPointsSchema.safeParse({ amount: 5 }).success, false);
+        assert.strictEqual(InvestPointsSchema.safeParse({ amount: 10 }).success, true);
+        pass('investment below minimum 10 points -> 422 by schema');
 
         // 3.3 Event with disabled investments rejected
         const eventNoInvest = await seedEvent({ investment_enabled: false, status: 'ongoing' });
@@ -295,8 +302,7 @@ async function main(): Promise<void> {
             'investment exceeding event investment cap'
         );
 
-        // 3.7 OCC version locking under concurrency
-        // Seed an entry and simulate 3 concurrent investments of 10 points
+        // 3.7 Concurrent investments: the `$inc` is atomic, so none is lost.
         const occEvent = await seedEvent({
             min_participants: 1,
             investment_enabled: true,
@@ -322,8 +328,7 @@ async function main(): Promise<void> {
             'participant.id': occUser._id,
         });
         assert.strictEqual(finalOccEntry?.invested_points, 30);
-        assert.strictEqual(finalOccEntry?.version, 3);
-        pass('concurrent investments succeed without lost updates via OCC version retry');
+        pass('concurrent investments succeed without lost updates');
 
         // 3.8 The cap sits in the $inc filter: two investments that each fit alone cannot both land.
         const capUser = await seedUser(200, UserRole.USER, 'Cap Racer');
@@ -394,7 +399,8 @@ async function main(): Promise<void> {
         await svc.settleByRefund(offEntry._id, retryId, offline._id);
         assert.strictEqual((await User.findById(offline._id))?.points_balance, 90, 'an applied request is never refunded');
 
-        // A pending request of an investor deleted since: Points' 404 is final, not retried forever.
+        // A pending request of an investor deleted since: kept while the account can still be restored
+        // (the refund is owed to it then), dropped once the restore window has passed.
         const leaver = await seedUser(50, UserRole.USER, 'Leaver');
         const leaverEntry = await seedEntry(offEvent._id, { type: 'user', id: leaver._id, display_name: 'Leaver' });
         const leaverReq = uuid();
@@ -404,8 +410,44 @@ async function main(): Promise<void> {
         );
         await svc.debitPoints(leaver._id, 20, leaverEntry._id, leaverReq);
         await User.updateOne({ _id: leaver._id }, { $set: { deleted_at: new Date() } });
+        // Not even tried while parked, so weeks of such rows cannot fill the sweep's page.
+        assert.strictEqual(await svc.settlePendingInvestments(), 0, 'a restorable investor is skipped by the sweep');
+        assert.strictEqual((await LeaderboardEntry.findById(leaverEntry._id))?.pending_requests.length, 1, 'kept while restorable');
+        await User.updateOne({ _id: leaver._id }, { $set: { deleted_at: new Date(Date.now() - 60 * 86_400_000) } });
         await svc.settlePendingInvestments();
-        assert.strictEqual((await LeaderboardEntry.findById(leaverEntry._id))?.pending_requests.length, 0, "a deleted investor's request is dropped");
+        assert.strictEqual((await LeaderboardEntry.findById(leaverEntry._id))?.pending_requests.length, 0, 'dropped past the restore window');
+
+        // A retry that Points refuses after a first attempt whose outcome is unknown: the first may
+        // have landed, so the refusal is not "nothing taken".
+        let hits = 0;
+        const flaky = createServer((_req, res) => {
+            hits++;
+            res.writeHead(hits === 1 ? 502 : 409, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: hits === 1 ? 'bad_gateway' : 'event_not_ongoing' }));
+        }).listen(0);
+        await new Promise((r) => flaky.once('listening', r));
+        usePointsUrl(`http://127.0.0.1:${(flaky.address() as { port: number }).port}`);
+        try {
+            await assert.rejects(svc.debitPoints(offline._id, 10, offEntry._id, uuid()), svc.PointsOutcomeUnknown);
+        } finally {
+            usePointsUrl(realUrl);
+            flaky.close();
+        }
+        assert.strictEqual(hits, 2, 'retried once');
+        pass('a refusal after an unknown first attempt stays unknown');
+
+        // Retries of a request already in flight answer 409 and spend no rate-limit quota.
+        const busyId = uuid();
+        await LeaderboardEntry.updateOne(
+            { _id: offEntry._id },
+            { $push: { pending_requests: { request_id: busyId, user_id: offline._id, amount: 10, at: new Date(), settle: 'apply' } } }
+        );
+        for (let i = 0; i < 6; i++) {
+            await refuses(svc.investPoints(offEvent._id, { id: offline._id }, 10, busyId), 409, 'investment_in_flight', `in-flight retry ${i + 1}`);
+        }
+        await LeaderboardEntry.updateOne({ _id: offEntry._id }, { $pull: { pending_requests: { request_id: busyId } } });
+        const fresh = await svc.investPoints(offEvent._id, { id: offline._id }, 10);
+        assert.strictEqual(fresh.replayed, false, 'a new request still has its quota');
 
         // The board closes between the debit and the $inc: the investment is undone and refunded.
         svc.investHooks.afterDebit = async () => {
@@ -416,9 +458,21 @@ async function main(): Promise<void> {
         } finally {
             svc.investHooks.afterDebit = async () => undefined;
         }
-        assert.strictEqual((await LeaderboardEntry.findById(offEntry._id))?.invested_points, 10, 'undone');
-        assert.strictEqual((await User.findById(offline._id))?.points_balance, 90, 'and refunded');
+        assert.strictEqual((await LeaderboardEntry.findById(offEntry._id))?.invested_points, 20, 'not applied');
+        assert.strictEqual((await User.findById(offline._id))?.points_balance, 80, 'and refunded');
         pass('an unreachable Points Service fails closed');
+
+        // An investment racing the final: either the final counts it and it stands, or the board was
+        // closed first and it is refunded — never counted by the final and then refunded.
+        const racer = await seedUser(100, UserRole.USER, 'Final Racer');
+        const raceEvent = await seedEvent({ min_participants: 1, status: 'ongoing' });
+        const raceEntry = await seedEntry(raceEvent._id, { type: 'user', id: racer._id, display_name: 'Final Racer' });
+        await Promise.allSettled([svc.investPoints(raceEvent._id, { id: racer._id }, 30), svc.finalizeEvent(raceEvent._id)]);
+        const final = await LeaderboardSnapshot.findOne({ event_id: raceEvent._id, reason: 'final' });
+        const invested = (await LeaderboardEntry.findById(raceEntry._id))!.invested_points;
+        assert.strictEqual(final?.ranks[0]?.final_score, invested, 'the final shows exactly what stands');
+        assert.strictEqual((await User.findById(racer._id))?.points_balance, 100 - invested, 'and the user paid exactly that');
+        pass('an investment and the final agree');
     }
 
     /*  *
@@ -632,6 +686,21 @@ async function main(): Promise<void> {
         const tied = week.standings.filter((s) => s.points === 25).map((s) => s.user_id);
         assert.deepStrictEqual(tied, [tieA._id, tieB._id].sort().reverse(), 'ties by user id descending, as ZREVRANGE');
         pass('reversals are netted out; ties order like the Redis cache');
+
+        // A board aggregated before an eviction is not cached after it.
+        if (await getRedisClient()) {
+            const before = globalCacheGeneration();
+            await evictGlobalLeaderboards();
+            await cacheGlobalLeaderboard('all', 'all', 'all', [{ user_id: u1._id, total_points: 1 }], before);
+            assert.strictEqual(await getCachedGlobalLeaderboard('all', 'all', 'all', 0, 10), null, 'stale write skipped');
+            await cacheGlobalLeaderboard('all', 'all', 'all', [{ user_id: u1._id, total_points: 1 }], globalCacheGeneration());
+            assert.strictEqual((await getCachedGlobalLeaderboard('all', 'all', 'all', 0, 10))?.total, 1, 'a current write lands');
+            await evictGlobalLeaderboards();
+            pass('the global cache refuses a write that predates an eviction');
+        }
+        assert.strictEqual(QueryGlobalLeaderboardSchema.safeParse({ domain: 'dev' }).success, true, 'challenge domain dev');
+        assert.strictEqual(QueryGlobalLeaderboardSchema.safeParse({ domain: 'fitness' }).success, true, 'event domain fitness');
+        pass('the global domain filter takes every event and challenge domain');
     }
 
     /*  *
@@ -776,7 +845,7 @@ async function main(): Promise<void> {
         pass('RegistrationCancelled marks participant eliminated mid-event');
 
         // 6.8 Eliminated participant ranks after active participants even with higher raw score
-        const raceEvent = await seedEvent({ status: 'ongoing', min_participants: 2 });
+        const raceEvent = await seedEvent({ status: 'ongoing', min_participants: 1 });
         const activeRunner = await seedEntry(raceEvent._id, {
             type: 'user',
             id: 'runner-1',
@@ -856,7 +925,7 @@ async function main(): Promise<void> {
         pass('Hall of Fame writes and invest run requireActiveUser');
     }
 
-    section('8. Audit #2: finals, replay, revival, snapshots, public reads');
+    section('8. Finals, replay, revival, snapshots, public reads');
     {
         await resetCollections();
         const frozen: DomainEvent[] = [];
@@ -880,8 +949,25 @@ async function main(): Promise<void> {
         const replay = await replayFinals();
         assert.deepStrictEqual(replay, { finalized: 1, republished: 1 });
         assert.ok(await LeaderboardSnapshot.exists({ event_id: missed._id, reason: 'final' }));
+        // Once Points holds every podium row, a final is not announced again.
+        for (const e of [done, missed]) {
+            await PointTransaction.create({
+                user_id: p1._id,
+                amount: 30,
+                type: 'earn',
+                source: 'event',
+                reason: 'event.podium.1',
+                reference: { type: 'event', id: e._id },
+                idempotency_key: idempotencyKey.eventPodium(e._id, p1._id),
+                balance_after: 30,
+                actor: { type: 'system', user_id: null },
+            });
+        }
+        const published = frozen.length;
+        assert.deepStrictEqual(await replayFinals(), { finalized: 0, republished: 0 });
+        assert.strictEqual(frozen.length, published, 'nothing re-announced for a paid podium');
         resetBus();
-        pass('finals publish once; the replay sweep finalizes and re-announces');
+        pass('finals publish once; the replay sweep finalizes, and re-announces only an unpaid podium');
 
         // EventCancelled's freeze is serialized behind a queued recompute: the freeze is the last word.
         const racing = await seedEvent({ min_participants: 1 });
@@ -939,6 +1025,65 @@ async function main(): Promise<void> {
         const global = await svc.getGlobalLeaderboard({ period: 'week', domain: 'all', limit: 10, page: 1 });
         assert.strictEqual(global.standings.find((r) => r.user_id === ghost._id)?.display_name, DELETED_DISPLAY_NAME);
         pass('public reads are projected, drafts hidden, deleted users anonymous');
+    }
+
+    section('9. Threshold, tiebreaks and the membership replay');
+    {
+        await resetCollections();
+        // Eliminated entries do not count toward the threshold: a mid-event withdrawal below it freezes.
+        const admin = await seedUser(0, UserRole.CORE, 'Admin');
+        const [a, b] = await Promise.all([seedUser(0, UserRole.USER, 'Keeper'), seedUser(0, UserRole.USER, 'Leaver')]);
+        const event = await seedEvent({ status: 'ongoing', min_participants: 2 });
+        const regB = await seedRegistration(event._id, b._id);
+        await seedRegistration(event._id, a._id);
+        await svc.submitScores(event._id, { id: admin._id, role: 'coordinator' }, {
+            scores: [
+                { participant_id: a._id, raw: { goals: 2 } },
+                { participant_id: b._id, raw: { goals: 1 } },
+            ],
+        });
+        assert.strictEqual((await svc.getEventLeaderboard(event._id, { page: 1, limit: 10 })).threshold_met, true);
+        await FormSubmission.updateOne({ _id: regB }, { $set: { status: 'cancelled' } });
+        await handlers.onRegistrationCancelled({ registration_id: regB });
+        assert.strictEqual((await LeaderboardEntry.findOne({ 'participant.id': b._id }))?.stats.eliminated, true);
+        assert.strictEqual((await svc.getEventLeaderboard(event._id, { page: 1, limit: 10 })).threshold_met, false);
+        assert.strictEqual((await svc.getPodium(event._id)).threshold_met, false);
+        const latest = await LeaderboardSnapshot.findOne({ event_id: event._id }).sort({ taken_at: -1 });
+        assert.strictEqual(latest?.frozen, true, 'below the threshold again: frozen');
+        pass('eliminated entries do not count toward the threshold');
+
+        // Equal score and name: the entry id decides, the same way every time.
+        const twins = await seedEvent({ status: 'ongoing', min_participants: 1 });
+        const t1 = await seedEntry(twins._id, { type: 'user', id: uuid(), display_name: 'Twin' });
+        const t2 = await seedEntry(twins._id, { type: 'user', id: uuid(), display_name: 'Twin' });
+        await svc.recomputeEventRanks(twins._id, 'score_update');
+        const order = (await svc.getEventLeaderboard(twins._id, { page: 1, limit: 10 })).standings.map((e) => e._id);
+        assert.deepStrictEqual(order, [t1._id, t2._id].sort(), 'ties by _id');
+        assert.strictEqual((await LeaderboardEntry.findById(order[0]))?.rank, 1);
+        pass('ranks break ties on _id');
+
+        // Missed RegistrationCreated / TeamLocked / EventCancelled are re-derived by the sweep.
+        const { replayMembership } = await import('../leaderboard/sweeps');
+        const solo = await seedEvent({ status: 'upcoming', min_participants: 1 });
+        const joiner = await seedUser(0, UserRole.USER, 'Joiner');
+        await seedRegistration(solo._id, joiner._id);
+        const teamed = await seedEvent({ status: 'ongoing', min_participants: 1, is_teamed: true });
+        const teamId = await seedLockedTeam(teamed._id, 'Late Lockers', [joiner._id]);
+        const gone = await seedEvent({ status: 'ongoing', min_participants: 1 });
+        await seedEntry(gone._id, { type: 'user', id: joiner._id, display_name: 'Joiner' });
+        await svc.recomputeEventRanks(gone._id, 'score_update');
+        await Event.updateOne({ _id: gone._id }, { $set: { status: 'cancelled', cancelled_at: new Date() } });
+
+        assert.deepStrictEqual(await replayMembership(), { joined: 2, frozen: 1 });
+        assert.ok(await LeaderboardEntry.exists({ event_id: solo._id, 'participant.id': joiner._id }), 'solo entry built');
+        assert.ok(await LeaderboardEntry.exists({ event_id: teamed._id, 'participant.id': teamId }), 'team entry built');
+        assert.strictEqual((await LeaderboardSnapshot.findOne({ event_id: gone._id }).sort({ taken_at: -1 }))?.frozen, true, 'cancelled board frozen');
+        assert.deepStrictEqual(await replayMembership(), { joined: 0, frozen: 0 }, 'a second run finds nothing to do');
+        // Demoted then promoted again on the SAME registration, with the RegistrationCreated lost.
+        await LeaderboardEntry.updateOne({ event_id: solo._id, 'participant.id': joiner._id }, { $set: { 'stats.eliminated': true } });
+        assert.deepStrictEqual(await replayMembership(), { joined: 1, frozen: 0 }, 'an eliminated entry with a standing registration is revived');
+        assert.strictEqual((await LeaderboardEntry.findOne({ event_id: solo._id, 'participant.id': joiner._id }))?.stats.eliminated, false);
+        pass('the membership sweep re-derives missed joins and cancels, idempotently');
     }
 
     const hallOfFameSelfcheck = require('./hallOfFame.selfcheck');

@@ -69,8 +69,9 @@ Announcement model**, not redeclared: the same values are written back into
 | Index | Serves |
 |---|---|
 | `{ user_id: 1, created_at: -1, _id: -1 }` | the keyset feed — `_id` is in the index because it is in the sort |
-| `{ user_id: 1, read_at: 1, created_at: -1 }` | badge count and `?unread=true` |
+| `{ user_id: 1, read_at: 1, created_at: -1 }` | badge count (`GET /notifications/unread-count` → `{ count }`, the announcement badge's shape) and `?unread=true` |
 | `{ dedupe_key: 1, user_id: 1 }` **unique** | idempotency **and** retraction (`deleteMany({ dedupe_key })` needs the key as prefix) |
+| `{ 'data.player_user_id': 1 }` partial on `type: 'auction.sold.captain'` | `UserDeleted` erasing a player from captain cards (User Service replays recent deletions on a timer) |
 | `{ expires_at: 1 }` TTL `expireAfterSeconds: 0` | 90-day retention, no sweep job |
 
 ---
@@ -91,6 +92,7 @@ Announcement model**, not redeclared: the same values are written back into
   attempted_at: Date | null,
   next_attempt_at: Date | null,           // set iff status is retryable
   writeback_at: Date | null,              // when this outcome reached the announcement document
+  writeback_tried_at: Date | null,        // last writeback-sweep attempt; the sweep takes least recently tried first, so rows that keep failing rotate instead of holding its page
   revision: number,                       // bumped on every settle; sent with the writeback so an older receipt never overwrites a newer one
   created_at, updated_at
 }
@@ -116,7 +118,7 @@ Announcement model**, not redeclared: the same values are written back into
 | `{ source.type, source.id, channel, category }` **unique** | the claim: a colliding insert means someone already owns this send |
 | `{ status: 1, next_attempt_at: 1 }` | the retry sweep |
 | `{ writeback_at: 1, status: 1 }` | terminal rows whose outcome never reached the announcement |
-| `{ source.id: 1 }` | reconciliation counts an announcement's rows against its channels — *not* an `exists` test, because a dispatch that died half way through its categories has rows and is still unfinished |
+| `{ source.id: 1 }` | reconciliation counts an announcement's rows against its channels — *not* an `exists` test, because a dispatch that died half way through its categories has rows and is still unfinished. Only publishes older than 2 minutes are candidates, so a fan-out still running is not re-run underneath itself |
 
 ### 3.3 `notification_rate_slots` — Spec §9.4 "1 per tag per hour" (Sep 26)
 
@@ -157,7 +159,7 @@ people's actions.
 ### 4.1 The WhatsApp audience gate
 
 **A community group is a public destination.** An announcement with `audience.min_role` above
-`user`, or scoped to one event's registrants, is never sent to one — the dispatch row resolves
+`guest`, or scoped to one event's registrants, is never sent to one — the dispatch row resolves
 `skipped` with `audience_restricted` / `audience_scoped`.
 
 This is load-bearing: the model raises `audience.min_role` to `core` whenever the `teams` category
@@ -195,13 +197,24 @@ Consumed:
 AnnouncementPublished  { announcement_id, categories[], priority, author_user_id, audience }  → broadcast
 AnnouncementUpdated    { announcement_id, changed_fields[] }                                  → refresh card text
 AnnouncementDeleted    { announcement_id, deleted_by }                                        → retract inbox rows
-PointsEarned           { transaction_id, user_id, amount, balance_after, reason, source }      → "you earned X points"
+PointsEarned           { transaction_id, user_id, amount, balance_after, reason, source }      → "you earned X points" (not for source 'challenge')
 RegistrationCreated    { registration_id, owner, user_id, role }                             → "you're in" (every path, promotions included)
 RegistrationWaitlisted { registration_id, owner, user_id, position }
-ChallengeCompleted     { participation_id, challenge_id, member_user_ids[], award_points }
-ChallengeRejected      { participation_id, challenge_id, reason }
+ChallengeCompleted     { participation_id, challenge_id, member_user_ids[], award_points }   → "approved, X points on their way"
+ChallengeRejected      { participation_id, challenge_id, reason, rejection_no }              → keyed per rejection_no
 EventCancelled         { event_id }
+FeedbackSubmitted      { ticket_id, ticket_no, kind, category, subject }                     → staff notice (core+)
+FeedbackResponded      { ticket_id, ticket_no, reporter_user_id, responded_at }              → keyed per responded_at (falls back to the ticket's response.at)
+TeamInviteCreated      { team_id, owner, user_id, invited_by }
+PlayerSold             { event_id, lot_id, player_user_id, team_id, captain_user_id, amount } → player card + captain card
+UserDeleted            { user_id }                                                           → erase the player's name from captain auction cards
 ```
+
+A challenge approval is one card, not two: `ChallengeCompleted` already says what it pays, so the
+`PointsEarned` it causes (source `challenge`) is not carded. The captain's auction card is the only
+card that names someone other than its recipient; the name sits in its title alone, and
+`UserDeleted` (guarded on the user still being deleted) re-renders that title anonymously and sets a
+generic body (older cards named the player in the body too).
 
 **Retired (Sep 26):** `RegistrationConfirmed` — the Event Service's organiser promotion now goes through
 Registration Service and emits `RegistrationCreated` like every other entry into `confirmed`; one dedupe
@@ -213,9 +226,8 @@ by the **Announcement Service** when the writeback lands, because the owner of a
 the events about it (`relationships.md §6`). A retried writeback re-emits it; nothing consumes it
 today, and delivery is not a money path.
 
-`PointsEarned` joined the list on Sep 27. It had been deferred on the false premise that the Points
-Service published nothing; it publishes five events under computed names (`EVENT_FOR[tx.type]` in
-`ledger.ts`), exactly as `relationships.md §6` always said. The other four are deliberately not
+The Points Service publishes five events under computed names (`EVENT_FOR[tx.type]` in `ledger.ts`),
+as `relationships.md §6` says; only `PointsEarned` is consumed. The other four are deliberately not
 consumed: a spend is something the user just did, a refund and an adjustment explain themselves
 where they happen, and an expiry is not news to push at somebody. The dedupe key is the ledger row,
 which is already idempotent.

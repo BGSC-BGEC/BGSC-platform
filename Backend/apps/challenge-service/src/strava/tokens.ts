@@ -94,7 +94,7 @@ interface TokenResponse {
 /**
  * The one refusal a client can act on: link Strava again. NEVER a 401 — on a BGSC route a 401 means
  * "your BGSC session is dead", and a client that refreshes or signs out on 401 would do exactly that
- * because Strava revoked a token (audit Sep 26).
+ * because Strava revoked a token.
  */
 export const reauthRequired = (): ServiceError => new ServiceError(409, 'strava_reauth_required');
 
@@ -139,7 +139,7 @@ export async function exchange(body: Record<string, string>): Promise<TokenRespo
  * from a JWT secret that changed) cannot be read by anyone ever again, so it is a reconnect, not a
  * 500 on every call.
  */
-export function openStored(sealed: string): string {
+function openStored(sealed: string): string {
     try {
         return open(sealed);
     } catch {

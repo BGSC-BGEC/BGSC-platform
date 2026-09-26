@@ -399,6 +399,69 @@ async function main(): Promise<void> {
         const ledgerView = await eventLedger(event_id, { limit: 10 });
         assert.strictEqual(ledgerView.podium_conflicts.length, 1, 'one conflict row, however often it is replayed');
         pass('an unpayable podium is surfaced to the admin, not lost');
+
+        // A paid winner who cancels afterwards: the replayed final is that payment, not a conflict.
+        await FormSubmission.updateMany({ 'owner.id': event_id, 'user.user_id': b._id }, { $set: { status: 'cancelled' } });
+        const replayed = { event_id, reason: 'final' as const, podium: [{ place: 2, participant: { type: 'user', id: b._id }, user_ids: [b._id] }] };
+        await handlers.payFinalPodium(replayed);
+        assert.strictEqual(await code(awardPodium({ user_id: b._id, event_id, place: 2 }, admin)), 'resolved', 'a replay of a paid place');
+        // A place the event pays nothing for is skipped, not a winner nobody paid.
+        await handlers.payFinalPodium({ event_id: free, reason: 'final', podium: [{ place: 1, participant: { type: 'user', id: c._id }, user_ids: [c._id] }] });
+        assert.strictEqual((await eventLedger(event_id, { limit: 10 })).podium_conflicts.length, 1, 'no new conflict for the paid winner');
+        assert.strictEqual((await eventLedger(free, { limit: 10 })).podium_conflicts.length, 0, 'a zero pool is not a conflict');
+        assert.strictEqual(await balanceOf(b._id), 20, 'and nothing paid twice');
+        pass('a replayed final answers from the key before re-checking; unpaid places are not conflicts');
+    }
+
+    section('a reversal takes back only what has not already expired');
+    {
+        const expireAll = (credit: { _id: string; user_id: string }, amount: number) =>
+            record({
+                user_id: credit.user_id,
+                amount: -amount,
+                type: 'expire',
+                source: 'event',
+                reason: 'event.participation',
+                reference: { type: 'transaction', id: credit._id },
+                idempotency_key: idempotencyKey.expire(credit._id),
+                actor: { type: 'system', user_id: null },
+            });
+        const fund = (user_id: string) =>
+            record({
+                user_id,
+                amount: 100,
+                type: 'adjust',
+                source: 'admin',
+                reason: 'admin.manual',
+                reference: { type: null, id: null },
+                idempotency_key: idempotencyKey.adminAdjust(uuid()),
+                actor: { type: 'admin', user_id: uuid() },
+            });
+        const event_id = await seedEvent({ participation: 10 });
+
+        // 6 of the 10 expired: the reversal takes the other 4, not 10 again.
+        const user = await seedUser(0);
+        const reg = uuid();
+        await attended(event_id, user._id, reg);
+        const credit = (await PointTransaction.findOne({ idempotency_key: idempotencyKey.eventParticipation(reg) }))!;
+        await expireAll(credit, 6);
+        await fund(user._id); // so insolvency cannot mask a double take
+        await handlers.reverseParticipation({ registration_id: reg, reason: 'user_cancel' });
+        const reversal = await PointTransaction.findOne({ idempotency_key: idempotencyKey.participationReversal(credit._id) });
+        assert.strictEqual(reversal?.amount, -4, 'only the unexpired part');
+        assert.strictEqual(await balanceOf(user._id), 100, '10 earned, 6 expired, 4 reversed');
+
+        // All of it expired: nothing to take back, and no row.
+        const spent = await seedUser(0);
+        const reg2 = uuid();
+        await attended(event_id, spent._id, reg2);
+        const credit2 = (await PointTransaction.findOne({ idempotency_key: idempotencyKey.eventParticipation(reg2) }))!;
+        await expireAll(credit2, 10);
+        await fund(spent._id);
+        await handlers.reverseParticipation({ registration_id: reg2, reason: 'user_cancel' });
+        assert.strictEqual(await PointTransaction.exists({ idempotency_key: idempotencyKey.participationReversal(credit2._id) }), null);
+        assert.strictEqual(await balanceOf(spent._id), 100);
+        pass('expired points are not lost twice to a reversal');
     }
 
     section('a spend that lands after the cancel sweep is given back');

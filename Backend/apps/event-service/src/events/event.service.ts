@@ -11,6 +11,7 @@ import {
     User,
     userSnapshotOf,
     AuctionLot,
+    AuctionStatus,
     FormDefinition,
     DELETED_DISPLAY_NAME,
 } from '@bgsc/shared';
@@ -23,7 +24,7 @@ import { invalidateAuctionLiveCache } from '../auction/cache';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PRODUCER = 'event-service';
 
-export function isUuid(val: string): boolean {
+function isUuid(val: string): boolean {
     return UUID_RE.test(val);
 }
 
@@ -160,7 +161,7 @@ export async function createEvent(actor: Actor, input: CreateEventInput): Promis
         core_admins: Array.from(new Set([actor.id, ...input.core_admins])),
         leaderboard,
         auction,
-        counts: { registrations_confirmed: 0, teams: 0 },
+        counts: { registrations_confirmed: 0 },
         seat_holders: [],
     });
     await assertValid(event);
@@ -244,7 +245,7 @@ export async function listEvents(
     if (query.from) conds.push({ start_at: { $gte: query.from } });
     if (query.to) conds.push({ start_at: { $lte: query.to } });
 
-    const limit = Math.min(100, query.limit || 20);
+    const limit = query.limit;
 
     let sortObj: Record<string, 1 | -1> = { start_at: 1, _id: 1 };
     if (query.sort === 'date_desc') {
@@ -261,7 +262,7 @@ export async function listEvents(
     // Page-based pagination (for admin dashboard / list views)
     if (query.page) {
         const filter = { $and: conds };
-        const page = Math.max(1, query.page);
+        const page = query.page;
         const skip = (page - 1) * limit;
         const [events, total] = await Promise.all([
             Event.find(filter, projection).sort(sortObj).skip(skip).limit(limit),
@@ -303,7 +304,10 @@ export async function findByRef(ref: string, viewer?: Actor): Promise<IEvent> {
     return event;
 }
 
-/** Nested objects a PATCH merges into instead of replacing (C2: a partial object must not wipe siblings). */
+/** Nested objects a PATCH merges into instead of replacing: a partial object must not wipe siblings. */
+/** Auction states that let a league move to `past`. */
+const AUCTION_DONE: AuctionStatus[] = ['not_started', 'finished'];
+
 const NESTED_KEYS = new Set(['registration', 'teaming', 'points_pool', 'scoring', 'leaderboard']);
 
 export async function updateEvent(ref: string, actor: Actor, input: UpdateEventInput): Promise<IEvent> {
@@ -330,7 +334,7 @@ export async function updateEvent(ref: string, actor: Actor, input: UpdateEventI
 
     // Nested objects are written as dotted paths (`registration.max_participants`), never as a whole
     // subdocument rebuilt from this (possibly stale) read — two admins editing different fields of
-    // `registration` at once no longer undo each other (audit #2). A null subdocument (leaderboard)
+    // `registration` at once no longer undo each other. A null subdocument (leaderboard)
     // is set whole, since there is nothing to dot into.
     const set: Record<string, unknown> = {};
     const isPlainObject = (v: unknown): v is Record<string, unknown> =>
@@ -358,6 +362,12 @@ export async function updateEvent(ref: string, actor: Actor, input: UpdateEventI
         // Cancelling reverses points and drops boards (model doc §5: Coordinator+).
         if (status === 'cancelled' && !atLeast(actor.role, UserRole.COORDINATOR)) {
             throw new ServiceError(403, 'coordinator_required');
+        }
+        // A league completes only once its auction is over: a live or paused one would keep raising
+        // and settling lots on a past event, and its rosters never lock (that waits on AuctionClosed).
+        // One that never started has no lots in play.
+        if (status === 'past' && event.auction && !AUCTION_DONE.includes(event.auction.status)) {
+            throw new ServiceError(409, 'auction_not_finished');
         }
         set.status = status;
     }
@@ -395,8 +405,17 @@ export async function updateEvent(ref: string, actor: Actor, input: UpdateEventI
     if (set.status === 'past') set.completed_at = now;
     if (set.status === 'cancelled') set.cancelled_at = now;
 
+    // CAS on the version validated above, not just the status: two PATCHes that each pass validation
+    // against the same read could otherwise store a combination neither checked. The auction guard
+    // rides along, so an auction started after the read cannot slip under a completion.
     const updated = await Event.findOneAndUpdate(
-        { _id: event._id, status: from, deleted_at: null },
+        {
+            _id: event._id,
+            status: from,
+            updated_at: event.updated_at,
+            deleted_at: null,
+            ...(set.status === 'past' && event.auction ? { 'auction.status': { $in: AUCTION_DONE } } : {}),
+        },
         { $set: set },
         { returnDocument: 'after', projection: { seat_holders: 0 } }
     );
@@ -425,12 +444,10 @@ export async function updateEvent(ref: string, actor: Actor, input: UpdateEventI
     return updated;
 }
 
+/** Model doc §5: a draft is deleted by Core+ who administers it (the route floors at core). */
 export async function deleteEvent(ref: string, actor: Actor): Promise<{ deleted: boolean }> {
     const event = await findByRef(ref, actor);
-
-    if (!atLeast(actor.role, UserRole.COORDINATOR)) {
-        throw new ServiceError(403, 'forbidden');
-    }
+    assertEventAdmin(event, actor);
 
     // CAS: a publish racing the delete must not leave a soft-deleted published event.
     const deleted = await Event.findOneAndUpdate(
@@ -460,7 +477,7 @@ const SEAT_OPEN_STATUSES: EventStatus[] = ['upcoming', 'ongoing'];
  * `capacity_full` means "full, and this event waitlists"; `waitlist_disabled` means "full, no
  * waitlist" — the registration waitlists on the first and rejects on the second. The old code
  * answered `{ reserved: true, waitlisted: true }` for a waitlist place, which registration read as
- * a confirmed seat (audit Sep 26, C4).
+ * a confirmed seat.
  */
 export async function reserveSeat(eventId: string, registrationId: string): Promise<ReserveResult> {
     const event = await Event.findOne(
@@ -496,10 +513,13 @@ export async function reserveSeat(eventId: string, registrationId: string): Prom
     };
     if (max !== null) filter['counts.registrations_confirmed'] = { $lt: max };
 
-    const claimed = await Event.updateOne(filter, {
-        $addToSet: { seat_holders: registrationId },
-        $inc: { 'counts.registrations_confirmed': 1 },
-    });
+    // Seat, captain-pool and auction-status writes skip `updated_at`: it is the version an admin
+    // PATCH CASes on, and bookkeeping must not make PATCHes fail during a registration rush.
+    const claimed = await Event.updateOne(
+        filter,
+        { $addToSet: { seat_holders: registrationId }, $inc: { 'counts.registrations_confirmed': 1 } },
+        { timestamps: false }
+    );
     if (claimed.modifiedCount === 1) return { reserved: true };
 
     // Lost the CAS: already a holder (a concurrent retry), closed meanwhile, or full.
@@ -517,7 +537,8 @@ export async function reserveSeat(eventId: string, registrationId: string): Prom
 export async function releaseSeat(eventId: string, registrationId: string): Promise<{ released: boolean }> {
     const res = await Event.updateOne(
         { _id: eventId, seat_holders: registrationId },
-        { $pull: { seat_holders: registrationId }, $inc: { 'counts.registrations_confirmed': -1 } }
+        { $pull: { seat_holders: registrationId }, $inc: { 'counts.registrations_confirmed': -1 } },
+        { timestamps: false }
     );
     return { released: res.modifiedCount === 1 };
 }
@@ -583,7 +604,7 @@ export async function getEventEligibility(
     if (event.registration.opens_at && now < event.registration.opens_at) return no('not_yet_open');
     if (event.registration.closes_at && now > event.registration.closes_at) return no('registration_closed');
     if (isFull && !event.registration.waitlist_enabled) return no('capacity_full', 'full');
-    // No usable form, no way to register — never answer "eligible" for that (audit #2 H1).
+    // No usable form, no way to register — never answer "eligible" for that.
     if (!event.registration.form_id) return no('registration_form_unavailable');
     try {
         await assertEventForm(event._id, event.registration.form_id);
@@ -624,13 +645,12 @@ export async function getEventParticipants(ref: string, query: QueryParticipants
     if (query.team_id) filter['context.event.team_id'] = query.team_id;
     if (query.search?.trim()) filter['user.display_name'] = new RegExp(escapeRegex(query.search.trim()), 'i');
 
-    const page = Math.max(1, query.page || 1);
-    const limit = Math.min(100, query.limit || 20);
+    const { page, limit } = query;
     const skip = (page - 1) * limit;
 
     const [submissions, total] = await Promise.all([
         FormSubmission.find(filter, { user: 1, status: 1, context: 1, submitted_at: 1, waitlist_position: 1 })
-            .sort({ submitted_at: 1, created_at: 1 })
+            .sort({ submitted_at: 1, created_at: 1, _id: 1 })
             .skip(skip)
             .limit(limit)
             .lean(),
@@ -694,10 +714,22 @@ async function submissionCounts(eventId: string) {
     return c;
 }
 
+/**
+ * The same rule as the participant list: the public (and a demoted admin) gets the confirmed and
+ * waitlist counts; rejected, cancelled, attendance and role breakdowns are admin reads.
+ */
 export async function getEventParticipantStats(ref: string, viewer?: Actor) {
     const event = await findByRef(ref, viewer);
     const c = await submissionCounts(event._id);
     const max = event.registration.max_participants;
+    const capacity = {
+        max_participants: max,
+        is_full: max !== null && event.counts.registrations_confirmed >= max,
+        waitlist_enabled: event.registration.waitlist_enabled,
+    };
+    if (!hasAdminRead(event, viewer)) {
+        return { event_id: event._id, counts: { confirmed: c.confirmed, waitlisted: c.waitlisted }, capacity };
+    }
     return {
         event_id: event._id,
         counts: {
@@ -713,11 +745,7 @@ export async function getEventParticipantStats(ref: string, viewer?: Actor) {
             captain_count: c.captain,
             member_count: c.member,
         },
-        capacity: {
-            max_participants: max,
-            is_full: max !== null && event.counts.registrations_confirmed >= max,
-            waitlist_enabled: event.registration.waitlist_enabled,
-        },
+        capacity,
     };
 }
 
@@ -758,8 +786,10 @@ export async function promoteWaitlistedParticipant(ref: string, registrationId: 
     assertEventAdmin(event, actor);
     if (TERMINAL_STATUSES.includes(event.status)) throw new ServiceError(409, 'event_is_terminal');
 
-    const belongs = await FormSubmission.exists({ _id: registrationId, 'owner.type': 'event', 'owner.id': event._id });
-    if (!belongs) throw new ServiceError(404, 'registration_not_found');
+    const row = await FormSubmission.findOne({ _id: registrationId, 'owner.type': 'event', 'owner.id': event._id }, { 'user.user_id': 1 }).lean();
+    if (!row) throw new ServiceError(404, 'registration_not_found');
+    // Nobody promotes their own registration, as nobody approves it (Registration's admin override).
+    if (row.user.user_id === actor.id) throw new ServiceError(403, 'cannot_review_own_registration');
 
     try {
         return await promoteRegistration(registrationId, actor.id);
@@ -825,7 +855,7 @@ export async function getEventAttendance(ref: string, viewer: Actor) {
 
 function assertAuctionLeague(event: IEvent): void {
     // The invariant is "auction != null exactly when type == 'ALL'". Creating an auction block on any
-    // other type broke every later save of that event with a 500 (audit Sep 26, H25).
+    // other type broke every later save of that event with a 500.
     if (event.type !== 'ALL' || !event.auction) {
         throw new ServiceError(422, 'event_is_not_an_auction_league');
     }
@@ -841,7 +871,8 @@ export async function addEventCaptain(ref: string, userId: string, actor: Actor)
 
     const res = await Event.updateOne(
         { _id: event._id, type: 'ALL', 'auction.status': { $ne: 'finished' }, 'auction.captain_user_ids': { $ne: userId } },
-        { $addToSet: { 'auction.captain_user_ids': userId } }
+        { $addToSet: { 'auction.captain_user_ids': userId } },
+        { timestamps: false }
     );
     if (res.modifiedCount === 1) {
         invalidateAuctionLiveCache(event._id);
@@ -856,7 +887,7 @@ export async function removeEventCaptain(ref: string, userId: string, actor: Act
     assertAuctionLeague(event);
 
     // `$pull`, not a read-filter-save of the whole array, which lost a concurrent `$addToSet`.
-    await Event.updateOne({ _id: event._id }, { $pull: { 'auction.captain_user_ids': userId } });
+    await Event.updateOne({ _id: event._id }, { $pull: { 'auction.captain_user_ids': userId } }, { timestamps: false });
     invalidateAuctionLiveCache(event._id);
     return (await Event.findById(event._id, { seat_holders: 0 }))!;
 }
@@ -869,7 +900,7 @@ export async function listEventCaptains(ref: string, viewer?: Actor) {
     return {
         event_id: event._id,
         captain_user_ids: captainIds,
-        // A deleted account is shown as deleted, never by its real name (audit #2).
+        // A deleted account is shown as deleted, never by its real name.
         captains: users.map((u) =>
             u.deleted_at
                 ? { user_id: u._id, display_name: DELETED_DISPLAY_NAME, avatar_url: null, deleted: true }

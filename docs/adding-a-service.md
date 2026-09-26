@@ -356,9 +356,10 @@ router.get('/:id', optionalAuth, validate({ params: IdParams }), c.get);
   caller never sees a 403 (it confirms the endpoint exists).
 - `requireRole` ranks the token's role claim, which stays valid for up to 15 minutes after a
   suspension or demotion. On writes, rank the live user document instead —
-  `apps/announcement-service/src/announcements/actor.ts` (`requireActiveUser(floor)`) is the pattern.
-- `optionalAuth` on reads whose response differs for a signed-in viewer. The gateway also runs it
-  and never rejects; the service re-verifies, so it is correct with or without the gateway.
+  `requireActiveUser(floor)` from `@bgsc/shared`.
+- `optionalAuth` on reads whose response differs for a signed-in viewer. It never rejects: a
+  missing, expired or garbage token is a guest. The gateway also runs it; the service re-verifies,
+  so it is correct with or without the gateway.
 - Literal paths (`/heads`, `/me`, `/read-all`) are declared **before** `/:id`, or Express matches
   them as an id.
 - Handlers return bare objects. The envelope is added centrally. `204` for a write with nothing
@@ -471,7 +472,7 @@ scratch Mongo and hits routes over `fetch()` with signed JWTs. Pattern copied fr
 - scratch DB of its own: `const TEST_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_e2e_<name>$2')`.
   Never the shared `bgsc_e2e` (suites running side by side wipe each other) and never `bgsc_dev`.
 - `await mongoose.connect(TEST_DB); await mongoose.connection.dropDatabase(); await Model.syncIndexes();`
-  **Not optional since audit #2:** `autoIndex` is off, so a scratch DB has no unique indexes until
+  **Not optional:** `autoIndex` is off, so a scratch DB has no unique indexes until
   you build them — a test expecting a duplicate to be refused would pass it silently.
 - ephemeral port: `server = app.listen(0); base = http://127.0.0.1:${port}`. Never collides.
 - inline JWT: `const token = (id, role) => jwt.sign({sub:id, role}, config.jwt.accessSecret, {expiresIn:'5m'})`.

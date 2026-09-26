@@ -43,11 +43,12 @@ nothing here writes into another service's collection.
 | Field | Why |
 |---|---|
 | `participants` | A snapshot, like every other in this repo: a draw is the record of who was in it, not a live view of who still is. A team that disbands after the draw still played its fixtures |
-| `seeding` | `registration` is the default and the only deterministic one — arrival order, explicable to a participant. `manual` must list the field exactly once; anything else is refused |
+| `seeding` | `registration` is the default and the only deterministic one — arrival order, explicable to a participant. `manual` must list the field exactly once; anything else is refused. `seeds` sent with another seeding is ignored |
 | `event_id` unique | One bracket per event, enforced by the index rather than by a read-then-write, so a double-clicked Generate is a 409 and not two draws |
 | `format` | Only the two that are generated today. `double_elim` and `elim_after_n` are on the event model and not here |
 
-**Invariants:** at least two participants; ids unique; seeds exactly `1..n` with no gaps.
+**Invariants:** at least two participants; ids unique; seeds exactly `1..n` with no gaps. At most 256
+participants (422 `too_many_participants`): a round robin of 256 is already 32,640 fixtures.
 
 ---
 
@@ -139,14 +140,15 @@ so a double-clicked Save produces one result and one advance.
 
 | Rule | Why |
 |---|---|
-| core admin **of that event**, or coordinator+ | `event.service.ts:280` already gates attendance this way; scoring somebody else's tournament is not a smaller act |
+| core admin **of that event**, or coordinator+ | event-service already gates attendance this way; scoring somebody else's tournament is not a smaller act |
 | a draw is refused in single elimination | a knockout has to knock somebody out; round robin keeps draws, which is what its table is for |
 | core reports, coordinator corrects | Spec §5.15.2's admin override, and every correction is audited with the previous score |
 | a correction is refused once the **next** round has been played | this service cannot un-play a match, so it will not invalidate one |
 | the last result completes the bracket | a compare-and-swap from `active`, so `BracketCompleted` is emitted exactly once |
 
 Standings are **derived** on read, never stored: points 3-1-0 with goal difference for a
-round robin, furthest round reached for elimination. A bye is not a game played. When that stops
+round robin; for elimination, furthest round reached, then still standing before knocked out (the
+two finalists share a round), then seed. A bye is not a game played. When that stops
 being cheap, `leaderboard_entries.stats` already has the fields — and a service that owns them.
 
 ---
@@ -164,7 +166,8 @@ BracketCompleted  { event_id, bracket_id, format, participant_type, winner_id, w
 
 Consumed: the three user-snapshot events — and nothing else. A bracket is drawn when an organiser says
 so, not in reaction to an event. The exception is the display copy of the person behind a seed:
-`UserDeleted` erases the name off the draw and off every fixture (`anonymizedSnapshot`), while the
+`UserDeleted` erases the name off the draw and off every fixture (`anonymizedSnapshot`) — only if the
+account is still deleted when it arrives, so a late one after `UserRestored` is a no-op — while the
 seed, the id and the results stay exactly as they were (relationships.md §4.1); `UserProfileUpdated`
 (gated on `full_name`/`avatar_url`) and `UserRestored` (ungated, `deleted: false`) copy it back from
 `users`. The profile consumer was missing until Sep 26, so a renamed player kept the old name on

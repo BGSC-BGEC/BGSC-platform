@@ -1,6 +1,9 @@
 import { isUuid, UpdateProfileInput, UpdateSettingsInput, ListUsersInput } from './user.schemas';
+import { PII_MIN_ROLE } from './user.serializer';
 import {
     ACCOUNT_DELETION_GRACE_DAYS,
+    Event,
+    FormSubmission,
     IUser,
     User,
     UserRole,
@@ -8,6 +11,7 @@ import {
     publish,
     rankOf,
     recordAudit,
+    restorableUntil,
     ServiceError,
 } from '@bgsc/shared';
 
@@ -52,14 +56,14 @@ export async function findByRefIncludingDeleted(ref: string): Promise<IUser | nu
  * account suspended for abuse keeps write access for another quarter of an hour, which is exactly
  * the window that matters. The self routes already load the document, so the check is free.
  *
- * Reads and self-deletion stay allowed: a suspended user may see their own record and may still
- * exercise deletion.
+ * Reads stay allowed: a suspended user may still see their own record. Self-deletion does not —
+ * it goes through here too (see deleteMe).
  */
 export async function findActiveSelf(id: string): Promise<IUser> {
     const user = await findById(id);
     // Suspended, deleted or gone: the session is no longer a session. 401 with no reason, the same
     // answer requireActiveUser gives — `account_suspended` told the caller why.
-    if (!user || (user.status !== UserStatus.ACTIVE && user.status !== UserStatus.PENDING_VERIFICATION)) {
+    if (!user || user.status !== UserStatus.ACTIVE) {
         throw new ServiceError(401, 'unauthorized');
     }
     return user;
@@ -207,7 +211,8 @@ async function auditedTransition<T>(opts: {
 }
 
 /**
- * Self-service restore window. After this, only an admin can bring the account back.
+ * Self-service restore window. After it the account cannot be restored at all, and its unique keys
+ * (email, username, verified phone) go to the next sign-up that asks for them.
  *
  * Re-exported from @bgsc/shared rather than defined here: Auth Service reads the same number to
  * decide whether a deleted user may sign back in, and the two were 30 and 45. That gap meant days
@@ -253,10 +258,6 @@ export async function findSelfIncludingDeleted(id: string): Promise<IUser | null
     return User.findOne({ _id: id });
 }
 
-export function restorableUntil(deletedAt: Date): Date {
-    return new Date(deletedAt.getTime() + RESTORE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-}
-
 /**
  * Deletion hides the account. Nothing is destroyed and no purge job exists (Spec §11.2.1) —
  * the restore window governs self-service restore, not erasure. The gate that collects this
@@ -268,7 +269,7 @@ export async function softDelete(
     opts: { reason?: string | null; research_consent: boolean; ip?: string | null }
 ): Promise<{ deleted_at: Date; restorable_until: Date }> {
     const now = new Date();
-    const until = restorableUntil(now);
+    const until = restorableUntil({ deleted_at: now })!;
 
     await auditedTransition<IUser>({
         // Only the caller that flips deleted_at from null proceeds; the rest are already-deleted.
@@ -337,7 +338,7 @@ export async function softDelete(
 
 /**
  * An admin may act only on someone they strictly outrank. changeStatus guarded founders alone, so
- * a coordinator could suspend — or un-suspend — a peer coordinator (audit Sep 26). Founders are
+ * a coordinator could suspend — or un-suspend — a peer coordinator. Founders are
  * covered by the same rule: nobody outranks them.
  */
 function assertOutranks(actor: Actor, role: UserRole): void {
@@ -363,7 +364,8 @@ export async function changeRole(
     assertOutranks(actor, target.role);
     assertOutranks(actor, newRole);
     // Guard the other direction too: a coordinator must not be demoted by the assignable-role list.
-    if (target.role === UserRole.COORDINATOR || target.role === UserRole.FOUNDER) {
+    // (A founder target never gets here: nobody outranks one.)
+    if (target.role === UserRole.COORDINATOR) {
         throw new ServiceError(501, 'requires_2fa');
     }
     if (target.role === newRole) throw new ServiceError(409, 'no_change');
@@ -529,7 +531,7 @@ export async function listUsers(input: ListUsersInput): Promise<ListResult> {
 
     const created: Record<string, Date> = {};
     if (input.joined_after) created.$gte = input.joined_after;
-    if (input.joined_before) created.$lte = input.joined_before;
+    if (input.joined_before) created.$lt = input.joined_before; // exclusive; see ListUsersQuery
     if (Object.keys(created).length) filter.created_at = created;
 
     const conditions: Record<string, unknown>[] = [filter];
@@ -571,7 +573,7 @@ export async function listUsers(input: ListUsersInput): Promise<ListResult> {
  * username is public by design.
  */
 export async function searchUsers(q: string, limit: number): Promise<IUser[]> {
-    const filter = { ...alive, status: { $in: [UserStatus.ACTIVE, UserStatus.PENDING_VERIFICATION] } };
+    const filter = { ...alive, status: UserStatus.ACTIVE };
 
     let byText: IUser[] = [];
     try {
@@ -610,11 +612,8 @@ export type PiiScope = 'all' | 'none' | Set<string>;
 
 export async function piiScopeFor(viewer?: { id: string; role: UserRole }): Promise<PiiScope> {
     if (!viewer) return 'none';
-    if (viewer.role === UserRole.COORDINATOR || viewer.role === UserRole.FOUNDER) return 'all';
+    if (rankOf(viewer.role) >= rankOf(PII_MIN_ROLE)) return 'all';
     if (viewer.role !== UserRole.CORE) return 'none';
-
-    const { Event } = await import('@bgsc/shared');
-    const { FormSubmission } = await import('@bgsc/shared');
 
     // Every event this Core admin is assigned to, cancelled ones included — a cancelled event still
     // needs its participants contacted.
@@ -636,6 +635,3 @@ export function scopeAllows(scope: PiiScope, targetId: string): boolean {
     if (scope === 'none') return false;
     return scope.has(targetId);
 }
-
-/** Re-exported so callers importing the service do not need a second import. */
-export { ServiceError };

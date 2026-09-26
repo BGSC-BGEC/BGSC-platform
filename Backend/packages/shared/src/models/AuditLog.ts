@@ -80,7 +80,7 @@ AuditLogSchema.pre(
 );
 
 // The query hooks above never see a loaded row being re-saved, or a bulkWrite — both rewrote history
-// unchecked (audit Sep 26). Inserting a new row is the one write allowed.
+// unchecked. Inserting a new row is the one write allowed.
 AuditLogSchema.pre('save', function (this: IAuditLog) {
     if (!this.isNew) throw new Error('audit_logs is append-only: entries are never modified or removed');
 });

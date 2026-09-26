@@ -104,12 +104,19 @@ async function creditParticipation(p: AttendedPayload): Promise<void> {
 /**
  * A credit taken back is a negative `adjust`, never a `refund` — a refund is a spend given back
  * (points-model.md §4). The amount comes from the original row, so a rule edited in between cannot
- * leave the user up or down a few points.
+ * leave the user up or down a few points — less whatever of it already expired, which the expiry
+ * sweep has taken once (its row is negative). Fully expired: nothing is left to take back.
+ *
+ * ponytail: read-then-write against the expiry sweep, which checks for this reversal the same way;
+ * both landing in the same instant takes the expired part twice. Expiry is off by default.
  */
 async function reverseCredit(credit: IPointTransaction, why: string): Promise<void> {
+    const expired = await PointTransaction.findOne({ idempotency_key: idempotencyKey.expire(credit._id) }).select('amount');
+    const remaining = credit.amount + (expired?.amount ?? 0);
+    if (remaining <= 0) return;
     await record({
         user_id: credit.user_id,
-        amount: -credit.amount,
+        amount: -remaining,
         type: 'adjust',
         source: credit.source,
         reason: credit.reason,
@@ -220,7 +227,7 @@ async function creditChallenge(p: ChallengeCompletedPayload): Promise<void> {
     const resolved = await resolve('challenge.completed', p.award_points);
     if (!resolved) return;
 
-    // One row per member, solo or team (Challenge.ts:271). Sequential, not Promise.all: each row
+    // One row per member, solo or team. Sequential, not Promise.all: each row
     // moves the same collection and a failure on one member must not lose the others.
     for (const user_id of p.member_user_ids ?? []) {
         try {
@@ -255,6 +262,8 @@ interface FrozenPayload extends Record<string, unknown> {
  * Pays `event.podium.<place>` to every user the final standings name. Same function and key as the
  * admin route, so a manual award before or after this is a replay, never a second payment.
  */
+const BENIGN_PODIUM_SKIPS = new Set(['place_not_awarded', 'event_pays_no_podium', 'rule_disabled']);
+
 async function payFinalPodium(p: FrozenPayload): Promise<void> {
     if (p.reason !== 'final') return;
     for (const slot of p.podium ?? []) {
@@ -263,10 +272,11 @@ async function payFinalPodium(p: FrozenPayload): Promise<void> {
                 await payPodium({ event_id: p.event_id, place: slot.place, user_id }, { type: 'system' });
             } catch (err) {
                 const code = (err as { code?: string })?.code;
-                // place_not_awarded past the event's multipliers is expected. Anything else is a
-                // winner the standings named and nobody paid: said loudly, and kept where the
-                // admin's event ledger read shows it (once per event, place and user).
-                if (code === 'place_not_awarded') continue;
+                // A place the event does not pay (past its multipliers, a zero pool, the rule
+                // switched off) is expected. Anything else is a winner the standings named and
+                // nobody paid: said loudly, and kept where the admin's event ledger read shows it
+                // (once per event, place and user).
+                if (code && BENIGN_PODIUM_SKIPS.has(code)) continue;
                 console.error(`[points-service] PODIUM CONFLICT: place ${slot.place} for ${user_id} on event ${p.event_id}:`, err);
                 const seen = await AuditLog.exists({
                     action: 'points.podium_conflict',

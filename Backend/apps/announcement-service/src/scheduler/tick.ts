@@ -1,5 +1,5 @@
-import { ACTIVE_MONTHS, ARCHIVE_MONTHS, Announcement } from '@bgsc/shared';
-import { Actor, announcePublished, publishedSet } from '../announcements/announcement.service';
+import { ACTIVE_MONTHS, ARCHIVE_MONTHS, Announcement, addMonthsUTC } from '@bgsc/shared';
+import { Actor, announcePublished, publishedPipeline } from '../announcements/announcement.service';
 
 /**
  * The scheduler.
@@ -17,12 +17,6 @@ const SYSTEM: Actor = { id: null, ip: null };
 
 export const TICK_INTERVAL_MS = 60_000;
 
-function minusMonths(from: Date, months: number): Date {
-    const d = new Date(from);
-    d.setMonth(d.getMonth() - months);
-    return d;
-}
-
 /**
  * Claim and publish every announcement whose scheduled time has arrived.
  *
@@ -30,8 +24,9 @@ function minusMonths(from: Date, months: number): Date {
  * one wins each document, so `AnnouncementPublished` is emitted exactly once.
  *
  * It also means `pre('validate')` never runs — that hook is document middleware and does not fire
- * on query updates — which is why `publishedSet` writes `expires_at` itself. Using `.save()` instead
- * would run the hook but reintroduce the double-publish race.
+ * on query updates — which is why `publishedPipeline` writes `expires_at` itself and caps
+ * `pinned_until` to it. Using `.save()` instead would run the hook but reintroduce the
+ * double-publish race.
  */
 async function publishDue(now: Date): Promise<number> {
     let published = 0;
@@ -39,8 +34,8 @@ async function publishDue(now: Date): Promise<number> {
     for (;;) {
         const claimed = await Announcement.findOneAndUpdate(
             { status: 'scheduled', scheduled_for: { $lte: now }, deleted_at: null },
-            { $set: publishedSet(now) },
-            { returnDocument: 'after', sort: { scheduled_for: 1 } }
+            publishedPipeline(now),
+            { returnDocument: 'after', sort: { scheduled_for: 1 }, updatePipeline: true }
         );
         if (!claimed) break;
 
@@ -71,7 +66,7 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     // Spec §15.3: 1 year in total.
     const purged = await Announcement.deleteMany({
         status: 'archived',
-        expires_at: { $lte: minusMonths(now, ARCHIVE_MONTHS) },
+        expires_at: { $lte: addMonthsUTC(now, -ARCHIVE_MONTHS) },
     });
 
     // A soft-deleted draft or scheduled item never gets an expires_at, so the purge above never
@@ -79,7 +74,7 @@ export async function tick(now: Date = new Date()): Promise<TickResult> {
     // the delete. (A deleted *published* one still archives and purges on its expires_at.)
     const purgedDeleted = await Announcement.deleteMany({
         status: { $in: ['draft', 'scheduled'] },
-        deleted_at: { $lte: minusMonths(now, ACTIVE_MONTHS + ARCHIVE_MONTHS) },
+        deleted_at: { $lte: addMonthsUTC(now, -(ACTIVE_MONTHS + ARCHIVE_MONTHS)) },
     });
 
     return {

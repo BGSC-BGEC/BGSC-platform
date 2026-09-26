@@ -24,6 +24,15 @@ import { closeRedis, getRedisClient } from '../leaderboard/redis';
 
 const SCRATCH_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_selfcheck_leaderboard$2');
 
+// The cache and rate limits go to their own logical database: the suite wipes `lb:*`, and on the
+// shared dev Redis that was the dev services' cache and every user's investment quota. Set before
+// the first `getRedisClient()`, which reads it. Pub/sub (the bus) is not per-database.
+if (config.redisUrl) {
+    const url = new URL(config.redisUrl);
+    url.pathname = '/15';
+    (config as { redisUrl: string }).redisUrl = url.toString();
+}
+
 export async function openScratchDb(): Promise<void> {
     await mongoose.connect(SCRATCH_DB);
     await mongoose.connection.dropDatabase();
@@ -185,7 +194,6 @@ export async function seedEntry(
         raw_score?: number;
         normalized_score?: number;
         invested_points?: number;
-        version?: number;
     } = {}
 ): Promise<ILeaderboardEntry> {
     const raw = overrides.raw ?? {};
@@ -207,7 +215,6 @@ export async function seedEntry(
         normalized_score: normScore,
         invested_points: invPoints,
         final_score: normScore + invPoints,
-        version: overrides.version ?? 0,
     });
 }
 

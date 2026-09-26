@@ -117,7 +117,6 @@ FeedbackTicketSchema.pre('validate', function (this: IFeedbackTicket) {
     if (t.is_anonymous && !t.contact_email) return fail('an anonymous ticket requires contact_email');
 
     if (t.attachments.length > 5) return fail('at most 5 attachments');
-    return undefined as unknown as void;
 });
 
 // `ticket_no` already has its unique index from the field definition above — declaring it twice
@@ -127,7 +126,7 @@ FeedbackTicketSchema.pre('validate', function (this: IFeedbackTicket) {
  *
  * `{ status, severity, created_at }` could not serve it: the inbox filters on `status` and sorts on
  * `created_at`, and `severity` sitting between them breaks the sort prefix — `explain()` showed
- * `SORT <- FETCH <- IXSCAN` (audit, Sep 27). Two indexes, each matching a real query shape, and both
+ * `SORT <- FETCH <- IXSCAN`. Two indexes, each matching a real query shape, and both
  * carrying `_id` because the cursor sorts on `(created_at, _id)`.
  */
 FeedbackTicketSchema.index({ status: 1, created_at: -1, _id: -1 });

@@ -118,7 +118,6 @@ export interface IEvent extends Document<string> {
 
     counts: {
         registrations_confirmed: number;
-        teams: number;
     };
 
     /** Registration ids holding a confirmed seat. Makes reserve/release idempotent per registration. */
@@ -266,15 +265,16 @@ const EventSchema = new Schema<IEvent>(
 
         bracket: { type: Schema.Types.Mixed, default: null },
 
-        // Denormalized; owner service $incs these in the same write as the cause. Nightly recount repairs drift.
-        // `registrations_waitlisted` was dropped (audit Sep 26): three writers kept it with non-idempotent
-        // $incs and it drifted on every retry. The waitlist is counted from form_submissions instead.
+        // Denormalized; moved only together with `seat_holders` below. The event-service seat
+        // reconciliation sweep gives back seats whose registration no longer uses them.
+        // `registrations_waitlisted` was dropped: three writers kept it with non-idempotent $incs and it
+        // drifted on every retry. The waitlist is counted from form_submissions instead. `teams` was
+        // dropped too: nothing ever wrote it, so every payload said 0.
         counts: {
             registrations_confirmed: { type: Number, default: 0, min: 0 },
-            teams: { type: Number, default: 0, min: 0 },
         },
 
-        // Seat ledger behind `counts.registrations_confirmed` (reserve-seat contract, audit Sep 26): reserve
+        // Seat ledger behind `counts.registrations_confirmed` (reserve-seat contract): reserve
         // is `$addToSet` + `$inc` guarded by `seat_holders: { $ne: id }`, release is `$pull` + `$inc -1`
         // guarded by `seat_holders: id`, so a retried call cannot count a seat twice.
         // ponytail: embedded array, one uuid per seat — ~400k seats before the 16MB document cap. Move to
@@ -383,7 +383,7 @@ export const Event = model<IEvent>('Event', EventSchema, 'events');
 /**
  * `settling`: the hammer fell and the winner is being charged (on_block → settling → sold|unsold).
  * No bid lands on it and no other lot goes up until it finalizes; a settle that finds a lot here
- * replays the same keyed Registration calls (audit #2: a crash between "sold" and the charge left a
+ * replays the same keyed Registration calls (a crash between "sold" and the charge used to leave a
  * lot sold, uncharged and unseated for good).
  */
 export const LOT_STATUS = ['queued', 'on_block', 'settling', 'sold', 'unsold'] as const;

@@ -1,5 +1,6 @@
 import assert from 'assert';
 import {
+    AuditLog,
     Challenge,
     ChallengeParticipation,
     DomainEvent,
@@ -23,7 +24,7 @@ import { actorOf, challengeInput, closeScratchDb, openScratchDb, seedUser } from
 /**
  * The participation lifecycle, and the one event this service exists to produce.
  *
- * `ChallengeCompleted` is consumed by the Points Service (points consumers.ts:231) with a payload
+ * `ChallengeCompleted` is consumed by the Points Service (points-service consumers.ts) with a payload
  * type it pinned on Sep 19. The assertions below are written against THAT shape, not against this
  * service's convenience — if the producer drifts, this file goes red before the payout does.
  *
@@ -116,6 +117,13 @@ async function main(): Promise<void> {
         }
         pass('5 simultaneous accepts on a cap of 3: exactly 3 rows, counts.accepted === 3');
 
+        // A re-click by someone who got a seat, on a full challenge: the claim used to run first and
+        // answer `challenge_full`, which reads as "you are not in" to the one person who is.
+        const seated = crowd[results.findIndex((r) => r.status === 'fulfilled')];
+        await refuses(409, 'already_accepted', () => part.accept(capped._id, {}, actorOf(seated)));
+        assert.strictEqual((await Challenge.findById(capped._id))!.counts.accepted, 3);
+        pass('a repeat accept at the cap is already_accepted, not challenge_full');
+
         section('deadlines');
         const timed = await live({
             window: { opens_at: null, closes_at: null, submissions_close_at: null, time_limit_minutes: 60 },
@@ -151,6 +159,23 @@ async function main(): Promise<void> {
         await refuses(422, 'proof_url_invalid', () =>
             part.submit(pf._id, { proofs: [{ type: 'url', value: 'not-a-url', name: null }], notes: null } as never, actorOf(alice))
         );
+        await refuses(422, 'proof_type_not_accepted', () =>
+            part.submit(pf._id, { proofs: [{ type: 'text', value: 'trust me', name: null }], notes: null } as never, actorOf(alice))
+        );
+        {
+            const url = { type: 'url', value: 'https://example.com/p', name: null };
+            const one = await live({ submission: { requires_proof: true, proof_types: ['url'], max_files: 1, auto_approve: false } });
+            const po = await part.accept(one._id, {}, actorOf(alice));
+            await refuses(422, 'too_many_proofs', () => part.submit(po._id, { proofs: [url, url], notes: null } as never, actorOf(alice)));
+
+            const inPerson = await live({ submission: { requires_proof: false, max_files: 0, auto_approve: false } });
+            const pi = await part.accept(inPerson._id, {}, actorOf(alice));
+            await refuses(409, 'no_proof_required', () => part.submit(pi._id, { proofs: [url], notes: null } as never, actorOf(alice)));
+            await refuses(409, 'nothing_to_reject', () =>
+                part.review(pi._id, { decision: 'rejected', reason: null } as never, adminActor, UserRole.CORE)
+            );
+        }
+        pass('proof type, proof count, no-proof and nothing-to-reject refusals carry their own codes');
         const submitted = await part.submit(
             pf._id,
             { proofs: [{ type: 'url', value: 'https://example.com/proof', name: null }], notes: null } as never,
@@ -246,7 +271,7 @@ async function main(): Promise<void> {
         assert.strictEqual(approved.reward!.points_awarded, 50);
         assert.strictEqual(completed.events.length, 1, 'exactly one ChallengeCompleted');
         const payload = completed.events[0].payload;
-        // The exact fields points-service/src/events/consumers.ts:189-195 destructures.
+        // The exact fields points-service/src/events/consumers.ts destructures.
         assert.strictEqual(payload.participation_id, pf._id);
         assert.strictEqual(payload.challenge_id, flow._id);
         assert.deepStrictEqual(payload.member_user_ids, [alice._id]);
@@ -262,6 +287,25 @@ async function main(): Promise<void> {
         assert.strictEqual(doubleClick.events.length, 0, 'a losing approve must publish nothing');
         assert.strictEqual((await Challenge.findById(flow._id))!.counts.approved, 1);
         pass('a second approve is 409, publishes nothing, and does not re-count');
+
+        {
+            // Two reviewers at once, not one after the other: both read `under_review`.
+            const race = await live();
+            const pr2 = await part.accept(race._id, {}, actorOf(bob));
+            await part.submit(pr2._id, { proofs: [{ type: 'url', value: 'https://example.com/r', name: null }], notes: null } as never, actorOf(bob));
+            const second = await seedUser('Second Reviewer', UserRole.CORE);
+            resetBus();
+            const paid = collect('ChallengeCompleted');
+            const outcomes = await Promise.allSettled([
+                part.review(pr2._id, { decision: 'approved', reason: null } as never, adminActor, UserRole.CORE),
+                part.review(pr2._id, { decision: 'approved', reason: null } as never, actorOf(second), UserRole.CORE),
+            ]);
+            paid.stop();
+            assert.strictEqual(outcomes.filter((o) => o.status === 'fulfilled').length, 1);
+            assert.strictEqual(paid.events.length, 1, 'exactly one ChallengeCompleted');
+            assert.strictEqual((await Challenge.findById(race._id))!.counts.approved, 1, 'the loser gave its reservation back');
+            pass('two concurrent approvals pay once and count once');
+        }
 
         section('a named reviewer below CORE may review their own challenge');
         const scout = await seedUser('Scout', UserRole.MEMBER);
@@ -299,6 +343,26 @@ async function main(): Promise<void> {
         pass('auto_approve approves on submit, carries the reward, and publishes the same payout event');
 
         {
+            // Core authors a trust challenge worth a fortune, accepts it and submits. `review` refuses
+            // a member approving themselves; auto-approve must not be the way around that.
+            const author = await seedUser('Author', UserRole.CORE);
+            const jackpot = await live({ award_points: 100_000, submission: { requires_proof: true, proof_types: ['text'], max_files: 1, auto_approve: true } });
+            resetBus();
+            const minted = collect('ChallengeCompleted');
+            const pj = await part.accept(jackpot._id, {}, actorOf(author));
+            const held = await part.submit(pj._id, { proofs: [{ type: 'text', value: 'done', name: null }], notes: null } as never, actorOf(author));
+            minted.stop();
+            assert.strictEqual(held.status, 'under_review', 'a Core+ member goes to a reviewer');
+            assert.strictEqual(held.reward, null);
+            assert.strictEqual(minted.events.length, 0, 'and nothing is paid');
+            assert.strictEqual((await Challenge.findById(jackpot._id))!.counts.approved, 0);
+            await refuses(403, 'cannot_review_own_participation', () =>
+                part.review(pj._id, { decision: 'approved', reason: null } as never, actorOf(author), UserRole.CORE)
+            );
+            pass('auto-approve does not pay a Core+ member: their submission waits for another reviewer');
+        }
+
+        {
             // A reviewer's rejection outlives a later switch to auto-approve.
             const strict = await live();
             const ps = await part.accept(strict._id, {}, actorOf(bob));
@@ -321,6 +385,27 @@ async function main(): Promise<void> {
             assert.strictEqual(rejections.events.length, 1);
             assert.strictEqual(rejections.events[0].payload.rejection_no, 2, 'ChallengeRejected.rejection_no is 1-based per participation');
             pass('ChallengeRejected carries rejection_no');
+
+            // The rejection is committed by the CAS; nothing replays its notice. An audit failure
+            // after it may fail the request, but must not also swallow the event.
+            const flaky = await live();
+            const pk = await part.accept(flaky._id, {}, actorOf(alice));
+            await part.submit(pk._id, proof, actorOf(alice));
+            const notices = collect<{ participation_id: string }>('ChallengeRejected');
+            const original = AuditLog.create.bind(AuditLog);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (AuditLog as any).create = async () => {
+                throw new Error('audit storage is down');
+            };
+            try {
+                await assert.rejects(part.review(pk._id, { decision: 'rejected', reason: 'no' } as never, adminActor, UserRole.CORE));
+            } finally {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (AuditLog as any).create = original;
+            }
+            notices.stop();
+            assert.strictEqual(notices.events.filter((e) => e.payload.participation_id === pk._id).length, 1);
+            pass('a rejection is announced even when its audit row fails');
         }
 
         section('legend challenges announce themselves to Hall of Fame');
@@ -331,6 +416,7 @@ async function main(): Promise<void> {
         await part.submit(pl._id, { proofs: [{ type: 'text', value: 'legendary', name: null }], notes: null } as never, actorOf(bob));
         legendEvents.stop();
         assert.strictEqual(legendEvents.events.length, 1);
+        assert.strictEqual((await ChallengeParticipation.findById(pl._id))!.reward!.grants_hall_of_fame, true, 'the flag is frozen into the reward');
         pass('grants_hall_of_fame publishes ChallengeLegendAchieved alongside the payout');
 
         {
@@ -369,6 +455,11 @@ async function main(): Promise<void> {
         });
 
         await refuses(403, 'not_team_captain', () => part.accept(teamChallenge._id, { team_id: team._id }, actorOf(mate)));
+        await refuses(409, 'teaming_not_enabled', () => part.accept(flow._id, { team_id: team._id }, actorOf(captain)));
+        {
+            const otherTeamed = await live({ teaming: { enabled: true, team_size_min: 2, team_size_max: 4, max_teams: 5 } });
+            await refuses(409, 'team_wrong_owner', () => part.accept(otherTeamed._id, { team_id: team._id }, actorOf(captain)));
+        }
         await refuses(409, 'team_required', () => part.accept(teamChallenge._id, {}, actorOf(bob)));
         pass('a teamed challenge is team-only: one kind of participant per cap');
 
@@ -379,7 +470,12 @@ async function main(): Promise<void> {
         const tp = await part.accept(teamChallenge._id, { team_id: team._id }, actorOf(captain));
         assert.strictEqual(tp.participant.type, 'team');
         assert.deepStrictEqual([...tp.member_user_ids].sort(), [captain._id, mate._id].sort());
+        assert.strictEqual(tp.status_history[0].by, captain._id, 'history names the captain who accepted, not the team');
         pass('a team still `forming` can accept — that is the only state a real roster is ever in');
+
+        // The same captain clicking again on a full (max_teams 1) challenge.
+        await refuses(409, 'already_accepted', () => part.accept(teamChallenge._id, { team_id: team._id }, actorOf(captain)));
+        pass('a team re-click at the cap is already_accepted');
 
         const rival = await Team.create({
             _id: uuid(),
@@ -404,7 +500,7 @@ async function main(): Promise<void> {
         pass('a member already on another accepted roster is refused — the index cannot express this');
 
         // Teaming switched off after the team accepted: a member must not come back alone, or
-        // Points pays them on two participations (audit Sep 26, H2).
+        // Points pays them on two participations.
         await catalog.updateChallenge(teamChallenge._id, { teaming: { enabled: false } } as never, adminActor);
         await refuses(409, 'member_already_participating', () => part.accept(teamChallenge._id, {}, actorOf(mate)));
         pass('a member of an accepted team cannot also accept solo');
@@ -658,6 +754,94 @@ async function main(): Promise<void> {
             assert.strictEqual(quiet.events.filter((e) => e.payload.participation_id === pl2._id).length, 0);
             assert.strictEqual((await ChallengeParticipation.findById(pl2._id))!.reward!.hall_of_fame_entry_id, 'hof-readback');
             pass('a legend approval is re-announced, or linked by reading Hall of Fame back when the entry exists');
+
+            // The flag an approval froze wins over the challenge's flag now: switching Hall of Fame
+            // on afterwards must not mint a Legend for `pf`, approved while `flow` did not grant it.
+            await Challenge.updateOne({ _id: flow._id }, { $set: { grants_hall_of_fame: true } });
+            await backdate(pf._id);
+            const late = collect<{ participation_id: string }>('ChallengeLegendAchieved');
+            await replayTick();
+            late.stop();
+            assert.strictEqual(late.events.filter((e) => e.payload.participation_id === pf._id).length, 0);
+            // A row approved before the reward carried the flag falls back to the challenge's.
+            await ChallengeParticipation.updateOne({ _id: pf._id }, { $unset: { 'reward.grants_hall_of_fame': 1 } }, { timestamps: false });
+            await backdate(pf._id);
+            const legacy = collect<{ participation_id: string }>('ChallengeLegendAchieved');
+            await replayTick();
+            legacy.stop();
+            assert.strictEqual(legacy.events.filter((e) => e.payload.participation_id === pf._id).length, 1);
+            await Challenge.updateOne({ _id: flow._id }, { $set: { grants_hall_of_fame: false } });
+            pass('the replay reads the Hall of Fame flag frozen at approval, falling back to the challenge only for older rows');
+        }
+
+        section('withdraw: Core+ undo, compare-and-swap, the seat comes back');
+        {
+            const capped2 = await live({ max_participants: 5 });
+            const [w1, w2, w3, w4] = await Promise.all([...Array(4)].map(() => seedUser('Withdrawn')));
+            const pw1 = await part.accept(capped2._id, {}, actorOf(w1));
+            const proof = { proofs: [{ type: 'url', value: 'https://example.com/w', name: null }], notes: null } as never;
+            const pw2 = await part.accept(capped2._id, {}, actorOf(w2));
+            await part.submit(pw2._id, proof, actorOf(w2));
+            const pw3 = await part.accept(capped2._id, {}, actorOf(w3));
+            await part.submit(pw3._id, proof, actorOf(w3));
+            await part.review(pw3._id, { decision: 'rejected', reason: 'no' } as never, adminActor, UserRole.CORE);
+            const pw4 = await part.accept(capped2._id, {}, actorOf(w4));
+            await part.submit(pw4._id, proof, actorOf(w4));
+            await part.review(pw4._id, { decision: 'approved', reason: null } as never, adminActor, UserRole.CORE);
+            assert.strictEqual((await Challenge.findById(capped2._id))!.counts.accepted, 4);
+
+            // Two admins at once on the same row: one transition, one audit row, one seat back.
+            const both = await Promise.allSettled([part.withdraw(pw1._id, 'dup', adminActor), part.withdraw(pw1._id, 'dup', adminActor)]);
+            assert.strictEqual(both.filter((o) => o.status === 'fulfilled').length, 1);
+            const loser = both.find((o) => o.status === 'rejected') as PromiseRejectedResult;
+            assert.strictEqual((loser.reason as ServiceError).code, 'participation_not_withdrawable');
+            const w1row = (await ChallengeParticipation.findById(pw1._id))!;
+            assert.strictEqual(w1row.status, 'withdrawn');
+            assert.strictEqual(w1row.status_history.filter((h) => h.to === 'withdrawn').length, 1);
+            assert.strictEqual(await AuditLog.countDocuments({ action: 'challenge.withdrawn', 'new_value.participation_id': pw1._id }), 1);
+            assert.strictEqual((await Challenge.findById(capped2._id))!.counts.accepted, 3, 'the seat is released once');
+
+            assert.strictEqual((await part.withdraw(pw2._id, null, adminActor)).status, 'withdrawn', 'from under_review');
+            assert.strictEqual((await part.withdraw(pw3._id, null, adminActor)).status, 'withdrawn', 'from rejected');
+            await refuses(409, 'participation_not_withdrawable', () => part.withdraw(pw4._id, null, adminActor));
+            assert.strictEqual((await Challenge.findById(capped2._id))!.counts.accepted, 1);
+            pass('withdraw is a CAS from accepted/submitted/under_review/rejected, never approved; it audits and gives the seat back');
+        }
+
+        section('deleting a challenge never strands a submission or orphans a payout');
+        {
+            const pending = await live();
+            const pp = await part.accept(pending._id, {}, actorOf(alice));
+            await part.submit(pp._id, { proofs: [{ type: 'url', value: 'https://example.com/d', name: null }], notes: null } as never, actorOf(alice));
+            await refuses(409, 'challenge_has_pending_submissions', () => catalog.softDelete(pending._id, adminActor));
+            pass('a challenge with a submission awaiting review cannot be deleted');
+
+            // An approve and a delete racing: whichever lands, never an approved row on a deleted
+            // challenge. In-person challenges approve straight out of `accepted`, so the pending
+            // guard above is not what decides these.
+            // Jittered starts, so the interleavings differ from run to run rather than one side always
+            // finishing first.
+            const after = <T>(ms: number, fn: () => Promise<T>) => new Promise((r) => setTimeout(r, ms)).then(fn);
+            for (let i = 0; i < 12; i++) {
+                const racing = await live({ submission: { requires_proof: false, max_files: 0, auto_approve: false } });
+                const racer = await seedUser('Racer');
+                const pr3 = await part.accept(racing._id, {}, actorOf(racer));
+                await Promise.allSettled([
+                    after(i % 4, () => catalog.softDelete(racing._id, adminActor)),
+                    after(3 - (i % 4), () => part.review(pr3._id, { decision: 'approved', reason: null } as never, adminActor, UserRole.CORE)),
+                ]);
+                const c = (await Challenge.findById(racing._id))!;
+                const row = (await ChallengeParticipation.findById(pr3._id))!;
+                assert.ok(!(c.deleted_at && row.status === 'approved'), 'an approved participation on a deleted challenge');
+                assert.strictEqual(c.counts.approved, row.status === 'approved' ? 1 : 0, 'the reservation matches the outcome');
+            }
+            pass('a delete racing an approve: one of them wins, never both');
+
+            const audited = await live();
+            await catalog.softDelete(audited._id, adminActor);
+            const row = await AuditLog.findOne({ action: 'challenge.deleted', target_id: audited._id }).lean();
+            assert.strictEqual((row!.previous_value as { status: string }).status, 'active', 'the audit records the real previous status');
+            pass('the delete audit carries the status the challenge actually had');
         }
 
         console.log('\nparticipation.selfcheck: all good.');

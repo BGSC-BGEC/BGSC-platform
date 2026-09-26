@@ -147,12 +147,13 @@ draft ──submit──> submitted ──auto/approve──> confirmed
 
 | Transition | Guard |
 |---|---|
-| draft → submitted | now within the owner's window (`events.registration.opens_at..closes_at`, or `challenges.window`); all `required` fields present; answers pass validation; unique index passes |
-| submitted → confirmed | if `events.registration.requires_approval == false`: automatic, in the same request. Else Core+ approves. Either way a seat must be reserved first (§3.2) |
-| submitted → waitlisted | seat reservation failed and `waitlist_enabled` |
+| draft → submitted | now within the owner's window (`events.registration.opens_at..closes_at` — enforced by the Event Service's reserve; or, for a challenge, `status == 'active'` and `challenges.window`, checked here: `409 challenge_not_active / challenge_not_open / challenge_closed`); `context.event.role` matches `teaming.is_teamed` (else `422 role_mismatch`); all `required` fields present; answers pass validation; unique index passes |
+| submitted → confirmed | if `events.registration.requires_approval == false`: automatic, in the same request. Else the row stays `submitted`, holding no seat, until an event admin confirms it (`PATCH /registrations/:id/status`, which reserves). Either way a seat must be reserved first (§3.2). Nobody approves or overrides their own registration (`403 cannot_review_own_registration`) |
+| submitted → waitlisted | seat reservation failed and `waitlist_enabled` — on submit, or when an admin confirms a `submitted` row into a full event (`200`, row `waitlisted`, recorded `by: 'system'` so auto-promotion picks it up) |
 | waitlisted → confirmed | (a) automatic: Registration Service consumes its own `RegistrationCancelled` with `freed_seat: true` and offers the seat to the lowest `waitlist_position`; (b) organiser: Event Service calls `POST /internal/registrations/:id/promote { by }`. Both go through one `promoteRegistration`: reserve (idempotent per registration) → CAS `waitlisted → confirmed`; a CAS loser gives back a seat it will not use. Refusal leaves the row waitlisted |
-| * → cancelled | by user before `closes_at`, or by Core+ any time. Captain cancelling: blocked while their team has other members (transfer captaincy or disband first) |
+| * → cancelled | by user before `closes_at` (`409 cancel_window_closed` after), or by an admin of the owner any time. Captain cancelling (or being demoted by an admin): blocked while their open (`forming`/`complete`) team has other members (`409 captain_has_team`; disband first); a captain alone takes the team with them. A locked roster does not block: it cannot be disbanded, so an admin can still remove a no-show captain |
 | * → rejected | Core+ |
+| * → waitlisted (admin) | event rows only (`409 no_waitlist` otherwise). Emits `RegistrationWaitlisted` with the new position; the row is never auto-promoted back (only an admin, or `/internal/.../promote`) |
 
 `confirmed` is the only state that counts as "registered" for points, leaderboard, and teams. `RegistrationCreated` is emitted on **every** entry into `confirmed` — submit, captain approval, admin confirm, and both promotion paths. **Decision (Sep 26):** it is the ONE "now confirmed" event; the Event Service's `RegistrationConfirmed` is retired, because the leaderboard and the points path only ever heard one of the two names. Every exit from `confirmed` (cancel, or an admin demotion) emits `RegistrationCancelled`.
 
@@ -164,11 +165,12 @@ Order matters so the common failure (duplicate) never needs compensation:
 
 ```
 1. insert form_submissions { status: 'submitted' }         ── unique index rejects duplicates here, nothing else touched
-2. POST event:/internal/events/:id/reserve-seat { registration_id, idempotency_key }   (callInternal; envelope unwrapped)
+2. POST event:/internal/events/:id/reserve-seat { registration_id }   (callInternal; envelope unwrapped; idempotent per registration_id)
      { reserved: true }                          ⇒ 3a
      { reserved: false, reason: 'capacity_full' } ⇒ 3b waitlisted     (full, waitlist on)
      { reserved: false, reason: other }           ⇒ 3b rejected       (waitlist_disabled | event_closed | not_open | event_not_found)
-     no answer (timeout / 5xx)                    ⇒ row stays `submitted`; a resubmit retries the same reserve
+     no answer (timeout / 5xx)                    ⇒ row stays `submitted`; the stranded sweep (every 5 min, rows untouched > 60s,
+                                                   not awaiting an admin) or a resubmit retries the same reserve
 3a. CAS submitted → confirmed, emit RegistrationCreated     (CAS lost ⇒ release the seat)
 3b. CAS submitted → waitlisted | rejected, emit RegistrationWaitlisted for waitlisted
 ```
@@ -181,9 +183,9 @@ Order matters so the common failure (duplicate) never needs compensation:
 ### 3.2.1 Invariants
 
 - `owner.type == 'event'` ⇒ `context.event` present, `context.challenge` absent (and vice versa)
-- `context.event.role ∈ {captain, member}` ⇒ owner event `teaming.is_teamed == true`; `role == 'solo'` ⇔ not teamed
+- `context.event.role ∈ {captain, member}` ⇒ owner event `teaming.is_teamed == true`; `role == 'solo'` ⇔ not teamed — checked at submit (`422 role_mismatch`)
 - owner event `type == 'ALL'` and `role == 'member'` ⇒ `base_price != null && > 0` (Spec §5.5)
-- `events.teaming.captain_application_required` and `role == 'captain'` ⇒ `captain_application.status == 'approved'` before a team can be created
+- `events.teaming.captain_application_required` and `role == 'captain'` ⇒ `captain_application.status == 'approved'` before a team can be created. Without the requirement a captain's application starts `approved`
 - `context.event.team_id != null` ⇒ `status == 'confirmed'`
 - `waitlist_position != null ⇔ status == 'waitlisted'`
 
@@ -197,7 +199,9 @@ For each field at `form_version`:
 5. `admin_only` ⇒ reject if present in a user submission.
 6. Unknown keys ⇒ reject.
 
-Errors returned as `{ field_key, code, message }[]`.
+Errors returned as `422 { error: 'validation_failed', fields: { key, code, message }[] }` — the same shape as a request-schema (zod) failure.
+
+`visible_if.value` is stored as the engine compares it: at form save it is coerced the way the controller field's answers are (a date to its ISO instant, `"20"` to 20, each element for `in`); a value no answer could equal (wrong type, unknown option, a `multi_select` or `file` controller) is `422 visible_if_value_invalid`.
 
 ### 3.4 Indexes
 
@@ -217,7 +221,7 @@ form_uploads { _id, user_id, form_id, field_key, url, name, size, mime, created_
 // indexes: { url: 1 } unique; { user_id: 1, created_at: -1 } (per-user quota)
 ```
 
-**Decision (Sep 26):** `files[]` used to be whatever the client sent — url, size and mime included — so a `javascript:` link, another user's upload or a 50 MB file claiming 10 bytes passed the field's `accept`/`max_size_bytes`. `POST /registrations/upload-file` now writes a `form_uploads` row; a submission names files by `{ field_key, url }` and everything stored is read from the upload row, which must be the same user's, for the same form and field (else `422 validation_failed / unknown_upload`). Files are written under `registrations/` in the shared upload root and served by Media Service's `/uploads`. Registration Service is the only writer.
+**Decision (Sep 26):** `files[]` used to be whatever the client sent — url, size and mime included — so a `javascript:` link, another user's upload or a 50 MB file claiming 10 bytes passed the field's `accept`/`max_size_bytes`. `POST /registrations/upload-file` now writes a `form_uploads` row; a submission names files by `{ field_key, url }` and everything stored is read from the upload row, which must be the same user's, for the same form and field (else `422 validation_failed / unknown_upload`). Files are **private**: written under `<uploadDir>/.private/registrations/` (a dot-directory Media Service's static `/uploads` never serves), referenced as `private://registrations/…`, and read back only through `GET /registrations/:id/files/:field_key` (the owner, or an admin of the owner). Registration Service is the only writer.
 
 ## 4. Domain events (Spec §8.1)
 

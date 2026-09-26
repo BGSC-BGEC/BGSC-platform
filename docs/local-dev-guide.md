@@ -104,6 +104,7 @@ npm run typecheck   # TypeScript 7 native compiler — actually checks, then reb
 npm run selfcheck   # in-process assertions: model invariants, middleware, event bus, gateway limiter
 npm run e2e         # real Mongo + real HTTP. Needs `docker compose up -d mongodb`
 npm test            # selfcheck + e2e
+npm run live-check  # whole stack on the host, every route + cross-service journeys (~3 min)
 ```
 
 Suites run against throwaway databases (`bgsc_models_e2e`, `bgsc_selfcheck_<svc>`, `bgsc_e2e_<svc>`)
@@ -155,9 +156,9 @@ a silent failure mode. **Follow `docs/adding-a-service.md`**; it is the checklis
 - **Attendance** is only markable while an event is `ongoing` and before `end_at`
   (`409 attendance_window_closed` otherwise) — seed an ongoing event to test it.
 - **Mail is a dev logger** (verify/reset/feedback links print to the service log). WhatsApp and push
-  are deferred to post-MVP; in-app notifications are the only channel.
-- **Upgrading a database that was not wiped:** `npm run migrate:audit2` (dry run, then
-  `-- --apply`); see the README's "Upgrading" section and audit-2 §6.
+  are deferred to post-MVP (WhatsApp stays off unless `WHATSAPP_*` is set); in-app notifications
+  are the only channel.
+- **A dev database from before the Sep 26 fixes** is not migrated — wipe it (`docker compose down -v`).
 
 ## Reference
 

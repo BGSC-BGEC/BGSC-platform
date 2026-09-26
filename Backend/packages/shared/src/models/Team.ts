@@ -183,7 +183,13 @@ TeamSchema.pre('validate', function (this: ITeam) {
 });
 
 TeamSchema.index({ 'owner.type': 1, 'owner.id': 1, status: 1 });
-TeamSchema.index({ 'owner.id': 1, name_lower: 1 }, { unique: true }); // unique team names per event/challenge
+// Unique team names per event/challenge among teams that still exist: a disbanded team's name is
+// free again. Named, because the key pattern is the old full-collection index's — an existing
+// database must drop `owner.id_1_name_lower_1` for disbanded names to become reusable.
+TeamSchema.index(
+    { 'owner.id': 1, name_lower: 1 },
+    { unique: true, name: 'team_name_per_owner_live', partialFilterExpression: { status: { $in: ['forming', 'complete', 'locked'] } } }
+);
 TeamSchema.index({ invite_code: 1 }, { unique: true });
 TeamSchema.index({ 'members.user_id': 1, 'owner.id': 1 }); // "my team here"; backs the duplicate-membership check
 TeamSchema.index({ 'owner.id': 1, join_policy: 1, status: 1 }); // team search: open teams still forming
@@ -193,7 +199,7 @@ export const Team = model<ITeam>('Team', TeamSchema, 'teams');
 /**
  * One team per user per owner. A multikey index on `teams.members.user_id` cannot express "unique
  * across documents", and the database has no transactions, so two concurrent joins both passed the
- * read-then-write check and put one user on two rosters (backend-audit-2026-09-26). The claim's
+ * read-then-write check and put one user on two rosters. The claim's
  * `_id` is `<owner_id>:<user_id>`, so the primary key is the lock: the second insert is an E11000.
  *
  * Registration Service is the only writer, alongside `teams`.

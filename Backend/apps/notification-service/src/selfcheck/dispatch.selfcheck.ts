@@ -13,7 +13,7 @@ import {
 import { v4 as uuid } from 'uuid';
 import { deliverAnnouncement } from '../broadcast/broadcast';
 import { attempt, audienceGate, claim, dispatchAnnouncement, nextRetryAt, writeback } from '../broadcast/dispatch';
-import { reconcile, retryDue, settleAbandoned } from '../scheduler/tick';
+import { RECONCILE_GRACE_MS, reconcile, retryDue, retryWritebacks, settleAbandoned } from '../scheduler/tick';
 import { closeScratchDb, openScratchDb, seedAnnouncement, seedEvent, seedUser } from './seed';
 
 /**
@@ -87,6 +87,9 @@ function unconfigureWhatsApp(): void {
     config.whatsapp.phoneNumberId = '';
     config.whatsapp.groupMap = {};
 }
+
+/** A sweep time past the reconcile grace for anything published now. */
+const afterGrace = () => new Date(Date.now() + RECONCILE_GRACE_MS + 1000);
 
 const rowsFor = (announcementId: string) =>
     NotificationDispatch.find({ 'source.id': announcementId }).lean<INotificationDispatch[]>();
@@ -341,21 +344,22 @@ async function main(): Promise<void> {
     const missed = await seedAnnouncement(author, 'Published during an outage', { categories: ['fitsoc'] });
     assert.strictEqual((await rowsFor(missed._id)).length, 0, 'nobody heard the event');
 
-    const reconciled = await reconcile(new Date());
+    assert.strictEqual(await reconcile(new Date()), 0, 'a publish whose fan-out may still be running is left alone');
+    const reconciled = await reconcile(afterGrace());
     assert.ok(reconciled >= 1, 'the sweep notices an announcement with no dispatch rows');
     assert.ok((await rowsFor(missed._id)).length > 0, 'and delivers it');
 
-    const again = await reconcile(new Date());
+    const again = await reconcile(afterGrace());
     assert.strictEqual(again, 0, 'and a second pass finds nothing to do');
     console.log('✓ a broadcast lost to a bus outage still goes out, exactly once');
 
     // A crash PART WAY through dispatch leaves rows behind, so "has any rows" would call this one
-    // done and the second community group would never hear about it (audit 2).
+    // done and the second community group would never hear about it.
     const halfDone = await seedAnnouncement(author, 'Crashed mid-dispatch', { categories: ['bgec', 'fitsoc'] });
     await claim(halfDone._id, 'whatsapp', 'bgec', 'dest-bgec');
     assert.strictEqual((await rowsFor(halfDone._id)).length, 1, 'one category claimed, then the process died');
 
-    assert.strictEqual(await reconcile(new Date()), 1, 'reconciliation notices the missing rows');
+    assert.strictEqual(await reconcile(afterGrace()), 1, 'reconciliation notices the missing rows');
     const repaired = await rowsFor(halfDone._id);
     assert.strictEqual(repaired.length, 3, 'and fills in the second category and the push row');
     assert.deepStrictEqual(
@@ -385,11 +389,11 @@ async function main(): Promise<void> {
         );
     }
     const lostInCrowd = await seedAnnouncement(author, 'Lost behind a full page', { categories: ['deuce'] });
-    assert.strictEqual(await reconcile(new Date()), 1, 'exactly the incomplete one is delivered');
+    assert.strictEqual(await reconcile(afterGrace()), 1, 'exactly the incomplete one is delivered');
     assert.ok((await rowsFor(lostInCrowd._id)).length > 0, 'even behind more than a page of complete ones');
     console.log('✓ reconciliation pages past complete announcements');
 
-    /* ---- writeback: retryable vs permanent (audit 1) ----------------------- */
+    /* ---- writeback: retryable vs permanent ------------------------------- */
 
     const retryable = await seedAnnouncement(author, 'Writeback retryable', { categories: ['deuce'] });
     await dispatchAnnouncement(retryable);
@@ -458,6 +462,37 @@ async function main(): Promise<void> {
         'while every row that did not move is stamped normally'
     );
     console.log('✓ a writeback only stamps the rows whose state it actually reported');
+
+    /* ---- the writeback sweep rotates past rows that keep failing ---------- */
+
+    // More stuck rows than one sweep page, all answering `retry`. Unsorted, the same page came back
+    // every tick; least-recently-tried first, the second tick reaches the rest.
+    await NotificationDispatch.updateMany({}, { $set: { writeback_at: new Date() } });
+    const stuck: string[] = [];
+    for (let i = 0; i < 60; i += 1) {
+        const a = await seedAnnouncement(author, `Stuck ${i}`, { categories: ['deuce'] });
+        await NotificationDispatch.create({
+            _id: uuid(),
+            channel: 'push',
+            source: { type: 'announcement', id: a._id },
+            status: 'skipped',
+            next_attempt_at: null,
+            writeback_at: null,
+        });
+        stuck.push(a._id);
+    }
+    writebackStatus = 503;
+    await retryWritebacks(new Date('2026-09-26T10:00:00Z'));
+    await retryWritebacks(new Date('2026-09-26T10:01:00Z'));
+    writebackStatus = 200;
+    assert.strictEqual(
+        await NotificationDispatch.countDocuments({ 'source.id': { $in: stuck }, writeback_tried_at: null }),
+        0,
+        'two ticks of a 50-row page have tried all 60 rows'
+    );
+    assert.strictEqual(await retryWritebacks(), 50, 'and once the receiver is back, a page lands per tick');
+    assert.strictEqual(await retryWritebacks(), 10, 'the rest on the next');
+    console.log('✓ the writeback sweep rotates instead of retrying the same page forever');
 
     /* ---- delivered announcements are never re-broadcast ------------------- */
 

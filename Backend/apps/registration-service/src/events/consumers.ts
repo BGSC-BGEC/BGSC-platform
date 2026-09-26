@@ -1,11 +1,12 @@
 import { FormDefinition, FormDefinitionVersion, FormSubmission, Team, User, anonymizedSnapshot, subscribe, userSnapshotOf } from '@bgsc/shared';
 import { promoteNext } from '../registrations/registration.service';
-import { lockReadyRosters } from '../teams/team.service';
+import { disbandEventTeams, lockReadyRosters } from '../teams/team.service';
 
 /**
  * Event bus consumers:
  *  - a released seat pulls the next person off the waitlist;
  *  - an event starting (or its auction closing) locks the ready rosters;
+ *  - an event cancelled disbands its open teams;
  *  - a changed profile rewrites the user snapshots this service owns (relationships.md §4);
  *  - a deleted account erases them, and a restored one writes them back.
  */
@@ -25,6 +26,11 @@ export function initializeConsumers(): void {
     subscribe('AuctionClosed', (event) => {
         const { event_id } = event.payload as { event_id?: string };
         if (event_id) void lockReadyRosters(event_id).catch(logged('AuctionClosed'));
+    });
+
+    subscribe('EventCancelled', (event) => {
+        const { event_id } = event.payload as { event_id?: string };
+        if (event_id) void disbandEventTeams(event_id).catch(logged('EventCancelled'));
     });
 
     subscribe('UserProfileUpdated', (event) => {

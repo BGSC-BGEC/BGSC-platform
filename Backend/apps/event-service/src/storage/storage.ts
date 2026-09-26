@@ -7,7 +7,7 @@ import { config } from '@bgsc/shared';
  * Local-disk storage for event posters and logos, under the platform's ONE upload root
  * (`config.uploadDir`, the shared volume) with this service's prefix `events/`. Media Service serves
  * `/uploads` for everyone; this service used to write `apps/event-service/uploads`, which neither the
- * volume nor the gateway's `/uploads` route could see (audit Sep 26, H22/H23).
+ * volume nor the gateway's `/uploads` route could see.
  * ponytail: local disk, no resize or external bucket.
  */
 const UPLOAD_ROOT = path.resolve(config.uploadDir);
@@ -55,4 +55,16 @@ export async function putObject(eventId: string, body: Buffer, mime: ImageMime):
     await fs.writeFile(dest, body);
 
     return { key, url: `/uploads/${key}`, bytes: body.length, mime };
+}
+
+/**
+ * Deletes a file `putObject` wrote for THIS event. Anything else — an external URL, a shared
+ * `/uploads` path, another event's file, a `..` escape — is left alone. A file already gone is fine.
+ */
+export async function deleteObject(eventId: string, url: string | null): Promise<void> {
+    const prefix = `/uploads/${PREFIX}/${eventId}/`;
+    if (!url?.startsWith(prefix)) return;
+    const dest = path.resolve(UPLOAD_ROOT, url.slice('/uploads/'.length));
+    if (!dest.startsWith(path.join(UPLOAD_ROOT, PREFIX, eventId) + path.sep)) return;
+    await fs.unlink(dest).catch(() => undefined);
 }

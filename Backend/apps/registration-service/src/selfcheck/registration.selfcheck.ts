@@ -1,5 +1,5 @@
 import './scratch-env';
-import { Event, FormDefinitionVersion, FormSubmission, FormUpload, User, publish, subscribe } from '@bgsc/shared';
+import { Challenge, Event, FormDefinitionVersion, FormSubmission, FormUpload, User, publish, subscribe } from '@bgsc/shared';
 import assert from 'assert';
 import { once } from 'events';
 import express from 'express';
@@ -9,7 +9,7 @@ import path from 'path';
 import * as registrationService from '../registrations/registration.service';
 import * as formService from '../forms/form.service';
 import { initializeConsumers } from '../events/consumers';
-import { promotionSweep } from '../events/sweeps';
+import { promotionSweep, strandedSweep } from '../events/sweeps';
 import { perUserRateLimit } from '../registrations/rate-limit';
 import { downloadFileHandler } from '../registrations/registration.controller';
 import { privatePathOf, putObject } from '../storage/storage';
@@ -47,8 +47,8 @@ async function main() {
     const creatorId = uuid();
     const admin = { id: creatorId, role: 'core' }; // the event's creator: its admin
     const otherCore = { id: uuid(), role: 'core' }; // core, but not this event's admin
-    const users = await Promise.all(['One', 'Two', 'Three', 'Four', 'Cap', 'Cap2', 'Five', 'Gone'].map((n) => seedUser(`User ${n}`)));
-    const [u1, u2, u3, u4, cap, cap2, u5, gone] = users.map((u) => u._id);
+    const users = await Promise.all(['One', 'Two', 'Three', 'Four', 'Cap', 'Cap2', 'Five', 'Gone', 'Six', 'Seven', 'Host'].map((n) => seedUser(`User ${n}`)));
+    const [u1, u2, u3, u4, cap, cap2, u5, gone, u6, u7, host] = users.map((u) => u._id);
     const as = (id: string) => ({ id, role: 'user' });
 
     const eventId = uuid();
@@ -73,10 +73,12 @@ async function main() {
 
     console.log('1. Validation failures are 422; admin_only is nobody\'s to self-submit...');
     await assert.rejects(() => submit(u1, { answers: {} }), (err: any) => err.status === 422 && err.code === 'validation_failed');
-    await assert.rejects(() => submit(u1, { answers: { name: 'x', seed: 1 } }), (err: any) => err.details[0].code === 'admin_only');
+    await assert.rejects(() => submit(u1, { answers: { name: 'x', seed: 1 } }), (err: any) => err.details[0].code === 'admin_only' && err.details[0].key === 'seed');
+    // The role is the client's claim: captain/member only on a teamed event, solo only on one that is not.
+    await assert.rejects(() => submit(u1, { context: { event: { role: 'captain' } } }), (err: any) => err.status === 422 && err.code === 'role_mismatch');
     console.log('✓');
 
-    console.log('2. Seat path against the real envelope (C1)...');
+    console.log('2. Seat path against the real envelope...');
     const reg1 = await submit(u1, { answers: { name: 'x', contact: 'one@example.com' } });
     assert.strictEqual(reg1.status, 'confirmed');
     assert(stub.holders.get(eventId)!.has(reg1._id));
@@ -110,7 +112,7 @@ async function main() {
     );
     console.log('✓');
 
-    console.log('5. Edit, then cancel releases the seat exactly once (H7, H9)...');
+    console.log('5. Edit, then cancel releases the seat exactly once...');
     // An admin answer written while the edit is in flight (just before its write) survives it.
     (FormSubmission as any).findOneAndUpdate = async (...args: unknown[]) => {
         delete (FormSubmission as any).findOneAndUpdate;
@@ -146,6 +148,8 @@ async function main() {
     await registrationService.updateRegistrationStatus(wait._id, admin, 'waitlisted');
     await settle();
     assert.strictEqual((await registrationService.getRegistration(wait._id)).status, 'waitlisted', 'no self-re-promotion');
+    assert(seen.RegistrationWaitlisted.some((p) => p.registration_id === wait._id && p.position >= 1),
+        'an admin demotion tells the user their waitlist position');
     assert.strictEqual(await promotionSweep(), 0, 'nor by the sweep: an admin demotion stands until an admin promotes');
 
     // Two admins confirm the same row at once: one wins, and the loser must NOT release the seat.
@@ -161,14 +165,28 @@ async function main() {
     stub.waitlist.delete(eventId);
     console.log('✓');
 
-    console.log('7. A lost reserve answer is retried by resubmitting; the promotion sweep fills gaps...');
+    console.log('7. A lost reserve answer is retried by resubmit and by the stranded sweep; the promotion sweep fills gaps...');
     stub.capacity.delete(eventId);
     stub.down = true;
     const stranded = await submit(u4);
+    const swept = await submit(u6);
+    const parked = await submit(u7);
     assert.strictEqual(stranded.status, 'submitted');
     stub.down = false;
     const retried = await submit(u4);
     assert(retried._id === stranded._id && retried.status === 'confirmed');
+    // Nobody resubmits: the sweep settles a row stranded for over a minute, and not a fresh one.
+    await FormSubmission.updateOne({ _id: swept._id }, { $set: { updated_at: new Date(Date.now() - 120_000) } }, { timestamps: false });
+    assert.strictEqual(await strandedSweep(), 1, 'only the old stranded row');
+    assert.strictEqual((await registrationService.getRegistration(swept._id)).status, 'confirmed', 'the sweep reserved its seat');
+    // An admin parking a stranded row on the waitlist frees whatever it held, and promotion never
+    // hands it straight back.
+    const parkedRow = await registrationService.updateRegistrationStatus(parked._id, admin, 'waitlisted');
+    await settle();
+    assert.strictEqual((await registrationService.getRegistration(parked._id)).status, 'waitlisted');
+    await registrationService.promoteNext(eventId);
+    assert.strictEqual((await registrationService.getRegistration(parked._id)).status, 'waitlisted', 'an admin-parked row stays parked');
+    assert(parkedRow.waitlist_position! >= 1);
 
     // A waitlisted row with a free seat and no RegistrationCancelled (the bus dropped it).
     stub.capacity.set(eventId, stub.holders.get(eventId)!.size);
@@ -189,36 +207,50 @@ async function main() {
     assert.strictEqual((await submit(u3)).status, 'confirmed', 'a system refusal can be retried');
     console.log('✓');
 
-    console.log('9. Captains: CAS approval; CaptainApproved on whichever path confirms (§7)...');
-    const capReg = await submit(cap, { context: { event: { role: 'captain' } } });
+    console.log('9. Captains (on a teamed event): CAS approval; CaptainApproved on whichever path confirms...');
+    const teamEventId = uuid();
+    const teamForm = await formService.createForm({ owner: { type: 'event', id: teamEventId }, title: 'Teams', fields: [f({})], created_by: host });
+    await formService.publishForm(teamForm._id);
+    await seedEvent({ id: teamEventId, formId: teamForm._id, createdBy: host, teamSize: [1, 3] });
+    const hostAdmin = as(host); // the teamed event's creator: its admin
+    const submitTeamed = (userId: string, role: 'solo' | 'captain' | 'member') =>
+        registrationService.submitRegistration({
+            form_id: teamForm._id, owner: { type: 'event', id: teamEventId }, answers: { name: 'x' }, context: { event: { role } }, user_id: userId,
+        });
+    await assert.rejects(() => submitTeamed(cap, 'solo'), (err: any) => err.code === 'role_mismatch', 'a teamed event has no solo role');
+    const capReg = await submitTeamed(cap, 'captain');
     await registrationService.cancelRegistration(capReg._id, as(cap));
-    await assert.rejects(() => registrationService.updateCaptainApplication(capReg._id, admin, 'approved'),
+    await assert.rejects(() => registrationService.updateCaptainApplication(capReg._id, hostAdmin, 'approved'),
         (err: any) => err.code === 'application_not_pending');
     await assert.rejects(() => registrationService.updateCaptainApplication(capReg._id, otherCore, 'approved'),
         (err: any) => err.status === 403, 'approval is the event admin\'s');
+    // An admin who applies as a captain on their own event cannot approve themselves.
+    const hostCap = await submitTeamed(host, 'captain');
+    await assert.rejects(() => registrationService.updateCaptainApplication(hostCap._id, hostAdmin, 'approved'),
+        (err: any) => err.status === 403 && err.code === 'cannot_review_own_registration');
 
     // Approved while full -> waitlisted, no CaptainApproved; promoted later -> CaptainApproved then.
-    stub.capacity.set(eventId, stub.holders.get(eventId)!.size);
-    const capReg2 = await submit(cap2, { context: { event: { role: 'captain' } } });
-    const approved = await registrationService.updateCaptainApplication(capReg2._id, admin, 'approved');
+    stub.capacity.set(teamEventId, stub.holders.get(teamEventId)?.size ?? 0);
+    const capReg2 = await submitTeamed(cap2, 'captain');
+    const approved = await registrationService.updateCaptainApplication(capReg2._id, hostAdmin, 'approved');
     assert.strictEqual(approved.status, 'waitlisted');
     assert(!seen.CaptainApproved.some((p) => p.registration_id === capReg2._id), 'no CaptainApproved without a seat');
-    stub.capacity.delete(eventId);
-    assert(await registrationService.promoteNext(eventId));
+    stub.capacity.delete(teamEventId);
+    assert(await registrationService.promoteNext(teamEventId));
     assert.strictEqual(seen.CaptainApproved.filter((p) => p.registration_id === capReg2._id).length, 1,
         'a promoted approved captain joins the pool');
     console.log('✓');
 
     console.log('10. Attendance only on confirmed rows, once...');
-    const att = await registrationService.recordAttendance(eventId, creatorId, [
+    const att = await registrationService.recordAttendance(teamEventId, creatorId, [
         { registration_id: capReg2._id, attended: true },
         { registration_id: goneReg._id, attended: true },
     ]);
     assert.deepStrictEqual(att, { updated_count: 1, skipped: [goneReg._id] });
-    assert.strictEqual((await registrationService.recordAttendance(eventId, creatorId, [{ registration_id: capReg2._id, attended: true }])).updated_count, 0);
+    assert.strictEqual((await registrationService.recordAttendance(teamEventId, creatorId, [{ registration_id: capReg2._id, attended: true }])).updated_count, 0);
     console.log('✓');
 
-    console.log('11. Files: bound to uploads, stored privately, downloaded only by owner/admin (§12)...');
+    console.log('11. Files: bound to uploads, stored privately, downloaded only by owner/admin...');
     const fileForm = await formService.createForm({
         owner: { type: 'generic', id: null },
         title: 'Files',
@@ -241,6 +273,8 @@ async function main() {
     assert((await fs.readFile(dl.path)).equals(pdf), 'the owner downloads their file');
     await assert.rejects(() => registrationService.registrationFile(withFile._id, 'proof', as(u2)), (err: any) => err.status === 404);
     assert(await registrationService.registrationFile(withFile._id, 'proof', { id: uuid(), role: 'core' }), 'core+ reads a generic form\'s files');
+    await assert.rejects(() => registrationService.updateRegistrationStatus(withFile._id, { id: uuid(), role: 'core' }, 'waitlisted'),
+        (err: any) => err.code === 'no_waitlist', 'only an event has a waitlist anything promotes from');
     // Over HTTP: the stored mime wins over the user-chosen filename's extension.
     await FormSubmission.updateOne({ _id: withFile._id }, { $set: { 'files.0.name': 'x.html' } });
     const app = express().get('/:id/:field_key', (req, _res, next) => void ((req as any).actor = { _id: u1, role: 'user' }, next()), downloadFileHandler);
@@ -264,10 +298,13 @@ async function main() {
     assert.strictEqual(kept.files[0].url, '/uploads/registrations/legacy/x.pdf', 'resending a stored legacy file is not an unknown upload');
     console.log('✓');
 
-    console.log('12. Edit window follows the event; UserDeleted strips contact answers...');
+    console.log('12. Edit and cancel windows follow the event; UserDeleted strips contact answers...');
     await Event.collection.updateOne({ _id: eventId as any }, { $set: { 'registration.closes_at': new Date(Date.now() - 1000) } });
-    await assert.rejects(() => registrationService.updateRegistration(capReg2._id, cap2, { answers: { name: 'late' } }),
+    await assert.rejects(() => registrationService.updateRegistration(lost._id, u5, { answers: { name: 'late' } }),
         (err: any) => err.code === 'edit_window_closed');
+    await assert.rejects(() => registrationService.cancelRegistration(lost._id, as(u5)), (err: any) => err.code === 'cancel_window_closed',
+        'the user cancels before closes_at');
+    assert.strictEqual((await registrationService.cancelRegistration(lost._id, admin)).status, 'cancelled', 'an admin, any time');
     // A phone answer under a key only an archived version of the form knows.
     await FormDefinitionVersion.create({ form_id: form._id, version: 1, fields: [f({ key: 'old_phone', type: 'phone', required: false })] });
     await FormSubmission.updateOne({ _id: reg1._id }, { $set: { 'answers.old_phone': '+1 555 0100' } });
@@ -283,6 +320,58 @@ async function main() {
     const results: unknown[] = [];
     for (let i = 0; i < 3; i++) limit({ user: { id: u2 } } as any, {} as any, (err?: unknown) => results.push(err));
     assert(results[0] === undefined && results[1] === undefined && (results[2] as any)?.status === 429);
+    console.log('✓');
+
+    console.log('14. requires_approval: the row waits for an admin, holding no seat; nobody confirms their own...');
+    const apprEventId = uuid();
+    const apprForm = await formService.createForm({ owner: { type: 'event', id: apprEventId }, title: 'Vetted', fields: [f({})], created_by: host });
+    await formService.publishForm(apprForm._id);
+    await seedEvent({ id: apprEventId, formId: apprForm._id, createdBy: host, requiresApproval: true });
+    const submitAppr = (userId: string) =>
+        registrationService.submitRegistration({
+            form_id: apprForm._id, owner: { type: 'event', id: apprEventId }, answers: { name: 'x' }, context: { event: { role: 'solo' } }, user_id: userId,
+        });
+    const vetted = await submitAppr(u2);
+    assert.strictEqual(vetted.status, 'submitted', 'not auto-confirmed');
+    assert(!stub.holders.get(apprEventId)?.has(vetted._id), 'and no seat taken');
+    await assert.rejects(() => submitAppr(u2), (err: any) => err.code === 'already_registered', 'a resubmit does not reserve past the admin');
+    await FormSubmission.updateOne({ _id: vetted._id }, { $set: { updated_at: new Date(Date.now() - 120_000) } }, { timestamps: false });
+    await strandedSweep();
+    assert.strictEqual((await registrationService.getRegistration(vetted._id)).status, 'submitted', 'nor does the stranded sweep');
+    const hostReg = await submitAppr(host);
+    await assert.rejects(() => registrationService.updateRegistrationStatus(hostReg._id, hostAdmin, 'confirmed'),
+        (err: any) => err.status === 403 && err.code === 'cannot_review_own_registration');
+    const confirmedByHost = await registrationService.updateRegistrationStatus(vetted._id, hostAdmin, 'confirmed');
+    assert(confirmedByHost.status === 'confirmed' && stub.holders.get(apprEventId)!.has(vetted._id), 'the admin confirm reserves');
+    stub.capacity.set(apprEventId, 1);
+    const late = await submitAppr((await seedUser('User Late'))._id);
+    const overflow = await registrationService.updateRegistrationStatus(late._id, hostAdmin, 'confirmed');
+    assert.strictEqual(overflow.status, 'waitlisted', 'confirming into a full event waitlists the row');
+    stub.capacity.set(apprEventId, 2);
+    assert(await registrationService.promoteNext(apprEventId), 'and promotion picks it up when a seat frees');
+    assert.strictEqual((await registrationService.getRegistration(late._id)).status, 'confirmed');
+    console.log('✓');
+
+    console.log('15. Two concurrent submits for the same user and event: one row, one 409...');
+    await FormSubmission.syncIndexes();
+    const twin = await Promise.allSettled([submitAppr(u3), submitAppr(u3)]);
+    assert.strictEqual(twin.filter((r) => r.status === 'fulfilled').length, 1);
+    assert((twin.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason.code === 'already_registered');
+    assert.strictEqual(await FormSubmission.countDocuments({ form_id: apprForm._id, 'user.user_id': u3 }), 1);
+    console.log('✓');
+
+    console.log('16. A challenge form takes registrations only while the challenge is active and open...');
+    const challengeId = uuid();
+    await Challenge.collection.insertOne({ _id: challengeId as any, status: 'draft', deleted_at: null, window: { opens_at: null, closes_at: null } });
+    const chForm = await formService.createForm({ owner: { type: 'challenge', id: challengeId }, title: 'Ch', fields: [f({})], created_by: creatorId });
+    await formService.publishForm(chForm._id);
+    const submitCh = (userId: string) =>
+        registrationService.submitRegistration({ form_id: chForm._id, owner: { type: 'challenge', id: challengeId }, answers: { name: 'x' }, user_id: userId });
+    await assert.rejects(() => submitCh(u2), (err: any) => err.code === 'challenge_not_active');
+    await Challenge.collection.updateOne({ _id: challengeId as any }, { $set: { status: 'active', 'window.closes_at': new Date(Date.now() - 1000) } });
+    await assert.rejects(() => submitCh(u2), (err: any) => err.code === 'challenge_closed');
+    await Challenge.collection.updateOne({ _id: challengeId as any }, { $set: { 'window.closes_at': null } });
+    assert.strictEqual((await submitCh(u2)).status, 'confirmed');
     console.log('✓');
 
     await stub.close();

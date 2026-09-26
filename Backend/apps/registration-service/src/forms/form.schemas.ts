@@ -1,6 +1,6 @@
-import { ALLOW_EDIT_UNTIL, FIELD_TYPE, FORM_STATUS, VISIBLE_IF_OP } from '@bgsc/shared';
+import { ALLOW_EDIT_UNTIL, FIELD_TYPE, FORM_STATUS, FormField, VISIBLE_IF_OP } from '@bgsc/shared';
 import { z } from 'zod';
-import { PATTERN_MAX_LENGTH, patternProblem } from '../registrations/validation';
+import { PATTERN_MAX_LENGTH, patternProblem, visibleIfValue } from '../registrations/validation';
 import { PageQuery } from '../registrations/registration.schemas';
 import { FILE_MAX_BYTES } from '../storage/storage';
 
@@ -45,7 +45,7 @@ type FieldInput = z.infer<typeof FormFieldSchema>;
  * Everything the FormDefinition model's pre-validate hook checks, and what the validation engine
  * needs to be safe, checked here as a 422. The model throws a plain Error (a 500), and on a
  * published form that 500 came AFTER the archive row was written — so every later edit hit the
- * archive's unique index and the form could never be edited again (backend-audit, registration).
+ * archive's unique index and the form could never be edited again.
  */
 function checkFields(fields: FieldInput[], ctx: z.RefinementCtx): void {
     const issue = (i: number, key: string, message: string) =>
@@ -87,6 +87,10 @@ function checkFields(fields: FieldInput[], ctx: z.RefinementCtx): void {
             }
             seen.add(cur.key);
         }
+        // Stored in the form the engine compares against (the parsed object is what gets saved).
+        const normalized = visibleIfValue(byKey.get(f.visible_if.field_key) as unknown as FormField, f.visible_if.op, f.visible_if.value);
+        if (normalized) f.visible_if.value = normalized.value;
+        else issue(i, 'visible_if', 'visible_if_value_invalid');
     });
 }
 

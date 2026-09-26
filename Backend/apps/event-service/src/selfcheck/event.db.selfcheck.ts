@@ -7,16 +7,19 @@ import { AuctionLot, Event, FormDefinition, FormSubmission, Team, User, UserRole
 import * as ev from '../events/event.service';
 import * as auction from '../auction/auction.service';
 import { handleCaptainApproved, handleRegistrationCancelled, handleUserDeleted, resnapshotUser } from '../events/consumers';
+import * as evc from '../events/event.controller';
 import { asServiceError } from '../clients/registration-client';
-import { startDueEvents } from '../events/scheduler';
+import { reconcileSeats, startDueEvents } from '../events/scheduler';
 import { settleExpiredLots } from '../auction/auction.service';
 import { CreateEventSchema, QueryEventsSchema, UpdateEventSchema } from '../events/event.schemas';
 import { putObject } from '../storage/storage';
+import { promises as fs } from 'fs';
+import path from 'path';
 import { Actor } from '../events/access';
 
 /**
  * Regression checks against a real MongoDB (scratch database `bgsc_selfcheck_event`, dropped at
- * start and end) and a stub Registration Service on STUB_PORT. Every block pins one audit finding.
+ * start and end) and a stub Registration Service on STUB_PORT. Every block pins one regression.
  */
 
 const SCRATCH_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_selfcheck_event$2');
@@ -113,14 +116,15 @@ async function rejects(p: Promise<unknown>, status: number, code: string, label:
 
 async function seatContract() {
     const e = await seedEvent();
-    // C4: idempotent per registration id — a retry holds the same seat, never a second one.
+    // Idempotent per registration id — a retry holds the same seat, never a second one.
     assert.deepStrictEqual(await ev.reserveSeat(e._id, 'r1'), { reserved: true });
     assert.deepStrictEqual(await ev.reserveSeat(e._id, 'r1'), { reserved: true }, 'retried reserve is idempotent');
     let fresh = (await Event.findById(e._id))!;
     assert.strictEqual(fresh.counts.registrations_confirmed, 1, 'retry did not double-count');
     assert.deepStrictEqual([...fresh.seat_holders], ['r1']);
+    assert.strictEqual(fresh.updated_at.getTime(), e.updated_at.getTime(), 'a seat write leaves the PATCH version (updated_at) alone');
 
-    // C4: full + waitlist → capacity_full (registration waitlists); full, no waitlist → waitlist_disabled.
+    // Full + waitlist → capacity_full (registration waitlists); full, no waitlist → waitlist_disabled.
     assert.deepStrictEqual(await ev.reserveSeat(e._id, 'r2'), { reserved: false, reason: 'capacity_full' });
     await Event.updateOne({ _id: e._id }, { $set: { 'registration.waitlist_enabled': false } });
     assert.deepStrictEqual(await ev.reserveSeat(e._id, 'r2'), { reserved: false, reason: 'waitlist_disabled' });
@@ -193,7 +197,7 @@ async function seatContract() {
 async function patchSemantics() {
     const e = await allLeague({ status: 'not_started' }, { core_admins: [ADMIN.id, CO_ADMIN.id] });
 
-    // C2: a partial PATCH changes exactly what it names.
+    // A partial PATCH changes exactly what it names.
     const renamed = await ev.updateEvent(e._id, ADMIN, UpdateEventSchema.parse({ title: 'Renamed' }) as never);
     assert.strictEqual(renamed.title, 'Renamed');
     assert.strictEqual(renamed.type, 'ALL', 'type survives a title PATCH');
@@ -295,7 +299,7 @@ async function createAndList() {
         'registration_form_invalid',
         'form swap on a published event'
     );
-    // Eligibility never says "eligible" without a usable form (H1).
+    // Eligibility never says "eligible" without a usable form.
     const drafty = await seedEvent({ registration: { closes_at: at(5), form_id: 'form-missing', max_participants: 5 } });
     const elig = await ev.getEventEligibility(drafty._id, 'someone');
     assert.deepStrictEqual([elig.eligible, elig.reason], [false, 'registration_form_unavailable']);
@@ -394,7 +398,7 @@ async function auctionEngine() {
     reply('debit-purse', { status: 500, body: { error: 'internal_error' } }, { status: 401, body: { error: 'unauthorized' } });
     await rejects(auction.advanceLot(c._id, ADMIN), 503, 'registration_service_unavailable', 'unknown outcome is a 503');
     assert.strictEqual((await AuctionLot.findById(c._id))!.status, 'settling', 'lot held in settling, not re-opened');
-    await rejects(auction.placeBid(c._id, { id: 'cap-2' }, 500, 0), 400, 'lot_not_on_block', 'no bid on a settling lot');
+    await rejects(auction.placeBid(c._id, { id: 'cap-2' }, 500, 0), 409, 'lot_not_on_block', 'no bid on a settling lot');
     // 401 from Registration is outcome-unknown too, never a refusal that unsells.
     await rejects(auction.advanceLot(c._id, ADMIN), 503, 'registration_service_unavailable', '401 is not a refusal');
     assert.strictEqual((await AuctionLot.findById(c._id))!.status, 'settling', '401 left the lot settling');
@@ -513,7 +517,7 @@ async function auctionEngine() {
     await rejects(auction.createLots(e8._id, ADMIN, { lots: [{ ...lot, order: 2 }] }), 409, 'lot_conflict', 'repeat player');
 }
 
-async function auditTwoChecks() {
+async function lifecycleAndBidGuards() {
     // Scheduler: an event that already ended is NOT started (no EventStarted storm).
     const ended = await seedEvent({ start_at: at(-3), end_at: at(-2), registration: { closes_at: at(-4), form_id: 'form-1' } });
     await startDueEvents();
@@ -579,6 +583,7 @@ async function auditTwoChecks() {
     calls.length = 0;
     const same = await auction.overrideCaptainBudget(notStarted._id, seeded._id, COORD, { purse_total: 700 });
     assert.ok(same && calls.length === 0, 'idempotent override needs no downstream call');
+    assert.strictEqual((same as { name?: string }).name, 'Seeded', 'the replay answers the full team, as the first call did');
 
     // Auto-settle: an expired lot in a live auction settles without an admin.
     const auto = await allLeague();
@@ -618,6 +623,291 @@ async function auditTwoChecks() {
     assert.ok(listed.captains.every((c) => c.display_name !== 'Real Name'), 'deleted captain not shown by name');
 }
 
+const confirmedReg = (eventId: string, userId: string, over: Record<string, unknown> = {}) =>
+    FormSubmission.create({
+        form_id: 'form-1',
+        form_version: 1,
+        owner: { type: 'event', id: eventId },
+        user: { user_id: userId, display_name: userId, avatar_url: null },
+        context: { event: { role: 'captain' } },
+        status: 'confirmed',
+        ...over,
+    });
+
+const seedTeam = (eventId: string, captain: string, auctionBlock: Record<string, unknown> | null) =>
+    Team.create({
+        owner: { type: 'event', id: eventId },
+        name: `Team ${captain} ${randomUUID().slice(0, 6)}`,
+        captain_user_id: captain,
+        members: [{ user_id: captain, display_name: captain, registration_id: `reg-${captain}`, acquired_via: 'created' }],
+        invite_code: randomUUID().replace(/-/g, '').slice(0, 8),
+        size_min: 1,
+        size_max: 5,
+        auction: auctionBlock,
+    });
+
+async function bidding() {
+    const e = await allLeague({ captain_user_ids: ['cap-a', 'cap-b'], purse_per_team: 1000 });
+    const lot = await seedLot(e._id, { status: 'on_block', timer_ends_at: at(1) }); // floor 100, increment 10
+    await seedTeam(e._id, 'cap-a', { purse_total: 1000 });
+    await seedTeam(e._id, 'cap-b', null); // formed after the start: missed the start's purse run
+    await confirmedReg(e._id, 'cap-a');
+    await confirmedReg(e._id, 'cap-b');
+
+    await rejects(auction.placeBid(lot._id, { id: 'cap-a' }, 50, 0), 422, 'bid_below_minimum', 'opening bid under the floor');
+    await rejects(auction.placeBid(lot._id, { id: 'cap-a' }, 1001, 0), 422, 'insufficient_purse', 'bid over the purse');
+
+    const first = await auction.placeBid(lot._id, { id: 'cap-a' }, 100, 0);
+    assert.deepStrictEqual([first.current_bid, first.version, first.bids.length], [100, 1, 1], 'a valid bid lands');
+    await rejects(auction.placeBid(lot._id, { id: 'cap-b' }, 105, 1), 422, 'bid_below_minimum', 'raise under the increment');
+
+    // A captain whose team has no purse is given the default one (idempotent upstream), not a 422.
+    calls.length = 0;
+    const second = await auction.placeBid(lot._id, { id: 'cap-b' }, 110, 1);
+    assert.strictEqual(second.current_bid, 110, 'late team bids from the default purse');
+    assert.deepStrictEqual(
+        calls.map((x) => [x.op, x.body.purse_total]),
+        [['auction-purses', 1000]],
+        'late team gets the start-time default purse'
+    );
+
+    // Two bids read the same version: the first wins, the other misses the CAS.
+    await rejects(auction.placeBid(lot._id, { id: 'cap-a' }, 200, 1), 409, 'conflict_concurrent_bid', 'stale version refused');
+
+    // The server timer is the deadline, whatever the client thinks.
+    await AuctionLot.updateOne({ _id: lot._id }, { $set: { timer_ends_at: at(-1) } });
+    await rejects(auction.placeBid(lot._id, { id: 'cap-a' }, 200, 2), 409, 'conflict_concurrent_bid', 'bid after timer_ends_at');
+
+    // Pause moves the lot version, so a bid read before the pause cannot land after it.
+    const p = await allLeague();
+    const pLot = await seedLot(p._id, { status: 'on_block', timer_ends_at: at(1) });
+    await auction.pauseAuction(p._id, ADMIN);
+    assert.strictEqual((await AuctionLot.findById(pLot._id))!.version, pLot.version + 1, 'pause bumps the lot version');
+    await rejects(auction.placeBid(pLot._id, { id: 'cap-1' }, 100, 0), 409, 'auction_not_live', 'no bid on a paused auction');
+
+    // A route miss or a body Registration cannot parse is version skew, not a refusal: the lot stays
+    // settling (503) instead of going unsold for good.
+    const s = await allLeague();
+    const sLot = await seedLot(s._id, {
+        status: 'on_block',
+        current_bid: 150,
+        current_bidder: { user_id: 'cap-1', team_id: 'team-s' },
+        timer_ends_at: at(-1),
+    });
+    reply('debit-purse', { status: 404, body: { error: 'not_found' } }, { status: 422, body: { error: 'validation_failed' } });
+    await rejects(auction.advanceLot(sLot._id, ADMIN), 503, 'registration_service_unavailable', 'route-miss 404 is not a refusal');
+    await rejects(auction.advanceLot(sLot._id, ADMIN), 503, 'registration_service_unavailable', 'validation_failed is not a refusal');
+    assert.strictEqual((await AuctionLot.findById(sLot._id))!.status, 'settling', 'lot still settling after skew');
+    assert.strictEqual((await auction.advanceLot(sLot._id, ADMIN)).settled_lot.status, 'sold', 'the replay sells');
+
+    // Not an auction league: 422 on the auction routes, as on the captain routes.
+    const le = await seedEvent();
+    await rejects(auction.getAuctionLiveState(le._id), 422, 'event_is_not_an_auction_league', 'auction read on LE');
+
+    // A deleted account goes on the block anonymized.
+    const lotsEvent = await allLeague({ status: 'not_started' });
+    const gone = randomUUID();
+    await User.create({ _id: gone, email: `${gone}@sc.local`, username: `sc_${gone.slice(0, 8)}`, role: UserRole.USER, profile: { full_name: 'Real Name' }, deleted_at: new Date() });
+    const goneReg = await confirmedReg(lotsEvent._id, gone, { context: { event: { role: 'solo' } } });
+    const [goneLot] = await auction.createLots(lotsEvent._id, ADMIN, { lots: [{ registration_id: goneReg._id, user_id: gone, base_price: 1, order: 1 }] });
+    assert.deepStrictEqual([goneLot.player.display_name, goneLot.player.deleted], ['Deleted user', true], 'deleted player anonymized');
+}
+
+async function eventWrites() {
+    // A league does not complete under a live auction; a finished or never-started one does.
+    const live = await allLeague({}, { status: 'ongoing' });
+    await rejects(ev.updateEvent(live._id, ADMIN, { status: 'past' }), 409, 'auction_not_finished', 'past with a live auction');
+    await Event.updateOne({ _id: live._id }, { $set: { 'auction.status': 'finished' } });
+    assert.strictEqual((await ev.updateEvent(live._id, ADMIN, { status: 'past' })).status, 'past', 'finished auction completes');
+    const unstarted = await allLeague({ status: 'not_started' }, { status: 'ongoing' });
+    assert.strictEqual((await ev.updateEvent(unstarted._id, ADMIN, { status: 'past' })).status, 'past', 'never-started auction completes');
+
+    // A PATCH validated against a read that another write has since moved past is a 409.
+    const e = await seedEvent();
+    const cas = Event.findOneAndUpdate;
+    Event.findOneAndUpdate = (async (...args: unknown[]) => {
+        Event.findOneAndUpdate = cas;
+        await Event.collection.updateOne({ _id: e._id as never }, { $set: { updated_at: new Date(Date.now() + 60_000) } });
+        return (cas as (...a: unknown[]) => unknown).apply(Event, args);
+    }) as never;
+    await rejects(ev.updateEvent(e._id, ADMIN, { title: 'Stale' }), 409, 'event_changed_concurrently', 'stale PATCH refused');
+    assert.notStrictEqual((await Event.findById(e._id))!.title, 'Stale');
+
+    // Delete a draft: Core+ who administers it (a core creator may); anyone else may not.
+    const draft = await seedEvent({ status: 'draft' });
+    await rejects(ev.deleteEvent(draft._id, OUTSIDER), 404, 'not_found', 'non-admin core: a draft is hidden');
+    assert.deepStrictEqual(await ev.deleteEvent(draft._id, ADMIN), { deleted: true }, 'core creator deletes their draft');
+    const published = await seedEvent();
+    await rejects(ev.deleteEvent(published._id, OUTSIDER), 403, 'forbidden', 'non-admin core cannot delete');
+    await rejects(ev.deleteEvent(published._id, ADMIN), 409, 'cannot_delete_published_event', 'published is never deleted');
+
+    // Promotion goes through Registration; only this event's admins, only this event's rows.
+    const wl = await seedEvent();
+    const row = await confirmedReg(wl._id, 'u-wl', { status: 'waitlisted', waitlist_position: 1 });
+    calls.length = 0;
+    await ev.promoteWaitlistedParticipant(wl._id, row._id, ADMIN);
+    assert.deepStrictEqual(calls.map((x) => [x.op, x.body.by]), [['promote', ADMIN.id]], 'promote delegated with the actor');
+    await rejects(ev.promoteWaitlistedParticipant(wl._id, row._id, OUTSIDER), 403, 'forbidden', 'non-admin cannot promote');
+    await rejects(ev.promoteWaitlistedParticipant(wl._id, randomUUID(), ADMIN), 404, 'registration_not_found', 'foreign row');
+    const own = await confirmedReg(wl._id, ADMIN.id, { status: 'waitlisted', waitlist_position: 2 });
+    await rejects(ev.promoteWaitlistedParticipant(wl._id, own._id, ADMIN), 403, 'cannot_review_own_registration', 'no self-promotion');
+}
+
+/** Drives the media controller the way Express would; resolves with the response or the error passed to next(). */
+function upload(ref: string, actor: Actor, body: Buffer): Promise<{ status: number; body: Record<string, unknown> } | unknown> {
+    return new Promise((resolve) => {
+        const res = {
+            statusCode: 200,
+            status(code: number) {
+                this.statusCode = code;
+                return this;
+            },
+            json(b: Record<string, unknown>) {
+                resolve({ status: this.statusCode, body: b });
+            },
+        };
+        evc.uploadMedia({ actor: { _id: actor.id, role: actor.role }, params: { ref }, query: {}, body } as never, res as never, resolve);
+    });
+}
+
+async function participantsAndMedia() {
+    // The public reads confirmed and waitlist counts only; the event's admins read the breakdown.
+    const e = await seedEvent({ registration: { closes_at: at(5), form_id: 'form-1', max_participants: 5, waitlist_enabled: true } });
+    await confirmedReg(e._id, 'u-ok', { context: { event: { role: 'solo' } } });
+    await confirmedReg(e._id, 'u-no', { status: 'rejected', context: { event: { role: 'solo' } } });
+    const pub = await ev.getEventParticipantStats(e._id);
+    assert.deepStrictEqual(pub.counts, { confirmed: 1, waitlisted: 0 }, 'public stats: confirmed and waitlist only');
+    const adm = await ev.getEventParticipantStats(e._id, ADMIN);
+    assert.strictEqual((adm.counts as Record<string, number>).rejected, 1, 'admin stats keep the breakdown');
+
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    const draft = await seedEvent({ status: 'draft' });
+    const hidden = (await upload(draft._id, OUTSIDER, jpeg)) as ServiceError;
+    assert.strictEqual(`${hidden.status} ${hidden.code}`, '404 not_found', 'draft media: 404 to a non-admin');
+    const denied = (await upload(e._id, OUTSIDER, jpeg)) as ServiceError;
+    assert.strictEqual(`${denied.status} ${denied.code}`, '403 forbidden', 'media: non-admin core refused');
+
+    const one = (await upload(e._id, ADMIN, jpeg)) as { status: number; body: { url: string } };
+    assert.strictEqual(one.status, 201, 'admin uploads a cover');
+    const onDisk = (url: string) => path.join(config.uploadDir, url.slice('/uploads/'.length));
+    await fs.access(onDisk(one.body.url));
+    const two = (await upload(e._id, ADMIN, jpeg)) as { status: number; body: { url: string } };
+    assert.strictEqual((await Event.findById(e._id))!.cover_media_url, two.body.url);
+    await assert.rejects(fs.access(onDisk(one.body.url)), 'the replaced cover is deleted');
+    await fs.access(onDisk(two.body.url));
+    await Event.updateOne({ _id: e._id }, { $set: { logo_url: two.body.url } });
+    assert.strictEqual(((await upload(e._id, ADMIN, jpeg)) as { status: number }).status, 201);
+    await fs.access(onDisk(two.body.url)); // a replaced cover still shown as the logo is kept
+
+    const past = await seedEvent({ status: 'past' });
+    const frozen = (await upload(past._id, ADMIN, jpeg)) as ServiceError;
+    assert.strictEqual(`${frozen.status} ${frozen.code}`, '409 event_is_terminal', 'no media on a past event');
+}
+
+async function cursorPaging() {
+    // Five events, two sharing a start time: every page boundary, tie included, is walked once.
+    const starts = [12, 13, 13, 14, 15];
+    const seeded = await Promise.all(starts.map((d) => seedEvent({ title: 'Cursor Walk', start_at: at(d), end_at: at(d + 1) })));
+    for (const sort of ['date_asc', 'date_desc'] as const) {
+        const seen: string[] = [];
+        let cursor: string | undefined;
+        let pages = 0;
+        do {
+            const page = await ev.listEvents(QueryEventsSchema.parse({ search: 'Cursor Walk', sort, limit: 2, cursor }));
+            seen.push(...page.events.map((x) => x._id));
+            cursor = page.next_cursor ?? undefined;
+            pages++;
+        } while (cursor);
+        const dir = sort === 'date_asc' ? 1 : -1;
+        const expected = [...seeded]
+            .sort((a, b) => dir * (a.start_at.getTime() - b.start_at.getTime()) || (a._id < b._id ? -1 : 1))
+            .map((x) => x._id);
+        assert.strictEqual(pages, 3, `${sort}: three pages of two`);
+        assert.deepStrictEqual(seen, expected, `${sort}: no event skipped or repeated across pages`);
+    }
+}
+
+async function seatRepair() {
+    // A cancellation that already freed the seat never strips a fresh one (an admin re-confirm
+    // reserves before it flips the row).
+    const e = await seedEvent({ registration: { closes_at: at(5), form_id: 'form-1', max_participants: 10 } });
+    await FormSubmission.collection.insertOne({ _id: 'reconfirm' as never, status: 'submitted' });
+    await ev.reserveSeat(e._id, 'reconfirm');
+    await handleRegistrationCancelled({
+        registration_id: 'reconfirm',
+        owner: { type: 'event', id: e._id },
+        previous_status: 'confirmed',
+        freed_seat: true,
+    });
+    assert.ok((await Event.findById(e._id))!.seat_holders.includes('reconfirm'), 'fresh seat survives a late cancel');
+    await handleRegistrationCancelled({
+        registration_id: 'reconfirm',
+        owner: { type: 'event', id: e._id },
+        previous_status: 'waitlisted',
+        freed_seat: false,
+    });
+    assert.ok((await Event.findById(e._id))!.seat_holders.includes('reconfirm'), 'a waitlist exit frees nothing');
+
+    // Past the first hundred capped events: every one is reached, not just a first batch.
+    await Event.collection.insertMany(
+        Array.from({ length: 100 }, () => randomUUID()).map((id) => ({
+            _id: id as never, slug: `sc-${id}`, status: 'upcoming', deleted_at: null, registration: { max_participants: 10 }, seat_holders: ['keep-confirmed'],
+        }))
+    );
+
+    // The sweep gives back seats held by rows gone or long cancelled/rejected/waitlisted; confirmed,
+    // submitted and freshly changed rows keep theirs.
+    const old = at(-1);
+    const rowsOf: [string, string, Date][] = [
+        ['keep-confirmed', 'confirmed', old],
+        ['keep-submitted', 'submitted', old],
+        ['keep-fresh-cancel', 'cancelled', new Date()],
+        ['drop-cancelled', 'cancelled', old],
+        ['drop-rejected', 'rejected', old],
+        ['drop-waitlisted', 'waitlisted', old],
+    ];
+    await FormSubmission.collection.insertMany(
+        rowsOf.map(([id, status, updated_at]) => ({ _id: id as never, form_id: 'f-seat', user: { user_id: id }, status, updated_at }))
+    );
+    const holders = ['keep-confirmed', 'keep-submitted', 'keep-fresh-cancel', 'drop-cancelled', 'drop-rejected', 'drop-waitlisted', 'drop-missing'];
+    const capped = await seedEvent({ registration: { closes_at: at(5), form_id: 'form-1', max_participants: 10 } });
+    await Event.updateOne({ _id: capped._id }, { $set: { seat_holders: holders, 'counts.registrations_confirmed': holders.length } });
+    const closed = await seedEvent({ status: 'past', registration: { closes_at: at(5), form_id: 'form-1', max_participants: 10 } });
+    await Event.updateOne({ _id: closed._id }, { $set: { seat_holders: ['drop-cancelled'], 'counts.registrations_confirmed': 1 } });
+
+    await reconcileSeats();
+    let fresh = (await Event.findById(capped._id))!;
+    assert.deepStrictEqual([...fresh.seat_holders], ['keep-confirmed', 'keep-submitted', 'keep-fresh-cancel'], 'stale seats released');
+    assert.strictEqual(fresh.counts.registrations_confirmed, 3, 'counter moved with the ledger');
+    await reconcileSeats();
+    fresh = (await Event.findById(capped._id))!;
+    assert.strictEqual(fresh.counts.registrations_confirmed, 3, 'a second run decrements nothing');
+    assert.deepStrictEqual([...(await Event.findById(closed._id))!.seat_holders], ['drop-cancelled'], 'past events untouched');
+
+    // A row promoted after the sweep's batch read (reserve first, row flip after) keeps its seat:
+    // the row is read again right before its release.
+    await FormSubmission.collection.insertOne({ _id: 'race-promoted' as never, form_id: 'f-seat', user: { user_id: 'rp' }, status: 'waitlisted', updated_at: old });
+    const racing = await seedEvent({ registration: { closes_at: at(5), form_id: 'form-1', max_participants: 10 } });
+    await Event.updateOne({ _id: racing._id }, { $set: { seat_holders: ['race-promoted'], 'counts.registrations_confirmed': 1 } });
+    const reread = FormSubmission.findById;
+    FormSubmission.findById = function (...args: unknown[]) {
+        FormSubmission.findById = reread;
+        const q = (reread as (...a: unknown[]) => { exec: (...a: unknown[]) => Promise<unknown> }).apply(FormSubmission, args);
+        const exec = q.exec.bind(q);
+        q.exec = async (...a: unknown[]) => {
+            await FormSubmission.collection.updateOne({ _id: 'race-promoted' as never }, { $set: { status: 'confirmed', updated_at: new Date() } });
+            return exec(...a);
+        };
+        return q;
+    } as never;
+    try {
+        await reconcileSeats();
+    } finally {
+        FormSubmission.findById = reread;
+    }
+    assert.deepStrictEqual([...(await Event.findById(racing._id))!.seat_holders], ['race-promoted'], 'a row confirmed mid-sweep keeps its seat');
+}
+
 async function storage() {
     const stored = await putObject('event-x', Buffer.from([0xff, 0xd8, 0xff, 0, 0, 0, 0, 0, 0, 0, 0, 0]), 'image/jpeg');
     assert.ok(stored.url.startsWith('/uploads/events/event-x/'), 'event images live under the shared root, events/ prefix');
@@ -635,8 +925,13 @@ async function main() {
         await createAndList();
         await captainsAndConsumers();
         await auctionEngine();
-        await auditTwoChecks();
+        await lifecycleAndBidGuards();
         await storage();
+        await bidding();
+        await eventWrites();
+        await participantsAndMedia();
+        await cursorPaging();
+        await seatRepair();
         console.log('event service db selfcheck: all assertions passed');
     } finally {
         await mongoose.connection.dropDatabase();

@@ -17,7 +17,7 @@ import { authAttemptIpCeiling, authAttemptLimiter, generalLimiter, parseAttemptB
  */
 
 const NAME = 'gateway';
-const PORT = parseInt(process.env.GATEWAY_PORT || String(config.gatewayPort), 10);
+const PORT = config.gatewayPort;
 
 export const app = express();
 
@@ -75,7 +75,7 @@ app.use(authAttemptLimiter);
 app.use(generalLimiter);
 
 // The routing table with its internal targets (`http://auth-service:3001`, …) is operator
-// information, not something to hand an anonymous caller mapping the network (audit Sep 26).
+// information, not something to hand an anonymous caller mapping the network.
 app.get('/gateway/services', requireRole(UserRole.COORDINATOR), (_req: Request, res: Response) => {
     res.json({
         services: Object.entries(ROUTES).map(([key, r]) => ({
@@ -132,7 +132,7 @@ export function start(): void {
         console.log(`[${NAME}] live: ${live.join(', ')} | pending: ${Object.keys(ROUTES).filter((k) => !isLive(k)).join(', ')}`);
     });
     // Every proxy instance listens on the server; fifteen of them trip Node's default cap of 10 and
-    // print MaxListenersExceededWarning on every boot (audit #2). Not a leak: the count is fixed.
+    // print MaxListenersExceededWarning on every boot. Not a leak: the count is fixed.
     server.setMaxListeners(Object.keys(ROUTES).length + 10);
 
     for (const signal of ['SIGINT', 'SIGTERM'] as const) {

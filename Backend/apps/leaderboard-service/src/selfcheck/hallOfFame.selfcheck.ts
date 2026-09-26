@@ -82,14 +82,18 @@ export async function runSelfcheck() {
     });
 
     const { subscribe, resetBus, ChallengeParticipation } = await import('@bgsc/shared');
+    // The Challenge Service always names the participation; the honoree comes from its snapshot.
+    const participationId = 'aaaaaaaa-2222-3333-4444-555555555555';
+    await ChallengeParticipation.collection.insertOne({
+        _id: participationId,
+        challenge_id: testChallengeId,
+        participant: { type: 'user', id: testUserId, display_name: 'Legend Runner', avatar_url: 'https://cdn.bgsc.in/legend.jpg' },
+        member_user_ids: [testUserId],
+    } as never);
     const announced: unknown[] = [];
     resetBus();
     subscribe('HallOfFameEntryCreated', (e) => void announced.push(e.payload));
-    await handlers.onChallengeLegendAchieved({
-        challenge_id: testChallengeId,
-        participant_id: testUserId,
-        participant_type: 'user',
-    });
+    await handlers.onChallengeLegendAchieved({ challenge_id: testChallengeId, participation_id: participationId });
 
     const legendEntry = await HallOfFameEntry.findOne({
         category: 'challenge_legend',
@@ -102,11 +106,7 @@ export async function runSelfcheck() {
     assert(legendEntry.achievement.difficulty === 'legend', 'Achievement difficulty mismatch');
 
     // Replay idempotency test
-    await handlers.onChallengeLegendAchieved({
-        challenge_id: testChallengeId,
-        participant_id: testUserId,
-        participant_type: 'user',
-    });
+    await handlers.onChallengeLegendAchieved({ challenge_id: testChallengeId, participation_id: participationId });
     const countAfterReplay = await HallOfFameEntry.countDocuments({
         category: 'challenge_legend',
         'honoree.id': testUserId,
@@ -119,7 +119,7 @@ export async function runSelfcheck() {
     // the challenge-side consumer is an idempotent $set.
     assert(announced.length === 2, 'the replay re-announces the existing entry');
     assert((announced[0] as any).entry_id === (announced[1] as any).entry_id, 'both announcements name the one entry');
-    assert((await ChallengeParticipation.countDocuments({})) === 0, "challenge_participations is not this service's to write");
+    assert((await ChallengeParticipation.countDocuments({})) === 1, "challenge_participations is not this service's to write");
 
     // Two creates of one title race to one slug: the loser takes the next slug, not a 500.
     const racers = await Promise.all(
@@ -174,7 +174,7 @@ export async function runSelfcheck() {
     const restoredEntry = await HallOfFameEntry.findById(legendEntry._id);
     assert(restoredEntry?.honoree.display_name === 'Legendary Champion', 'UserRestored failed to rehydrate HoF honoree');
 
-    // 9. Audit #2: PATCH merges nested groups and never un-anonymizes; schemas; deleted snapshots; search.
+    // 9. PATCH merges nested groups and never un-anonymizes; schemas; deleted snapshots; search.
     await User.updateOne({ _id: testUserId }, { $set: { deleted_at: new Date() } });
     await handlers.onUserDeleted({ user_id: testUserId });
     const patched = await service.updateEntry(legendEntry._id, { achievement: { season: 'Monsoon' } } as never, 'system');
@@ -223,6 +223,7 @@ export async function runSelfcheck() {
     await HallOfFameEntry.deleteMany({});
     await User.deleteOne({ _id: testUserId });
     await Challenge.deleteOne({ _id: testChallengeId });
+    await ChallengeParticipation.collection.deleteOne({ _id: participationId } as never);
 
     console.log('[selfcheck] HallOfFame selfcheck passed.');
 }

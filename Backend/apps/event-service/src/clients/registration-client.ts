@@ -6,20 +6,30 @@ import { InternalCallError, ServiceError, callInternal, config } from '@bgsc/sha
  *
  * There is no fallback. The old client wrote `teams` directly on ANY failure — a timeout after the
  * debit had landed debited twice, and a deliberate `team_full` refusal was overridden by a raw
- * `$push` (audit Sep 26). Every mutating call carries a request id derived from the thing it
+ * `$push`. Every mutating call carries a request id derived from the thing it
  * settles, so a retry after "outcome unknown" is safe and a second debit is impossible.
  */
 
 const base = () => config.services.registration;
 
+/**
+ * Not an answer from Registration: no response or a 5xx, our service token refused (401/403 — a
+ * deployment fault, not the member's session; passing it through logged the user out), the
+ * generic route-miss 404 `not_found` (its domain 404s carry their own codes, e.g.
+ * `team_not_found`), or a 422 `validation_failed` on the body we sent. The last two mean version
+ * skew or a misroute, never "no".
+ */
+export const outcomeUnknown = (err: InternalCallError): boolean =>
+    err.outcomeUnknown ||
+    err.status === 401 ||
+    err.status === 403 ||
+    (err.status === 404 && err.code === 'not_found') ||
+    (err.status === 422 && err.code === 'validation_failed');
+
 /** A refusal keeps its status and code; "never got an answer" is a 503 the caller can retry. */
 export function asServiceError(err: unknown): unknown {
     if (!(err instanceof InternalCallError)) return err;
-    // 401/403 here means our service token was refused — a deployment fault, not the member's
-    // session. Passing it through made the client log the user out.
-    if (err.outcomeUnknown || err.status === 401 || err.status === 403) {
-        return new ServiceError(503, 'registration_service_unavailable');
-    }
+    if (outcomeUnknown(err)) return new ServiceError(503, 'registration_service_unavailable');
     return new ServiceError(err.status, err.code, err.details);
 }
 

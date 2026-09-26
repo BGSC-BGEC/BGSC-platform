@@ -112,7 +112,7 @@ assert.strictEqual(sniffImage(jpegHeader), 'image/jpeg', 'sniffs JPEG correctly'
 assert.strictEqual(sniffImage(pngHeader), 'image/png', 'sniffs PNG correctly');
 assert.strictEqual(sniffImage(fakeFile), null, 'rejects non-image bytes');
 
-// 8. C2: the update schema carries only what the client sent — no defaults, nested partials.
+// 8. The update schema carries only what the client sent — no defaults, nested partials.
 assert.deepStrictEqual(UpdateEventSchema.parse({ title: 'x' }), { title: 'x' }, 'PATCH {title} fills no defaults');
 assert.deepStrictEqual(
     UpdateEventSchema.parse({ registration: { max_participants: 5 } }),
@@ -140,7 +140,7 @@ assert.ok(isEventAdmin(ev, { id: 'z', role: 'coordinator' }));
 assert.ok(!isEventAdmin(ev, { id: 'z', role: 'core' }), 'an unrelated core is not an event admin');
 assert.ok(!isEventAdmin(ev, undefined));
 
-// 12. Audit #2: links a browser renders are http(s) or our own uploads; attendance ids are uuids.
+// 12. Links a browser renders are http(s) or our own uploads; attendance ids are uuids.
 assert.strictEqual(UpdateEventSchema.safeParse({ rules_pdf_url: 'javascript:alert(1)' }).success, false, 'javascript: url refused');
 assert.strictEqual(UpdateEventSchema.safeParse({ rules_pdf_url: 'https://x.org/rules.pdf' }).success, true);
 assert.strictEqual(UpdateEventSchema.safeParse({ rules_pdf_url: '/uploads/events/e/r.pdf' }).success, true);

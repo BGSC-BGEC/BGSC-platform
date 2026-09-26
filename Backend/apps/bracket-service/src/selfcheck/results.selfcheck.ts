@@ -1,6 +1,6 @@
 import assert from 'assert';
-import { Bracket, FormSubmission, IMatch, Match, ServiceError, User, UserRole, resetBus, subscribe } from '@bgsc/shared';
-import { v4 as uuid } from 'uuid';
+import { Bracket, Event, FormSubmission, IMatch, Match, ServiceError, User, UserRole, resetBus, subscribe } from '@bgsc/shared';
+import { randomUUID } from 'crypto';
 import { Actor, Viewer } from '../brackets/actor';
 import * as brackets from '../brackets/bracket.service';
 import { standingsOf } from '../brackets/standings';
@@ -80,7 +80,7 @@ async function main(): Promise<void> {
     assert.strictEqual(reported.winner, 'a', 'the higher score wins');
     assert.strictEqual(reported.reported_by, admin._id, 'and the reporter is recorded');
 
-    // The same score again is a retry, not a correction: no 409, nothing changes (audit #2).
+    // The same score again is a retry, not a correction: no 409, nothing changes.
     const retried = await matches.reportResult(real._id, { score_a: 3, score_b: 1 }, core(admin._id));
     assert.deepStrictEqual([retried.winner, retried.reported_by], ['a', admin._id], 'an identical re-report is a no-op');
 
@@ -151,7 +151,7 @@ async function main(): Promise<void> {
     );
 
     // A delete in flight (`draft`) refuses reports, so no result can land between its check and
-    // its delete (audit Sep 26).
+    // its delete.
     const inFlight = (await brackets.listMatches(event._id)).find((m) => m.status === 'scheduled' && m.a && m.b);
     if (inFlight) {
         await Bracket.updateOne({ event_id: event._id }, { $set: { status: 'draft' } });
@@ -162,7 +162,7 @@ async function main(): Promise<void> {
         );
         assert.strictEqual((await Match.findById(inFlight._id).lean())!.reported_by, null, 'and writes nothing');
 
-        // A claim left by a deleter that died is taken back, not honoured forever (audit #2).
+        // A claim left by a deleter that died is taken back, not honoured forever.
         await Bracket.updateOne({ event_id: event._id }, { $set: { claimed_at: new Date(Date.now() - 10 * 60_000) } });
         await matches.scheduleMatch(inFlight._id, { venue: 'Court 2' }, core(admin._id));
         const reclaimed = (await Bracket.findOne({ event_id: event._id }).lean())!;
@@ -184,7 +184,7 @@ async function main(): Promise<void> {
     console.log('✓ an unplayed draw can be redone even when it contains byes');
 
     // A report that lands while a delete holds the claim cannot complete the bracket; the delete,
-    // finding it played, hands it back — and must finish the job itself (audit #2 recheck).
+    // finding it played, hands it back — and must finish the job itself.
     const duel = await seedEvent('Duel', { format: 'single_elim', created_by: admin._id });
     await seedField(duel._id, 2);
     await brackets.generateBracket({ event_id: duel._id, seeding: 'registration' }, core(admin._id));
@@ -235,7 +235,7 @@ async function main(): Promise<void> {
         table.rows.every((r) => r.difference === r.scored - r.conceded),
         'goal difference is what it says'
     );
-    // A correction to a finished draw re-announces the champion (audit Sep 26).
+    // A correction to a finished draw re-announces the champion.
     const drawnFixture = finished.matches.find((m) => m.winner === 'draw')!;
     await matches.reportResult(drawnFixture._id, { score_a: 2, score_b: 1 }, coordinator(boss._id));
     assert.strictEqual(completed.length, 2, 'a post-completion correction emits BracketCompleted again');
@@ -272,6 +272,23 @@ async function main(): Promise<void> {
         1,
         'exactly one participant is left standing'
     );
+    // The finalists share a round_reached; when side b wins the final, a seed-only tiebreak put the
+    // higher-seeded runner-up on top.
+    for (const n of [2, 4]) {
+        const upset = await seedEvent(`Upset Cup ${n}`, { format: 'single_elim', created_by: admin._id });
+        await seedField(upset._id, n);
+        await brackets.generateBracket({ event_id: upset._id, seeding: 'registration' }, core(admin._id));
+        for (const round of n === 2 ? [1] : [1, 2]) {
+            for (const m of (await brackets.listMatches(upset._id)).filter((x) => x.round === round && x.status === 'scheduled')) {
+                await matches.reportResult(m._id, { score_a: 0, score_b: 1 }, core(admin._id));
+            }
+        }
+        const { bracket: ub, matches: um } = await brackets.getBracket(upset._id, guest);
+        const t = standingsOf(ub, um);
+        assert.ok(t.champion, `${n} players: the draw is finished`);
+        assert.strictEqual(t.rows[0].id, t.champion!.id, `${n} players: side b won the final, and tops the table`);
+        assert.deepStrictEqual([t.rows[0].eliminated, t.rows[1].eliminated], [false, true], `${n} players: the runner-up is second`);
+    }
     console.log('✓ elimination standings: one survivor, and no round beyond the last');
 
     /* ---- teamed events ------------------------------------------------------ */
@@ -292,7 +309,7 @@ async function main(): Promise<void> {
     );
     console.log('✓ a teamed event draws its locked rosters, and nothing that is still forming');
 
-    /* ---- a draft event's draw is not public (audit 3) --------------------------- */
+    /* ---- a draft event's draw is not public --------------------------- */
 
     const secret = await seedEvent('Unannounced Cup', { format: 'single_elim', status: 'draft', created_by: admin._id });
     await seedField(secret._id, 4);
@@ -320,7 +337,7 @@ async function main(): Promise<void> {
     const secretMatch = (await brackets.listMatches(secret._id))[0];
 
     // Visibility before permission: an outsider gets the 404 a missing thing gets, not a 403 that
-    // confirms the draft (audit #2).
+    // confirms the draft.
     await expectError(() => matches.reportResult(secretMatch._id, { score_a: 1, score_b: 0 }, core(outsider._id)), 'match_not_found', 'report on a hidden draft');
     await expectError(() => brackets.deleteBracket(secret._id, core(outsider._id)), 'bracket_not_found', 'delete on a hidden draft');
     await expectError(() => brackets.generateBracket({ event_id: secret._id, seeding: 'registration' }, core(outsider._id)), 'event_not_found', 'draw on a hidden draft');
@@ -329,9 +346,19 @@ async function main(): Promise<void> {
         'match_not_found',
         'a single fixture of a draft event is hidden the same way'
     );
+    // A database failure is not a missing fixture.
+    const findOne = Event.findOne;
+    (Event as unknown as { findOne: () => never }).findOne = () => {
+        throw new Error('db down');
+    };
+    try {
+        await assert.rejects(() => brackets.getMatch(secretMatch._id, guest), /db down/, 'getMatch passes a database failure through');
+    } finally {
+        Event.findOne = findOne;
+    }
     // One code for "draft" and "missing" on each route, or the code tells a stranger which it is.
     await expectError(() => brackets.listMatchesFor(secret._id, guest), 'event_not_found', 'and so is its fixture list');
-    await expectError(() => brackets.listMatchesFor(uuid(), guest), 'event_not_found', 'exactly as a missing event is');
+    await expectError(() => brackets.listMatchesFor(randomUUID(), guest), 'event_not_found', 'exactly as a missing event is');
 
     // A published event is public, which is the whole point of the spectator view.
     assert.ok((await brackets.getBracket(league._id, guest)).matches.length > 0, 'a live event is public');
@@ -341,6 +368,13 @@ async function main(): Promise<void> {
 
     const { handlers: bracketHandlers } = await import('../events/consumers');
     const gone = players[0];
+    await bracketHandlers.anonymize({ user_id: gone._id });
+    assert.strictEqual(
+        (await Bracket.findOne({ event_id: league._id }).lean())!.participants.find((p) => p.id === gone._id)!.display_name,
+        'Player 1',
+        'a UserDeleted for an account that is not deleted erases nothing'
+    );
+    await User.updateOne({ _id: gone._id }, { $set: { deleted_at: new Date() } });
     await bracketHandlers.anonymize({ user_id: gone._id });
 
     const afterDelete = await brackets.getBracket(league._id, guest);
@@ -374,6 +408,12 @@ async function main(): Promise<void> {
     assert.strictEqual(reseat.display_name, 'Player 1', 'UserRestored puts the name back on the draw');
     assert.strictEqual(reseat.deleted, false, 'and lowers the flag');
     assert.ok(back.matches.filter((m) => m.a?.id === gone._id).every((m) => m.a!.display_name === 'Player 1'), 'and on the fixtures');
+    await bracketHandlers.anonymize({ user_id: gone._id }); // the UserDeleted, delivered late
+    assert.strictEqual(
+        (await Bracket.findOne({ event_id: league._id }).lean())!.participants.find((p) => p.id === gone._id)!.display_name,
+        'Player 1',
+        'a UserDeleted replayed after UserRestored does not erase the restored account'
+    );
 
     await User.updateOne({ _id: gone._id }, { $set: { 'profile.full_name': 'Renamed One' } });
     await bracketHandlers.onProfileUpdated({ user_id: gone._id, changed_fields: ['bio'] });
@@ -390,7 +430,7 @@ async function main(): Promise<void> {
     );
     console.log('✓ a deleted account keeps its seed and its results, and loses its name');
 
-    /* ---- one seat per person, and a correction racing the next round (audit Sep 26) -- */
+    /* ---- one seat per person, and a correction racing the next round -- */
 
     const twice = await seedEvent('Two Forms Cup', { format: 'round_robin', created_by: admin._id });
     const [dup, , ghost] = await seedField(twice._id, 3);
@@ -419,7 +459,7 @@ async function main(): Promise<void> {
     }
     console.log('✓ one seat per person, and a correction never disagrees with the round after it');
 
-    /* ---- two reporters, one fixture (audit 2) ----------------------------------- */
+    /* ---- two reporters, one fixture ----------------------------------- */
 
     const race = await seedEvent('Race Cup', { format: 'round_robin', created_by: admin._id });
     await seedField(race._id, 2);
@@ -436,7 +476,7 @@ async function main(): Promise<void> {
     assert.strictEqual(lost.length, 1, 'and the other is refused');
     assert.strictEqual((lost[0] as PromiseRejectedResult).reason.code, 'already_reported', 'with the right code');
 
-    // Two coordinators correcting at once: the swap pins the result being corrected (audit #2).
+    // Two coordinators correcting at once: the swap pins the result being corrected.
     const corrections2 = await Promise.allSettled([
         matches.reportResult(only._id, { score_a: 5, score_b: 0 }, coordinator(boss._id)),
         matches.reportResult(only._id, { score_a: 0, score_b: 5 }, coordinator(boss._id)),
@@ -475,7 +515,26 @@ async function main(): Promise<void> {
         'event_cancelled',
         'a cancelled event is not drawn'
     );
-    console.log('✓ empty fields, direct events, unsupported formats and cancelled events are each refused');
+    const crowd = await seedEvent('Too Many', { format: 'round_robin', created_by: admin._id });
+    await FormSubmission.insertMany(
+        Array.from({ length: 257 }, (_, i) => ({
+            form_id: randomUUID(),
+            form_version: 1,
+            owner: { type: 'event', id: crowd._id },
+            user: { user_id: randomUUID(), display_name: `P${i}`, avatar_url: null },
+            context: { event: { role: 'solo' } },
+            status: 'confirmed',
+            confirmed_at: new Date(),
+            submitted_at: new Date(),
+        }))
+    );
+    await expectError(
+        () => brackets.generateBracket({ event_id: crowd._id, seeding: 'registration' }, core(admin._id)),
+        'too_many_participants',
+        'a field over 256 is refused before a single fixture is written'
+    );
+    assert.strictEqual(await Bracket.countDocuments({ event_id: crowd._id }), 0, 'and nothing is claimed');
+    console.log('✓ empty fields, oversized fields, direct events, unsupported formats and cancelled events are each refused');
 
     await closeScratchDb();
     console.log('\nresults selfcheck: all checks passed');

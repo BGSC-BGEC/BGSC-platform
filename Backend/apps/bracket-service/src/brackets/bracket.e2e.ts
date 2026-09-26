@@ -11,10 +11,11 @@ import assert from 'assert';
 import { Server } from 'http';
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
-import { v4 as uuid } from 'uuid';
+import { randomUUID } from 'crypto';
 import { Event, FormSubmission, Match, User, UserRole, config } from '@bgsc/shared';
 import { app } from '../index';
 
+const uuid = (): string => randomUUID();
 const TEST_DB = config.mongoUri.replace(/\/([^/?]+)(\?|$)/, '/bgsc_e2e_bracket$2');
 
 let server: Server;
@@ -162,6 +163,8 @@ async function main(): Promise<void> {
     const list = await call('GET', `/matches?event_id=${eventId}`);
     assert.strictEqual(list.body.matches.length, 3, 'the fixture list is public too');
     assert.strictEqual((await call('GET', '/matches')).status, 422, 'but never unscoped');
+    assert.strictEqual((await call('GET', `/matches?event_id=${eventId}&round=255`)).status, 200, 'round 255 exists in a round robin of 256');
+    assert.strictEqual((await call('GET', `/matches?event_id=${eventId}&round=256`)).status, 422, 'no draw has a round past that');
     assert.strictEqual((await call('GET', `/brackets/${uuid()}`)).status, 404, 'an undrawn event is a 404');
     pass('spectator reads need no session; an unscoped fixture list is refused');
 

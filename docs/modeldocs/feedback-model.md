@@ -89,7 +89,7 @@ person believed it. So on that path:
 | `{ status: 1, severity: 1, created_at: -1 }` | the staff inbox, filtered by status and severity |
 | `{ 'reporter.user_id': 1, created_at: -1 }` | "my tickets" |
 | `{ kind: 1, category: 1, created_at: -1 }` | the inbox filters |
-| `{ event_id: 1, created_at: -1 }` sparse | complaints about one event |
+| `{ event_id: 1, created_at: -1 }` | complaints about one event (declared `sparse`, which excludes nothing: `event_id` is stored as `null`, not omitted) |
 
 ---
 
@@ -117,7 +117,11 @@ Emitted:
 ```
 FeedbackSubmitted      { ticket_id, ticket_no, kind, category, severity, subject }
 FeedbackStatusChanged  { ticket_id, ticket_no, from, to }
+FeedbackResponded      { ticket_id, ticket_no, reporter_user_id, responded_at }   // attributed tickets only
 ```
+
+`responded_at` is the ISO timestamp the reply was stored with (`response.at`). Notification keys its
+dedupe on it; reading `response.at` at consume time let two quick replies collapse into one notice.
 
 `FeedbackSubmitted` exists so staff can be told in-app without this service learning who staff are —
 the Notification Service already knows how to fan out to a role floor (`notification-model.md §4`).
@@ -126,7 +130,8 @@ Consumed:
 
 ```
 UserProfileUpdated { user_id, changed_fields }  → rename the reporter snapshot
-UserDeleted        { user_id }                  → erase it (relationships.md §4.1) and null contact_email (the account's own address)
+UserDeleted        { user_id }                  → erase it (relationships.md §4.1) and null contact_email (the account's own address);
+                                                  only while the account is deleted NOW — a late copy after UserRestored is a no-op
 UserRestored       { user_id }                  → re-snapshot with deleted: false; refill contact_email from users where it was nulled
 ```
 

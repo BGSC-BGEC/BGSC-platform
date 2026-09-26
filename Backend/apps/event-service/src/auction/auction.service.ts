@@ -5,13 +5,13 @@ import {
     IAuctionLot,
     IEvent,
     InternalCallError,
-    LOT_STATUS,
     LotStatus,
     OC_OVERRIDE_QUOTA_MAX,
     ServiceError,
     Team,
     User,
     UserRole,
+    anonymizedSnapshot,
     publish,
     userSnapshotOf,
 } from '@bgsc/shared';
@@ -20,6 +20,7 @@ import {
     addAuctionTeamMember,
     asServiceError,
     debitTeamPurse,
+    outcomeUnknown,
     refundTeamPurse,
     setAuctionPurses,
     setTeamAuctionBudget,
@@ -49,7 +50,7 @@ export async function getEventAndAuction(ref: string, viewer?: Actor | null): Pr
         throw new ServiceError(404, 'event_not_found');
     }
     if (event.type !== 'ALL' || !event.auction) {
-        throw new ServiceError(400, 'event_is_not_an_auction_league');
+        throw new ServiceError(422, 'event_is_not_an_auction_league');
     }
     return event;
 }
@@ -186,9 +187,7 @@ export async function getAuctionLiveState(ref: string, viewer?: Actor | null) {
 export async function listLots(ref: string, status?: LotStatus, viewer?: Actor | null): Promise<IAuctionLot[]> {
     const event = await getEventAndAuction(ref, viewer);
     const filter: Record<string, unknown> = { event_id: event._id };
-    if (status && LOT_STATUS.includes(status)) {
-        filter.status = status;
-    }
+    if (status) filter.status = status;
     return AuctionLot.find(filter).sort({ order: 1 });
 }
 
@@ -240,13 +239,14 @@ export async function createLots(ref: string, actor: Actor, input: CreateLotsInp
         });
     }
 
-    const users = await User.find({ _id: { $in: userIds } });
+    // A deleted account goes on the block anonymized, never under its real name.
+    const users = await User.find({ _id: { $in: userIds }, deleted_at: null });
     const userMap = new Map(users.map((u) => [u._id, userSnapshotOf(u)]));
 
     const docs = input.lots.map((lotInput) => ({
         _id: randomUUID(),
         event_id: event._id,
-        player: userMap.get(lotInput.user_id) ?? { user_id: lotInput.user_id, display_name: 'Player', avatar_url: null },
+        player: userMap.get(lotInput.user_id) ?? { user_id: lotInput.user_id, ...anonymizedSnapshot() },
         registration_id: lotInput.registration_id,
         base_price: lotInput.base_price,
         oc_adjusted_price: lotInput.oc_adjusted_price ?? null,
@@ -276,8 +276,8 @@ export async function createLots(ref: string, actor: Actor, input: CreateLotsInp
         throw err;
     }
 
-    // A live auction with nothing on the block (started empty, or the queue ran dry) picks the new
-    // lots up here; otherwise they sat queued forever (audit Sep 26, H30).
+    // A live auction started with an empty queue has nothing on the block: it picks the new lots up
+    // here, or they would sit queued forever. (A queue that runs dry finishes the auction instead.)
     if (event.auction!.status === 'live') await raiseNextLot(event._id);
     invalidateAuctionLiveCache(event._id);
     return created;
@@ -291,8 +291,8 @@ export async function createLots(ref: string, actor: Actor, input: CreateLotsInp
  */
 async function raiseNextLot(eventId: string): Promise<IAuctionLot | null> {
     if (await AuctionLot.exists({ event_id: eventId, status: { $in: ACTIVE_LOT_STATUSES } })) return null;
-    const event = await Event.findById(eventId, { auction: 1 });
-    if (!event?.auction || event.auction.status !== 'live') return null;
+    const event = await Event.findById(eventId, { auction: 1, status: 1 });
+    if (!event?.auction || event.auction.status !== 'live' || !ACTIVE_EVENT_STATUSES.includes(event.status)) return null;
 
     const timerSec = event.auction.bid_timer_seconds || 5;
     try {
@@ -302,9 +302,9 @@ async function raiseNextLot(eventId: string): Promise<IAuctionLot | null> {
             { sort: { order: 1 }, returnDocument: 'after' }
         );
         if (!next) return null;
-        // A close or cancel that stopped the auction between the check above and the raise would leave
-        // this lot on the block of a dead auction, unsellable: put it back in the queue.
-        if (!(await Event.exists({ _id: eventId, 'auction.status': 'live' }))) {
+        // A close, cancel or completion that stopped the auction between the check above and the raise
+        // would leave this lot on the block of a dead auction, unsellable: put it back in the queue.
+        if (!(await Event.exists({ _id: eventId, 'auction.status': 'live', status: { $in: ACTIVE_EVENT_STATUSES } }))) {
             await AuctionLot.updateOne(
                 { _id: next._id, status: 'on_block', version: next.version },
                 { $set: { status: 'queued', timer_ends_at: null } }
@@ -323,7 +323,8 @@ async function raiseNextLot(eventId: string): Promise<IAuctionLot | null> {
 async function finishAuction(eventId: string): Promise<boolean> {
     const res = await Event.updateOne(
         { _id: eventId, 'auction.status': { $in: ['not_started', 'live', 'paused'] } },
-        { $set: { 'auction.status': 'finished' } }
+        { $set: { 'auction.status': 'finished' } },
+        { timestamps: false } // auction flips are not event edits: `updated_at` is the admin PATCH's version
     );
     if (res.modifiedCount !== 1) return false;
     publish('AuctionClosed', PRODUCER, { event_id: eventId });
@@ -368,7 +369,8 @@ export async function startAuction(ref: string, actor: Actor) {
 
     const won = await Event.findOneAndUpdate(
         { _id: event._id, 'auction.status': 'not_started' },
-        { $set: { 'auction.status': 'live', 'auction.purse_per_team': defaultPurse } }
+        { $set: { 'auction.status': 'live', 'auction.purse_per_team': defaultPurse } },
+        { timestamps: false }
     );
     if (!won) throw new ServiceError(409, 'auction_already_started');
 
@@ -379,15 +381,18 @@ export async function startAuction(ref: string, actor: Actor) {
 
 export async function pauseAuction(ref: string, actor: Actor) {
     const event = await adminEvent(ref, actor);
-    const res = await Event.updateOne({ _id: event._id, 'auction.status': 'live' }, { $set: { 'auction.status': 'paused' } });
+    const res = await Event.updateOne({ _id: event._id, 'auction.status': 'live' }, { $set: { 'auction.status': 'paused' } }, { timestamps: false });
     if (res.modifiedCount !== 1) throw new ServiceError(409, 'auction_not_live');
+    // A bid that read the auction as live before the pause still carries the old lot version: bumping
+    // it makes that bid's CAS miss (409) instead of landing on a paused auction and moving its timer.
+    await AuctionLot.updateOne({ event_id: event._id, status: 'on_block' }, { $inc: { version: 1 } });
     invalidateAuctionLiveCache(event._id);
     return getAuctionLiveState(ref, actor);
 }
 
 export async function resumeAuction(ref: string, actor: Actor) {
     const event = await adminEvent(ref, actor);
-    const res = await Event.updateOne({ _id: event._id, 'auction.status': 'paused' }, { $set: { 'auction.status': 'live' } });
+    const res = await Event.updateOne({ _id: event._id, 'auction.status': 'paused' }, { $set: { 'auction.status': 'live' } }, { timestamps: false });
     if (res.modifiedCount !== 1) throw new ServiceError(409, 'auction_not_paused');
 
     // The lot on the block gets a fresh timer; if a lot was settled while paused, the next one goes
@@ -413,7 +418,7 @@ export async function closeAuction(ref: string, actor: Actor) {
     // the next lot up after the scan below), settle the lot on the block WITHOUT raising the next one,
     // then finish. `finished` comes last: AuctionClosed locks the rosters, which the last sale still
     // needs open. A bid landing mid-settle bumps the version; the settle retries against the new high bid.
-    await Event.updateOne({ _id: event._id, 'auction.status': 'live' }, { $set: { 'auction.status': 'paused' } });
+    await Event.updateOne({ _id: event._id, 'auction.status': 'live' }, { $set: { 'auction.status': 'paused' } }, { timestamps: false });
     for (let attempt = 0; ; attempt++) {
         const active = await AuctionLot.findOne({ event_id: event._id, status: { $in: ACTIVE_LOT_STATUSES } }, { _id: 1 });
         if (!active) break;
@@ -468,12 +473,12 @@ export async function placeBid(lotId: string, bidder: { id: string }, amount: nu
         throw new ServiceError(404, 'lot_not_found');
     }
     if (lot.status !== 'on_block') {
-        throw new ServiceError(400, 'lot_not_on_block');
+        throw new ServiceError(409, 'lot_not_on_block');
     }
 
     const event = await Event.findById(lot.event_id, { seat_holders: 0 });
     if (!event || !event.auction || event.auction.status !== 'live' || !ACTIVE_EVENT_STATUSES.includes(event.status)) {
-        throw new ServiceError(400, 'auction_not_live');
+        throw new ServiceError(409, 'auction_not_live');
     }
 
     // Pre-check 1: Bidder must be an approved captain
@@ -521,8 +526,18 @@ export async function placeBid(lotId: string, bidder: { id: string }, amount: nu
         throw new ServiceError(422, 'team_roster_full');
     }
 
-    // Pre-check 6: Check purse remaining
-    const purseRemaining = (team.auction?.purse_total ?? 0) - (team.auction?.purse_spent ?? 0);
+    // Pre-check 6: Check purse remaining. A team formed after the start (a captain approved late)
+    // missed the start's purse run and has none; the same idempotent call gives it the default now,
+    // which is exactly what it would have got at the start (overrides are closed once live).
+    if (!team.auction) {
+        try {
+            await setAuctionPurses(event._id, event.auction.purse_per_team ?? 0);
+        } catch (err) {
+            throw asServiceError(err);
+        }
+    }
+    const purseTotal = team.auction?.purse_total ?? event.auction.purse_per_team ?? 0;
+    const purseRemaining = purseTotal - (team.auction?.purse_spent ?? 0);
     if (amount > purseRemaining) {
         throw new ServiceError(422, 'insufficient_purse');
     }
@@ -576,12 +591,11 @@ export async function placeBid(lotId: string, bidder: { id: string }, amount: nu
  * ------------------------------------------------------------------ */
 
 /**
- * A Registration answer we may act on as a refusal. 401/403 mean OUR credentials or its auth broke,
- * not "no" — treated as outcome unknown, like a timeout. A settlement used to mark
- * the lot permanently unsold on a mis-set internal token.
+ * A Registration answer we may act on as a refusal. Anything `outcomeUnknown` calls a deployment
+ * fault (our token refused, a route miss, a body it cannot parse) is not "no": acting on it would
+ * mark the lot permanently unsold.
  */
-const isRefusal = (err: unknown): err is InternalCallError =>
-    err instanceof InternalCallError && !err.outcomeUnknown && err.status !== 401 && err.status !== 403;
+const isRefusal = (err: unknown): err is InternalCallError => err instanceof InternalCallError && !outcomeUnknown(err);
 
 /** Keys are per lot AND team: a different team is never charged under another's key. */
 const keyOf = (lotId: string, teamId: string, op: 'debit' | 'refund' | 'add') => `${lotId}:${teamId}:${op}`;
@@ -619,7 +633,7 @@ type SettleResult = { settled_lot: IAuctionLot; next_lot: IAuctionLot | null; se
  * winner's team and amount are frozen on it — and only reaches `sold`/`unsold` once Registration has
  * answered. Any unknown outcome leaves it `settling` (503); the next settle of that lot (an admin's
  * advance, the auto-settle tick, a close) replays the same keyed calls. The lot never goes back on the
- * block, so no second team can be charged while the first team's debit is in doubt (audit #2).
+ * block, so no second team can be charged while the first team's debit is in doubt.
  */
 async function settleLot(lotId: string, opts: { raiseNext: boolean; ignoreTimer: boolean }): Promise<SettleResult> {
     let lot = await AuctionLot.findById(lotId);
@@ -629,7 +643,7 @@ async function settleLot(lotId: string, opts: { raiseNext: boolean; ignoreTimer:
     if (lot.status === 'sold' || lot.status === 'unsold') {
         return { settled_lot: lot, next_lot: await activeLot() };
     }
-    if (lot.status === 'queued') throw new ServiceError(400, 'lot_not_on_block');
+    if (lot.status === 'queued') throw new ServiceError(409, 'lot_not_on_block');
 
     const event = await Event.findById(lot.event_id, { auction: 1, status: 1 });
     if (!event?.auction) throw new ServiceError(404, 'event_not_found');
@@ -863,8 +877,9 @@ export async function overrideCaptainBudget(ref: string, teamId: string, actor: 
         throw new ServiceError(400, 'team_is_disbanded');
     }
     if (team.auction?.is_overridden) {
-        // A retry of the same override is a success, not a conflict (audit #2).
-        if (team.auction.purse_total === input.purse_total) return team;
+        // A retry of the same override is a success, not a conflict — answered with the full team,
+        // as the first call was.
+        if (team.auction.purse_total === input.purse_total) return Team.findById(teamId);
         throw new ServiceError(409, 'team_already_overridden');
     }
 

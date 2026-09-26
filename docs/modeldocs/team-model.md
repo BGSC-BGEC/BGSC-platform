@@ -69,7 +69,7 @@ Spec §5.7 says challenge teams follow "the structure of teamed events". So one 
 | `owner` | Polymorphic ref. All team queries are scoped by `owner.id` so there is never a cross-owner scan. |
 | `members[].registration_id` | For event owners every member must have their own confirmed `form_submissions` doc; team ≠ registration, team groups registrations. Challenge owners have no form, so null there. |
 | `join_policy` | Spec §5.5 three-way toggle. `open` = anyone can request; `invite_only` = captain invites; `closed` = nothing in/out. |
-| `invite_code` | Spec §5.5 "invite codes". Captain can rotate; old code invalid immediately. |
+| `invite_code` | Spec §5.5 "invite codes". Captain can rotate; old code invalid immediately. **As built:** generated at create (a clash on the global unique index is redrawn, up to 3 tries). Only the captain and the owner's admins read it (lists: captain only). `POST /teams/join-by-code { code }` (any case) counts as the captain's invite, so it bypasses `join_policy`; same membership checks as `/join`, `404 invite_code_not_found`. No rotate route yet. |
 | `pending` | Both invite and request directions live in one array; accepting either moves the user to `members`. Expire after 72h by default. |
 | `status` | See §4.1. `forming` while roster can change; `complete` once `size_min` met and captain confirms; `locked` after `roster_finalizes_at` (event) or on challenge acceptance; `disbanded` = soft removal. |
 | `auction.*` writes | **Registration Service only (Sep 26).** The Event Service used to `$inc` purses and `$push` members directly, and fell back to those writes on any HTTP failure — double debits after a timeout, and deliberate refusals (`team_full`, `team_locked`) overridden. Now every write is an `/internal` route here: `debit-purse` / `refund-purse { amount, request_id }`, `add-member`, `POST /internal/events/:id/auction-purses { purse_total }` (auction start; only teams with no purse), `PATCH /internal/teams/:id/auction-budget` (OC override). |
@@ -84,6 +84,8 @@ Spec §5.7 says challenge teams follow "the structure of teamed events". So one 
 - `members[].user_id` unique within a team; a user is in **at most one** non-disbanded team per `owner` (enforced by unique index on a side collection or by a check-then-write inside the Registration Service; see §6)
 - `pending[].user_id ∉ members[].user_id`
 - `status == 'locked'` ⇒ no member mutations except by Core+ of the owner
+- owner `teaming.max_teams` ⇒ at most that many non-disbanded teams per owner (`409 max_teams_reached` at create; count-then-insert, so simultaneous creates can overshoot by the number racing)
+- event owner with `type == 'ALL'`: members are bought through the auction (`/internal/teams/:id/add-member`), never joined or invited (`409 auction_league`); until `events.auction.status == 'finished'` only an event admin may remove a member or disband, and a bought player may not cancel their registration (`409 auction_in_progress`)
 - `auction != null ⇔ owner.type == 'event' && events.type == 'ALL'`
 
 ### 4.1 Status lifecycle
@@ -100,10 +102,10 @@ forming ──(size_min met, captain confirms)──> complete ──(roster_fin
 | create | captain (needs confirmed captain registration for event owners) | `TeamCreated` |
 | member add / remove | captain, member (leave), Core+ | `TeamMemberAdded` / `TeamMemberRemoved` |
 | forming ↔ complete | captain, or automatic on size change | `TeamUpdated` |
-| → locked | Core+ (`PATCH /teams/:id/lock`); Challenge Service on acceptance (`POST /internal/teams/:id/lock`, idempotent). **As built:** no scheduler and no auction auto-lock — and a teamed event's leaderboard entry is created on `TeamLocked`, so event teams must be locked by hand. | `TeamLocked` |
-| → disbanded | captain while `forming`; Core+ any time; automatic on `EventCancelled` | `TeamDisbanded` |
+| → locked | Core+ (`PATCH /teams/:id/lock`); Challenge Service on acceptance (`POST /internal/teams/:id/lock`, idempotent). **As built:** event rosters at or above `size_min` lock automatically on `EventStarted` (an auction league on `AuctionClosed` instead, once its auction is finished), and a 5-minute sweep re-derives the same for events the bus missed. Rosters below `size_min` stay `forming` for an admin. | `TeamLocked` |
+| → disbanded | captain while `forming`; Core+ any time; automatic on `EventCancelled` for `forming`/`complete` teams (and by the 5-minute sweep for a missed one); a locked roster is kept | `TeamDisbanded` |
 
-Captain leaving: blocked unless they transfer captaincy first (`TeamUpdated { captain_user_id }`) or the team has no other members (then disband).
+Captain leaving: blocked while the open (`forming`/`complete`) team has other members (`409 captain_has_team` on cancel or admin demotion; disband first — there is no captaincy transfer yet). A captain whose team has no other members takes it with them (disbanded). A locked roster never blocks (it cannot be disbanded); the captain stays on it as a member.
 
 ## 5. User-side "open to be invited" toggle
 
@@ -114,7 +116,7 @@ Spec §5.5: "User toggle: Open / Closed / Invite Only (controls if others can in
 | Index | Serves |
 |---|---|
 | `{ 'owner.type': 1, 'owner.id': 1, status: 1 }` | list teams for an event/challenge, filter by status |
-| `{ 'owner.id': 1, name_lower: 1 }` unique | unique team names per event (store `name_lower` alongside `name`) |
+| `{ 'owner.id': 1, name_lower: 1 }` unique, partial on `status ∈ {forming, complete, locked}` (name `team_name_per_owner_live`) | unique team names per event among teams that exist; a disbanded team's name is free again. An existing database must drop the old full index `owner.id_1_name_lower_1` |
 | `{ invite_code: 1 }` unique | join by code |
 | `{ 'members.user_id': 1, 'owner.id': 1 }` | "my team for this event"; also the duplicate-membership check |
 | `{ 'owner.id': 1, join_policy: 1, status: 1 }` | Team search: open teams still forming |

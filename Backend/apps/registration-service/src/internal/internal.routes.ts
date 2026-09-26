@@ -1,5 +1,5 @@
-import { InternalCallError, ServiceError, requireServiceToken, validate } from '@bgsc/shared';
-import { NextFunction, Request, Response, Router } from 'express';
+import { ServiceError, requireServiceToken, validate, wrap } from '@bgsc/shared';
+import { Router } from 'express';
 import { z } from 'zod';
 import * as registrationService from '../registrations/registration.service';
 import * as teamService from '../teams/team.service';
@@ -20,9 +20,6 @@ const Id = z.string().uuid();
 const IdParams = z.object({ id: Id });
 const EventParams = z.object({ eventId: Id });
 
-type Handler = (req: Request, res: Response) => Promise<void>;
-const route = (fn: Handler) => (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
-
 // POST /internal/registrations/attendance - mark attendance on confirmed registrations of an event
 internalRoutes.post(
     '/registrations/attendance',
@@ -33,7 +30,7 @@ internalRoutes.post(
             attendances: z.array(z.object({ registration_id: Id, attended: z.boolean() })).min(1).max(1000),
         }),
     }),
-    route(async (req, res) => {
+    wrap(async (req, res) => {
         const { event_id, marked_by, attendances } = req.body;
         res.json(await registrationService.recordAttendance(event_id, marked_by, attendances));
     })
@@ -43,21 +40,15 @@ internalRoutes.post(
 internalRoutes.post(
     '/registrations/:id/promote',
     validate({ params: IdParams, body: z.object({ by: z.string().min(1).max(64) }) }),
-    route(async (req, res) => {
+    wrap(async (req, res) => {
         const registration = await registrationService.getRegistration(req.params.id as string);
         if (registration.status !== 'waitlisted') throw new ServiceError(409, 'not_waitlisted');
 
-        let result;
-        try {
-            result = await registrationService.promoteRegistration(registration, req.body.by, 'admin_promoted_from_waitlist');
-        } catch (err) {
-            if (err instanceof InternalCallError) {
-                // 401/403 mean our token or routing is wrong, not that the event refused.
-                const unknown = err.outcomeUnknown || err.status === 401 || err.status === 403;
-                throw new ServiceError(unknown ? 503 : 409, unknown ? 'event_service_unavailable' : err.code);
-            }
-            throw err;
-        }
+        const result = await registrationService
+            .promoteRegistration(registration, req.body.by, 'admin_promoted_from_waitlist')
+            .catch((err) => {
+                throw registrationService.seatCallError(err);
+            });
         if (result.outcome === 'refused' || result.outcome === 'skipped') throw new ServiceError(409, result.reason);
         if (result.outcome === 'raced') throw new ServiceError(409, 'not_waitlisted');
         res.json(result.registration);
@@ -70,7 +61,7 @@ const Amount = z.object({ amount: z.number().positive().finite(), request_id: z.
 internalRoutes.post(
     '/teams/:id/debit-purse',
     validate({ params: IdParams, body: Amount }),
-    route(async (req, res) => {
+    wrap(async (req, res) => {
         res.json(await teamService.debitPurse(req.params.id as string, req.body.amount, req.body.request_id));
     })
 );
@@ -79,7 +70,7 @@ internalRoutes.post(
 internalRoutes.post(
     '/teams/:id/refund-purse',
     validate({ params: IdParams, body: Amount }),
-    route(async (req, res) => {
+    wrap(async (req, res) => {
         res.json(await teamService.refundPurse(req.params.id as string, req.body.amount, req.body.request_id));
     })
 );
@@ -88,7 +79,7 @@ internalRoutes.post(
 internalRoutes.post(
     '/teams/:id/add-member',
     validate({ params: IdParams, body: z.object({ user_id: Id, registration_id: Id, request_id: z.string().min(1).max(200) }) }),
-    route(async (req, res) => {
+    wrap(async (req, res) => {
         res.json(
             await teamService.addMemberToTeam(
                 req.params.id as string,
@@ -105,7 +96,7 @@ internalRoutes.post(
 internalRoutes.post(
     '/events/:eventId/auction-purses',
     validate({ params: EventParams, body: z.object({ purse_total: z.number().min(0).finite() }) }),
-    route(async (req, res) => {
+    wrap(async (req, res) => {
         res.json(await teamService.setAuctionPurses(req.params.eventId as string, req.body.purse_total));
     })
 );
@@ -121,7 +112,7 @@ internalRoutes.patch(
             overridden_by: z.string().min(1).max(64),
         }),
     }),
-    route(async (req, res) => {
+    wrap(async (req, res) => {
         res.json(
             await teamService.setAuctionBudget(req.params.id as string, {
                 purse_total: req.body.purse_total,
@@ -139,7 +130,7 @@ internalRoutes.patch(
 internalRoutes.post(
     '/teams/:id/lock',
     validate({ params: IdParams }),
-    route(async (req, res) => {
+    wrap(async (req, res) => {
         const teamId = req.params.id as string;
         const lockedBy = typeof req.body?.locked_by === 'string' ? req.body.locked_by.slice(0, 64) : 'system';
 

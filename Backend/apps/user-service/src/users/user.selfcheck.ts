@@ -5,11 +5,12 @@
  *   npx ts-node src/users/user.selfcheck.ts
  */
 import assert from 'assert';
-import { IUser, UserRole } from '@bgsc/shared';
-import { maskEmail, maskPhone, visibilityFor, serializeUser, snapshotOf } from './user.serializer';
+import { IUser, RESERVED_USERNAMES, UserRole, userSnapshotOf as snapshotOf } from '@bgsc/shared';
+import { maskEmail, maskPhone, visibilityFor, serializeUser } from './user.serializer';
 import { computeRating, RATING_VERSION, RATING_WEIGHTS } from './playerCard';
 import { sniffImage } from '../storage/storage';
-import { isUuid } from './user.schemas';
+import { isUuid, ListUsersQuery, UpdateProfileSchema } from './user.schemas';
+import { userRoutes } from './user.routes';
 
 /* -------------------------------- masking -------------------------------- */
 
@@ -22,6 +23,7 @@ assert.ok(!maskEmail('ana@gmail.com').includes('na@'), 'the local part is genuin
 assert.strictEqual(maskPhone('+919876543210'), '+91******3210', 'keeps country code and last four');
 assert.strictEqual(maskPhone('9876543210'), '******3210', 'bare number keeps last four');
 assert.strictEqual(maskPhone('12'), '***', 'too short to mask safely');
+assert.strictEqual(maskPhone('+91 98765-43210'), '+91******3210', 'separators neither break nor leak through the mask');
 
 /* ------------------------------- visibility ------------------------------- */
 
@@ -84,6 +86,7 @@ const full = serializeUser(mk(), self);
 assert.strictEqual(full.email, 'ana@gmail.com', 'self sees the real email');
 assert.strictEqual(full.profile.phone_number, '+919876543210', 'self sees the real phone');
 assert.ok(full.settings, 'self sees settings');
+assert.strictEqual(full.is_phone_verified, false, 'self sees whether their phone is verified');
 
 const pub = serializeUser(mk(), stranger);
 assert.strictEqual(pub.email, 'a***@gmail.com', 'a stranger sees a masked email');
@@ -156,6 +159,42 @@ assert.strictEqual(sniffImage(Buffer.from('GIF89a-------------')), null, 'gif is
 assert.strictEqual(sniffImage(Buffer.from('<?php system($_GET[1]); ?>')), null, 'a php payload is not an image');
 assert.strictEqual(sniffImage(Buffer.from('%PDF-1.7 ----------')), null, 'a pdf is not an image');
 assert.strictEqual(sniffImage(Buffer.alloc(4)), null, 'a truncated buffer is rejected, not read past');
+
+/* -------------------------------- schemas --------------------------------- */
+
+const phoneOf = (phone_number: unknown) => UpdateProfileSchema.safeParse({ phone_number });
+assert.strictEqual((phoneOf('+91 98765-43210').data as any)?.phone_number, '+919876543210',
+    'a phone number is stored in one spelling, separators stripped');
+assert.strictEqual((phoneOf('(+91) 98765.43210').data as any)?.phone_number, '+919876543210', 'parens and dots too');
+for (const bad of ['9876543210', 'abc', '+0123456789', '+91 98765 43210 99999 1']) {
+    assert.strictEqual(phoneOf(bad).success, false, `not E.164: ${bad}`);
+}
+assert.strictEqual(phoneOf(null).success, true, 'null still clears the number');
+
+const q = (query: Record<string, string>) => ListUsersQuery.safeParse(query);
+assert.strictEqual(q({ joined_before: '2026-09-01' }).data?.joined_before?.toISOString(), '2026-09-02T00:00:00.000Z',
+    'a bare joined_before date includes that whole day (exclusive next midnight, UTC)');
+assert.strictEqual(q({ joined_after: '2026-09-01' }).data?.joined_after?.toISOString(), '2026-09-01T00:00:00.000Z',
+    'a bare joined_after date starts at its midnight');
+assert.strictEqual(q({ joined_before: '2026-09-01T10:00:00+05:30' }).data?.joined_before?.toISOString(),
+    '2026-09-01T04:30:00.000Z', 'a timestamp is taken as given');
+for (const bad of ['true', '0', '1757000000000', 'yesterday']) {
+    assert.strictEqual(q({ joined_before: bad }).success, false, `not a date: ${bad}`);
+}
+
+/* --------------------------- reserved usernames --------------------------- */
+
+// Every literal first segment under /users is a name /users/:ref can never reach, so it must be
+// reserved at sign-up. Read off the router itself, so a new literal route cannot be forgotten.
+const literals = new Set(
+    (userRoutes.stack as { route?: { path: string } }[])
+        .map((l) => l.route?.path.split('/')[1])
+        .filter((seg): seg is string => !!seg && !seg.startsWith(':'))
+);
+assert.ok(literals.size > 0, 'the router has literal routes to check');
+for (const seg of literals) {
+    assert.ok(RESERVED_USERNAMES.includes(seg), `/users/${seg} is a reserved username`);
+}
 
 /* ---------------------------------- refs ---------------------------------- */
 

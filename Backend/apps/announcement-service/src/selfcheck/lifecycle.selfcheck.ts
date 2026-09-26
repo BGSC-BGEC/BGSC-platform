@@ -3,6 +3,7 @@ import {
     Announcement,
     Event,
     UserRole,
+    addMonthsUTC,
     expiryFor,
     resetBus,
     subscribe,
@@ -66,7 +67,7 @@ async function main(): Promise<void> {
         'and expires_at is derived as published_at + 4 months'
     );
 
-    // Spec §6.4: WhatsApp auto-sends on publish. Week 4 reads this flag; nothing else sets it.
+    // Spec §6.4: WhatsApp auto-sends on publish. The broadcast reads this flag; nothing else sets it.
     assert.strictEqual(published.delivery.whatsapp.requested, true, 'publish asks for WhatsApp delivery');
     assert.strictEqual(published.delivery.push.requested, true, 'and push');
 
@@ -212,7 +213,48 @@ async function main(): Promise<void> {
         'and the CAS path wrote expires_at itself — pre(validate) never ran'
     );
     assert.strictEqual(claimed!.delivery.whatsapp.requested, true, 'the tick asks for delivery too');
+    assert.strictEqual(claimed!.pinned_until, null, 'and an unpinned announcement stays unpinned');
     console.log('✓ compare-and-swap, and the hook bypass is handled');
+
+    /* ---- 6a. month arithmetic and the scheduler's pin cap ---------------- */
+    console.log('6a. Month ends...');
+    const utc = (iso: string) => new Date(iso).getTime();
+    assert.strictEqual(expiryFor(new Date('2026-10-31T23:59:00Z')).getTime(), utc('2027-02-28T23:59:00Z'), 'Oct 31 + 4 months clamps to Feb 28, not Mar 3');
+    assert.strictEqual(expiryFor(new Date('2027-10-31T12:00:00Z')).getTime(), utc('2028-02-29T12:00:00Z'), 'and to Feb 29 in a leap year');
+    assert.strictEqual(expiryFor(new Date('2026-11-01T00:00:00Z')).getTime(), utc('2027-03-01T00:00:00Z'), 'Nov 1 is Mar 1');
+    assert.ok(
+        expiryFor(new Date('2026-10-31T23:59:00Z')) < expiryFor(new Date('2026-11-01T00:00:00Z')),
+        'so a later publish across a month end no longer expires earlier'
+    );
+    assert.strictEqual(addMonthsUTC(new Date('2026-03-31T05:00:00Z'), -1).getTime(), utc('2026-02-28T05:00:00Z'), 'backwards clamps too');
+    // The same instant must expire at the same instant on an IST host and in a UTC container.
+    const tzBefore = process.env.TZ;
+    const edge = new Date('2026-10-31T20:00:00Z'); // already Nov 1 in IST
+    process.env.TZ = 'Asia/Kolkata';
+    const inIst = expiryFor(edge).getTime();
+    process.env.TZ = 'UTC';
+    const inUtc = expiryFor(edge).getTime();
+    if (tzBefore === undefined) delete process.env.TZ;
+    else process.env.TZ = tzBefore;
+    assert.strictEqual(inIst, inUtc, 'expiry does not depend on the host time zone');
+
+    // Scheduled at Oct 30 23:00 with a pin at that schedule's expiry; the tick only gets to it at
+    // Oct 31 01:00, whose clamped expiry is earlier. The claim is a query update — no hook — so the
+    // pipeline has to cap the pin, or pinned_until > expires_at lands on disk.
+    const lateNow = new Date('2026-10-31T01:00:00Z');
+    const lateDue = await raw({
+        status: 'scheduled',
+        scheduled_for: new Date('2026-10-30T23:00:00Z'),
+        pinned_until: expiryFor(new Date('2026-10-30T23:00:00Z')),
+    });
+    await tick(lateNow);
+    const capped = await Announcement.findById(lateDue._id);
+    assert.strictEqual(capped!.status, 'published');
+    assert.strictEqual(capped!.expires_at!.getTime(), expiryFor(lateNow).getTime());
+    assert.strictEqual(capped!.pinned_until!.getTime(), capped!.expires_at!.getTime(), 'the pin is capped at the new expiry');
+    capped!.title = 'Still saves';
+    await capped!.save();
+    console.log('✓ months are UTC and clamped; the scheduler cannot store a pin past expiry');
 
     /* ---- 6b. concurrent HTTP transitions emit one event apiece ---------- */
     console.log('6b. Transition races...');
@@ -224,8 +266,8 @@ async function main(): Promise<void> {
     });
 
     // A double-clicked Publish button. Read-then-write lets both requests through, and each emits
-    // its own AnnouncementPublished — which Week 4's Broadcast Service turns into two WhatsApp
-    // sends to every mapped group, the exact thing Spec §9.4's rate limit exists to stop.
+    // its own AnnouncementPublished — which the broadcast turns into two WhatsApp sends to every
+    // mapped group, the exact thing Spec §9.4's rate limit exists to stop.
     const racedPublish = await draft();
     const publishResults = await Promise.allSettled([
         svc.publishOrSchedule(racedPublish._id, undefined, ACTOR),
@@ -274,7 +316,7 @@ async function main(): Promise<void> {
     assert(await Announcement.findById(deletedRecently._id), 'a recently deleted one is kept');
     console.log('✓ 4 months to archived, a year to gone');
 
-    /* ---- 8. fix-phase regressions ---------------------------------------- */
+    /* ---- 8. tags, and the pin race -------------------------------------- */
     console.log('8. Tags and the pin race...');
     const tagged = await draft({ tags: ['Finals', ' MIXED '] });
     assert.deepStrictEqual([...tagged.tags], ['finals', 'mixed'], 'tags are stored lowercased and trimmed');
@@ -316,33 +358,30 @@ async function main(): Promise<void> {
     assert.strictEqual((await svc.update(mine._id, { title: 'Own fix' }, ACTOR)).title, 'Own fix', 'and so may the author');
     console.log('✓ only the author or a strictly higher rank changes an announcement');
 
-    /* ---- 10. legacy unmasked delivery group ids ------------------------- */
-    console.log('10. Legacy group_id masking...');
-    const legacy = await raw({
-        status: 'published',
-        published_at: new Date(),
-        delivery: {
-            whatsapp: {
-                requested: true,
-                per_category: [{ category: 'bgec', group_id: '+919876543210', status: 'sent', revision: 1 }],
-            },
-            push: { requested: true, status: 'skipped', sent_count: null },
-        },
-    });
-    assert.ok((await svc.maskLegacyGroupIds()) >= 1, 'a raw destination is found');
-    const maskedRow = (await Announcement.findById(legacy._id))!.delivery.whatsapp.per_category[0];
-    assert.strictEqual(maskedRow.group_id, '••••3210', 'and masked in place');
-    assert.strictEqual(maskedRow.status, 'sent', 'touching nothing else');
-    assert.strictEqual(await svc.maskLegacyGroupIds(), 0, 'a second run finds nothing: idempotent at boot');
-    const receipt = await svc.recordDelivery(legacy._id, {
+    /* ---- 10. delivery receipts ----------------------------------------- */
+    console.log('10. Delivery receipts...');
+    const broadcastDoc = await raw({ status: 'published', published_at: new Date() });
+    const receipt = await svc.recordDelivery(broadcastDoc._id, {
         whatsapp: [{ category: 'bgec', group_id: '+911234567890', status: 'sent', revision: 5 }],
     });
     assert.strictEqual(
         receipt.delivery.whatsapp.per_category[0].group_id,
         '••••7890',
-        'a raw destination in a new receipt is masked on arrival too'
+        'a raw destination in a receipt is masked on arrival'
     );
-    console.log('✓ legacy delivery receipts lose their raw destination');
+
+    // Two writebacks racing to append the same category's first row: one appends, the other must
+    // not stop there — the newer revision has to win whichever request landed first.
+    const racedReceipt = await raw({ status: 'published', published_at: new Date() });
+    const row = (revision: number, status: 'pending' | 'sent') => ({
+        whatsapp: [{ category: 'bgec' as const, group_id: '••••0001', status, revision }],
+    });
+    await Promise.all([svc.recordDelivery(racedReceipt._id, row(1, 'pending')), svc.recordDelivery(racedReceipt._id, row(2, 'sent'))]);
+    const racedRows = (await Announcement.findById(racedReceipt._id))!.delivery.whatsapp.per_category;
+    assert.strictEqual(racedRows.length, 1, 'one row per category, however the appends interleave');
+    assert.strictEqual(racedRows[0].revision, 2, 'and it holds the newer receipt');
+    assert.strictEqual(racedRows[0].status, 'sent');
+    console.log('✓ receipts are masked, and concurrent first receipts settle on the newest');
 
     await closeScratchDb();
     console.log('\n✅ All lifecycle selfchecks passed!');

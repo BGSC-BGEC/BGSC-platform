@@ -49,7 +49,7 @@ userRoutes.post(
 
 // ---- literal paths, before /:ref -------------------------------------------
 // requireActiveUser on every route that resolves PII scope: the scope and the serializer's
-// elevation rank the LIVE role, not a token claim that outlives a demotion (audit #2).
+// elevation rank the LIVE role, not a token claim that outlives a demotion.
 userRoutes.get('/search', requireAuth, requireActiveUser(), validate({ query: SearchQuery }), c.searchUsers);
 userRoutes.get('/', requireAuth, requireActiveUser(UserRole.COORDINATOR), validate({ query: ListUsersQuery }), c.listUsers);
 
@@ -68,7 +68,7 @@ userRoutes.get(
 
 // `requireActiveUser`, not `requireRole`: changing somebody's role is the most consequential write
 // on the platform, and a token outlives a demotion or a suspension by up to fifteen minutes. The
-// live document decides (adding-a-service.md §6.2; whole-backend audit, Sep 27).
+// live document decides (adding-a-service.md §6.2).
 userRoutes.patch(
     '/:ref/role',
     requireAuth,

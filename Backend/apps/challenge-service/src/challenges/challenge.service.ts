@@ -5,6 +5,7 @@ import {
     MVP_PROOF_TYPES,
     ProofType,
     ServiceError,
+    escapeRegex,
     publish,
     recordAudit,
 } from '@bgsc/shared';
@@ -31,7 +32,9 @@ export interface Actor {
 }
 
 /** Every read of a soft-deleting collection carries this. Built here so no path can forget it. */
-const alive = { deleted_at: null };
+export const alive = { deleted_at: null };
+
+export const isDuplicateKey = (err: unknown): boolean => (err as { code?: number } | null)?.code === 11000;
 
 /* ------------------------------------------------------------------ *
  * 1. Normalization — turning a valid request into a savable document
@@ -49,10 +52,10 @@ const slugify = (title: string): string =>
         .replace(/^-+|-+$/g, '') || 'challenge';
 
 /**
- * The model defaults `proof_types` to `[...MVP_PROOF_TYPES]` (Challenge.ts:129) while
- * `requires_proof` defaults `true` (Challenge.ts:128). An admin creating a no-proof challenge sends
- * `{ requires_proof: false }` and nothing else; the default then fills `['url','text']`, the hook
- * at Challenge.ts:173 throws, and a request that was never wrong answers 500.
+ * The model defaults `proof_types` to `[...MVP_PROOF_TYPES]` while `requires_proof` defaults `true`
+ * (Challenge.ts). An admin creating a no-proof challenge sends `{ requires_proof: false }` and
+ * nothing else; the default then fills `['url','text']`, the model's validate hook throws, and a
+ * request that was never wrong answers 500.
  *
  * So this normalizes rather than refuses: `requires_proof: false` means there are no proof types,
  * which is a restatement of the same fact, not a second decision the admin has to remember to make.
@@ -67,7 +70,7 @@ function normalizeSubmission(s: {
     return { ...s, proof_types };
 }
 
-/** `teaming.enabled === false` must leave every size null (Challenge.ts:158-161). Same reasoning. */
+/** `teaming.enabled === false` must leave every size null (the model's hook). Same reasoning. */
 function normalizeTeaming(t: {
     enabled: boolean;
     team_size_min: number | null;
@@ -108,8 +111,8 @@ function assertSavable(c: Draftish): void {
     // A submit carries at least one proof (SubmitBody .min(1)), so a cap of 0 on a challenge that
     // requires proof is a challenge nobody can ever complete.
     if (s.requires_proof && s.max_files < 1) fail('max_files_required');
-    // The enum accepts image/video; Media Service does not exist until Week 4, so a challenge
-    // demanding a file upload would be unsatisfiable (challenge-model.md §6).
+    // The enum accepts image/video, but no Media Service upload is wired into a submission yet, so
+    // a challenge demanding a file would be unsatisfiable (challenge-model.md §6).
     const unsupported = s.proof_types.filter((p) => !MVP_PROOF_TYPES.includes(p));
     if (unsupported.length > 0) fail('proof_type_not_available_yet', { proof_types: unsupported });
 }
@@ -161,10 +164,8 @@ export async function createChallenge(input: CreateChallengeInput, actor: Actor)
     return challenge;
 }
 
-const isDuplicateKey = (err: unknown): boolean => (err as { code?: number } | null)?.code === 11000;
-
 /**
- * The slug is unique by index (Challenge.ts:83), so a second "Run 5K" is a duplicate-key error —
+ * The slug is unique by index (Challenge.ts), so a second "Run 5K" is a duplicate-key error —
  * a 500 for a request that was never wrong. Try the clean slug, and on a collision re-suffix and
  * try again.
  *
@@ -219,7 +220,7 @@ export async function updateChallenge(
 
     // The three nested groups are MERGED into what is stored; everything else is a plain replace.
     // `Object.assign` of the whole patch replaced them wholesale, so `{ teaming: { max_teams: 5 } }`
-    // also switched teaming off (audit Sep 26, H1).
+    // also switched teaming off.
     const { window, teaming, submission, ...flat } = patch;
     const stored = challenge.toObject() as unknown as Pick<IChallenge, 'window' | 'teaming' | 'submission'>;
     Object.assign(challenge, flat);
@@ -297,29 +298,48 @@ export async function transition(
 }
 
 export async function softDelete(id: string, actor: Actor): Promise<void> {
-    // relationships.md §3: forbid while any participation is approved. Points were paid against
-    // this challenge and `point_transactions.reference` is immutable, so the row the ledger points
-    // at must keep existing. `archive` is the reversible verb for "stop showing this".
+    // A submission waiting on a reviewer would be stranded: every participation path loads the
+    // challenge alive-only, so nobody could review it or withdraw it once the challenge is gone.
+    // ponytail: a submit landing between this read and the tombstone still strands one row; it pays
+    // nobody, so a read is enough. Reserve on the challenge (like approvals) if that ever matters.
+    if (await ChallengeParticipation.exists({ challenge_id: id, status: { $in: ['submitted', 'under_review'] } })) {
+        throw new ServiceError(409, 'challenge_has_pending_submissions');
+    }
+    // The counter below closes the race; this read covers a row the counter missed (an approval
+    // whose compare-and-swap landed but whose reply was lost, so its reservation was given back).
     if (await ChallengeParticipation.exists({ challenge_id: id, status: 'approved' })) {
         throw new ServiceError(409, 'challenge_has_approved_participations');
     }
 
-    const deleted = await Challenge.findOneAndUpdate(
-        { _id: id, ...alive },
-        { $set: { deleted_at: new Date(), status: 'archived' } },
-        { returnDocument: 'after' }
+    // relationships.md §3: forbid while any participation is approved. Points were paid against
+    // this challenge and `point_transactions.reference` is immutable, so the row the ledger points
+    // at must keep existing. `archive` is the reversible verb for "stop showing this".
+    //
+    // Checked as `counts.approved` INSIDE the tombstone's filter, not by a read first: an approval
+    // reserves that count on this document before its own compare-and-swap (participation.service
+    // `withApproval`, which requires the challenge alive). Both writes land on one document, so an
+    // approve racing this delete either reserved first (this refuses) or finds the challenge gone.
+    const deleted_at = new Date();
+    const before = await Challenge.findOneAndUpdate(
+        { _id: id, ...alive, 'counts.approved': 0 },
+        { $set: { deleted_at, status: 'archived' } },
+        { returnDocument: 'before' }
     );
-    if (!deleted) throw new ServiceError(404, 'challenge_not_found');
+    if (!before) {
+        throw (await Challenge.exists({ _id: id, ...alive }))
+            ? new ServiceError(409, 'challenge_has_approved_participations')
+            : new ServiceError(404, 'challenge_not_found');
+    }
 
     await recordAudit({
         actor_id: actor.id,
         action: 'challenge.deleted',
         target_type: 'challenge',
         target_id: id,
-        // An audit row must carry at least one of previous/new (AuditLog.ts:66); a delete's diff is
+        // An audit row must carry at least one of previous/new (AuditLog.ts); a delete's diff is
         // the status and the tombstone, not the whole document.
-        previous_value: { status: 'active_or_earlier', deleted_at: null },
-        new_value: { status: 'archived', deleted_at: deleted.deleted_at },
+        previous_value: { status: before.status, deleted_at: null },
+        new_value: { status: 'archived', deleted_at },
         ip: actor.ip,
     });
 }
@@ -361,8 +381,6 @@ export async function listChallenges(
         .limit(q.limit);
     return pageOf(rows, q.limit, 'created_at');
 }
-
-const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** Detail by `_id` or `slug` — the mobile app deep-links on slug, the admin panel holds ids. */
 export async function getByKey(key: string, viewer: Viewer): Promise<IChallenge> {

@@ -45,7 +45,6 @@ export interface ILeaderboardEntry extends Document<string> {
     last_scored_at: Date | null;
     scored_by: string | null;
 
-    version: number;
     /**
      * Investments whose debit was asked for but not yet applied here (leaderboard-model.md §6). The
      * `$inc` removes its request in the same update; anything left behind is settled (refunded) by
@@ -99,7 +98,6 @@ const LeaderboardEntrySchema = new Schema<ILeaderboardEntry>(
         last_scored_at: { type: Date, default: null },
         scored_by: { type: String, default: null },
 
-        version: { type: Number, default: 0 }, // optimistic lock for concurrent investments
         pending_requests: {
             type: [
                 new Schema(

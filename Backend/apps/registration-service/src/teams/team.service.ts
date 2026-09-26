@@ -27,9 +27,9 @@ type Member = ITeam['members'][number];
 /**
  * Rosters change only through conditional updates from here on. Every mutation used to be
  * read → check → `team.save()`; array pushes save as `$push` with no version check, so two joins
- * into the last slot both landed and left a roster over `size_max` that no later save could pass
- * (backend-audit-2026-09-26). Query updates skip the model's pre-validate hook, so each filter
- * below carries the invariant it would have checked.
+ * into the last slot both landed and left a roster over `size_max` that no later save could pass.
+ * Query updates skip the model's pre-validate hook, so each filter below carries the invariant it
+ * would have checked.
  */
 const OPEN_STATUSES: TeamStatus[] = ['forming', 'complete'];
 
@@ -100,6 +100,7 @@ async function captainContext(input: CreateTeamInput): Promise<{
     registration_id: string | null;
     size_min: number;
     size_max: number;
+    max_teams: number | null;
 }> {
     if (input.owner.type === 'challenge') {
         const challenge = await Challenge.findOne({ _id: input.owner.id, deleted_at: null }).select('teaming status');
@@ -119,6 +120,7 @@ async function captainContext(input: CreateTeamInput): Promise<{
             registration_id: null, // a challenge team has no registration (Team.ts invariant)
             size_min: challenge.teaming.team_size_min ?? 1,
             size_max: challenge.teaming.team_size_max ?? challenge.teaming.team_size_min ?? 1,
+            max_teams: challenge.teaming.max_teams ?? null,
         };
     }
 
@@ -147,8 +149,11 @@ async function captainContext(input: CreateTeamInput): Promise<{
         registration_id: captainReg._id,
         size_min: t.team_size_min,
         size_max: t.team_size_max,
+        max_teams: t.max_teams ?? null,
     };
 }
+
+const inviteCode = () => uuid().replace(/-/g, '').substring(0, 8);
 
 export async function createTeam(input: CreateTeamInput): Promise<ITeam> {
     const captain = await captainContext(input);
@@ -160,6 +165,12 @@ export async function createTeam(input: CreateTeamInput): Promise<ITeam> {
     });
     if (existingTeam) {
         throw new ServiceError(409, 'captain_already_has_team');
+    }
+    // ponytail: count-then-insert, so captains creating at the same instant can overshoot
+    // `max_teams` by the number racing. A per-owner counter claimed with $inc is the upgrade.
+    if (captain.max_teams != null) {
+        const teams = await Team.countDocuments({ 'owner.id': input.owner.id, status: { $ne: 'disbanded' } });
+        if (teams >= captain.max_teams) throw new ServiceError(409, 'max_teams_reached');
     }
 
     const teamId = uuid();
@@ -185,7 +196,7 @@ export async function createTeam(input: CreateTeamInput): Promise<ITeam> {
             },
         ],
         join_policy: input.join_policy ?? 'invite_only',
-        invite_code: uuid().replace(/-/g, '').substring(0, 8),
+        invite_code: inviteCode(),
         size_min: captain.size_min,
         size_max: captain.size_max,
         pending: [],
@@ -193,12 +204,21 @@ export async function createTeam(input: CreateTeamInput): Promise<ITeam> {
         auction: null, // set by the Event Service at auction start, through /internal
     });
 
-    try {
-        await team.save();
-    } catch (err: any) {
-        if (owned) await releaseMembership(input.owner.id, input.captain_user_id, teamId);
-        if (err?.code === 11000 && err?.keyPattern?.name_lower) throw new ServiceError(409, 'team_name_taken');
-        throw err;
+    // 32 random bits in a globally unique index: a clash is rare, and it is a new draw, not a 500.
+    for (let attempt = 1; ; attempt++) {
+        try {
+            await team.save();
+            break;
+        } catch (err: any) {
+            if (err?.code === 11000 && err?.keyPattern?.invite_code && attempt < 3) {
+                team.invite_code = inviteCode();
+                continue;
+            }
+            if (owned) await releaseMembership(input.owner.id, input.captain_user_id, teamId);
+            if (err?.code === 11000 && err?.keyPattern?.name_lower) throw new ServiceError(409, 'team_name_taken');
+            if (err?.code === 11000 && err?.keyPattern?.invite_code) throw new ServiceError(409, 'invite_code_conflict');
+            throw err;
+        }
     }
 
     // Link the captain's registration; it doubles as the event-side one-team lock.
@@ -234,7 +254,7 @@ export async function getTeam(teamId: string): Promise<ITeam> {
 
 /**
  * `invited_user` lists the teams holding a LIVE invite for that user (`GET /teams?invited=me`) —
- * without it an invite sat in `pending[]` with no way for the invitee to find it (spec §5.5).
+ * without it an invite sat in `pending[]` with no way for the invitee to find it.
  */
 export async function listTeams(filter: {
     owner_id?: string;
@@ -258,6 +278,47 @@ export async function listTeams(filter: {
 /* ------------------------------------------------------------------ *
  * Membership
  * ------------------------------------------------------------------ */
+
+/**
+ * An auction league (`ALL`) team, and whether its auction is over; null for any other team. Its
+ * members are bought: the auction seats them through `addMemberToTeam(…, 'auction')`, never a join.
+ */
+async function auctionLeague(team: ITeam): Promise<{ finished: boolean } | null> {
+    if (team.owner.type !== 'event') return null;
+    const event = await Event.findById(team.owner.id).select('type auction.status').lean();
+    return event?.type === 'ALL' ? { finished: event.auction?.status === 'finished' } : null;
+}
+
+/**
+ * While an auction league's auction is still selling, its rosters and purses are the auction's:
+ * a bought player leaving, or a captain disbanding, would undo sales already paid for. The
+ * controllers skip this for an admin of the event.
+ */
+export async function refuseDuringAuction(team: ITeam): Promise<void> {
+    const league = await auctionLeague(team);
+    if (league && !league.finished) throw new ServiceError(409, 'auction_in_progress');
+}
+
+/** The same, for a registration's team: cancelling a bought seat mid-auction would undo a paid sale. */
+export async function refuseLeavingDuringAuction(teamId: string | null | undefined): Promise<void> {
+    if (!teamId) return;
+    const team = await Team.findById(teamId);
+    if (team) await refuseDuringAuction(team);
+}
+
+/**
+ * The user captains an open team of this owner that has members besides them. A locked roster
+ * does not count: it can be neither disbanded nor shrunk, so counting it would bar an admin from
+ * ever removing a no-show captain once rosters lock.
+ */
+export async function captainHasTeam(ownerId: string, userId: string): Promise<boolean> {
+    return !!(await Team.exists({
+        'owner.id': ownerId,
+        captain_user_id: userId,
+        status: { $in: OPEN_STATUSES },
+        'members.1': { $exists: true },
+    }));
+}
 
 /** The member row, and for an event team the registration it links. Refusals mirror the old checks. */
 async function memberFor(
@@ -418,6 +479,7 @@ export async function inviteMember(teamId: string, captainId: string, userId: st
     if (team.status !== 'forming') throw new ServiceError(400, 'team_not_accepting_members');
     if (team.members.some((m) => m.user_id === userId)) throw new ServiceError(409, 'already_member');
     if (team.members.length >= team.size_max) throw new ServiceError(409, 'team_full');
+    if (await auctionLeague(team)) throw new ServiceError(409, 'auction_league');
 
     if (team.owner.type === 'event') {
         const reg = await FormSubmission.findOne({
@@ -465,14 +527,19 @@ export async function inviteMember(teamId: string, captainId: string, userId: st
     return updated;
 }
 
-/** Accept a live invite, or join a team whose policy is `open`. */
-export async function joinTeam(teamId: string, userId: string): Promise<ITeam> {
+/**
+ * Accept a live invite, or join a team whose policy is `open`. Holding the team's invite code
+ * (`withCode`) counts as the captain's invite: the captain shares it, and only the captain and the
+ * owner's admins can read it.
+ */
+export async function joinTeam(teamId: string, userId: string, withCode = false): Promise<ITeam> {
     const team = await getTeam(teamId);
     if (team.status !== 'forming') throw new ServiceError(400, 'team_not_accepting_members');
+    if (await auctionLeague(team)) throw new ServiceError(409, 'auction_league');
 
-    const invited = team.pending.some(
-        (p) => p.user_id === userId && p.direction === 'invite' && p.expires_at.getTime() > Date.now()
-    );
+    const invited =
+        withCode ||
+        team.pending.some((p) => p.user_id === userId && p.direction === 'invite' && p.expires_at.getTime() > Date.now());
     // Self-service join is exactly what join_policy governs; an invite is the captain's say-so.
     if (!invited && team.join_policy !== 'open') throw new ServiceError(403, 'team_not_open');
 
@@ -489,6 +556,12 @@ export async function joinTeam(teamId: string, userId: string): Promise<ITeam> {
     }
 
     return addMemberToTeam(teamId, userId, registrationId, invited ? 'invite' : 'join');
+}
+
+export async function joinTeamByCode(code: string, userId: string): Promise<ITeam> {
+    const team = await Team.findOne({ invite_code: code.toUpperCase() }).select('_id').lean();
+    if (!team) throw new ServiceError(404, 'invite_code_not_found');
+    return joinTeam(team._id, userId, true);
 }
 
 export async function removeMemberFromTeam(
@@ -542,8 +615,11 @@ async function unlinkAndRelease(team: ITeam, member: Member, reason: string, by:
  * Found by `members.registration_id`, not by the `team_id` the caller read before its status CAS:
  * a join landing between that read and the CAS left the member on a roster nobody detached them from.
  *
+ * A captain whose team still has other members is refused before this (`captain_has_team`); one
+ * leaving alone takes the team with them.
+ *
  * ponytail: a locked roster is left as it is (it is what the Challenge/Points side already
- * snapshotted), and a departing captain stays captain — disbanding is the admin's call.
+ * snapshotted).
  */
 export async function detachRegistration(registrationId: string, userId: string, by: string, reason: string): Promise<void> {
     const before = await Team.findOneAndUpdate(
@@ -555,9 +631,17 @@ export async function detachRegistration(registrationId: string, userId: string,
         { $pull: { members: { registration_id: registrationId } } },
         { returnDocument: 'before' }
     );
-    if (!before) return;
-    const member = before.members.find((m) => m.registration_id === registrationId)!;
-    await unlinkAndRelease(before, member, reason, by);
+    if (before) {
+        const member = before.members.find((m) => m.registration_id === registrationId)!;
+        await unlinkAndRelease(before, member, reason, by);
+        return;
+    }
+    const own = await Team.findOne({ 'members.registration_id': registrationId, captain_user_id: userId, status: { $in: OPEN_STATUSES } }).select('_id');
+    if (own) {
+        await disbandTeam(own._id, reason).catch((err) => {
+            if (!(err instanceof ServiceError)) throw err; // already gone: nothing left to do
+        });
+    }
 }
 
 export async function lockTeam(teamId: string, lockedBy: string): Promise<ITeam> {
@@ -632,6 +716,26 @@ export async function disbandTeam(teamId: string, reason?: string): Promise<ITea
 
     publish('TeamDisbanded', PRODUCER, { team_id: teamId, owner: updated.owner, reason: reason ?? 'disbanded' });
     return updated;
+}
+
+/**
+ * A cancelled event's open teams go with it (team-model.md §4.1). A locked roster is left as the
+ * record of what was played. Idempotent: `disbandTeam` is a CAS on an open status.
+ */
+export async function disbandEventTeams(eventId: string): Promise<number> {
+    const open = await Team.find({ 'owner.type': 'event', 'owner.id': eventId, status: { $in: OPEN_STATUSES } })
+        .select('_id')
+        .limit(500);
+    let disbanded = 0;
+    for (const t of open) {
+        try {
+            await disbandTeam(t._id, 'event_cancelled');
+            disbanded++;
+        } catch (err) {
+            if (!(err instanceof ServiceError)) console.error(`[registration-service] disband failed for ${t._id}:`, err);
+        }
+    }
+    return disbanded;
 }
 
 /* ------------------------------------------------------------------ *

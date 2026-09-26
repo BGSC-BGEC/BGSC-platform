@@ -66,6 +66,12 @@ const AudienceSchema = z.object({
 
 const Tags = z.array(z.string().trim().min(1).max(40)).max(20);
 
+/**
+ * An ISO 8601 timestamp carrying its zone (`Z` or an offset), then a Date. Not `z.coerce.date()`:
+ * that turns `true`, `0` or a bare number into a date, and a zoneless string into server-local time.
+ */
+const IsoDate = z.iso.datetime({ offset: true }).transform((v) => new Date(v));
+
 export const CreateAnnouncementSchema = z.object({
     title: z.string().trim().min(1).max(120),
     body: z.string().trim().min(1).max(5000),
@@ -74,7 +80,7 @@ export const CreateAnnouncementSchema = z.object({
     tags: Tags.optional(),
     priority: z.enum(ANNOUNCEMENT_PRIORITY).optional(),
     audience: AudienceSchema.optional(),
-    pinned_until: z.coerce.date().nullable().optional(),
+    pinned_until: IsoDate.nullable().optional(),
 });
 
 export const UpdateAnnouncementSchema = z
@@ -88,13 +94,13 @@ export const UpdateAnnouncementSchema = z
         audience: AudienceSchema.optional(),
         tags: Tags.optional(),
         priority: z.enum(ANNOUNCEMENT_PRIORITY).optional(),
-        pinned_until: z.coerce.date().nullable().optional(),
+        pinned_until: IsoDate.nullable().optional(),
     })
     .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' });
 
 /** Send Now is this body empty; Schedule for Later is the same route with a date. */
 export const PublishAnnouncementSchema = z.object({
-    scheduled_for: z.coerce.date().optional(),
+    scheduled_for: IsoDate.optional(),
 });
 
 export const ListAnnouncementsQuery = z.object({
@@ -133,7 +139,7 @@ const DeliveryRow = z.object({
     group_id: z.string().trim().min(1).max(200),
     status: z.enum(DELIVERY_STATUS),
     message_id: z.string().trim().max(200).nullish(),
-    attempted_at: z.coerce.date().nullish(),
+    attempted_at: IsoDate.nullish(),
     error: z.string().trim().max(300).nullish(),
     // The sender's dispatch-row revision. Receipts can arrive out of order; an older one never
     // overwrites a newer one (announcement.service.ts:applyWhatsAppRow).

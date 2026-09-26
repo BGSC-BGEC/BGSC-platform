@@ -52,41 +52,46 @@ export async function replayTick(now: Date = new Date()): Promise<{ payouts: num
         payouts++;
     }
 
-    // (B) Legend challenges are few; their ids bound the participation query.
+    // (B) Keyed on the flag the approval froze into its reward, never on the challenge's flag now:
+    // an admin switching `grants_hall_of_fame` on after the fact must not mint Legends for the
+    // last week's approvals (or, switched off, silently drop one still owed).
+    // ponytail: rows approved before the reward carried the flag fall back to the challenge's. The
+    // window is 7 days, so the fallback (and its `distinct`) can go a week after this ships.
     const legendIds = await Challenge.distinct('_id', { grants_hall_of_fame: true });
     let legends = 0;
     let linked = 0;
-    if (legendIds.length > 0) {
-        const unannounced = await ChallengeParticipation.find({
-            status: 'approved',
-            updated_at,
-            challenge_id: { $in: legendIds },
-            reward: { $ne: null },
-            'reward.hall_of_fame_entry_id': null,
-        })
-            .sort({ updated_at: 1 })
-            .limit(PAGE);
+    const unannounced = await ChallengeParticipation.find({
+        status: 'approved',
+        updated_at,
+        reward: { $ne: null },
+        'reward.hall_of_fame_entry_id': null,
+        $or: [
+            { 'reward.grants_hall_of_fame': true },
+            { 'reward.grants_hall_of_fame': { $exists: false }, challenge_id: { $in: legendIds } },
+        ],
+    })
+        .sort({ updated_at: 1 })
+        .limit(PAGE);
 
-        for (const p of unannounced) {
-            const entry = await HallOfFameEntry.findOne({
-                category: 'challenge_legend',
-                'honoree.id': p.participant.id,
-                'source.id': p.challenge_id,
-                deleted_at: null,
-            })
-                .select('_id')
-                .lean<{ _id: string }>();
-            if (entry) {
-                await ChallengeParticipation.updateOne(
-                    { _id: p._id, status: 'approved', 'reward.hall_of_fame_entry_id': null },
-                    { $set: { 'reward.hall_of_fame_entry_id': entry._id } }
-                );
-                linked++;
-                continue;
-            }
-            publishLegend(p);
-            legends++;
+    for (const p of unannounced) {
+        const entry = await HallOfFameEntry.findOne({
+            category: 'challenge_legend',
+            'honoree.id': p.participant.id,
+            'source.id': p.challenge_id,
+            deleted_at: null,
+        })
+            .select('_id')
+            .lean<{ _id: string }>();
+        if (entry) {
+            await ChallengeParticipation.updateOne(
+                { _id: p._id, status: 'approved', 'reward.hall_of_fame_entry_id': null },
+                { $set: { 'reward.hall_of_fame_entry_id': entry._id } }
+            );
+            linked++;
+            continue;
         }
+        publishLegend(p);
+        legends++;
     }
 
     return { payouts, legends, linked };

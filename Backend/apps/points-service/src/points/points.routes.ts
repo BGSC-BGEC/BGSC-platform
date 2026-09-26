@@ -15,7 +15,7 @@ import {
 } from './points.schemas';
 
 /**
- * Mounted at `/points` — the prefix the gateway forwards unchanged (routing.ts:28).
+ * Mounted at `/points` — the prefix the gateway forwards unchanged.
  *
  * Spec §5.7 marks the whole Point System page "Visibility: Authenticated only", so there is one
  * floor for the entire prefix and no `optionalAuth` anywhere in this service.

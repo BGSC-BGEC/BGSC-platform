@@ -10,8 +10,8 @@ hallOfFameRouter.get('/', validate({ query: schemas.HallOfFameQuerySchema }), wr
 hallOfFameRouter.get('/featured', wrap(controller.getFeaturedEntries));
 hallOfFameRouter.get('/:slugOrId', validate({ params: schemas.HallOfFameSlugOrIdParamSchema }), wrap(controller.getEntryBySlugOrId));
 
-// Protected routes. `requireActiveUser(floor)` is a factory: passed uncalled it took the request
-// as its role and threw, so every write here was a 500 (backend-audit-2026-09-26).
+// Protected routes. `requireActiveUser(floor)` is a factory: passed uncalled it takes the request
+// as its role and throws, so every write here would be a 500.
 hallOfFameRouter.post(
     '/',
     requireAuth,

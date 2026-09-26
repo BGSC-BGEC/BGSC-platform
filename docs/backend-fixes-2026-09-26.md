@@ -1,6 +1,6 @@
 # Backend fixes — audit #1 (Sep 26, 2026)
 
-One line per bug fixed. Source: `docs/backend-audit-2026-09-26.md`. Done by BE-2 with BE-1's agreement.
+One line per bug fixed. The audit reports themselves were retired; this file is the record. Done by BE-2 with BE-1's agreement.
 
 ## Shared (lead)
 - shared: internal calls read the `{success,data}` envelope raw → `callInternal` helper unwraps + types failures.
@@ -317,7 +317,7 @@ One line per bug fixed. Source: `docs/backend-audit-2026-09-26.md`. Done by BE-2
 
 # Audit #2 fixes (Sep 26)
 
-Source: `docs/backend-audit-2-2026-09-26.md`. Owner decisions: mail stays dev-logger (launch blocker), WhatsApp + push deferred to post-MVP, founder via `npm run seed:founder`, many manual albums per event, announcement edit = author or outranking, attendance only while an event is running.
+Owner decisions: mail stays dev-logger (launch blocker), WhatsApp + push deferred to post-MVP, founder via `npm run seed:founder`, many manual albums per event, announcement edit = author or outranking, attendance only while an event is running.
 
 ## Shared (lead)
 - shared: "event admin" checked differently per service (or not at all) → one `isEventAdmin` / `requireEventAdmin`.
@@ -398,7 +398,7 @@ Source: `docs/backend-audit-2-2026-09-26.md`. Owner decisions: mail stays dev-lo
 - compose: missing `CORS_ORIGIN` silently defaulted to localhost → required.
 - compose: auth-service lacked Google / frontend URLs → passed through.
 - ops: no founder bootstrap → `npm run seed:founder`.
-- ops: no upgrade path for non-wiped DBs → `npm run migrate:audit2` (dry-run default, idempotent, tested); also drops audit #1's too-broad album index.
+- ops: no upgrade path for non-wiped DBs → a one-off migration script (later dropped in audit #3: no production data exists; wipe dev DBs instead).
 - migrate: duplicate lot `order` values sent lots to the queue end → renumbered in place, relative order kept.
 - migrate: extra `settling` lot only reported → re-queued like any extra active lot, logged "!!" for a purse check.
 - docs: README / dev guide / adding-a-service updated (Redis password, autoIndex, event-admin, attendance window, replay sweeps, upgrade checklist).
@@ -524,7 +524,7 @@ Source: `docs/backend-audit-2-2026-09-26.md`. Owner decisions: mail stays dev-lo
 ## Ops (audit #2)
 - `.env`: `REDIS_PASSWORD` carries the password; `REDIS_URL=redis://host:6379` (no password inside).
 - first founder: `FOUNDER_EMAIL=… npm run seed:founder` (one-time, audited).
-- non-wiped DBs: `npm run migrate:audit2` (dry run) then `--apply`; any `!!` line = a `settling` lot re-queued → check that team's purse before re-running the lot.
+- non-wiped DBs: wipe them (`docker compose down -v`); the migration script was dropped in audit #3.
 - indexes: `autoIndex` is off; each service builds its own on boot (`models:`).
 - registration files: boot moves `<uploadDir>/registrations` (the shared upload dir) into `<uploadDir>/.private/registrations`; keep the `uploads` volume. Files a very old build kept in `apps/registration-service/uploads/` are not moved (dev data; wipe).
 
@@ -558,3 +558,115 @@ Source: `docs/backend-audit-2-2026-09-26.md`. Owner decisions: mail stays dev-lo
 - docs: founder bootstrap order (register first) and the in-image command (`-e FOUNDER_EMAIL`) fixed.
 - docker: image never built — `package-lock.json` lacked the media-service workspace (`npm ci` refused) → lock synced.
 - all services: an early refusal of a big upload (expired token, 413/415) raced the gateway's streaming → 502 instead of 401 → body drained before replying.
+
+# Audit #3 fixes (Sep 26, clean audit)
+
+Nine read-only audits (one per service cluster, one for cross-service contracts), fixes per cluster, then an independent re-review of the fix diff (its findings are fixed below too). Gate: TS7 typecheck incl. tests, build, `npm test` (every workspace), Docker image build, and `npm run live-check` (new: the whole stack on the host, every route through the gateway plus cross-service journeys — 992 calls, 0 failures, 0 5xx).
+
+## Shared / gateway / infra
+- repo: `npm test` and the Docker build referenced a migration script that was never committed → script dropped (no production data); wipe dev DBs instead.
+- dev: `npm run dev` restarted on shared edits but ran the stale `packages/shared/dist` → dev scripts rebuild shared before `ts-node`.
+- shared: 422 `validation_failed` had two shapes (`fields` vs `details[].field_key`) → always `fields: [{ key, code, message? }]`.
+- shared: a Mongoose `ValidationError` (a model rule zod didn't repeat) answered 500 → 422 `validation_failed`, logged.
+- shared: error handler threw on an error after headers were sent → handed to Express.
+- shared: `/internal` guard ignored `INTERNAL_API_TOKEN_PREVIOUS` (bus accepted it) → both accept it during a rotation; prod refuses the published dev value there too.
+- shared: four copies of the role-rank lookup → one `roleRank`; unused `requireSelfOr`, `resolveService`, `config.port` removed.
+- shared: dead album slug hook removed (media-service always sets the slug).
+- gateway: unreachable `/health` limiter skip and double `GATEWAY_PORT` parse removed; phone-OTP limiter key tested.
+- compose: auth/user services got each other's URL though neither calls the other → removed; registration upload comment corrected.
+- deps: unused `cors`/`dotenv`/`uuid`/`bcrypt`/`mongoose`/`zod`/`ioredis` dropped where unused, test-only deps moved to devDependencies; shared declares `ioredis`, not `bcrypt`; unused decorator/JSON tsconfig flags removed.
+- docs: README, dev guide, handoff, adding-a-service, `.env.example` rotation note brought in line; dead audit/plan citations stripped from code comments.
+
+## Auth + user
+- auth: two tabs refreshing one token logged the user out (replay detection) → the just-retired token within 30 s is a plain 401, no revoke.
+- auth: accounts past the 45-day restore window held their email/username/phone forever → released (audited, CAS) when someone registers/verifies them.
+- auth/user: one phone in different formats bypassed "one verified number" → E.164 normalised everywhere; masking from digits.
+- auth: whitespace-only name passed (`min` before `trim`) and 500'd → trim first, 422.
+- auth: logout needed a live access token → also accepts `{ refresh_token }`.
+- auth: forgot/resend timing revealed registered emails → mail sent fire-and-forget.
+- auth: Google asked for unused offline access + forced consent, fetches had no timeout, browser failures showed raw JSON → trimmed, 10 s timeout, redirect with `?error=` (+ `restore_with`).
+- auth: key-release rollback could throw over the real error → logged, original error kept.
+- auth: `me`/`search` usernames shadowed routes; bcrypt ignored bytes past 72 → reserved names, 72-byte cap.
+- user: `is_phone_verified` never returned; player card counted generic/challenge forms; `joined_before=<date>` excluded that day → fixed.
+- user/auth: dead code (`PENDING_VERIFICATION`, unused re-exports/imports, triple restore-window math) removed.
+
+## Event + auction
+- auction: a captain approved after start had no purse (every bid 422) → default purse on first bid.
+- events: seat ledger never reconciled → 5-min sweep releases holders whose row is cancelled/rejected/waitlisted/missing (re-read before release).
+- events: an auction league could be completed with its auction live → 409 `auction_not_finished`.
+- events: concurrent PATCHes could store an invalid event → CAS on `updated_at` (seat/captain bookkeeping no longer bumps it).
+- auction: K=0 allowed on update, purse not resettable, bid read before a pause landed after it, wrong status codes (400→409/422), refusal vs route-miss confusion stranded lots → fixed.
+- events: deleted player's name on new lots, public stats leaked rejected/cancelled counts, paging without tiebreak, media upload on finished events + orphaned files, core creators couldn't delete their draft, admins could self-promote from the waitlist → fixed.
+- events: `counts.teams` never written → removed.
+- events: late `RegistrationCancelled` could pull a re-confirmed row's fresh seat → releases only a seat that cancellation should have freed.
+
+## Registration + teams
+- registration: `requires_approval` ignored (everyone auto-confirmed) → honoured; an admin confirm that finds the event full waitlists it for promotion.
+- registration: rows stranded `submitted` by a lost reserve reply → 5-min sweep retries them.
+- registration: client-chosen role vs teaming unchecked, `captain_application_required` ignored, `max_teams` unenforced → 422/409/auto-approve.
+- registration/teams: captain could leave a team seatless; open-team captains now 409 `captain_has_team` (locked rosters exempt).
+- teams: auction leagues could be joined/left around the auction → refused until the auction finishes.
+- teams: no `EventCancelled` handling → open teams disbanded (consumer + sweep); disbanded names now reusable; invite-code collision 500 → retried.
+- registration: cancel after registration closes, self-review of own row, waitlisting generic/challenge rows, `visible_if` date/number never matching, challenge forms ignoring challenge status → fixed.
+- registration: admin demotion to waitlist published no `RegistrationWaitlisted` → published.
+- registration: handlers' hand-rolled try/catch → shared `wrap`; dead code and citations removed.
+- teams: `invite_code` was readable by any signed-in user and joined nothing → captain/admin-only, `POST /teams/join-by-code` (owner decision).
+- registration: a bought auction-league player could cancel mid-auction, leaving the purse spent → 409 `auction_in_progress` until the auction finishes; admins may still remove (owner decision).
+
+## Points + leaderboard + HoF
+- points: an investment spend retry refused after an unknown first attempt lost the user's points → key looked up first; leaderboard treats refusal-after-unknown as unknown.
+- points: admin recalculate could erase an in-flight write → 409 `write_in_flight`.
+- points: reversal after partial expiry took the full credit → nets the expired part.
+- points: podium replays logged false conflicts and paid-winner cancels spammed → key-first, benign skips; replays only while podium unpaid.
+- points: lifetime earned counted refunds → excluded.
+- leaderboard: threshold counted eliminated entries; investment could be undone after the final snapshot counted it; ties unordered; stale global cache after eviction; retries burned rate limit; `dev` domain unfilterable → fixed.
+- leaderboard: missed `RegistrationCreated`/`TeamLocked`/`EventCancelled` never repaired → membership sweep (also revives a same-registration re-confirm).
+- leaderboard: refunds to restorable deleted investors dropped → kept, and skipped by the sweep so they can't starve others.
+- leaderboard: selfcheck wiped `lb:*` on the dev Redis → uses logical DB 15; unused per-event Redis cache and `version` field removed.
+
+## Challenge + Strava + feedback
+- challenge: a core could pay themselves via an auto-approve challenge → auto-approve only when no member is core+.
+- challenge: delete stranded pending submissions / raced approvals → refused while submissions pend; approvals reserve on the challenge first; an approved row always blocks delete.
+- challenge: re-click at cap said `challenge_full`; reject lost its notice on audit failure; team accept recorded the team as actor; delete audit invented a status; legend replay followed later flag flips; dates accepted booleans → fixed.
+- strava: relink reset the sync cooldown → kept.
+- feedback: late `UserDeleted` re-anonymized restored users → guarded; `FeedbackResponded` carries `responded_at` (two replies = two cards).
+
+## Announcement + notification
+- announcement: expiry month math local-time and non-monotonic at month end → UTC, day clamped; scheduler caps `pinned_until`.
+- announcement: opening a card never lowered the unread badge (count used only the watermark) → excludes opened cards.
+- announcement: duplicate reads on publish, `requireActiveUser` on hot read routes, dead boot migration → removed.
+- notification: `{unread}` vs `{count}` → `{count}`; invalid inbox rows dropped silently → thrown; exactly-full page gave an empty next page → `limit+1`.
+- notification: player's name survived deletion on captain cards → `UserDeleted` rewrites them (indexed); challenge approval sent two cards → one.
+- notification: writeback retry starved, reconcile re-ran fan-outs in progress → rotation + 2-min grace.
+
+## Media + bracket
+- media: moderators couldn't see pending files → `GET /media/:id/file` (uploader/core while pending), `preview_url` in the queue.
+- media: draft events' albums/photos public → hidden (queue included); any core auto-published into any event → event admins only.
+- media: gzip bodies inflated to 50 MB, any `ftyp` treated as MP4, `/uploads` dirs answered 301 → fixed (MP4 accepted by major or compatible brand).
+- bracket: runner-up topped standings when side b won the final; late `UserDeleted`; DB errors as 404; unbounded field size → fixed.
+
+## Deliberately left / policy (audit #3)
+- `optionalAuth` stays lenient (stale/garbage token = guest): both clients send stale tokens today (mobile `Bearer logged_out`, web never refreshes). Make it strict once clients refresh on 401.
+- refresh grace: a thief who rotates first keeps the session if the victim replays within 30 s.
+- leaderboard: a mid-event withdrawal can drop a board below threshold and freeze it (no more score entry) — per spec, confirmed by the owner.
+- registration: `UserDeleted` keeps confirmed seats (restorable).
+- points: registration cancel after event `past` still reverses participation credit (user cancel window now closes at registration close).
+- challenge: image/video proofs stay url/text until upload ownership is designed.
+- feedback: `sparse` on `event_id_1_created_at_-1` left (changing it breaks boot on existing DBs).
+- existing dev DBs: old `teams.owner.id_1_name_lower_1` index keeps blocking reuse of disbanded names until dropped; wipe or `dropIndex`.
+
+## Frontend / client changes (audit #3)
+- all: 422 errors list `fields: [{ key, code, message? }]` (registration used `details[].field_key`).
+- auth: phone numbers E.164 (`+` and country code); reserved usernames; password ≤ 72 bytes; `full_name` ≤ 120; logout accepts `{ refresh_token }`; Google browser failures redirect to `/auth/callback?error=…[&restore_with=…]`; `is_phone_verified` in user payloads.
+- user: `joined_before/after` ISO or `YYYY-MM-DD`; `pending_verification` status gone.
+- events: participant stats for non-admins `{ confirmed, waitlisted }`; `counts.teams` gone; 409 `event_changed_concurrently` / `event_is_terminal` / `auction_not_finished`; auction 409 `lot_not_on_block` / `auction_not_live`, 422 `event_is_not_an_auction_league`; `k_multiplier` > 0, `purse_per_team: null` allowed; pause bumps lot version (re-read before bidding).
+- registration: admin confirm of a `submitted` row into a full event answers 200 with `status: 'waitlisted'` (read the status, don't assume confirmed); event-side promote of your own row is 403. Requires-approval events stay `submitted`; 422 `role_mismatch` / `visible_if_value_invalid`; 409 `cancel_window_closed` / `captain_has_team` / `no_waitlist` / `max_teams_reached` / `auction_league` / `auction_in_progress` / `challenge_not_*`; 403 `cannot_review_own_registration`.
+- challenges: window dates ISO strings; 409 `challenge_has_pending_submissions`, `already_accepted`; core+ auto-approve submits go to `under_review`.
+- announcements: `scheduled_for` / `pinned_until` zoned ISO strings.
+- notifications: `GET /notifications/unread-count` → `{ count }`. Mobile repository is out of contract (PATCH vs POST read, `mark-all-read` path, `page` vs `cursor`, item fields `_id/body/read_at`, envelope not unwrapped; mock data in every catch hides it).
+- media: `GET /media/:id/file` (Bearer); queue `preview_url`; core uploads into events they don't run go pending; 415 for gzip / non-MP4 `ftyp`; draft filters 404.
+- teams: `invite_code` only in the captain's (and admins') reads; join with `POST /teams/join-by-code { code }`; bought players' cancel mid-auction → 409 `auction_in_progress`.
+- brackets: > 256 participants 422 `too_many_participants`; `?round=` 1–255.
+- points: `lifetime_earned` excludes refunds; recalculate may 409 `write_in_flight`.
+- leaderboard: `?domain=dev` accepted; ranks/threshold ignore eliminated entries.
+- clients should refresh on 401 and drop the token when refresh fails (mobile: remove the key on logout instead of storing `'logged_out'`).

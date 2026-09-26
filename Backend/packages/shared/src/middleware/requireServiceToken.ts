@@ -4,12 +4,11 @@ import { config } from '../config/env';
 import { redisOptions } from '../config/redis';
 
 /**
- * Guard for `/internal/*`. These routes are for service-to-service calls (snapshot refresh across
- * the six BE-2 collections) and carry no user session, so `requireAuth` does not apply.
+ * Guard for `/internal/*`. These routes are for service-to-service calls (seat reservation, points
+ * moves, roster locks, …) and carry no user session, so `requireAuth` does not apply.
  *
- * Without this the snapshot endpoint is an unauthenticated directory of every user's real name and
- * avatar, reachable by anyone who can reach the port. "Not exposed on the gateway" is a deployment
- * assumption, not an access control.
+ * "Not exposed on the gateway" is a deployment assumption, not an access control: without this
+ * anyone who can reach a service's port could move points.
  */
 
 export const DEV_INTERNAL_TOKEN = 'dev_internal_token_change_me';
@@ -25,9 +24,16 @@ function tokensMatch(given: string, expected: string): boolean {
     return timingSafeEqual(a, b);
 }
 
+/**
+ * The current token, or during a rotation the previous one — the same pair the event bus verifies
+ * with, so a service not yet restarted onto the new value is still heard over HTTP too.
+ */
 export function requireServiceToken(req: Request, res: Response, next: NextFunction): void {
     const given = req.header('x-internal-token');
-    if (!given || !tokensMatch(given, config.internalToken)) {
+    const accepted = [config.internalToken, config.internalTokenPrevious].filter(Boolean);
+    // Both compared every time, so the timing does not say which one matched.
+    const ok = !!given && accepted.map((t) => tokensMatch(given, t)).includes(true);
+    if (!ok) {
         res.status(401).json({ error: 'unauthorized' });
         return;
     }
@@ -74,12 +80,16 @@ export function assertInternalTokenConfigured(opts: { datastores?: boolean } = {
             'bgsc_dev_super_secret_refresh_key_change_in_production',
         ],
         INTERNAL_API_TOKEN: [DEV_INTERNAL_TOKEN],
+        // Verified by the bus and the internal guard, so a published value here is as good as
+        // a published current token.
+        INTERNAL_API_TOKEN_PREVIOUS: [DEV_INTERNAL_TOKEN],
     };
 
     const actual: Record<string, string> = {
         JWT_ACCESS_SECRET: config.jwt.accessSecret,
         JWT_REFRESH_SECRET: config.jwt.refreshSecret,
         INTERNAL_API_TOKEN: config.internalToken,
+        INTERNAL_API_TOKEN_PREVIOUS: config.internalTokenPrevious,
     };
 
     const offenders = Object.keys(published).filter((name) =>

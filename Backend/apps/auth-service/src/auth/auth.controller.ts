@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
-import { config, wrap } from '@bgsc/shared';
+import { ServiceError, config, wrap } from '@bgsc/shared';
 
 /**
  * Binds a Google sign-in to the browser that started it (see AuthService.verifyState). Lax, not
@@ -57,8 +57,13 @@ export class AuthController {
   });
 
   static logout = wrap(async (req: Request, res: Response): Promise<void> => {
+    const refreshToken = (req.body as { refresh_token?: string } | undefined)?.refresh_token;
     if (req.user?.id) {
       await AuthService.logout(req.user.id);
+    } else if (refreshToken) {
+      await AuthService.logoutWithRefreshToken(refreshToken);
+    } else {
+      throw new ServiceError(401, 'unauthorized');
     }
     res.status(200).json({ message: 'logged_out' });
   });
@@ -69,13 +74,15 @@ export class AuthController {
     res.status(200).json({ message: 'email_verified', ...result });
   });
 
+  // These two answer before doing any work. Awaiting it made a known address (lookup, write, mail)
+  // measurably slower than an unknown one (lookup only), which enumerated accounts by timing.
   static resendVerification = wrap(async (req: Request, res: Response): Promise<void> => {
-    await AuthService.resendVerification(req.body.email);
+    AuthService.resendVerification(req.body.email).catch((err) => console.error('resend-verification failed:', err));
     res.status(200).json({ message: 'verification_email_sent' });
   });
 
   static forgotPassword = wrap(async (req: Request, res: Response): Promise<void> => {
-    await AuthService.forgotPassword(req.body.email);
+    AuthService.forgotPassword(req.body.email).catch((err) => console.error('forgot-password failed:', err));
     res.status(200).json({ message: 'password_reset_email_sent' });
   });
 
@@ -98,30 +105,39 @@ export class AuthController {
   };
 
   static googleCallback = wrap(async (req: Request, res: Response): Promise<void> => {
-    const code = typeof req.query.code === 'string' ? req.query.code : '';
-    if (!code) {
-      res.status(400).json({ error: 'missing_authorization_code' });
-      return;
-    }
-
-    // Throws unless this callback belongs to a consent screen THIS browser was sent to. Returns
-    // whatever the caller stashed on the way in — a return path, typically — to hand back.
-    const callerState = AuthService.verifyState(
-      typeof req.query.state === 'string' ? req.query.state : undefined,
-      readCookie(req, OAUTH_NONCE_COOKIE)
-    );
-    res.clearCookie(OAUTH_NONCE_COOKIE, OAUTH_COOKIE_OPTS);
-
     const isBrowser = req.headers.accept?.includes('text/html');
-    if (isBrowser) {
-      // A one-time code, never the tokens: a URL is kept by history, logs and proxies.
-      const params = new URLSearchParams({ login_code: await AuthService.googleLoginCode(code) });
-      if (callerState) params.append('state', callerState);
-      res.redirect(`${config.frontendUrl}/auth/callback?${params.toString()}`);
-      return;
-    }
+    try {
+      const code = typeof req.query.code === 'string' ? req.query.code : '';
+      if (!code) throw new ServiceError(400, 'missing_authorization_code');
 
-    res.status(200).json(await AuthService.handleGoogleCallback(code));
+      // Throws unless this callback belongs to a consent screen THIS browser was sent to. Returns
+      // whatever the caller stashed on the way in — a return path, typically — to hand back.
+      const callerState = AuthService.verifyState(
+        typeof req.query.state === 'string' ? req.query.state : undefined,
+        readCookie(req, OAUTH_NONCE_COOKIE)
+      );
+      res.clearCookie(OAUTH_NONCE_COOKIE, OAUTH_COOKIE_OPTS);
+
+      if (isBrowser) {
+        // A one-time code, never the tokens: a URL is kept by history, logs and proxies.
+        const params = new URLSearchParams({ login_code: await AuthService.googleLoginCode(code) });
+        if (callerState) params.append('state', callerState);
+        res.redirect(`${config.frontendUrl}/auth/callback?${params.toString()}`);
+        return;
+      }
+
+      res.status(200).json(await AuthService.handleGoogleCallback(code));
+    } catch (err) {
+      if (!isBrowser) throw err;
+      // A person mid-sign-in lands back in the app with a reason, not on a page of raw JSON.
+      if (!(err instanceof ServiceError)) console.error('Google callback failed:', err);
+      const error = err instanceof ServiceError ? err.code : 'server_error';
+      const params = new URLSearchParams({ error });
+      // A deactivated account's way back (reset-then-reactivate for a Google-only one) rides along.
+      const restoreWith = err instanceof ServiceError ? (err.details as { restore_with?: unknown } | undefined)?.restore_with : undefined;
+      if (typeof restoreWith === 'string') params.set('restore_with', restoreWith);
+      res.redirect(`${config.frontendUrl}/auth/callback?${params.toString()}`);
+    }
   });
 
   /** The frontend swaps the callback's one-time login code for the token pair. */

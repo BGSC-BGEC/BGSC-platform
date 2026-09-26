@@ -23,7 +23,7 @@ export async function listEntries(query: {
 
     const [items, total] = await Promise.all([
         HallOfFameEntry.find(filter)
-            .sort({ 'achievement.year': -1, featured_order: 1, created_at: -1 })
+            .sort({ 'achievement.year': -1, featured_order: 1, created_at: -1, _id: 1 })
             .skip(skip)
             .limit(query.limit)
             .lean(),
@@ -35,7 +35,7 @@ export async function listEntries(query: {
 
 export async function getFeaturedEntries() {
     return HallOfFameEntry.find({ deleted_at: null, featured: true })
-        .sort({ featured_order: 1, 'achievement.year': -1 })
+        .sort({ featured_order: 1, 'achievement.year': -1, _id: 1 })
         .lean();
 }
 

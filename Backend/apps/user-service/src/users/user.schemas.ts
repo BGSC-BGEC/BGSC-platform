@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { UserRole, UserStatus } from '@bgsc/shared';
+import { UserRole, UserStatus, phoneNumberSchema } from '@bgsc/shared';
 
 /**
  * Request schemas. Zod strips unknown keys, so these double as the sanitization layer: a client
@@ -17,7 +17,9 @@ export const UpdateProfileSchema = z
     .object({
         full_name: z.string().trim().min(1).max(120).optional(),
         bio: z.string().max(250).optional(),
-        phone_number: z.string().trim().max(20).nullable().optional(),
+        // E.164 after stripping separators, the same rule Auth's OTP flow applies: one number, one
+        // spelling, or the verified-number index would see `+91 98765-43210` as a different number.
+        phone_number: phoneNumberSchema.nullable().optional(),
         interests: z.array(z.string().trim().min(1).max(40)).max(30).optional(),
         social_links: z
             .object({
@@ -26,7 +28,7 @@ export const UpdateProfileSchema = z
                 // clears it on disconnect. Accepting it from a profile PATCH gave the field two
                 // writers with different standards of proof — anyone could paste an athlete id and
                 // wear the badge. The other three are self-declared handles that nothing verifies,
-                // so they stay editable. (Whole-platform audit, Sep 27.)
+                // so they stay editable.
                 instagram: z.string().trim().max(64).nullable().optional(),
                 linkedin: z.string().trim().max(128).nullable().optional(),
                 steam_id: z.string().trim().max(64).nullable().optional(),
@@ -64,11 +66,21 @@ export const ChangeStatusSchema = z.object({
     reason: z.string().trim().min(1).max(500),
 });
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** An ISO timestamp or a bare `YYYY-MM-DD` (UTC). `z.coerce.date()` also took `true` and `0`. */
+const isoDate = z.union([z.iso.datetime({ offset: true }), z.iso.date()]);
+
 export const ListUsersQuery = z.object({
     role: z.enum(UserRole).optional(),
     status: z.enum(UserStatus).optional(),
-    joined_after: z.coerce.date().optional(),
-    joined_before: z.coerce.date().optional(),
+    joined_after: isoDate.transform((s) => new Date(s)).optional(),
+    /**
+     * Exclusive upper bound. A bare date means "up to and including that day", so it becomes the
+     * next midnight (UTC) — as `$lte` on that day's midnight it silently excluded the day named.
+     */
+    joined_before: isoDate
+        .transform((s) => (s.length === 10 ? new Date(Date.parse(s) + DAY_MS) : new Date(s)))
+        .optional(),
     q: z.string().trim().min(1).max(80).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(25),
     cursor: z.string().optional(),

@@ -52,8 +52,12 @@ async function main(): Promise<void> {
     await setSeen(new Date(t - 5000));
     assert.strictEqual(await unreadCount(viewer), 0, 'nothing published since last_seen_at is unread');
 
-    await post({ published_at: new Date(t - 3000) });
+    const fresh = await post({ published_at: new Date(t - 3000) });
     assert.strictEqual(await unreadCount(viewer), 1, 'an announcement published since then is unread');
+    await markRead(reader._id, fresh._id);
+    assert.strictEqual(await unreadCount(viewer), 0, 'opening the card clears it from the badge too');
+    await post({ published_at: new Date(t - 2000) });
+    assert.strictEqual(await unreadCount(viewer), 1, 'and only it');
 
     // Real `now`, which is strictly after the fixture above — no same-millisecond race.
     await markAllRead(reader._id);

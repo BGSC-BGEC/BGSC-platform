@@ -15,9 +15,9 @@ import {
     publish,
     recordAudit,
 } from '@bgsc/shared';
-import { v4 as uuid } from 'uuid';
+import { randomUUID } from 'crypto';
 import { Actor, Viewer, adminEventOr404, assertEventVisible } from './actor';
-import { GenerateBracketInput } from './bracket.schemas';
+import { GenerateBracketInput, MAX_FIELD } from './bracket.schemas';
 import { generate, seedParticipants } from './generate';
 import { completeBracketIfDone } from '../matches/match.service';
 
@@ -138,6 +138,10 @@ export async function generateBracket(input: GenerateBracketInput, actor: Actor)
     if (field.entries.length < 2) {
         throw new ServiceError(422, 'not_enough_participants', { found: field.entries.length });
     }
+    // A round robin of n is n(n-1)/2 fixtures in one insert: 256 is 32,640, 1,000 would be ~500k.
+    if (field.entries.length > MAX_FIELD) {
+        throw new ServiceError(422, 'too_many_participants', { found: field.entries.length, max: MAX_FIELD });
+    }
     if (input.seeding === 'manual' && !input.seeds) throw new ServiceError(422, 'manual_seeding_requires_seeds');
 
     let participants: BracketParticipant[];
@@ -149,7 +153,7 @@ export async function generateBracket(input: GenerateBracketInput, actor: Actor)
     }
 
     const draw = generate(participants, format);
-    const bracketId = uuid();
+    const bracketId = randomUUID();
 
     // Two writes and no transaction (Mongo is standalone here, relationships.md §5). The bracket
     // goes first because its unique `event_id` is the claim: a second generator loses here, before
@@ -254,13 +258,10 @@ export async function listMatchesFor(
 export async function getMatch(id: string, viewer: Viewer): Promise<IMatch> {
     const match = await Match.findById(id).lean<IMatch>();
     if (!match) throw new ServiceError(404, 'match_not_found');
-    try {
-        assertEventVisible(await loadEvent(match.event_id), viewer);
-    } catch {
-        // The event is a draft the viewer may not see; the fixture is not theirs to read either,
-        // and it answers as the fixture rather than leaking which half was missing.
-        throw new ServiceError(404, 'match_not_found');
-    }
+    // A missing event or a draft the viewer may not see: the fixture is not theirs to read either,
+    // and it answers as the fixture rather than leaking which half was missing. Anything else (a
+    // database failure) is not a 404.
+    assertEventVisible(await loadEvent(match.event_id, 'match_not_found'), viewer, 'match_not_found');
     return match;
 }
 
@@ -281,7 +282,7 @@ export async function deleteBracket(eventId: string, actor: Actor): Promise<void
     // Claim first: `active` → `draft`. A report re-reads the bracket AFTER its own compare-and-swap
     // and backs out when it finds `draft` (match.service.ts), so once this claim lands no result
     // can slip in between the "nothing played" check and the delete — the check-then-delete this
-    // replaced could destroy a result reported in that gap (audit Sep 26). A `draft` bracket is
+    // replaced could destroy a result reported in that gap. A `draft` bracket is
     // also claimable, so a delete that died half way can be retried.
     // `claimed_at` dates the claim, so a delete that dies before finishing does not leave the
     // bracket refusing reports forever: a report takes a stale claim back (match.service.ts).

@@ -45,7 +45,7 @@ export function createServiceProxy(key: string, target: string, prefixes: string
                 // A consumed stream would otherwise forward an empty body and hang the service. The
                 // parser already un-chunked and inflated it, so the client's Transfer-Encoding and
                 // Content-Encoding no longer describe what is sent: kept, a chunked or gzip login
-                // reached the service as a 400 (audit #2). fixRequestBody sets Content-Length.
+                // reached the service as a 400. fixRequestBody sets Content-Length.
                 if ((req as Request).body !== undefined) {
                     proxyReq.removeHeader('transfer-encoding');
                     proxyReq.removeHeader('content-encoding');

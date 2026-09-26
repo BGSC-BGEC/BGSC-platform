@@ -5,6 +5,7 @@ import {
     Event,
     FeedbackTicket,
     FormSubmission,
+    Notification,
     NotificationCategory,
     Team,
     User,
@@ -17,7 +18,7 @@ import {
     fanOutToStaff,
     refreshAnnouncementCards,
 } from '../broadcast/broadcast';
-import { renderMessage } from '../broadcast/templates';
+import { TEMPLATES, render, renderMessage } from '../broadcast/templates';
 import { createOne, retract } from '../notifications/notification.service';
 
 /**
@@ -106,9 +107,9 @@ async function eventTitle(eventId: string): Promise<string | null> {
  *
  * `RegistrationCreated` is the ONE event for "this registration is now confirmed", whichever path
  * got it there — straight in on submit, an automatic promotion off the waitlist, or an organiser's
- * promotion (fix-phase contract: event-service's `RegistrationConfirmed` is retired). The dedupe key
- * is the registration AND which confirmation of it this is — a replay is still one card, but a row
- * an admin rejected and then confirmed again gets its second "you're in" (audit #2).
+ * promotion (event-service's `RegistrationConfirmed` is retired). The dedupe key is the
+ * registration AND which confirmation of it this is — a replay is still one card, but a row an
+ * admin rejected and then confirmed again gets its second "you're in".
  *
  * The ordinal is counted at consume time from the row's history, so two confirmations landing
  * before the first event is consumed would share a key. ponytail: fine at campus scale; carry the
@@ -201,19 +202,19 @@ interface PointsEarnedPayload extends Record<string, unknown> {
 }
 
 /**
- * Deferred on Sep 26 on a false premise — that the Points Service published
- * nothing, when `ledger.ts` has always published five events under a computed name that a
- * `publish('` search cannot see. Built once the audit corrected that.
- *
  * `PointsEarned` only: a spend is something the user just did on purpose, a refund and an
  * adjustment already carry their own explanation elsewhere, and an expiry is not news anybody wants
  * pushed at them. Earning is the one that is worth a card.
  *
  * The ledger publishes only on a *new* row — `record()` returns early on a replayed idempotency key
  * — so the transaction id is a dedupe key that cannot double-fire anyway.
+ *
+ * A challenge credit gets no card of its own: `ChallengeCompleted` already told every member that
+ * the challenge was approved and what it pays, and a second card for the same approval is noise.
  */
 async function onPointsEarned(p: PointsEarnedPayload): Promise<void> {
     if (!p.user_id || !p.transaction_id) return;
+    if (p.source === 'challenge') return;
 
     await createOne({
         user_id: p.user_id,
@@ -285,7 +286,7 @@ interface ChallengeRejectedPayload extends Record<string, unknown> {
     participation_id: string;
     challenge_id: string;
     reason?: string | null;
-    /** 1 for the participation's first rejection, 2 for its second… (challenge-service, audit #2). */
+    /** 1 for the participation's first rejection, 2 for its second… (challenge-service). */
     rejection_no?: number;
 }
 
@@ -334,11 +335,7 @@ async function onChallengeRejected(p: ChallengeRejectedPayload): Promise<void> {
 }
 
 /* ------------------------------------------------------------------ *
- * Feedback (Staff notice for submitted tickets)
- * ------------------------------------------------------------------ */
-
-/* ------------------------------------------------------------------ *
- * Teams, auction and feedback replies (audit #2)
+ * Teams, auction and feedback
  *
  * Every card below goes through `createOne`, which applies the recipient's mute and refuses a
  * deleted or suspended account. Names shown in a card are read live (`deleted_at: null` for a
@@ -388,6 +385,9 @@ interface PlayerSoldPayload extends Record<string, unknown> {
 /**
  * Two cards: the player learns where they went, the buying captain gets the receipt. The lot is
  * sold once, so `lot_id` per side is the whole dedupe key.
+ *
+ * The player's name is in the captain's TITLE only, so `onUserDeleted` can take it out again by
+ * rewriting one field, without re-reading the team and the event.
  */
 async function onPlayerSold(p: PlayerSoldPayload): Promise<void> {
     if (!p.lot_id || !p.player_user_id || !p.team_id) return;
@@ -417,17 +417,56 @@ async function onPlayerSold(p: PlayerSoldPayload): Promise<void> {
         // A deleted player is not named, even to their buyer.
         ...renderMessage('auction.sold.captain', {
             ...vars,
-            player_name: player?.profile?.full_name || player?.username || 'Your new player',
+            player_name: player?.profile?.full_name || player?.username || UNNAMED_PLAYER,
         }),
         data: { ...data, player_user_id: p.player_user_id },
         dedupe_key: dedupe.auctionSold(p.lot_id, 'captain'),
     });
 }
 
+/** What the captain's card calls a player who is deleted, at sale time or later. */
+const UNNAMED_PLAYER = 'a new player';
+/** The captain card's body once its player is erased. */
+const ERASED_CAPTAIN_BODY = 'Your new player joined your team in the auction.';
+
+interface UserDeletedPayload extends Record<string, unknown> {
+    user_id: string;
+}
+
+/**
+ * The one card that names someone other than its recipient is the captain's auction receipt, and
+ * it lives ninety days. A player who deletes their account comes off it, the way every other
+ * service erases its display copies (relationships.md §4).
+ *
+ * The "still deleted?" read is the guard the other snapshot consumers use: a delete followed by a
+ * quick restore must not anonymize a live account because the events were consumed out of order.
+ * Not undone by `UserRestored`: the card is a receipt, and a restored player's page carries the name.
+ *
+ * User Service replays every recent deletion on a timer, so this runs many times per deletion; the
+ * partial `data.player_user_id` index keeps each run an index lookup, and the `$set` is a no-op once
+ * applied. The body is overwritten too: cards rendered by an older template named the player there.
+ * It cannot be re-rendered from `data` (no team or event name), so it gets generic text.
+ */
+async function onUserDeleted(p: UserDeletedPayload): Promise<void> {
+    if (!p.user_id) return;
+    if (!(await User.exists({ _id: p.user_id, deleted_at: { $ne: null } }))) return;
+    await Notification.updateMany(
+        { type: 'auction.sold.captain', 'data.player_user_id': p.user_id },
+        {
+            $set: {
+                title: render(TEMPLATES['auction.sold.captain'].title, { player_name: UNNAMED_PLAYER }),
+                body: ERASED_CAPTAIN_BODY,
+            },
+        }
+    );
+}
+
 interface FeedbackRespondedPayload extends Record<string, unknown> {
     ticket_id: string;
     ticket_no: string;
     reporter_user_id: string | null;
+    /** ISO time of the reply. Absent from older producers, which fall back to the ticket's own. */
+    responded_at?: string;
 }
 
 /**
@@ -437,10 +476,15 @@ interface FeedbackRespondedPayload extends Record<string, unknown> {
  */
 async function onFeedbackResponded(p: FeedbackRespondedPayload): Promise<void> {
     if (!p.ticket_id || !p.ticket_no || !p.reporter_user_id) return;
-    const ticket = await FeedbackTicket.findById(p.ticket_id)
-        .select('response')
-        .lean<{ response?: { at?: Date } | null }>();
-    const respondedAt = ticket?.response?.at ? new Date(ticket.response.at).getTime() : 0;
+    // The payload's time names THIS reply. Reading the ticket instead gives whatever reply is on it
+    // when the event is consumed, so two replies in quick succession collapsed onto one key.
+    let respondedAt = p.responded_at ? Date.parse(p.responded_at) : NaN;
+    if (Number.isNaN(respondedAt)) {
+        const ticket = await FeedbackTicket.findById(p.ticket_id)
+            .select('response')
+            .lean<{ response?: { at?: Date } | null }>();
+        respondedAt = ticket?.response?.at ? new Date(ticket.response.at).getTime() : 0;
+    }
 
     await createOne({
         user_id: p.reporter_user_id,
@@ -478,10 +522,9 @@ async function onFeedbackSubmitted(p: FeedbackSubmittedPayload): Promise<void> {
  * ------------------------------------------------------------------ */
 
 /**
- * `PointsEarned` is consumed here since Sep 27. It had been deferred on the grounds that
- * the Points Service published nothing — it does, through a computed name (`EVENT_FOR[tx.type]` in
- * `ledger.ts`) that a search for `publish('` cannot see. The other four points events are
- * deliberately not consumed: see `onPointsEarned`.
+ * The Points Service publishes under a computed name (`EVENT_FOR[tx.type]` in `ledger.ts`), which a
+ * search for `publish('PointsEarned'` does not find. The other four points events are deliberately
+ * not consumed: see `onPointsEarned`.
  */
 export function initializeConsumers(): void {
     subscribe('AnnouncementPublished', safe('announcement broadcast', onAnnouncementPublished));
@@ -498,6 +541,7 @@ export function initializeConsumers(): void {
     subscribe('FeedbackResponded', safe('feedback reply notice', onFeedbackResponded));
     subscribe('TeamInviteCreated', safe('team invite notice', onTeamInviteCreated));
     subscribe('PlayerSold', safe('auction sale notice', onPlayerSold));
+    subscribe('UserDeleted', safe('deleted player anonymization', onUserDeleted));
 
     console.log('[notification-service] Event consumers initialized');
 }
@@ -517,5 +561,6 @@ export const handlers = {
     onFeedbackResponded,
     onTeamInviteCreated,
     onPlayerSold,
+    onUserDeleted,
 };
 

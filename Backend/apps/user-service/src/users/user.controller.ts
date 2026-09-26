@@ -1,15 +1,15 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request } from 'express';
 import * as svc from './user.service';
 import { serializeUser, visibilityFor, Viewer } from './user.serializer';
 import { playerCardFor } from './playerCard';
 import { putObject, deleteObject, sniffImage, IMAGE_MAX_BYTES } from '../storage/storage';
 import {
-    ACCOUNT_DELETION_GRACE_DAYS,
+    AuditLog,
     User,
     UserRole,
     UserStatus,
     publish,
-    recordAudit,
+    restorableUntil,
     wrap,
 } from '@bgsc/shared';
 
@@ -46,17 +46,24 @@ export const getMe = wrap(async (req, res) => {
     if (!user) return void res.status(404).json({ error: 'not_found' });
 
     if (user.deleted_at) {
+        const until = restorableUntil(user)!;
+        // Reactivation authenticates by password. An account made by Google sign-in has none, so
+        // it sets one through the reset flow first — say so, or its owner is told of a door they
+        // cannot open.
+        const hasPassword = !!(await User.exists({ _id: user._id, password_hash: { $type: 'string' } }));
         res.json({
             ...serializeUser(user, viewerOf(req), true),
             deletion: {
                 deleted_at: user.deleted_at,
-                restorable_until: user.deletion?.restorable_until ?? svc.restorableUntil(user.deleted_at),
-                restorable: new Date() <= (user.deletion?.restorable_until ?? svc.restorableUntil(user.deleted_at)),
+                restorable_until: until,
+                restorable: new Date() <= until,
                 research_consent: user.deletion?.research_consent ?? false,
                 // Named because this service deliberately has no restore route: a deleted user
                 // holds no token, so restoring authenticates by password at the Auth Service.
                 // Without this the only place a client learns a restore exists does not say how.
-                restore_with: 'POST /account/reactivate',
+                restore_with: hasPassword
+                    ? 'POST /account/reactivate'
+                    : 'POST /auth/forgot-password, then POST /account/reactivate',
             },
         });
         return;
@@ -82,8 +89,7 @@ export const updateMySettings = wrap(async (req, res) => {
  * What deletion does, so the client gate discloses the truth rather than a paraphrase of it
  * (Spec §11.2.1). Fetch this, show it, then send the confirmation.
  */
-export const deletionPreview = wrap(async (req, res) => {
-    await svc.findById(req.user!.id);
+export const deletionPreview = wrap(async (_req, res) => {
     res.json(svc.RETENTION_DISCLOSURE);
 });
 
@@ -136,11 +142,12 @@ export const uploadAvatar = wrap(async (req, res) => {
     }
 
     // Replace, do not accumulate. Best-effort: the new avatar is already saved, so a failed
-    // cleanup must not fail the request — it only leaves a file for the Week 4 Media Service.
+    // cleanup must not fail the request — it only leaves an orphaned file on disk.
     //
     // ponytail: two uploads racing each other still orphan one file — both write, one wins the
     // document, the loser's file is never referenced. Disk-only, no correctness impact, and a
-    // per-user lock costs more than the leak. Media Service (Week 4) owns lifecycle/GC.
+    // per-user lock costs more than the leak. Nothing garbage-collects avatars; add a sweep if
+    // orphans ever matter.
     const old = previous.profile?.avatar_url;
     if (old && old !== stored.url && old.startsWith('/uploads/')) {
         deleteObject(old.replace(/^\/uploads\//, '')).catch((err) =>
@@ -219,11 +226,8 @@ export const auditForUser = wrap(async (req, res) => {
     // Deleted accounts included: their trail is exactly what an admin comes here for.
     const user = await svc.findByRefIncludingDeleted(ref);
     if (!user) return void res.status(404).json({ error: 'not_found' });
-    const { AuditLog } = await import('@bgsc/shared');
     const rows = await AuditLog.find({ target_type: 'user', target_id: user._id })
         .sort({ created_at: -1 })
         .limit(50);
     res.json({ entries: rows });
 });
-
-export { recordAudit };

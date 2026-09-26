@@ -1,5 +1,5 @@
 import { BracketFormat, BracketParticipant, MatchStatus, MatchWinner } from '@bgsc/shared';
-import { v4 as uuid } from 'uuid';
+import { randomUUID } from 'crypto';
 
 /**
  * The draw, as pure functions.
@@ -29,7 +29,7 @@ export interface GeneratedDraw {
 /** Injected so a test can pin ids to `m<round>-<slot>` and read the wiring; production passes uuids. */
 export type IdFactory = (round: number, slot: number) => string;
 
-const defaultIds: IdFactory = () => uuid();
+const defaultIds: IdFactory = () => randomUUID();
 
 /**
  * One participant is not a tournament, and the shapes below quietly produce nonsense for it — a

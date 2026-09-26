@@ -1,4 +1,4 @@
-import { Challenge, Event, EventActor, ROLE_RANK, RoleName, ServiceError, isEventAdmin, requireEventAdmin } from '@bgsc/shared';
+import { Challenge, Event, EventActor, RoleName, ServiceError, isEventAdmin, requireEventAdmin, roleRank } from '@bgsc/shared';
 import { Request } from 'express';
 
 /**
@@ -13,8 +13,7 @@ import { Request } from 'express';
 
 export type Actor = EventActor;
 
-const rank = (role: string): number => ROLE_RANK.indexOf(role as RoleName);
-const isCore = (actor: Actor) => rank(actor.role) >= rank('core');
+const isCore = (actor: Actor) => roleRank(actor.role as RoleName) >= roleRank('core');
 
 /** The live actor. Every route that calls this mounts `requireActiveUser`. */
 export function actorOf(req: Request): Actor {
@@ -40,7 +39,7 @@ export async function requireOwnerAdmin(owner: OwnerRef, actor: Actor, nonEventF
         await requireEventAdmin(owner.id, actor);
         return;
     }
-    if (rank(actor.role) < rank(nonEventFloor)) throw new ServiceError(403, 'forbidden');
+    if (roleRank(actor.role as RoleName) < roleRank(nonEventFloor)) throw new ServiceError(403, 'forbidden');
 }
 
 /** The owner an id refers to: an event if one exists with that id, else a challenge. */

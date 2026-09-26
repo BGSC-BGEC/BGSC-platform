@@ -7,6 +7,7 @@ import {
     Notification,
     NotificationDispatch,
     Team,
+    User,
     UserRole,
     UserStatus,
 } from '@bgsc/shared';
@@ -262,6 +263,10 @@ async function main(): Promise<void> {
         2,
         'a re-confirmation is good news again'
     );
+    assert.ok(
+        await Notification.exists({ user_id: member._id, dedupe_key: dedupe.registrationConfirmed(registrationId, 2) }),
+        'keyed as the second confirmation'
+    );
 
     // Preferences apply to per-user triggers too, not only to the fan-outs.
     const eventMuted = await seedUser('Event muted', UserRole.USER);
@@ -303,7 +308,7 @@ async function main(): Promise<void> {
     );
     console.log('✓ per-user triggers are idempotent and never render a blank name');
 
-    /* ---- points (unblocked by the Sep 27 audit) ---------------------------- */
+    /* ---- points ------------------------------------------------------------ */
 
     await handlers.onPointsEarned({
         transaction_id: 'tx-1',
@@ -332,6 +337,20 @@ async function main(): Promise<void> {
         await Notification.countDocuments({ dedupe_key: dedupe.pointsEarned('tx-1') }),
         1,
         'and the ledger row is the dedupe key, so a redelivery pays out one card'
+    );
+    // A challenge credit is already announced by the challenge-approved card.
+    await handlers.onPointsEarned({
+        transaction_id: 'tx-challenge',
+        user_id: member._id,
+        amount: 50,
+        balance_after: 175,
+        reason: 'challenge.completed',
+        source: 'challenge',
+    });
+    assert.strictEqual(
+        await Notification.countDocuments({ dedupe_key: dedupe.pointsEarned('tx-challenge') }),
+        0,
+        'a challenge credit gets no second card'
     );
     console.log('✓ a points credit produces one card, in words');
 
@@ -467,7 +486,7 @@ async function main(): Promise<void> {
     );
     console.log('✓ feedback ticket fan-out reaches staff and dedupes properly');
 
-    /* ---- team invites, auction sales, feedback replies (audit #2) ---------- */
+    /* ---- team invites, auction sales, feedback replies --------------------- */
 
     // Raw inserts: these consumers only READ teams and tickets, and the owning models' full
     // invariants are another service's fixture problem.
@@ -513,6 +532,31 @@ async function main(): Promise<void> {
     const anonymous = await Notification.findOne({ dedupe_key: dedupe.auctionSold('lot-2', 'captain') }).lean();
     assert.ok(anonymous && !anonymous.title.includes('Gone'), 'and is not named to their buyer');
 
+    // Deleted AFTER the sale: the name comes off the captain's card.
+    const soldThenGone = await seedUser('Sold Then Gone', UserRole.USER);
+    await handlers.onPlayerSold({
+        event_id: eventId, lot_id: 'lot-3', player_user_id: soldThenGone._id, team_id: teamId, captain_user_id: core._id, amount: 9,
+    });
+    const namedKey = { dedupe_key: dedupe.auctionSold('lot-3', 'captain') };
+    assert.ok((await Notification.findOne(namedKey).lean())!.title.includes('Sold Then Gone'), 'named while live');
+    await handlers.onUserDeleted({ user_id: soldThenGone._id });
+    assert.ok((await Notification.findOne(namedKey).lean())!.title.includes('Sold Then Gone'), 'a UserDeleted for a live account (restored since) changes nothing');
+    await User.updateOne({ _id: soldThenGone._id }, { $set: { deleted_at: new Date() } });
+    // A card from an older template that named the player in the body as well.
+    await Notification.updateOne(namedKey, { $set: { body: 'Sold Then Gone joins Night Owls for 9.' } });
+    await handlers.onUserDeleted({ user_id: soldThenGone._id });
+    const erased = (await Notification.findOne(namedKey).lean())!;
+    assert.ok(!`${erased.title} ${erased.body}`.includes('Sold Then Gone'), 'the deleted player is erased from the card');
+    assert.ok(
+        (await Notification.findOne({ dedupe_key: dedupe.auctionSold('lot-1', 'captain') }).lean())!.title.includes('Team mate'),
+        'and nobody else is touched'
+    );
+    // User Service replays deletions on a timer: each replay must be an index lookup, not a scan.
+    const plan = JSON.stringify(
+        await Notification.find({ type: 'auction.sold.captain', 'data.player_user_id': soldThenGone._id }).explain()
+    );
+    assert.ok(plan.includes('data.player_user_id_1') && !plan.includes('COLLSCAN'), 'the erase query uses its index');
+
     const ticketWithReply = uuid();
     const respondedAt = new Date();
     await FeedbackTicket.collection.insertOne({
@@ -527,6 +571,19 @@ async function main(): Promise<void> {
         1,
         'the reporter hears about a reply, once'
     );
+    // Two replies: the producer's `responded_at` names each one, so each is its own card even when
+    // both are consumed after the second has overwritten the ticket.
+    const twoReplies = { ticket_id: uuid(), ticket_no: 'FB-8', reporter_user_id: member._id };
+    await handlers.onFeedbackResponded({ ...twoReplies, responded_at: '2026-09-26T10:00:00.000Z' });
+    await handlers.onFeedbackResponded({ ...twoReplies, responded_at: '2026-09-26T11:00:00.000Z' });
+    await handlers.onFeedbackResponded({ ...twoReplies, responded_at: '2026-09-26T11:00:00.000Z' });
+    assert.strictEqual(
+        await Notification.countDocuments({ type: 'feedback.responded', 'data.ticket_id': twoReplies.ticket_id }),
+        2,
+        'two replies are two cards, and a replay of either is not a third'
+    );
+    await Notification.deleteMany({ 'data.ticket_id': twoReplies.ticket_id });
+
     await handlers.onFeedbackResponded({ ...reply, reporter_user_id: null });
     assert.strictEqual(
         await Notification.countDocuments({ type: 'feedback.responded' }),

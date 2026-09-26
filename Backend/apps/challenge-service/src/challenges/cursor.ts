@@ -33,7 +33,7 @@ function decodeCursor(raw: string): Cursor {
     return c;
 }
 
-export type Direction = 'asc' | 'desc';
+type Direction = 'asc' | 'desc';
 
 /**
  * Keyset condition on the compound key `(field, _id)`.

@@ -87,7 +87,7 @@ export async function listRules(): Promise<IPointRule[]> {
  * Spec §5.7's "points earning opportunities": what a user can actually go and do. `leaderboard`
  * and `admin` are not opportunities; `store` and `sponsor` are out of MVP and unseeded.
  *
- * Served by the `{ enabled: 1, source: 1 }` index (Points.ts:171).
+ * Served by the `{ enabled: 1, source: 1 }` index on `point_rules`.
  */
 const OPPORTUNITY_SOURCES: PointsSource[] = ['event', 'challenge', 'engagement'];
 

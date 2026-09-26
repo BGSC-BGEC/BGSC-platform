@@ -21,7 +21,11 @@ export type ChallengeDifficulty = (typeof CHALLENGE_DIFFICULTY)[number];
 export type ChallengeStatus = (typeof CHALLENGE_STATUS)[number];
 export type ProofType = (typeof PROOF_TYPE)[number];
 
-/** Media Service lands in Week 4; until then only these two proof types are accepted. */
+/**
+ * The proof types a submission can actually carry. The enum also names image/video, but nothing
+ * wires a Media Service upload into a submission yet (no size/mime capture, no ownership check on
+ * the uploaded URL), so a challenge demanding a file would be unsatisfiable.
+ */
 export const MVP_PROOF_TYPES: ProofType[] = ['url', 'text'];
 
 export interface IChallenge extends Document<string> {
@@ -183,7 +187,7 @@ ChallengeSchema.pre('validate', function (this: IChallenge) {
 
 ChallengeSchema.index({ status: 1, domain: 1, difficulty: 1 }); // challenge browser filters
 // The catalog's own order. Without it the planner picked the scheduler's `window.closes_at` index
-// and sorted in memory (audit, Sep 27).
+// and sorted in memory.
 ChallengeSchema.index({ status: 1, created_at: -1, _id: -1 }); // catalog page, keyset-ordered
 ChallengeSchema.index({ status: 1, 'window.closes_at': 1 }); // scheduler: complete expired
 ChallengeSchema.index({ tags: 1, status: 1 });
@@ -251,6 +255,12 @@ export interface IChallengeParticipation extends Document<string> {
         points_awarded: number;
         point_transaction_ids: string[];
         hall_of_fame_entry_id: string | null;
+        /**
+         * The challenge's `grants_hall_of_fame` at approval. The replay sweep reads this, not the
+         * challenge: an admin flipping the flag later must not grant (or withhold) a past Legend.
+         * Absent on rows approved before it existed.
+         */
+        grants_hall_of_fame?: boolean;
     } | null;
 
     status_history: StatusHistoryItem[];
@@ -350,6 +360,7 @@ const ChallengeParticipationSchema = new Schema<IChallengeParticipation>(
                     points_awarded: { type: Number, required: true, min: 0 },
                     point_transaction_ids: { type: [String], default: [] }, // one per member_user_id
                     hall_of_fame_entry_id: { type: String, default: null },
+                    grants_hall_of_fame: { type: Boolean },
                 },
                 { _id: false }
             ),

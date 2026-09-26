@@ -1,14 +1,13 @@
 import assert from 'assert';
 import { PointTransaction, PointTxClaim, ServiceError, User, idempotencyKey } from '@bgsc/shared';
 import { v4 as uuid } from 'uuid';
-import { drift, ledgerHooks, ledgerSum, record, voidKey } from '../points/ledger';
-import { recalculate } from '../points/points.service';
+import { ledgerHooks, ledgerSum, record, voidKey } from '../points/ledger';
+import { adminSummary, recalculate } from '../points/points.service';
 import { balanceOf, closeScratchDb, openScratchDb, pass, resetLedger, rowsFor, seedUser, section } from './seed';
 
 /**
- * The write path. What the model's own selfcheck
- * (models.selfcheck.ts:294-345) does not cover: everything that only shows up when two callers
- * arrive at once, or when the second half of a write fails.
+ * The write path. What the model's own selfcheck does not cover: everything that only shows up when
+ * two callers arrive at once, or when the second half of a write fails.
  */
 
 const credit = (user_id: string, amount: number, key: string) =>
@@ -160,14 +159,14 @@ async function main(): Promise<void> {
     {
         const user = await seedUser(0);
         const key = idempotencyKey.eventParticipation(uuid());
-        // Both get past the dedupe read before either row lands, so one of them hits the unique
-        // index and takes the compensation path. Neither may fail, and the balance must move once.
+        // Both get past the dedupe read before either row lands; the key claim lets one move money
+        // and the other replay its row. Neither may fail, and the balance must move once.
         const [a, b] = await Promise.all([credit(user._id, 10, key), credit(user._id, 10, key)]);
         assert.strictEqual(a.tx._id, b.tx._id, 'both callers end up with the same row');
         assert.strictEqual([a.replayed, b.replayed].filter(Boolean).length >= 1, true, 'one is a replay');
         assert.strictEqual(await rowsFor(user._id), 1, 'one row');
         assert.strictEqual(await balanceOf(user._id), 10, 'and the balance moved exactly once');
-        pass('a duplicate-key race compensates and returns the winner');
+        pass('a same-key race writes once and returns the winner');
     }
 
     section('one key, two callers, and a spend landing in the window');
@@ -216,17 +215,18 @@ async function main(): Promise<void> {
     {
         const user = await seedUser(0);
         await credit(user._id, 30, uuid());
-        assert.strictEqual(await drift(user._id), 0, 'a healthy user has no drift');
+        const synced = async () => (await adminSummary(user._id)).ledger_synced;
+        assert.strictEqual(await synced(), true, 'a healthy user has no drift');
 
         // Simulate the crash window: the cache moved, the row never landed.
         await User.updateOne({ _id: user._id }, { $inc: { points_balance: 7 } });
-        assert.strictEqual(await drift(user._id), 7, 'drift is the gap to the newest balance_after');
+        assert.strictEqual(await synced(), false, 'the cache is off the ledger sum');
 
         const repair = await recalculate(user._id, { id: 'selfcheck-admin', ip: null });
         assert.strictEqual(repair.repaired, true);
         assert.strictEqual(repair.balance, 30, 'the ledger wins');
         assert.strictEqual(await balanceOf(user._id), 30, 'and the cache is rewritten');
-        assert.strictEqual(await drift(user._id), 0);
+        assert.strictEqual(await synced(), true);
 
         const again = await recalculate(user._id, { id: 'selfcheck-admin', ip: null });
         assert.strictEqual(again.repaired, false, 'a second repair is a no-op');
@@ -266,6 +266,31 @@ async function main(): Promise<void> {
 
         assert.strictEqual(await balanceOf(user._id), 42, 'the concurrent credit survived untouched');
         pass('a lost compare-and-swap refuses rather than overwriting');
+    }
+
+    section('a repair refuses while a write is between its $inc and its row');
+    {
+        const user = await seedUser(0);
+        await credit(user._id, 30, uuid());
+        // The balance already holds the credit, the ledger not yet: without the claim check this reads
+        // as drift, and the "repair" erases the credit whose row lands a moment later.
+        let outcome: unknown;
+        ledgerHooks.afterMove = async () => {
+            ledgerHooks.afterMove = async () => undefined;
+            outcome = await recalculate(user._id, { id: 'selfcheck-admin', ip: null }).then(
+                () => 'repaired',
+                (e: ServiceError) => e.code
+            );
+        };
+        try {
+            await credit(user._id, 5, uuid());
+        } finally {
+            ledgerHooks.afterMove = async () => undefined;
+        }
+        assert.strictEqual(outcome, 'write_in_flight');
+        assert.strictEqual(await balanceOf(user._id), 35, 'the in-flight credit survived');
+        assert.strictEqual((await adminSummary(user._id)).ledger_synced, true);
+        pass('recalculate refuses 409 write_in_flight while a live writer holds a moving claim');
     }
 
     section('a claim its holder abandoned does not hold the key forever');
@@ -309,7 +334,6 @@ async function main(): Promise<void> {
             previous_rank: null,
             last_scored_at: null,
             scored_by: null,
-            version: 0,
         });
 
         const reqId = uuid();

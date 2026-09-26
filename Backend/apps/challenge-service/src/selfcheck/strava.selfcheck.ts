@@ -366,6 +366,15 @@ async function main(): Promise<void> {
             }
             assert.strictEqual(calls.length, 0, 'and it spends nothing of the Strava budget');
             pass('a second sync within 5 minutes is 429 sync_cooldown, claimed by compare-and-swap before any Strava call');
+
+            // Relinking the same athlete used to clear the cooldown, so link -> sync in a loop spent
+            // the app-wide budget anyway.
+            const again = new URL(svc.authorizeUrl(eager._id)).searchParams.get('state')!;
+            respond = () => ({ body: { access_token: 'e-a2', refresh_token: 'e-r2', expires_at: epoch(6 * 3600_000), athlete: { id: 6666 } } });
+            await svc.link(eager._id, 'code-eager-2', again, GRANTED);
+            respond = () => ({ body: [] });
+            await refuses(429, 'sync_cooldown', () => svc.sync(eager._id));
+            pass('a relink of the same athlete does not reset the sync cooldown');
         }
 
         section('relinking to a different athlete starts from nothing');

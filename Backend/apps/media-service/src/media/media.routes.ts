@@ -29,7 +29,9 @@ mediaRoutes.post(
     requireActiveUser(),
     validate({ query: UploadMediaQuerySchema }),
     ctrl.declaredSize,
-    raw({ limit: VIDEO_MAX_BYTES, type: ACCEPTED_CONTENT_TYPES }),
+    // `inflate: false`: a gzip body is refused (415), never expanded — the limit would otherwise be
+    // on the inflated bytes, and a few KB of zip bomb is 50MB of buffer.
+    raw({ limit: VIDEO_MAX_BYTES, type: ACCEPTED_CONTENT_TYPES, inflate: false }),
     ctrl.uploadMedia
 );
 
@@ -62,6 +64,9 @@ mediaRoutes.patch(
 
 // Interactions & Details
 mediaRoutes.post('/:id/like', requireAuth, requireActiveUser(), validate({ params: MediaIdParams }), ctrl.toggleLike);
+// The file itself, for whoever may see the item — the only way to a pending file (moderator preview,
+// uploader's own view); an approved one is also at its public `/uploads` URL.
+mediaRoutes.get('/:id/file', requireAuth, validate({ params: MediaIdParams }), ctrl.getMediaFile);
 mediaRoutes.get('/:id', optionalAuth, validate({ params: MediaIdParams }), ctrl.getMedia);
 mediaRoutes.patch(
     '/:id',

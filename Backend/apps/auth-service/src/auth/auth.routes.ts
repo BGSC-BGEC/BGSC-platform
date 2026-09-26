@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { AuthController } from './auth.controller';
-import { requireActiveUser, requireAuth, validate } from '@bgsc/shared';
+import { optionalAuth, requireActiveUser, requireAuth, validate } from '@bgsc/shared';
 import {
   RegisterSchema,
   LoginSchema,
   RefreshTokenSchema,
+  LogoutSchema,
   VerifyEmailSchema,
   ResendVerificationSchema,
   ForgotPasswordSchema,
@@ -29,8 +30,9 @@ authRoutes.post('/register', validate({ body: RegisterSchema }), AuthController.
 authRoutes.post('/login', validate({ body: LoginSchema }), AuthController.login);
 authRoutes.post('/refresh', validate({ body: RefreshTokenSchema }), AuthController.refresh);
 
-// Protected Session
-authRoutes.post('/logout', requireAuth, AuthController.logout);
+// Logout by access token, or by refresh token once the access token has expired (optionalAuth: an
+// expired bearer is ignored rather than refused, so the refresh token in the body still counts).
+authRoutes.post('/logout', optionalAuth, validate({ body: LogoutSchema }), AuthController.logout);
 
 // Email Verification
 authRoutes.post('/verify-email', validate({ body: VerifyEmailSchema }), AuthController.verifyEmail);
@@ -54,8 +56,7 @@ authRoutes.post(
 
 // Account Lifecycle. Reactivation is unauthenticated by necessity: a deleted user cannot obtain
 // a token (login returns a status, not tokens), so this authenticates by password and issues a
-// fresh pair. It is the only working restore path — User Service's POST /users/me/restore sits
-// behind requireAuth and is unreachable once the caller's old access token expires.
+// fresh pair. It is the only restore path; User Service deliberately has none.
 accountRoutes.post(
   '/reactivate',
   validate({ body: ReactivateAccountSchema }),

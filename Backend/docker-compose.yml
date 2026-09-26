@@ -13,7 +13,7 @@
 # It also refuses the Mongo root password and the Redis password this file falls back to: set
 # MONGO_ROOT_PASSWORD and REDIS_PASSWORD in .env for anything that is not your own laptop.
 # CORS_ORIGIN has no fallback here: a localhost default would pass the production check in
-# config/env.ts, so compose refuses to start without it instead (audit #2).
+# config/env.ts, so compose refuses to start without it instead.
 #
 # No container_name anywhere: Compose namespaces containers by project (backend-gateway-1, ...).
 # Hardcoding bgsc-* collides with the Legacy stack, which used the same names — address containers
@@ -23,8 +23,7 @@ services:
     image: mongo:7.0
     restart: unless-stopped
     # Loopback only: the database is for the containers on this network and for a developer's own
-    # tools, never the LAN (audit Sep 26 — it was published on every interface with a root password
-    # committed in this file). MONGO_ROOT_PASSWORD only takes effect when the volume is first
+    # tools, never the LAN. MONGO_ROOT_PASSWORD only takes effect when the volume is first
     # created; changing it later means changing the user inside Mongo too. Keep it URL-safe: it is
     # pasted into every MONGO_URI below unencoded.
     ports:
@@ -55,11 +54,11 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     # Loopback only, and password-protected: the bus carries events that move points, and anything
-    # that could reach an open Redis could publish one (audit Sep 26). Messages are also HMAC-signed
+    # that could reach an open Redis could publish one. Messages are also HMAC-signed
     # with INTERNAL_API_TOKEN (packages/shared/src/events/publish.ts), so the password guards the
     # channel and the signature guards the payload. The production guard refuses the fallback below.
     # Services get the password as REDIS_PASSWORD, never inside REDIS_URL: pasted into a URL, a
-    # password with `/ # ? %` crash-looped every service (audit #2). Any characters are fine now.
+    # password with `/ # ? %` crash-looped every service. Any characters are fine now.
     ports:
       - "127.0.0.1:6379:6379"
     environment:
@@ -140,10 +139,9 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
       # config/env.ts refuses to boot in production without it, gateway or not.
       CORS_ORIGIN: ${CORS_ORIGIN:?set CORS_ORIGIN in .env}
-      USER_SERVICE_URL: http://user-service:3002
       # OAuth and the links in auth mail point at the public edge and the web app, not at this
       # container. Blank = config/env.ts derives them from API_BASE_URL / its localhost defaults, and
-      # Google sign-in answers "not configured" (audit #2: none of these reached the container).
+      # Google sign-in answers "not configured".
       API_BASE_URL: ${API_BASE_URL:-}
       FRONTEND_URL: ${FRONTEND_URL:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
@@ -177,7 +175,6 @@ services:
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
       # config/env.ts refuses to boot in production without it, gateway or not.
       CORS_ORIGIN: ${CORS_ORIGIN:?set CORS_ORIGIN in .env}
-      AUTH_SERVICE_URL: http://auth-service:3001
       # Avatars land under avatars/ in the shared upload root; media-service serves them.
       UPLOAD_DIR: /app/uploads
     volumes:
@@ -213,7 +210,8 @@ services:
       # Seat reservation is the one call this service makes out; unreachable means a submission
       # stays 'submitted' rather than falsely claiming a seat.
       EVENT_SERVICE_URL: http://event-service:3003
-      # Form file answers land under registrations/ in the shared upload root.
+      # Form file answers land under .private/registrations/ in the shared upload root — never served
+      # by /uploads; read through GET /registrations/:id/files/:field_key.
       UPLOAD_DIR: /app/uploads
     volumes:
       - uploads:/app/uploads
@@ -244,7 +242,7 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
       # Was missing: config/env.ts throws without it in production, so event-service crash-looped
-      # and, through the gateway's depends_on, took the whole stack down with it (audit Sep 26).
+      # and, through the gateway's depends_on, took the whole stack down with it.
       CORS_ORIGIN: ${CORS_ORIGIN:?set CORS_ORIGIN in .env}
       # Attendance, promotion and auction purses are registration-service writes it asks for.
       REGISTRATION_SERVICE_URL: http://registration-service:3004

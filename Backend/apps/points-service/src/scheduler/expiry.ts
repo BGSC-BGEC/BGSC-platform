@@ -2,7 +2,7 @@ import { IPointTransaction, PointExpiryCursor, PointTransaction, User, idempoten
 import { record } from '../points/ledger';
 
 /**
- * Points validity/expiry (MVP plan Week 3 BE-2).
+ * Points validity/expiry.
  *
  * The write half is always on: `resolve()` stamps `expires_at` on a credit whenever its rule sets
  * `expires_after_days`. This sweep is the read half. Every seeded rule has `expires_after_days:
@@ -21,7 +21,7 @@ const CURSOR_ID = 'expiry';
  * credited after it, clamped to the credit itself.
  *
  * Without this, a user who spent an expiring credit and later earned non-expiring points would
- * lose the new points to the old credit's expiry (backend-audit-2026-09-26).
+ * lose the new points to the old credit's expiry.
  */
 async function unspentOf(credit: IPointTransaction, balance: number): Promise<number> {
     // Newer CREDITS only: a refund gives a spend back (it is not new money on top), and a credit that
@@ -62,7 +62,7 @@ export async function tick(now: Date = new Date()): Promise<number> {
               ],
           }
         : {};
-    // Served by the partial index on `expires_at` (Points.ts:138).
+    // Served by the partial index on `expires_at`.
     const due = await PointTransaction.find({ $and: [{ expires_at: { $lte: now }, amount: { $gt: 0 } }, after] })
         .sort({ expires_at: 1, _id: 1 })
         .limit(BATCH);

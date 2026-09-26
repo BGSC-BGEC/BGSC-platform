@@ -2,7 +2,8 @@ import { z } from 'zod';
 
 export const QueryGlobalLeaderboardSchema = z.object({
     period: z.enum(['all', 'semester', 'month', 'week']).default('all'),
-    domain: z.enum(['all', 'sports', 'esports', 'fitness', 'general']).default('all'),
+    // The union of event domains and challenge domains: the board spans both.
+    domain: z.enum(['all', 'sports', 'esports', 'fitness', 'dev', 'general']).default('all'),
     source: z.enum(['all', 'challenge', 'event']).default('all').optional(),
     limit: z.coerce.number().int().min(1).max(100).default(50),
     page: z.coerce.number().int().min(1).default(1),

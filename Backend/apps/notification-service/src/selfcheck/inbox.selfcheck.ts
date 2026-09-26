@@ -77,6 +77,22 @@ async function main(): Promise<void> {
         { user_id: me._id, category: 'announcement', type: 'announcement.published', title: 'c', body: 'd', dedupe_key: 'announcement:mine' },
     ]);
     assert.strictEqual(bulk, 2, 'an unordered batch inserts the new rows and skips the duplicate');
+
+    // A duplicate AND an invalid document in one batch: the server's duplicate error is what gets
+    // thrown, and the invalid document must not vanish behind it as if it had been delivered.
+    const row = (dedupe_key: string, category = 'event') =>
+        ({ user_id: me._id, category, type: 'event.cancelled', title: 'a', body: 'b', dedupe_key }) as never;
+    await assert.rejects(
+        () => svc.createMany([row('event.cancelled:e1'), row('event.cancelled:bad', 'sponsors'), row('event.cancelled:e3')]),
+        'a batch with an invalid document throws even when the rest are duplicates'
+    );
+    assert.ok(await Notification.exists({ dedupe_key: 'event.cancelled:e3' }), 'after inserting the valid ones');
+    assert.ok(!(await Notification.exists({ dedupe_key: 'event.cancelled:bad' })), 'and nothing invalid');
+    await assert.rejects(
+        () => svc.createMany([row('event.cancelled:bad2', 'sponsors'), row('event.cancelled:e4')]),
+        'and with no duplicate at all'
+    );
+    assert.ok(await Notification.exists({ dedupe_key: 'event.cancelled:e4' }));
     console.log('✓ creation is idempotent per (cause, user), one row at a time or in bulk');
 
     /* ---- keyset pagination across a tie ----------------------------------- */
@@ -98,6 +114,10 @@ async function main(): Promise<void> {
     }
     assert.strictEqual(new Set(seen).size, seen.length, 'no row is returned twice across pages');
     assert.deepStrictEqual(new Set(seen), new Set(paged), 'and none is skipped, even with identical timestamps');
+
+    const exact = await svc.list(me._id, { limit: 5 });
+    assert.strictEqual(exact.notifications.length, 5, 'exactly a page of rows');
+    assert.strictEqual(exact.next_cursor, null, 'is the end, not a cursor to an empty page');
     console.log('✓ keyset pagination survives a timestamp tie, which is the only case it can fail');
 
     await assert.rejects(

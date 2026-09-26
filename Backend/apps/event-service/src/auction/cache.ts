@@ -4,7 +4,7 @@
  *
  * One entry is stored under every alias a client may poll (the ref it asked with, the `_id`, the
  * slug). Invalidation used to delete only the `_id` key, so a mutation made through the slug route
- * answered with the stale slug entry — `POST .../pause` replied `status: 'live'` (audit Sep 26).
+ * answered with the stale slug entry — `POST .../pause` replied `status: 'live'`.
  * Invalidation is now by event id, which catches every alias.
  *
  * ponytail: per-process. Two instances each serve up to 750ms of their own staleness.

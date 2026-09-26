@@ -106,6 +106,16 @@ NotificationSchema.index({ user_id: 1, read_at: 1, created_at: -1 });
  */
 NotificationSchema.index({ dedupe_key: 1, user_id: 1 }, { unique: true });
 
+/**
+ * `UserDeleted` erasing a player's name from captain auction cards. User Service replays recent
+ * deletions on a timer, so this runs far more often than once per deletion; partial on the one
+ * type that carries the field, which is also the query's own `type` filter.
+ */
+NotificationSchema.index(
+    { 'data.player_user_id': 1 },
+    { partialFilterExpression: { type: 'auction.sold.captain' } }
+);
+
 /** Mongo drops the row when `expires_at` passes. New collection, so no index migration to do. */
 NotificationSchema.index({ expires_at: 1 }, { expireAfterSeconds: 0 });
 
@@ -158,6 +168,11 @@ export interface INotificationDispatch extends Document<string> {
     /** When this row's outcome reached the announcement document. */
     writeback_at: Date | null;
     /**
+     * When the writeback sweep last tried this row. The sweep takes the least recently tried first,
+     * so rows whose writeback keeps coming back `retry` cannot hold its bounded page forever.
+     */
+    writeback_tried_at: Date | null;
+    /**
      * Set immediately before the provider call, cleared by every settle. A row found `pending` with
      * this set and its lease lapsed died mid-send: it is closed as `outcome_unknown`, never re-sent.
      */
@@ -195,6 +210,7 @@ const NotificationDispatchSchema = new Schema<INotificationDispatch>(
         attempted_at: { type: Date, default: null },
         next_attempt_at: { type: Date, default: null },
         writeback_at: { type: Date, default: null },
+        writeback_tried_at: { type: Date, default: null },
         sending_at: { type: Date, default: null },
         revision: { type: Number, default: 0 },
     },

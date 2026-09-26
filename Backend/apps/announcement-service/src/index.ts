@@ -1,7 +1,6 @@
 import { createServiceApp, startService } from '@bgsc/shared';
 import express from 'express';
 import { announcementRoutes } from './announcements/announcement.routes';
-import { maskLegacyGroupIds } from './announcements/announcement.service';
 import { internalRoutes } from './internal/internal.routes';
 import { initializeConsumers } from './events/consumers';
 import { startScheduler } from './scheduler/tick';
@@ -34,11 +33,6 @@ const options = {
         initializeConsumers();
         // Scheduled -> published, published -> archived, archived -> purged.
         startScheduler();
-        // One-off, idempotent: receipts from before masking carry raw destinations (PII). Never
-        // a reason not to serve.
-        void maskLegacyGroupIds()
-            .then((n) => n > 0 && console.log(`[${NAME}] Masked ${n} legacy delivery group_id(s).`))
-            .catch((err) => console.error(`[${NAME}] Legacy group_id masking failed:`, err));
     },
 };
 

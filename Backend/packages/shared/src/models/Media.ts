@@ -68,8 +68,9 @@ export const MediaSchema: Schema<IMedia> = new Schema<IMedia>(
         mime_type: { type: String, required: true },
         media_type: { type: String, enum: MEDIA_TYPES, required: true },
         size_bytes: { type: Number, required: true, min: 0 },
-        category: { type: String, enum: MEDIA_CATEGORIES, default: 'general', index: true },
-        event_id: { type: String, default: null, index: true },
+        // category and event_id are served by the compound indexes below, which lead with them.
+        category: { type: String, enum: MEDIA_CATEGORIES, default: 'general' },
+        event_id: { type: String, default: null },
         album_id: { type: String, default: null, index: true },
         caption: { type: String, default: null, maxlength: 500 },
         tags: [{ type: String, trim: true, lowercase: true }],
@@ -126,12 +127,6 @@ export const MediaAlbumSchema: Schema<IMediaAlbum> = new Schema<IMediaAlbum>(
     timestamps
 );
 
-MediaAlbumSchema.pre('validate', function (this: IMediaAlbum) {
-    if (!this.slug && this.title) {
-        this.slug = this.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    }
-});
-
 /**
  * One SYSTEM album per event (owner decision: organisers may make as many manual albums for an
  * event as they like). `EventCompleted` can arrive twice, and a find-then-create let both copies
@@ -139,7 +134,8 @@ MediaAlbumSchema.pre('validate', function (this: IMediaAlbum) {
  *
  * Named, and a new name: an older dev database may hold `event_id_1` or the earlier all-albums
  * `event_id_unique`, and reusing either name with new options is a boot-time IndexOptionsConflict.
- * `npm run migrate:audit2` drops `event_id_unique` — left in place it would still refuse a second manual album.
+ * A database created before this change may still hold `event_id_unique`; left in place it refuses
+ * a second manual album, so drop it by hand: `db.media_albums.dropIndex('event_id_unique')`.
  */
 MediaAlbumSchema.index(
     { event_id: 1 },

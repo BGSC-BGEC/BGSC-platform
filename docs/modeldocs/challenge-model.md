@@ -3,7 +3,7 @@
 **Owner service:** Challenge Service
 **Collections:** `challenges`, `challenge_participations`
 **Spec refs:** §4.1 Challenge, §5.7 Challenge System, §5.15 "Challenge Creation" (required fields), §5.9 "Challenge Legends" → Hall of Fame, §8.2 (Points consumes `ChallengeCompleted`), §15.1 media limits
-**MVP plan refs:** Week 3 BE-2 "Challenge System" (create/manage, types individual/team, participation, completion tracking, rewards → points). `ARCHITECTURE_REVIEW_MEETING.md` §6: proof upload depends on Media (Week 4) — proof is a URL/text until then.
+**MVP plan refs:** Week 3 BE-2 "Challenge System" (create/manage, types individual/team, participation, completion tracking, rewards → points). Proof upload depends on Media — proof is a URL/text until an upload is wired into submissions.
 
 ---
 
@@ -58,7 +58,7 @@ Fields map 1:1 to Spec §5.15 "Challenge Creation — Required fields": Points, 
 
   submission: {
     requires_proof: boolean,              // false = admin marks complete manually
-    proof_types: ('url' | 'text' | 'image' | 'video')[],   // image/video enabled when Media lands (Week 4)
+    proof_types: ('url' | 'text' | 'image' | 'video')[],   // image/video refused until a Media upload is wired into submissions
     max_files: number,                    // default 5
     auto_approve: boolean                 // true = approved on submit (trust-based digital challenges)
   },
@@ -88,14 +88,14 @@ draft ──activate──> active ──(closes_at passed or admin)──> comp
 
 - `award_points > 0`
 - `difficulty == 'legend'` ⇒ `grants_hall_of_fame` defaults true (admin may override). **Applied in the
-  service, not as a schema default** (`Challenge.ts:97` is `default: false`): a Mongoose default
+  service, not as a schema default** (the schema's is `default: false`): a Mongoose default
   cannot tell "the admin said false" from "the admin said nothing", and the override has to win
 - `teaming.enabled == false` ⇒ `team_size_*`, `max_teams` null
 - `kind == 'physical'` ⇒ `location != null`
 - `window.opens_at < window.closes_at <= window.submissions_close_at` for whichever are set
 - `teaming.enabled == true` ⇒ `1 <= team_size_min <= team_size_max`
 - `submission.requires_proof == false` ⇒ `proof_types == []` — the service **normalizes** this rather
-  than refusing it. `proof_types` defaults to `[...MVP_PROOF_TYPES]` (`Challenge.ts:129`) while
+  than refusing it. `proof_types` defaults to `[...MVP_PROOF_TYPES]` (`Challenge.ts`) while
   `requires_proof` defaults `true`, so `{ requires_proof: false }` alone would trip the hook and
   answer 500 for a request that was never wrong
 - `submission.auto_approve == true` ⇒ `requires_proof == true` (something must be submitted)
@@ -163,7 +163,9 @@ draft ──activate──> active ──(closes_at passed or admin)──> comp
   reward: {
     points_awarded: number,
     point_transaction_ids: string[],      // one per member_user_id
-    hall_of_fame_entry_id: string | null  // set by THIS service on HallOfFameEntryCreated (Leaderboard never writes it)
+    hall_of_fame_entry_id: string | null, // set by THIS service on HallOfFameEntryCreated (Leaderboard never writes it)
+    grants_hall_of_fame?: boolean         // the challenge's flag AT APPROVAL; the replay sweep reads this, not the challenge.
+                                          // Absent on rows approved before it existed (the sweep falls back to the challenge)
   } | null,
 
   status_history: { from: string, to: string, by: string, at: Date }[],
@@ -197,13 +199,13 @@ accepted ──submit──> submitted ─(auto_approve)─> approved
 |---|---|---|
 | create (`accepted`) | challenge `active`; now in `[window.opens_at, window.closes_at]`; unique index passes; solo: `counts.accepted < max_participants`; team: caller is captain of a `teams` doc with `owner = { challenge, id }`, `status != 'disbanded'`, `teaming.team_size_min <= members <= teaming.team_size_max`, and team count `< teaming.max_teams` — the team is then `locked` and `member_user_ids` copied from it. Plus a query the unique index cannot express: **no member of the team may already be on another roster for this challenge** — `{ challenge_id, 'participant.id' }` is unique on the *team*, so without it Points pays an overlapping member twice. The lock is `POST /internal/teams/:id/lock` on Registration Service (their collection, so it crosses by HTTP) and is best-effort: `member_user_ids` is already snapshotted, so a failed lock costs a movable roster, not a wrong payout | `ChallengeAccepted` |
 | accepted → under_review | `requires_proof`; ≥ 1 proof; `now <= deadline_at`; challenge not `archived`; caller ∈ `member_user_ids` | `ChallengeSubmitted` |
-| accepted → approved | `auto_approve` (the submit writes the verdict and the reward in the same update) | `ChallengeSubmitted` + `ChallengeCompleted` |
+| accepted → approved | `auto_approve`, never rejected before, **and no member ranks Core or above** — Core+ can author a challenge, so auto-approving their own submission would be approving their own payout; it goes to `under_review` instead (the submit writes the verdict and the reward in the same update) | `ChallengeSubmitted` + `ChallengeCompleted` |
 | under_review → approved | reviewer ∈ `challenge.reviewers` or Core+, **and not a member of the participation** | `ChallengeCompleted` |
 | under_review → rejected | same | `ChallengeRejected` |
 | rejected → under_review | user resubmits; `now <= deadline_at`; `submission.version += 1` | `ChallengeSubmitted` |
 | accepted → approved | `requires_proof == false`; reviewer/Core+ marks complete (physical challenges verified in person) | `ChallengeCompleted` |
 | accepted → expired | scheduler at `deadline_at` | `ChallengeExpired` |
-| accepted → withdrawn | Core+ only | — |
+| accepted / submitted / under_review / rejected → withdrawn | Core+ only; compare-and-swap; gives the seat back (`counts.accepted -= 1`, floored at 0) and writes a `challenge.withdrawn` audit row. Never from `approved` (the ledger references it) or `expired` | — |
 
 > **`status == 'complete'` was the original guard here and it could never be satisfied.** Nothing
 > in the Registration Service ever assigns that state — a team goes `forming` → `locked` (core+
@@ -217,24 +219,34 @@ Spec §5.7 (via UI): submission is replaceable while `under_review` (same transi
 ### 3.2 Reward on approve (single place)
 
 ```
-1. CAS status → approved (the loser of a double-click matches nothing), review filled,
-   reward = { points_awarded: challenge_snapshot.award_points, point_transaction_ids: [], ... }
-2. challenges.counts.approved $inc
+1. reserve: challenges.counts.approved $inc, filter { deleted_at: null } (404 if the challenge is gone)
+2. CAS status → approved (the loser of a double-click matches nothing, and gives its reservation back), review filled,
+   reward = { points_awarded: challenge_snapshot.award_points, point_transaction_ids: [], ...,
+              grants_hall_of_fame: challenge.grants_hall_of_fame }
 3. publish ChallengeCompleted { participation_id, challenge_id, participant, member_user_ids, award_points }
-4. if challenge.grants_hall_of_fame → publish ChallengeLegendAchieved; Leaderboard Service (Hall of Fame) creates
+4. if reward.grants_hall_of_fame → publish ChallengeLegendAchieved; Leaderboard Service (Hall of Fame) creates
    the entry and publishes HallOfFameEntryCreated { entry_id, source, participation_id }, from which this
    service sets reward.hall_of_fame_entry_id (only on an approved row with a reward)
 5. later, on read: reward.point_transaction_ids filled from the ledger (below)
 ```
 
+**Step 1 comes before the CAS on purpose.** Deleting a challenge is refused while any participation
+is approved (relationships.md §3). The delete tombstones with `counts.approved: 0` in its filter and
+the reservation requires the challenge alive — two writes to the same document, so they serialize:
+an approve racing a delete either reserved first (the delete answers `409
+challenge_has_approved_participations`) or finds the challenge gone. Reading the participations and
+then tombstoning let an approval land in between. The delete is also refused (`409
+challenge_has_pending_submissions`) while any row is `submitted`/`under_review`: every participation
+path loads the challenge alive-only, so those rows could never be reviewed or withdrawn.
+
 **Step 3 is an event, not a call.** The Points Service has consumed `ChallengeCompleted` since
-Sep 19 (`points-service/src/events/consumers.ts:231`) and writes one `earn` row per member keyed
-`challenge.completed:<participation_id>:<uid>` (`Points.ts:212`). A synchronous call would buy
+Sep 19 (`points-service/src/events/consumers.ts`) and writes one `earn` row per member keyed
+`challenge.completed:<participation_id>:<uid>` (`Points.ts`). A synchronous call would buy
 nothing but a failure mode; the Challenge Service makes no outbound call to Points at all.
 
 `award_points` comes from `challenge_snapshot`, never from today's `challenges` row — the value at
 acceptance (§4 snapshot policy). It must be non-zero: the seeded `challenge.completed` rule has
-`default_amount: 0` (`Points.ts:195`) and the payload is the only override, so a zero or a missing
+`default_amount: 0` (`Points.ts`) and the payload is the only override, so a zero or a missing
 field pays nobody and logs nothing.
 
 Idempotent on both sides: the compare-and-swap in step 1 means a second approve publishes nothing,
@@ -242,8 +254,8 @@ and the idempotency key means a replayed event writes nothing.
 
 **`reward.point_transaction_ids[]` is filled by READING `point_transactions`**, not by consuming
 `PointsEarned`. `record()` returns early on a replay and publishes nothing
-(`points-service/src/points/ledger.ts:114-115`), and `PointsEarned.reference.id` is the *challenge*,
-not the participation (`ledger.ts:96`) — so a dropped or replayed message would leave the array
+(`points-service/src/points/ledger.ts`), and `PointsEarned.reference.id` is the *challenge*,
+not the participation — so a dropped or replayed message would leave the array
 permanently short, with nothing to notice it. The read is
 `PointTransaction.find({ idempotency_key: { $in: member_user_ids.map(u => idempotencyKey.challengeCompleted(pid, u)) } })`:
 one indexed lookup on a unique index, run when a participation is served and the array is shorter
@@ -268,9 +280,10 @@ ChallengeAccepted         { participation_id, challenge_id, participant, member_
 ChallengeSubmitted        { participation_id, challenge_id, version }
 ChallengeCompleted        { participation_id, challenge_id, participant, member_user_ids[], award_points }
                           // Spec §8.2 → Points. The consumer destructures only the last three
-                          // (points consumers.ts:189-195); `participant` is carried as well;
+                          // (points-service consumers.ts); `participant` is carried as well;
                           // a superset satisfies every consumer.
-ChallengeRejected         { participation_id, challenge_id, reason }
+ChallengeRejected         { participation_id, challenge_id, reason, rejection_no }   // 1-based ordinal of this rejection;
+                          // published before the audit row, since nothing replays it
 ChallengeExpired          { participation_id, challenge_id }
 ChallengeLegendAchieved   { participation_id, challenge_id, member_user_ids[] }                 // → Hall of Fame
 ```
@@ -293,6 +306,6 @@ what a paid ledger row references; the user's Strava link is removed too) and `H
 
 ## 6. Deferred
 
-- Image/video proofs — `proof_types` accepts them; enabled per challenge once Media Service (Week 4) exists. Until then `['url','text']`.
+- Image/video proofs — the model's enum accepts them, but the API refuses them until a Media Service upload is wired into submissions (size/mime capture, ownership of the uploaded URL). Until then `['url','text']`.
 - Friend-to-friend challenge invitations (Spec §5.4 Tab 4) — Friends out of MVP.
 - Hall of Fame entry creation — Week 4 BE-1; we only emit the event.

@@ -151,7 +151,7 @@ async function main(): Promise<void> {
     );
     const count = await call('GET', '/notifications/unread-count', { as: meT });
     assert.strictEqual(count.status, 200, '/unread-count too');
-    assert.strictEqual(count.body.unread, 0, 'zero for an empty inbox');
+    assert.deepStrictEqual(count.body, { count: 0 }, 'zero for an empty inbox, as { count } like the announcement badge');
     pass('/preferences and /unread-count are declared before /:id and resolve correctly');
 
     /* ---- the inbox --------------------------------------------------------- */
@@ -202,7 +202,7 @@ async function main(): Promise<void> {
 
     const all = await call('POST', '/notifications/read-all', { as: meT });
     assert.strictEqual(all.body.marked, 1, 'read-all marks what was still unread');
-    assert.strictEqual((await call('GET', '/notifications/unread-count', { as: meT })).body.unread, 0, 'badge zeroed');
+    assert.strictEqual((await call('GET', '/notifications/unread-count', { as: meT })).body.count, 0, 'badge zeroed');
 
     const gone = await call('DELETE', `/notifications/${mine}`, { as: meT });
     assert.strictEqual(gone.status, 204, 'dismiss is 204 with no body');

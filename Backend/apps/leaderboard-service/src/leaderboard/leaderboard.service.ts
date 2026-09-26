@@ -1,6 +1,11 @@
 import {
+    ACCOUNT_DELETION_GRACE_DAYS,
+    CHALLENGE_DOMAIN,
     Challenge,
+    ChallengeDomain,
+    EVENT_DOMAIN,
     Event,
+    EventDomain,
     FormSubmission,
     IEvent,
     ILeaderboardEntry,
@@ -16,6 +21,7 @@ import {
     callInternal,
     config,
     escapeRegex,
+    idempotencyKey,
     isEventAdmin,
     normalize,
     publish,
@@ -27,13 +33,7 @@ import {
     QueryEventLeaderboardInput,
     SubmitScoresInput,
 } from './leaderboard.schemas';
-import {
-    cacheEventLeaderboard,
-    cacheGlobalLeaderboard,
-    checkInvestmentRateLimit,
-    evictEventLeaderboard,
-    getCachedGlobalLeaderboard,
-} from './redis';
+import { cacheGlobalLeaderboard, checkInvestmentRateLimit, getCachedGlobalLeaderboard, globalCacheGeneration } from './redis';
 
 export interface Actor {
     id: string;
@@ -55,20 +55,29 @@ export class PointsOutcomeUnknown extends Error {
 /**
  * The one way this service moves points: Points Service's internal routes. There is no fallback
  * that writes `users` or `point_transactions` here — the old one double-debited whenever a slow
- * points call had in fact landed (backend-audit-2026-09-26). A refusal is passed through as a
- * ServiceError; an unknown outcome (no answer, 5xx, or 409 `request_in_flight` while another writer
- * holds the key) is retried once with the same key and then thrown as `PointsOutcomeUnknown`.
+ * points call had in fact landed. A refusal is passed through as a ServiceError; an unknown outcome
+ * (no answer, 5xx, or 409 `request_in_flight` while another writer holds the key) is retried once
+ * with the same key and then thrown as `PointsOutcomeUnknown`.
+ *
+ * A refusal of the retry is unknown too: the first attempt may have landed, and a check that has
+ * changed since (the event moved on, a rule switched off) says nothing about it. Read as "nothing
+ * taken", it would drop the request and the points with it.
  */
 async function pointsCall<T>(path: string, body: Record<string, unknown>): Promise<T> {
+    let unknown = false;
     for (let attempt = 0; ; attempt++) {
         try {
             return await callInternal<T>(config.services.points, path, { body, timeoutMs: 5000 });
         } catch (err) {
             if (!(err instanceof InternalCallError)) throw err;
             if (err.outcomeUnknown || err.code === 'request_in_flight') {
-                if (attempt === 0) continue;
+                if (attempt === 0) {
+                    unknown = true;
+                    continue;
+                }
                 throw new PointsOutcomeUnknown();
             }
+            if (unknown) throw new PointsOutcomeUnknown();
             // Our own service token refused: refused at the door, so nothing was applied — but a
             // deployment fault, not the member's request.
             if (err.status === 401 || err.status === 403) throw new ServiceError(503, 'points_unavailable');
@@ -91,7 +100,8 @@ export async function debitPoints(userId: string, amount: number, entryId: strin
  * Give back whatever the spend `requestId` took. Points refunds exactly that spend, once, under the
  * key the event-cancel sweep also uses. `nothing_taken` is final: Points voids the spend key when it
  * finds no spend, so a late spend can never land after this answer. `user_deleted` is final too: the
- * account is gone and no retry will ever pay it. `unknown` means ask again later.
+ * account is gone past its restore window and no retry will ever pay it. `unknown` means ask again
+ * later — including for an account deleted but still restorable, which is owed the refund on return.
  */
 export async function refundPoints(
     userId: string,
@@ -107,13 +117,22 @@ export async function refundPoints(
         return 'refunded';
     } catch (err) {
         if (err instanceof ServiceError && err.code === 'spend_not_found') return 'nothing_taken';
-        if (err instanceof ServiceError && err.code === 'user_not_found') {
+        if (err instanceof ServiceError && err.code === 'user_not_found' && !(await restorable(userId))) {
             console.error(`[leaderboard-service] refund of ${requestId} (entry ${entryId}) dropped: user ${userId} is deleted`);
             return 'user_deleted';
         }
         console.error(`[leaderboard-service] refund of ${requestId} (entry ${entryId}) unconfirmed; the settle sweep retries it:`, err);
         return 'unknown';
     }
+}
+
+/** An account that exists and is live again, or deleted but still inside its restore window. */
+async function restorable(userId: string): Promise<boolean> {
+    const user = await User.findById(userId).select('deleted_at deletion.restorable_until').lean();
+    if (!user) return false;
+    if (!user.deleted_at) return true;
+    const until = user.deletion?.restorable_until ?? new Date(user.deleted_at.getTime() + ACCOUNT_DELETION_GRACE_DAYS * 86_400_000);
+    return until.getTime() > Date.now();
 }
 
 /* ------------------------------------------------------------------ *
@@ -153,8 +172,7 @@ function serialized<T>(key: string, fn: () => Promise<T>): Promise<T> {
 
 /**
  * Recompute raw scores (from the event's current weights), normalization, final scores and ranks
- * for every entry of an event. Saves entries, captures a snapshot, prunes old snapshots and
- * refreshes the Redis cache.
+ * for every entry of an event. Saves entries, captures a snapshot and prunes old snapshots.
  *
  * A closed board is never rewritten: a late cancellation, team disband or in-flight investment
  * after the final used to write a `frozen: false` snapshot and reopen it.
@@ -180,12 +198,14 @@ async function recompute(
     const [event, latest] = await Promise.all([Event.findById(eventId), latestSnapshot(eventId)]);
     const allEntries = await LeaderboardEntry.find({ event_id: eventId });
     const minParticipants = event?.leaderboard?.min_participants ?? 1;
+    // An eliminated entry (a mid-event cancel or disband) is kept for the refunds, not as a player.
+    const active = allEntries.filter((e) => !e.stats?.eliminated).length;
 
     // Closed: report what stands. A replayed EventCompleted still gets its entries (for the podium)
     // without a second final snapshot.
     const closed = latest?.reason === 'final' || event?.status === 'cancelled' || (reason !== 'final' && isClosed(event, latest));
     if (closed || allEntries.length === 0) {
-        return { allEntries, thresholdMet: allEntries.length > 0 && allEntries.length >= minParticipants, wroteFinal: false };
+        return { allEntries, thresholdMet: active > 0 && active >= minParticipants, wroteFinal: false };
     }
 
     const original = new Map(
@@ -217,16 +237,16 @@ async function recompute(
         e.final_score = Math.round(((e.normalized_score || 0) + (e.invested_points || 0)) * 100) / 100;
     }
 
-    // Deterministic: active before eliminated, final_score DESC, participant.display_name ASC.
+    // Deterministic: active before eliminated, final_score DESC, participant.display_name ASC, _id.
     allEntries.sort((a, b) => {
         const aElim = a.stats?.eliminated ? 1 : 0;
         const bElim = b.stats?.eliminated ? 1 : 0;
         if (aElim !== bElim) return aElim - bElim;
         if (b.final_score !== a.final_score) return b.final_score - a.final_score;
-        return a.participant.display_name.localeCompare(b.participant.display_name);
+        return a.participant.display_name.localeCompare(b.participant.display_name) || a._id.localeCompare(b._id);
     });
 
-    const thresholdMet = allEntries.length >= minParticipants;
+    const thresholdMet = active >= minParticipants;
     for (let i = 0; i < allEntries.length; i++) {
         const e = allEntries[i];
         e.previous_rank = e.rank;
@@ -284,15 +304,9 @@ async function recompute(
     // Batch-prune snapshots only past 25, keeping the newest 20.
     const snapshotCount = await LeaderboardSnapshot.countDocuments({ event_id: eventId });
     if (snapshotCount > 25) {
-        const old = await LeaderboardSnapshot.find({ event_id: eventId }).sort({ taken_at: -1 }).skip(20).select('_id');
+        const old = await LeaderboardSnapshot.find({ event_id: eventId }).sort({ taken_at: -1, _id: -1 }).skip(20).select('_id');
         if (old.length > 0) await LeaderboardSnapshot.deleteMany({ _id: { $in: old.map((s) => s._id) } });
     }
-
-    await cacheEventLeaderboard(
-        eventId,
-        allEntries.map((e) => ({ participant_id: e.participant.id, final_score: e.final_score })),
-        reason === 'final'
-    );
 
     return { allEntries, thresholdMet, wroteFinal: reason === 'final' };
 }
@@ -301,10 +315,9 @@ async function recompute(
  * The final podium for `LeaderboardFrozen`: places 1-3 of a board that met its threshold, a team
  * expanded to its member user ids (contract: points pays each member under their own key).
  */
-export async function podiumOf(
-    entries: ILeaderboardEntry[],
-    thresholdMet: boolean
-): Promise<{ place: number; participant: { type: string; id: string }; user_ids: string[] }[]> {
+type PodiumSlot = { place: number; participant: { type: string; id: string }; user_ids: string[] };
+
+export async function podiumOf(entries: ILeaderboardEntry[], thresholdMet: boolean): Promise<PodiumSlot[]> {
     if (!thresholdMet) return [];
     const top = entries
         .filter((e) => e.rank !== null && e.rank <= 3 && !e.stats?.eliminated)
@@ -322,18 +335,32 @@ export async function podiumOf(
 }
 
 /**
+ * Whether Points holds a row for every podium payment it would make: each user of each place the
+ * event pays (a place worth 0, or past its multipliers, is never paid), under the podium key.
+ *
+ * ponytail: a winner Points refuses (not a participant, place taken, rule off) never gets a row, so
+ * that event is re-announced until the replay window closes; Points replays or logs it once. An
+ * acknowledgement from Points is the upgrade if that ever costs anything.
+ */
+async function podiumPaid(eventId: string, podium: PodiumSlot[]): Promise<boolean> {
+    const pool = (await Event.findById(eventId).select('points_pool').lean())?.points_pool;
+    const keys = podium
+        .filter((s) => Math.round((pool?.participation ?? 0) * (pool?.podium_multipliers?.[s.place - 1] ?? 0)) !== 0)
+        .flatMap((s) => s.user_ids.map((u) => idempotencyKey.eventPodium(eventId, u)));
+    return (await PointTransaction.countDocuments({ idempotency_key: { $in: keys } })) === keys.length;
+}
+
+/**
  * Final recompute and `LeaderboardFrozen{podium}`. Published only by the call that wrote the final
  * snapshot — N instances receiving one EventCompleted must not announce it N times — unless the
- * replay sweep asks to re-announce on purpose (Points dedupes by key).
+ * replay sweep asks to re-announce on purpose, and only while some of the podium is still unpaid.
  */
 export async function finalizeEvent(eventId: string, republish = false): Promise<boolean> {
     const { allEntries, thresholdMet, wroteFinal } = await recomputeEventRanks(eventId, 'final');
     if (!wroteFinal && !republish) return false;
-    publish('LeaderboardFrozen', 'leaderboard-service', {
-        event_id: eventId,
-        reason: 'final',
-        podium: await podiumOf(allEntries, thresholdMet),
-    });
+    const podium = await podiumOf(allEntries, thresholdMet);
+    if (!wroteFinal && (await podiumPaid(eventId, podium))) return false;
+    publish('LeaderboardFrozen', 'leaderboard-service', { event_id: eventId, reason: 'final', podium });
     return true;
 }
 
@@ -354,7 +381,6 @@ export function freezeCancelled(eventId: string): Promise<void> {
                 .filter((e) => e.rank !== null)
                 .map((e) => ({ participant_id: e.participant.id, rank: e.rank!, final_score: e.final_score })),
         });
-        await evictEventLeaderboard(eventId);
     });
 }
 
@@ -391,13 +417,22 @@ export async function settleByRefund(entryId: string, requestId: string, userId:
  */
 export async function settlePendingInvestments(olderThanMs = 60_000): Promise<number> {
     const cutoff = new Date(Date.now() - olderThanMs);
-    const entries = await LeaderboardEntry.find({ 'pending_requests.at': { $lt: cutoff } })
+    // A deleted-but-restorable investor's requests wait out the restore window (up to weeks); left
+    // in the batch they would fill the first 100 slots every tick and starve refunds owed now.
+    // ponytail: approximated by `deleted_at` inside the grace window, one distinct per tick; page
+    // with a cursor if that set ever gets large.
+    const parked = await User.distinct('_id', {
+        deleted_at: { $gt: new Date(Date.now() - ACCOUNT_DELETION_GRACE_DAYS * 86_400_000) },
+    });
+    const due = { at: { $lt: cutoff }, user_id: { $nin: parked } };
+    const entries = await LeaderboardEntry.find({ pending_requests: { $elemMatch: due } })
         .select('pending_requests')
         .limit(100)
         .lean();
+    const parkedSet = new Set(parked.map(String));
     let settled = 0;
     for (const entry of entries) {
-        for (const p of entry.pending_requests.filter((r) => r.at < cutoff)) {
+        for (const p of entry.pending_requests.filter((r) => r.at < cutoff && !parkedSet.has(r.user_id))) {
             if (await settleByRefund(entry._id, p.request_id, p.user_id)) settled++;
         }
     }
@@ -431,6 +466,8 @@ async function displayUsers(ids: string[]) {
 export async function getGlobalLeaderboard(query: QueryGlobalLeaderboardInput) {
     const { period, domain, source, limit, page } = query;
     const skip = (page - 1) * limit;
+    // Taken before the aggregate: an eviction while it runs means its result may already be stale.
+    const generation = globalCacheGeneration();
 
     // Redis ZSET cache first; Mongo is truth.
     const cached = await getCachedGlobalLeaderboard(period, domain, source ?? 'all', skip, limit);
@@ -480,10 +517,11 @@ export async function getGlobalLeaderboard(query: QueryGlobalLeaderboardInput) {
     if (source && source !== 'all') conditions.push({ source });
 
     if (domain !== 'all') {
-        const challengeDomain =
-            domain === 'sports' || domain === 'esports' || domain === 'general' ? domain : null;
+        // Events and challenges each use their own subset of the board's domains.
+        const eventDomain = (EVENT_DOMAIN as readonly string[]).includes(domain) ? (domain as EventDomain) : null;
+        const challengeDomain = (CHALLENGE_DOMAIN as readonly string[]).includes(domain) ? (domain as ChallengeDomain) : null;
         const [eventIds, challengeIds] = await Promise.all([
-            Event.find({ domain }).distinct('_id'),
+            eventDomain ? Event.find({ domain: eventDomain }).distinct('_id') : Promise.resolve([]),
             challengeDomain
                 ? Challenge.find({ domain: challengeDomain }).distinct('_id')
                 : Promise.resolve([]),
@@ -528,12 +566,13 @@ export async function getGlobalLeaderboard(query: QueryGlobalLeaderboardInput) {
         };
     });
 
-    // Populate Redis cache asynchronously
+    // Populate Redis cache asynchronously; skipped if an eviction landed since `generation`.
     void cacheGlobalLeaderboard(
         period,
         domain,
         source ?? 'all',
-        aggregateResult.map((r) => ({ user_id: r._id, total_points: r.total_points }))
+        aggregateResult.map((r) => ({ user_id: r._id, total_points: r.total_points })),
+        generation
     );
 
     return {
@@ -554,8 +593,8 @@ export async function getGlobalLeaderboard(query: QueryGlobalLeaderboardInput) {
  * ------------------------------------------------------------------ */
 
 /**
- * What a public read shows of an entry. Never `registration_id`, `scored_by`, the version or the
- * investment bookkeeping — those were being served raw to anonymous callers.
+ * What a public read shows of an entry. Never `registration_id`, `scored_by` or the investment
+ * bookkeeping — those were being served raw to anonymous callers.
  */
 const PUBLIC_ENTRY_FIELDS = [
     '_id',
@@ -592,6 +631,9 @@ async function publicEvent(ref: string, select?: string): Promise<IEvent> {
     return event;
 }
 
+/** Entries still playing: the ones the participation threshold counts. */
+const activeEntries = (eventId: string) => LeaderboardEntry.countDocuments({ event_id: eventId, 'stats.eliminated': { $ne: true } });
+
 export async function getEventLeaderboard(ref: string, query: QueryEventLeaderboardInput) {
     const event = await publicEvent(ref, '_id title slug type leaderboard');
 
@@ -603,16 +645,15 @@ export async function getEventLeaderboard(ref: string, query: QueryEventLeaderbo
     }
 
     const totalCount = await LeaderboardEntry.countDocuments(filter);
-    const totalEventEntries = search ? await LeaderboardEntry.countDocuments({ event_id: event._id }) : totalCount;
-    const thresholdMet = totalEventEntries >= event.leaderboard!.min_participants;
+    const thresholdMet = (await activeEntries(event._id)) >= event.leaderboard!.min_participants;
 
     const skip = (query.page - 1) * query.limit;
     const entries = await LeaderboardEntry.find(filter)
         .select(PUBLIC_ENTRY_SELECT)
         .sort(
             thresholdMet
-                ? { rank: 1, 'participant.display_name': 1 }
-                : { final_score: -1, 'participant.display_name': 1 }
+                ? { rank: 1, 'participant.display_name': 1, _id: 1 }
+                : { final_score: -1, 'participant.display_name': 1, _id: 1 }
         )
         .skip(skip)
         .limit(query.limit)
@@ -638,12 +679,11 @@ export async function getEventLeaderboard(ref: string, query: QueryEventLeaderbo
 export async function getPodium(ref: string) {
     const event = await publicEvent(ref, '_id type leaderboard');
 
-    const totalEventEntries = await LeaderboardEntry.countDocuments({ event_id: event._id });
-    const thresholdMet = totalEventEntries >= event.leaderboard!.min_participants;
+    const thresholdMet = (await activeEntries(event._id)) >= event.leaderboard!.min_participants;
 
     const entries = await LeaderboardEntry.find({ event_id: event._id, rank: { $in: [1, 2, 3] } })
         .select(PUBLIC_ENTRY_SELECT)
-        .sort({ rank: 1 })
+        .sort({ rank: 1, _id: 1 })
         .lean();
 
     return {
@@ -845,11 +885,6 @@ export async function investPoints(ref: string, actor: Actor, amount: number, re
     if (!event.points_pool?.investment_enabled) {
         throw new ServiceError(400, 'investment_disabled');
     }
-    if (amount < 10) {
-        throw new ServiceError(400, 'minimum_investment_not_met', {
-            message: 'minimum investment is 10 points',
-        });
-    }
 
     const entry = await ownEntry(event, actor.id);
     if (!entry) {
@@ -873,8 +908,6 @@ export async function investPoints(ref: string, actor: Actor, amount: number, re
         throw new ServiceError(400, 'investment_cap_exceeded');
     }
 
-    await checkInvestmentRateLimit(actor.id, event._id);
-
     // 1. Pending, once per request id.
     const marked = await LeaderboardEntry.updateOne(
         { _id: entry._id, 'pending_requests.request_id': { $ne: requestId }, applied_requests: { $ne: requestId } },
@@ -884,6 +917,13 @@ export async function investPoints(ref: string, actor: Actor, amount: number, re
         const now = await LeaderboardEntry.findById(entry._id);
         if (now?.applied_requests.includes(requestId)) return replayOf(now);
         throw new ServiceError(409, 'investment_in_flight');
+    }
+    // Counted once the request is ours: a retry of a request id already in flight spends no quota.
+    try {
+        await checkInvestmentRateLimit(actor.id, event._id);
+    } catch (err) {
+        await pullPending(entry._id, requestId);
+        throw err;
     }
 
     // 2. Debit.
@@ -898,43 +938,42 @@ export async function investPoints(ref: string, actor: Actor, amount: number, re
 
     await investHooks.afterDebit();
 
-    // 3. Apply: only if still pending as `apply`, not eliminated, and under the cap.
-    const updated = await LeaderboardEntry.findOneAndUpdate(
-        {
-            _id: entry._id,
-            'stats.eliminated': { $ne: true },
-            pending_requests: { $elemMatch: { request_id: requestId, settle: 'apply' } },
-            ...(capped ? { invested_points: { $lte: cap - amount } } : {}),
-        },
-        {
-            $inc: { invested_points: amount, version: 1 },
-            $pull: { pending_requests: { request_id: requestId } },
-            $push: { applied_requests: requestId },
-        },
-        { returnDocument: 'after' }
-    );
+    // 3. Apply: only if the board is still open, the request still pending as `apply`, the entry not
+    //    eliminated, and under the cap. Checked and applied in the event's recompute queue, so the
+    //    final recompute either counts this investment or runs first and the check refuses it — an
+    //    investment the final counted is never undone and refunded afterwards.
+    //    ponytail: the queue is per-process (see `serialized`); across instances a final taken
+    //    between the check and the `$inc` leaves the points on a closed board. A Redis lock per
+    //    event is the upgrade if instances multiply.
+    const applied = await serialized(event._id, async () => {
+        const [nowEvent, nowLatest] = await Promise.all([Event.findById(event._id).select('status'), latestSnapshot(event._id)]);
+        if (isClosed(nowEvent, nowLatest) || nowLatest?.frozen) return 'closed' as const;
+        return LeaderboardEntry.findOneAndUpdate(
+            {
+                _id: entry._id,
+                'stats.eliminated': { $ne: true },
+                pending_requests: { $elemMatch: { request_id: requestId, settle: 'apply' } },
+                ...(capped ? { invested_points: { $lte: cap - amount } } : {}),
+            },
+            {
+                $inc: { invested_points: amount },
+                $pull: { pending_requests: { request_id: requestId } },
+                $push: { applied_requests: requestId },
+            },
+            { returnDocument: 'after' }
+        );
+    });
+    if (applied === 'closed') {
+        await settleByRefund(entry._id, requestId, actor.id);
+        throw new ServiceError(400, 'leaderboard_frozen');
+    }
+    const updated = applied;
     if (!updated) {
         await settleByRefund(entry._id, requestId, actor.id);
         const now = await LeaderboardEntry.findById(entry._id).select('stats');
         throw now?.stats?.eliminated
             ? new ServiceError(409, 'entry_eliminated')
             : new ServiceError(400, 'investment_cap_exceeded');
-    }
-
-    // The board may have closed (final, freeze, cancel) while this was in flight: an investment
-    // counted after the final is undone and refunded, not left to buy a rank nobody can see.
-    const [nowEvent, nowLatest] = await Promise.all([Event.findById(event._id).select('status'), latestSnapshot(event._id)]);
-    if (isClosed(nowEvent, nowLatest) || nowLatest?.frozen) {
-        const undone = await LeaderboardEntry.updateOne(
-            { _id: entry._id, applied_requests: requestId },
-            {
-                $inc: { invested_points: -amount, version: 1 },
-                $pull: { applied_requests: requestId },
-                $push: { pending_requests: { request_id: requestId, user_id: actor.id, amount, at: new Date(), settle: 'refund' } },
-            }
-        );
-        if (undone.modifiedCount) await settleByRefund(entry._id, requestId, actor.id);
-        throw new ServiceError(400, 'leaderboard_frozen');
     }
 
     const priorRank = entry.rank;
@@ -974,11 +1013,12 @@ export async function projectInvestment(ref: string, actor: Actor, amount: numbe
         throw new ServiceError(404, 'entry_not_found');
     }
 
-    const allEntries = await LeaderboardEntry.find({ event_id: event._id }).select('_id participant final_score');
+    const allEntries = await LeaderboardEntry.find({ event_id: event._id }).select('_id participant final_score stats.eliminated');
     const projectedFinalScore =
         Math.round((entry.normalized_score + entry.invested_points + amount) * 100) / 100;
 
     const simulated = allEntries.map((e) => ({
+        _id: e._id,
         id: e.participant.id,
         name: e.participant.display_name,
         final_score: String(e._id) === String(entry._id) ? projectedFinalScore : e.final_score,
@@ -988,11 +1028,11 @@ export async function projectInvestment(ref: string, actor: Actor, amount: numbe
         if (b.final_score !== a.final_score) {
             return b.final_score - a.final_score;
         }
-        return a.name.localeCompare(b.name);
+        return a.name.localeCompare(b.name) || a._id.localeCompare(b._id);
     });
 
     const index = simulated.findIndex((s) => s.id === entry.participant.id);
-    const thresholdMet = allEntries.length >= event.leaderboard!.min_participants;
+    const thresholdMet = allEntries.filter((e) => !e.stats?.eliminated).length >= event.leaderboard!.min_participants;
     const projectedRank = thresholdMet ? index + 1 : null;
 
     return {
@@ -1011,7 +1051,7 @@ export async function getSnapshots(ref: string) {
     const event = await publicEvent(ref, '_id type leaderboard');
     return LeaderboardSnapshot.find({ event_id: event._id })
         .select('_id event_id taken_at reason frozen ranks')
-        .sort({ taken_at: -1 })
+        .sort({ taken_at: -1, _id: -1 })
         .limit(20)
         .lean();
 }

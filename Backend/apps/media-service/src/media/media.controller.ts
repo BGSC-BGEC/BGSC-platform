@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
-import { wrap } from '@bgsc/shared';
+import { ServiceError, wrap } from '@bgsc/shared';
 import { mediaService, Viewer } from './media.service';
 import {
     CreateAlbumInput,
@@ -67,6 +67,21 @@ export const getMedia = wrap(async (req, res) => {
     res.json(await mediaService.getMediaById(idOf(req), viewerOf(req)));
 });
 
+/** Headers first: `sendFile` keeps a Content-Type or Cache-Control that is already set. */
+export const getMediaFile = wrap(async (req, res) => {
+    const { path, mime } = await mediaService.getMediaFile(idOf(req), viewerOf(req));
+    res.setHeader('Content-Type', mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    // `.pending/` is a dot-directory, which `send` refuses by default; the path comes from the
+    // stored row and is already confined to the upload root.
+    await new Promise<void>((resolve, reject) =>
+        res.sendFile(path, { dotfiles: 'allow' }, (err) =>
+            err && !res.headersSent ? reject(new ServiceError(404, 'media_not_found')) : resolve()
+        )
+    );
+});
+
 export const updateMedia = wrap(async (req, res) => {
     res.json(await mediaService.updateMedia(idOf(req), req.actor!, req.body as UpdateMediaInput));
 });
@@ -88,7 +103,7 @@ export const getAlbum = wrap(async (req, res) => {
 });
 
 export const listPendingModeration = wrap(async (req, res) => {
-    res.json(await mediaService.listPendingModeration(req.query as unknown as PageQuery));
+    res.json(await mediaService.listPendingModeration(req.query as unknown as PageQuery, viewerOf(req)!));
 });
 
 export const moderateMedia = wrap(async (req, res) => {

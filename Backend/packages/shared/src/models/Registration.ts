@@ -405,7 +405,7 @@ export const FormSubmission = model<IFormSubmission>('FormSubmission', FormSubmi
  *
  * `files[]` on a submission used to be whatever the client sent — url, size and mime included — so
  * a `javascript:` link, someone else's upload or a 50 MB file claiming to be 10 bytes all passed the
- * form's own accept/size rules (backend-audit-2026-09-26 H5). A submission now names an upload by
+ * form's own accept/size rules. A submission now names an upload by
  * its url and the metadata stored is read from here, and only from an upload the same user made for
  * the same form and field.
  */

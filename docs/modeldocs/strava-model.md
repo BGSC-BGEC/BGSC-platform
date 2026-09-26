@@ -3,7 +3,7 @@
 **Owner service:** Challenge Service (`:3008`, also serves `/strava`)
 **Collections:** `strava_credentials`, `strava_activities`
 **Spec refs:** §9.1 Strava (Physical Sports), §12.4 Integration Settings "Connect / Disconnect Strava", §14 scope table (line 2597) — which lists the integration as **excluded from MVP**
-**MVP plan refs:** Week 3 BE-2 Sunday (`MVP_Timeline_Plan_Updated.md:381-382`) — "Strava OAuth integration (basic)", "Strava activity sync endpoint"
+**MVP plan refs:** Week 3 BE-2 Sunday (`MVP_Timeline_Plan_Updated.md`) — "Strava OAuth integration (basic)", "Strava activity sync endpoint"
 **Design source:** `docs/SystemDesignDocs/strava-integration.md` — correct on the *idea*, written for a stack this repo does not have (see §6)
 
 ---
@@ -18,10 +18,10 @@ What the two collections are for: `strava_credentials` holds one row per connect
 OAuth tokens, encrypted — and `strava_activities` holds what has been pulled, keyed by Strava's own
 activity id.
 
-**Two readers.** The challenge screen (a physical challenge's proof is usually an activity) and the
-user profile (Spec §9.1 "Activity feed on user profile"). The models live in
-`packages/shared/src/models/Strava.ts` like every other model, so the profile's reader queries the
-collection directly and needs no API between the services (`adding-a-service.md §6.5`).
+**Two screens, one reader.** The challenge screen (a physical challenge's proof is usually an
+activity) and the user profile (Spec §9.1 "Activity feed on user profile"). Both are served by the
+Challenge Service — the profile's feed is `GET /strava/users/:id/activities` — and no other service
+reads these collections.
 
 ## 2. `strava_credentials`
 
@@ -37,6 +37,7 @@ collection directly and needs no API between the services (`adding-a-service.md 
   scope: string,              // 'activity:read_all,profile:read_all'
 
   last_synced_at: Date | null, // watermark for the next sync's `after=`; null before the first
+  last_sync_started_at: Date | null, // per-user sync cooldown, claimed by compare-and-swap
   created_at: Date,
   updated_at: Date
 }
@@ -127,7 +128,7 @@ the fields above are what the sync endpoint and the two screens use.
 
 ## 4. Flows
 
-### 4.1 Connect (as built after audit #1, Sep 26)
+### 4.1 Connect
 
 ```
 GET /strava/connect   (auth)
@@ -189,6 +190,11 @@ Capped at **3 pages per call**. Strava allows 200 requests per 15 minutes for th
 application*, so one user's button press must not spend everyone's budget; `has_more` tells the
 client to call again. A 429 from Strava surfaces as `503 strava_rate_limited` with `Retry-After`
 passed through — an expected state, not a 500.
+
+One sync per user per **5 minutes**: a compare-and-swap on `last_sync_started_at`, claimed before
+any Strava call; inside the window the answer is `429 sync_cooldown { retry_after }`. A relink of
+the same athlete keeps the cooldown (resetting it let a link -> sync loop spend the app-wide budget);
+a relink to a different athlete is a fresh row and starts without one.
 
 ## 5. Domain events
 

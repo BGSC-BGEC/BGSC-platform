@@ -56,65 +56,18 @@ export async function closeRedis(): Promise<void> {
     }
 }
 
-/**
- * Cache event leaderboard entries in Redis ZSET + metadata HASH (Spec §2.3, leaderboard-model.md §8).
- */
-export async function cacheEventLeaderboard(
-    eventId: string,
-    entries: { participant_id: string; final_score: number }[],
-    isFrozen = false
-): Promise<void> {
-    const redis = await getRedisClient();
-    if (!redis) return;
-
-    const zKey = `lb:event:${eventId}`;
-    const metaKey = `lb:event:${eventId}:meta`;
-
-    try {
-        const pipeline = redis.pipeline();
-        pipeline.del(zKey);
-
-        if (entries.length > 0) {
-            const zaddArgs: (string | number)[] = [];
-            for (const e of entries) {
-                zaddArgs.push(e.final_score, e.participant_id);
-            }
-            pipeline.zadd(zKey, ...zaddArgs);
-        }
-
-        pipeline.hset(metaKey, {
-            updated_at: new Date().toISOString(),
-            frozen: isFrozen ? 'true' : 'false',
-            count: entries.length.toString(),
-        });
-
-        await pipeline.exec();
-    } catch (err) {
-        console.error(`[leaderboard-service] Failed to cache event leaderboard for ${eventId}:`, err);
-    }
-}
-
-/**
- * Delete event leaderboard cache in Redis.
- */
-export async function evictEventLeaderboard(eventId: string): Promise<void> {
-    const redis = await getRedisClient();
-    if (!redis) return;
-
-    try {
-        await redis.del(`lb:event:${eventId}`, `lb:event:${eventId}:meta`);
-    } catch (err) {
-        console.error(`[leaderboard-service] Failed to evict event leaderboard cache for ${eventId}:`, err);
-    }
-}
+/** Bumped by every eviction: a board aggregated before one must not be cached after it. */
+let globalGeneration = 0;
+export const globalCacheGeneration = (): number => globalGeneration;
 
 /**
  * Drop every cached global board (all periods, domains and sources).
  *
- * Without this the global board trailed the ledger by up to the 10-minute TTL (audit Sep 26). Called
- * from the PointsEarned / PointsAdjusted consumers; the next read rebuilds from the ledger.
+ * Without this the global board trailed the ledger by up to the 10-minute TTL. Called from the
+ * PointsEarned / PointsAdjusted consumers; the next read rebuilds from the ledger.
  */
 export async function evictGlobalLeaderboards(): Promise<void> {
+    globalGeneration++;
     const redis = await getRedisClient();
     if (!redis) return;
 
@@ -131,16 +84,19 @@ export async function evictGlobalLeaderboards(): Promise<void> {
 }
 
 /**
- * Cache global leaderboard in Redis ZSET.
+ * Cache global leaderboard in Redis ZSET. `generation` is `globalCacheGeneration()` from before the
+ * aggregate: if an eviction ran since, the aggregate may predate the points it evicted for, and
+ * caching it would serve that stale board for the whole TTL.
  */
 export async function cacheGlobalLeaderboard(
     period: string,
     domain: string,
     source: string,
-    userScores: { user_id: string; total_points: number }[]
+    userScores: { user_id: string; total_points: number }[],
+    generation: number
 ): Promise<void> {
     const redis = await getRedisClient();
-    if (!redis) return;
+    if (!redis || generation !== globalGeneration) return;
 
     const zKey = `lb:global:${period}:${domain}:${source}`;
     try {

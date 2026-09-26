@@ -9,7 +9,7 @@ import { startReplaySweeper } from './scheduler/replay';
 
 /**
  * Points Service — :3006. Owns `point_transactions` (append-only ledger) and `point_rules`, and is
- * the only writer of `users.points_balance` (relationships.md:20, an agreed cross-service
+ * the only writer of `users.points_balance` (relationships.md, an agreed cross-service
  * exception).
  *
  * Makes no outbound HTTP calls: everything it needs from another domain is a read or an event, and

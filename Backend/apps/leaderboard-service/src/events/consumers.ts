@@ -45,7 +45,6 @@ const blankEntry = {
     previous_rank: null,
     last_scored_at: null,
     scored_by: null,
-    version: 0,
 };
 
 /**
@@ -236,7 +235,7 @@ export interface EventCancelledPayload extends Record<string, unknown> {
 /**
  * The entries stay: Points Service's refund sweep finds investments through them, and deleting
  * them first (the two consumers race on the same message) lost every refund. The board is frozen
- * and the cache dropped instead.
+ * instead.
  */
 async function onEventCancelled(p: EventCancelledPayload): Promise<void> {
     await freezeCancelled(p.event_id);
@@ -328,9 +327,7 @@ async function onUserRestored(p: UserRestoredPayload): Promise<void> {
 
 export interface ChallengeLegendAchievedPayload extends Record<string, unknown> {
     challenge_id: string;
-    participation_id?: string;
-    participant_id?: string;
-    participant_type?: 'user' | 'team';
+    participation_id: string;
     member_user_ids?: string[];
 }
 
@@ -354,45 +351,23 @@ async function onChallengeLegendAchieved(p: ChallengeLegendAchievedPayload): Pro
     const challenge = await Challenge.findById(p.challenge_id).lean();
     if (!challenge) return;
 
-    let honoree: { type: 'user' | 'team'; id: string; display_name: string; avatar_url: string | null } | null = null;
-    let members: Awaited<ReturnType<typeof memberSnapshots>> | undefined = undefined;
-
-    if (p.participation_id) {
-        const participation = await ChallengeParticipation.findById(p.participation_id).lean();
-        if (participation) {
-            honoree = {
-                type: participation.participant.type,
-                id: participation.participant.id,
-                display_name: participation.participant.display_name,
-                avatar_url: participation.participant.avatar_url || null,
-            };
-            // The participation's snapshot may predate a deletion.
-            if (participation.participant.type === 'user' && !(await User.exists({ _id: honoree.id, deleted_at: null }))) {
-                honoree = { ...honoree, display_name: DELETED_DISPLAY_NAME, avatar_url: null };
-            }
-            if (participation.participant.type === 'team' && participation.member_user_ids?.length) {
-                members = await memberSnapshots(participation.member_user_ids);
-            }
-        }
+    // The Challenge Service always names the participation; the honoree comes from its snapshot.
+    const participation = await ChallengeParticipation.findById(p.participation_id).lean();
+    if (!participation) return;
+    let honoree = {
+        type: participation.participant.type,
+        id: participation.participant.id,
+        display_name: participation.participant.display_name,
+        avatar_url: participation.participant.avatar_url || null,
+    };
+    // The participation's snapshot may predate a deletion.
+    if (participation.participant.type === 'user' && !(await User.exists({ _id: honoree.id, deleted_at: null }))) {
+        honoree = { ...honoree, display_name: DELETED_DISPLAY_NAME, avatar_url: null };
     }
-
-    if (!honoree) {
-        if (p.participant_type === 'team') {
-            const team = await Team.findById(p.participant_id).lean();
-            if (!team) return;
-            honoree = { type: 'team', id: team._id, display_name: team.name, avatar_url: team.logo_url || null };
-        } else if (p.participant_id) {
-            const user = await User.findOne({ _id: p.participant_id, deleted_at: null }).lean();
-            if (!user) return;
-            honoree = {
-                type: 'user',
-                id: user._id,
-                display_name: user.profile?.full_name || user.username,
-                avatar_url: user.profile?.avatar_url || null,
-            };
-        }
-    }
-    if (!honoree) return;
+    const members =
+        participation.participant.type === 'team' && participation.member_user_ids?.length
+            ? await memberSnapshots(participation.member_user_ids)
+            : undefined;
 
     const identity = { category: 'challenge_legend' as const, 'honoree.id': honoree.id, 'source.id': challenge._id, deleted_at: null };
     const announce = (e: { _id: string; slug: string; category: string }) =>
@@ -400,9 +375,9 @@ async function onChallengeLegendAchieved(p: ChallengeLegendAchievedPayload): Pro
             entry_id: e._id,
             slug: e.slug,
             category: e.category,
-            honoree: { type: honoree!.type, id: honoree!.id },
+            honoree: { type: honoree.type, id: honoree.id },
             source: { type: 'challenge', id: challenge._id },
-            participation_id: p.participation_id ?? null,
+            participation_id: p.participation_id,
         });
 
     // A replay re-announces the existing entry: if the first HallOfFameEntryCreated was lost (pub/sub

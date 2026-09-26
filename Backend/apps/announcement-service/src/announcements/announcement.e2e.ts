@@ -256,7 +256,16 @@ async function main(): Promise<void> {
         });
         assert.strictEqual(past.status, 422);
         assert.strictEqual(past.body.error, 'scheduled_for_must_be_future');
-        console.log('✓ past scheduled_for → 422');
+        // `z.coerce.date()` read `true` as 1 ms past the epoch and a number as a timestamp.
+        for (const bad of [true, 1_900_000_000_000, '2030-01-01T10:00']) {
+            const r = await call('POST', `/announcements/${forSched.body._id}/publish`, {
+                as: coordTok,
+                body: { scheduled_for: bad },
+            });
+            assert.strictEqual(r.status, 422, `scheduled_for ${JSON.stringify(bad)} is not a zoned ISO date`);
+            assert.strictEqual(r.body.error, 'validation_failed');
+        }
+        console.log('✓ past scheduled_for → 422, and only a zoned ISO timestamp is a date');
 
         // ---- 10. unschedule writes audit + nulls scheduled_for --------------
         console.log('10. Unschedule...');
@@ -453,6 +462,9 @@ async function main(): Promise<void> {
         // Read still works — revoke does not block reads.
         const stillReads = await call('GET', `/announcements/${toPublish.body._id}`);
         assert.strictEqual(stillReads.status, 200, 'reads still work for suspended user');
+        // Read state is the caller's own document and needs no live-user lookup: requireAuth only.
+        const ownRead = await call('POST', `/announcements/${toPublish.body._id}/read`, { as: coordTok });
+        assert.strictEqual(ownRead.status, 204, 'marking read is not a privileged write');
         console.log('✓ suspended user 401 on write, 200 on read');
 
         // ---- 18. the composer bypass never crosses the rank gate ------------
@@ -506,7 +518,7 @@ async function main(): Promise<void> {
         assert.strictEqual(demoted.status, 403, 'the live role is ranked, not the token claim');
         console.log('✓ demoted user with a core token → 403');
 
-        // ---- 21. the delivery writeback (Week 4 broadcast) ----------
+        // ---- 21. the delivery writeback from the broadcast ----------
         console.log('21. Internal delivery writeback...');
         const pub = await call('POST', '/announcements', {
             as: founderTok,

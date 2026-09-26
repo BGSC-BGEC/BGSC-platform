@@ -9,9 +9,11 @@ import { UPLOAD_DIR } from './storage/storage';
  * Media Service — :3009. Owns `media`, `media_albums`, `media_likes`, and is the ONE server of
  * `/uploads` for the whole platform (docs/modeldocs/media-model.md, Spec §5.11.1).
  *
- * `UPLOAD_DIR` is `config.uploadDir`: user avatars, event images and registration files are
- * written there by their own services under their own prefixes, and served from here — the
- * gateway routes every `/uploads` request to this service.
+ * `UPLOAD_DIR` is `config.uploadDir`: user avatars and event images are written there by their own
+ * services under their own prefixes, and served from here — the gateway routes every `/uploads`
+ * request to this service. Dot-directories on the same volume are never served: `.pending/`
+ * (unapproved gallery files, fetched through `GET /media/:id/file`) and `.private/` (registration
+ * files, fetched through registration-service).
  */
 
 const MEDIA_ROOT = path.join(path.resolve(UPLOAD_DIR), 'media') + path.sep;
@@ -30,6 +32,9 @@ const options = {
                 maxAge: '7d',
                 immutable: true,
                 index: false,
+                // A directory would otherwise answer 301 to `dir/` — confirming it exists — where
+                // any other path answers 404.
+                redirect: false,
                 // `ignore`, not `deny`: the pending tree is `.pending/`, and it must answer 404 like
                 // any other missing file — a 403 would confirm an unapproved upload exists.
                 dotfiles: 'ignore',

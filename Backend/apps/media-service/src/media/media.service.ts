@@ -12,6 +12,7 @@ import {
     UserRole,
     isEventAdmin,
     publish,
+    rankOf,
     requireEventAdmin,
     userSnapshotOf,
 } from '@bgsc/shared';
@@ -26,10 +27,9 @@ import {
 } from './media.schemas';
 import {
     IMAGE_MAX_BYTES,
-    VIDEO_MAX_BYTES,
     deleteMediaObject,
-    hasMediaObject,
     keyOf,
+    locateMediaObject,
     publishMediaObject,
     putMediaObject,
     sniffMedia,
@@ -46,13 +46,31 @@ export interface Viewer {
     role: string;
 }
 
-const CORE_ROLES: string[] = [UserRole.CORE, UserRole.COORDINATOR, UserRole.FOUNDER];
-
 /** Per-uploader ceilings on what waits for moderation (members only; see `assertUnderQuota`). */
 export const MAX_PENDING_ITEMS = 20;
 export const MAX_PENDING_BYTES = 200 * 1024 * 1024;
 export const UPLOADS_PER_HOUR = 30;
-const isCore = (who: { role: string } | null | undefined): boolean => !!who && CORE_ROLES.includes(who.role);
+const atLeast = (who: { role: string } | null | undefined, floor: UserRole): boolean =>
+    !!who && rankOf(who.role as UserRole) >= rankOf(floor);
+const isCore = (who: { role: string } | null | undefined): boolean => atLeast(who, UserRole.CORE);
+
+/**
+ * The draft events this viewer does not run, as a filter on `events` — or null for coordinator+,
+ * who see every draft. A draft exists only for its admins (`isEventAdmin`), and so does every
+ * album and photo filed under it.
+ */
+const hiddenDrafts = (viewer: Viewer | null | undefined): Record<string, unknown> | null => {
+    if (atLeast(viewer, UserRole.COORDINATOR)) return null;
+    return viewer
+        ? { status: 'draft', created_by: { $ne: viewer.id }, core_admins: { $ne: viewer.id } }
+        : { status: 'draft' };
+};
+
+/** Ids of the drafts `hiddenDrafts` describes. ponytail: drafts are a handful at a time; a `$nin` over them is fine. */
+const hiddenEventIds = async (viewer: Viewer | null | undefined): Promise<string[]> => {
+    const filter = hiddenDrafts(viewer);
+    return filter ? Event.distinct('_id', filter) : [];
+};
 
 const isDuplicateKey = (err: unknown): err is { code: number; keyPattern?: Record<string, unknown> } =>
     (err as { code?: number }).code === 11000;
@@ -73,22 +91,46 @@ export class MediaService {
 
     /**
      * An item is public once approved; before that, and after a rejection, it exists only for its
-     * uploader and for core. A private album hides its items from everyone else as well. Anything
-     * a viewer may not see is a 404 — they should not learn it exists.
+     * uploader and for core. A private album hides its items from everyone else as well, and a
+     * draft event hides everything filed under it — directly or through its album — from anyone
+     * who does not run it, core and uploader included. Anything a viewer may not see is a 404 —
+     * they should not learn it exists.
      */
     private async assertVisible(media: IMedia, viewer: Viewer | null): Promise<void> {
         const privileged = isCore(viewer) || (!!viewer && viewer.id === media.uploader.user_id);
-        if (privileged) return;
-        if (media.status !== 'approved') throw new ServiceError(404, 'media_not_found');
-        if (media.album_id && (await MediaAlbum.exists({ _id: media.album_id, is_public: false }))) {
+        if (!privileged && media.status !== 'approved') throw new ServiceError(404, 'media_not_found');
+        const album = media.album_id
+            ? await MediaAlbum.findById(media.album_id).select('is_public event_id').lean<IMediaAlbum>()
+            : null;
+        if (!privileged && album && !album.is_public) throw new ServiceError(404, 'media_not_found');
+        const events = [media.event_id, album?.event_id].filter((id): id is string => !!id);
+        const drafts = hiddenDrafts(viewer);
+        if (events.length > 0 && drafts && (await Event.exists({ _id: { $in: events }, ...drafts }))) {
             throw new ServiceError(404, 'media_not_found');
         }
     }
 
     /**
+     * Who may publish, moderate, and override the owner of an item: core for the general gallery;
+     * for anything filed under an event — directly or through its album — only that event's admins
+     * (creator, listed core admins, coordinator+), the same rule `createAlbum` applies. Any core
+     * member publishing into, or deleting from, every event's gallery was the gap. An event that
+     * no longer exists leaves its media to coordinator+.
+     */
+    private async moderates(actor: IUser, item: { event_id?: string | null; album_id?: string | null }): Promise<boolean> {
+        if (!isCore(actor)) return false;
+        const album = item.album_id ? await MediaAlbum.findById(item.album_id).select('event_id').lean<IMediaAlbum>() : null;
+        const ids = [...new Set([item.event_id, album?.event_id].filter((id): id is string => !!id))];
+        if (ids.length === 0 || atLeast(actor, UserRole.COORDINATOR)) return true;
+        const events = await Event.find({ _id: { $in: ids } }).select('created_by core_admins').lean<IEvent[]>();
+        const who = { id: actor._id, role: actor.role };
+        return events.length === ids.length && events.every((e) => isEventAdmin(e, who));
+    }
+
+    /**
      * Approved items only are counted, so the number matches what a visitor can open. Recounted
      * rather than `$inc`ed: two moderators, an edit and a delete racing each other drifted an
-     * incremented counter (audit #2), and a recount converges whoever runs last.
+     * incremented counter, and a recount converges whoever runs last.
      */
     private async recountAlbum(albumId: string | null | undefined): Promise<void> {
         if (!albumId) return;
@@ -101,7 +143,7 @@ export class MediaService {
      * pending → unserved, rejected or gone → deleted. Every status change runs this after its own
      * compare-and-swap, re-reading the status rather than trusting the one it wrote — so an edit
      * that withdraws a file just after a moderator approved it is corrected by whichever of the two
-     * finishes last, instead of leaving an approved row with a hidden file (audit #2).
+     * finishes last, instead of leaving an approved row with a hidden file.
      *
      * ponytail: two reconciles can still interleave read→move; the window is one rename wide. The
      * upgrade is a per-item lock document if it is ever seen.
@@ -124,8 +166,8 @@ export class MediaService {
 
     /**
      * A member's uploads wait for a human, so they are capped where the human's queue is: items and
-     * bytes still pending, plus an hourly rate. Core uploads are published on arrival and are not
-     * capped — bulk event photos are their job.
+     * bytes still pending, plus an hourly rate. Uploads that publish on arrival (core, or an
+     * event's own admins for that event) are not capped — bulk event photos are their job.
      *
      * ponytail: count-then-write, so a parallel burst can overshoot by its width; the gateway's
      * 100/min per user bounds that. A per-uploader counter document is the upgrade.
@@ -147,11 +189,11 @@ export class MediaService {
         }
     }
 
+    /**
+     * The controller refuses an empty body and `raw()` anything over the video ceiling, so the
+     * only size left to check is an image that arrived declared as something bigger.
+     */
     async uploadMedia(actor: IUser, buffer: Buffer, query: UploadMediaQuery): Promise<IMedia> {
-        if (!buffer || buffer.length === 0) {
-            throw new ServiceError(400, 'media_payload_empty');
-        }
-
         const sniffed = sniffMedia(buffer);
         if (!sniffed) {
             throw new ServiceError(415, 'unsupported_media_type');
@@ -159,9 +201,6 @@ export class MediaService {
 
         if (sniffed.type === 'image' && buffer.length > IMAGE_MAX_BYTES) {
             throw new ServiceError(413, 'image_payload_too_large');
-        }
-        if (sniffed.type === 'video' && buffer.length > VIDEO_MAX_BYTES) {
-            throw new ServiceError(413, 'video_payload_too_large');
         }
 
         const core = isCore(actor);
@@ -176,15 +215,22 @@ export class MediaService {
             }
         }
 
-        if (!core) await this.assertUnderQuota(actor._id, buffer.length);
-
         if (query.album_id) {
-            const album = await MediaAlbum.findById(query.album_id).select('is_public').lean<IMediaAlbum>();
-            // A private album is core's to fill, and to a member it does not exist.
-            if (!album || (!album.is_public && !core)) throw new ServiceError(404, 'album_not_found');
+            const album = await MediaAlbum.findById(query.album_id).select('is_public event_id').lean<IMediaAlbum>();
+            const drafts = hiddenDrafts({ id: actor._id, role: actor.role });
+            // A private album is core's to fill, and to a member it does not exist; nor does the
+            // album of a draft they do not run.
+            if (
+                !album ||
+                (!album.is_public && !core) ||
+                (album.event_id && drafts && (await Event.exists({ _id: album.event_id, ...drafts })))
+            ) {
+                throw new ServiceError(404, 'album_not_found');
+            }
         }
 
-        const status = core ? 'approved' : 'pending';
+        const status = (await this.moderates(actor, query)) ? 'approved' : 'pending';
+        if (status === 'pending') await this.assertUnderQuota(actor._id, buffer.length);
 
         const prefix =
             query.category === 'event' && query.event_id
@@ -239,14 +285,14 @@ export class MediaService {
     async listMedia(query: ListMediaQuery, viewer?: Viewer | null) {
         const core = isCore(viewer);
         const filter: Record<string, unknown> = {};
+        const drafts = await hiddenEventIds(viewer);
 
         if (query.category) filter.category = query.category;
-        if (query.event_id) filter.event_id = query.event_id;
-        if (query.album_id) {
-            if (!core && (await MediaAlbum.exists({ _id: query.album_id, is_public: false }))) {
-                throw new ServiceError(404, 'album_not_found');
-            }
-            filter.album_id = query.album_id;
+        if (query.event_id) {
+            if (drafts.includes(query.event_id)) throw new ServiceError(404, 'event_not_found');
+            filter.event_id = query.event_id;
+        } else if (drafts.length > 0) {
+            filter.event_id = { $nin: drafts };
         }
         if (query.media_type) filter.media_type = query.media_type;
         if (query.tag) filter.tags = query.tag;
@@ -255,13 +301,24 @@ export class MediaService {
             if (query.status) filter.status = query.status;
         } else {
             filter.status = 'approved';
-            // The general gallery must not be a side door into a private album (audit #2).
-            // ponytail: private albums are a handful of committee sets; a $nin over their ids is
-            // fine until there are thousands, then denormalize `album_public` onto media.
-            if (!query.album_id) {
-                const hidden = await MediaAlbum.distinct('_id', { is_public: false });
-                if (hidden.length > 0) filter.album_id = { $nin: hidden };
+        }
+
+        // The general gallery must not be a side door into an album the viewer cannot open: a
+        // private one (unless core), or one filed under a hidden draft.
+        // ponytail: private albums are a handful of committee sets; a $nin over their ids is
+        // fine until there are thousands, then denormalize `album_public` onto media.
+        const hiddenAlbum = [
+            ...(core ? [] : [{ is_public: false }]),
+            ...(drafts.length > 0 ? [{ event_id: { $in: drafts } }] : []),
+        ];
+        if (query.album_id) {
+            if (hiddenAlbum.length > 0 && (await MediaAlbum.exists({ _id: query.album_id, $or: hiddenAlbum }))) {
+                throw new ServiceError(404, 'album_not_found');
             }
+            filter.album_id = query.album_id;
+        } else if (hiddenAlbum.length > 0) {
+            const hidden = await MediaAlbum.distinct('_id', { $or: hiddenAlbum });
+            if (hidden.length > 0) filter.album_id = { $nin: hidden };
         }
 
         const skip = (query.page - 1) * query.limit;
@@ -295,14 +352,25 @@ export class MediaService {
         return media;
     }
 
+    /** Where the item's file is right now, for whoever may see the item. The path is the row's, never the request's. */
+    async getMediaFile(id: string, viewer: Viewer | null): Promise<{ path: string; mime: string }> {
+        const media = await Media.findById(id).lean<IMedia>();
+        if (!media) throw new ServiceError(404, 'media_not_found');
+        await this.assertVisible(media, viewer);
+        const path = await locateMediaObject(keyOf(media.url));
+        if (!path) throw new ServiceError(404, 'media_not_found');
+        return { path, mime: media.mime_type };
+    }
+
     /* ------------------------------------------------------------------ *
      * Owner edits
      * ------------------------------------------------------------------ */
 
     /**
-     * The uploader or core may edit caption and tags. An uploader's edit to an APPROVED item puts
-     * it back in the queue — otherwise approval would be of a caption that no longer exists — and
-     * pulls its file out of /uploads until a moderator looks again.
+     * The uploader or a moderator of the item may edit caption and tags. Anyone else's edit to an
+     * APPROVED item — the uploader's included, unless they moderate it — puts it back in the queue
+     * (otherwise approval would be of a caption that no longer exists) and pulls its file out of
+     * /uploads until a moderator looks again.
      */
     async updateMedia(id: string, actor: IUser, input: UpdateMediaInput): Promise<IMedia> {
         const media = await Media.findById(id);
@@ -310,10 +378,10 @@ export class MediaService {
             throw new ServiceError(404, 'media_not_found');
         }
 
-        const core = isCore(actor);
         // Not visible to them → 404 first; visible but not theirs → 403.
         await this.assertVisible(media, { id: actor._id, role: actor.role });
-        if (media.uploader.user_id !== actor._id && !core) {
+        const moderator = await this.moderates(actor, media);
+        if (media.uploader.user_id !== actor._id && !moderator) {
             throw new ServiceError(403, 'forbidden_not_owner');
         }
 
@@ -321,7 +389,7 @@ export class MediaService {
         if (input.caption !== undefined) set.caption = input.caption;
         if (input.tags !== undefined) set.tags = input.tags;
 
-        const remoderate = !core && media.status === 'approved' && Object.keys(set).length > 0;
+        const remoderate = !moderator && media.status === 'approved' && Object.keys(set).length > 0;
         if (remoderate) Object.assign(set, { status: 'pending', approved_by: null, approved_at: null });
 
         // Compare-and-swap on the status we read: a moderator acting at the same moment wins, and
@@ -347,13 +415,13 @@ export class MediaService {
         }
 
         await this.assertVisible(media, { id: actor._id, role: actor.role });
-        if (media.uploader.user_id !== actor._id && !isCore(actor)) {
+        if (media.uploader.user_id !== actor._id && !(await this.moderates(actor, media))) {
             throw new ServiceError(403, 'forbidden_not_owner');
         }
 
         // The row goes FIRST, atomically: a moderator's swap on it then finds nothing and moves no
         // file, and two deletes produce one. File-first let an approve rename the file into
-        // /uploads after it was "deleted", orphaning it there (audit #2).
+        // /uploads after it was "deleted", orphaning it there.
         const claimed = await Media.findOneAndDelete({ _id: id });
         if (!claimed) throw new ServiceError(404, 'media_not_found');
 
@@ -442,8 +510,15 @@ export class MediaService {
     async listAlbums(query: ListAlbumsQuery, viewer?: Viewer | null) {
         const filter: Record<string, unknown> = {};
 
+        const drafts = await hiddenEventIds(viewer);
+
         if (query.category) filter.category = query.category;
-        if (query.event_id) filter.event_id = query.event_id;
+        if (query.event_id) {
+            if (drafts.includes(query.event_id)) throw new ServiceError(404, 'event_not_found');
+            filter.event_id = query.event_id;
+        } else if (drafts.length > 0) {
+            filter.event_id = { $nin: drafts };
+        }
         if (!isCore(viewer)) filter.is_public = true;
 
         const skip = (query.page - 1) * query.limit;
@@ -467,13 +542,15 @@ export class MediaService {
             $or: [{ _id: idOrSlug }, { slug: idOrSlug }],
         }).lean<IMediaAlbum>();
 
-        // A private album is a 404 to anyone who could not list it.
-        if (!album || (!album.is_public && !isCore(viewer))) {
+        // A private album, or one under a draft the viewer does not run, is a 404 to anyone who
+        // could not list it.
+        const drafts = await hiddenEventIds(viewer);
+        if (!album || (!album.is_public && !isCore(viewer)) || (album.event_id && drafts.includes(album.event_id))) {
             throw new ServiceError(404, 'album_not_found');
         }
 
         // ponytail: the first 50 items; the paged view is `GET /media?album_id=`.
-        const media = await Media.find({ album_id: album._id, status: 'approved' })
+        const media = await Media.find({ album_id: album._id, status: 'approved', event_id: { $nin: drafts } })
             .sort({ created_at: -1 })
             .limit(50)
             .lean();
@@ -485,17 +562,27 @@ export class MediaService {
      * Moderation
      * ------------------------------------------------------------------ */
 
-    async listPendingModeration(query: PageQuery) {
+    /**
+     * Pending items, oldest first, each with `preview_url` — the file is not at its public URL
+     * until approved, so a moderator looks at it there. A hidden draft's items are left out, whether
+     * filed under it directly or through its album (as `assertVisible` hides them).
+     */
+    async listPendingModeration(query: PageQuery, viewer: Viewer) {
         const skip = (query.page - 1) * query.limit;
 
-        const filter = { status: 'pending' as const };
+        const drafts = await hiddenEventIds(viewer);
+        const filter: Record<string, unknown> = { status: 'pending', event_id: { $nin: drafts } };
+        if (drafts.length > 0) {
+            const hidden = await MediaAlbum.distinct('_id', { event_id: { $in: drafts } });
+            if (hidden.length > 0) filter.album_id = { $nin: hidden };
+        }
         const [items, total] = await Promise.all([
             Media.find(filter).sort({ created_at: 1 }).skip(skip).limit(query.limit).lean(),
             Media.countDocuments(filter),
         ]);
 
         return {
-            items,
+            items: items.map((m) => ({ ...m, preview_url: `/media/${m._id}/file` })),
             total,
             page: query.page,
             limit: query.limit,
@@ -512,6 +599,9 @@ export class MediaService {
         if (!media) {
             throw new ServiceError(404, 'media_not_found');
         }
+        // Visibility before permission: a hidden draft's item is a 404, another event's a 403.
+        await this.assertVisible(media, { id: actor._id, role: actor.role });
+        if (!(await this.moderates(actor, media))) throw new ServiceError(403, 'forbidden');
 
         const from = media.status;
         if (input.status === 'approved' && from !== 'pending') {
@@ -521,9 +611,9 @@ export class MediaService {
             throw new ServiceError(409, 'media_already_rejected');
         }
         // Checked BEFORE any write: a legacy row whose file never made it to this upload root
-        // would otherwise flip to "approved" and serve a 404 (audit #2).
+        // would otherwise flip to "approved" and serve a 404.
         const key = keyOf(media.url);
-        if (input.status === 'approved' && !(await hasMediaObject(key))) {
+        if (input.status === 'approved' && !(await locateMediaObject(key))) {
             throw new ServiceError(409, 'file_missing');
         }
 
@@ -574,7 +664,7 @@ export class MediaService {
     /**
      * A real toggle: one `media_likes` row per (media, user), enforced by the unique index. The
      * counter is then RECOUNTED from those rows rather than `$inc`ed — an increment raced against
-     * a concurrent toggle drifted (audit #2), a recount is right whoever writes last.
+     * a concurrent toggle drifted, a recount is right whoever writes last.
      */
     async toggleLike(id: string, viewer: Viewer): Promise<{ media_id: string; liked: boolean; likes_count: number }> {
         const media = await Media.findById(id).lean<IMedia>();

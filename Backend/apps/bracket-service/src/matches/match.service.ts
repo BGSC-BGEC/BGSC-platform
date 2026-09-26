@@ -38,7 +38,7 @@ async function loadForReport(matchId: string, actor: Actor): Promise<{ match: IM
     if (!match) throw new ServiceError(404, 'match_not_found');
 
     // Visibility before permission: a draft event's fixture is a 404 to a non-admin, not a 403
-    // that confirms it exists (audit #2).
+    // that confirms it exists.
     const event = await adminEventOr404(match.event_id, actor, 'match_not_found');
     // A result for an event that was called off is a fixture nobody played.
     if (event.status === 'cancelled') throw new ServiceError(409, 'event_cancelled');
@@ -120,7 +120,7 @@ export async function reportResult(
     // The swap pins everything this decision was made on, not just the status: the two
     // participants (an upstream correction can re-seat a slot between load and write), and for a
     // correction the result being corrected — so two coordinators correcting at once produce one
-    // correction, and the audit row's "previous" is really what was replaced (audit #2).
+    // correction, and the audit row's "previous" is really what was replaced.
     // Typed, not inferred: a bare string[] here widens the filter and mongoose falls back to an
     // overload that returns a ModifyResult instead of the document.
     const from: MatchStatus[] = isCorrection ? ['completed'] : ['scheduled', 'ongoing'];
@@ -151,7 +151,7 @@ export async function reportResult(
     if (!live || live.status === 'draft') {
         await undoClaim(match, wrote);
         // The delete may have lost its own race and handed the bracket back; a sibling report that
-        // finished while we held this fixture could not complete it then (audit #2).
+        // finished while we held this fixture could not complete it then.
         if (live) await completeBracketIfDone(bracket);
         throw new ServiceError(409, 'bracket_being_redrawn');
     }
@@ -230,7 +230,7 @@ async function advanceWinner(match: IMatch, isCorrection: boolean): Promise<bool
  *
  * A coordinator's correction to an already-completed bracket can change who won it, so it
  * re-announces the champion with `corrected: true` — consumers key on `bracket_id` and take the
- * latest. Without it the published winner silently disagreed with the standings (audit Sep 26).
+ * latest. Without it the published winner silently disagreed with the standings.
  */
 export async function completeBracketIfDone(bracket: Pick<IBracket, '_id'>, isCorrection = false): Promise<void> {
     const outstanding = await Match.countDocuments({

@@ -109,6 +109,7 @@ export const KEY_PATTERN = /^[a-z][a-z0-9_]{0,31}$/;
 export const ROLE_RANK = ['guest', 'user', 'member', 'core', 'coordinator', 'founder'] as const;
 export type RoleName = (typeof ROLE_RANK)[number];
 
-export function roleRank(role: RoleName): number {
-    return ROLE_RANK.indexOf(role);
+/** Position on the ladder; -1 for anything that is not a role, so an unknown role never clears a floor. */
+export function roleRank(role: string): number {
+    return ROLE_RANK.indexOf(role as RoleName);
 }

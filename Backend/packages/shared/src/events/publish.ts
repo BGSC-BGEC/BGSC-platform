@@ -38,7 +38,7 @@ const CHANNEL = 'bgsc.events';
  * This process, for own-message suppression. A publisher hears its own message back from Redis and
  * has already delivered it locally. Suppression used to be a bounded set of recent message ids, so
  * a burst of more than ~2500 publishes before the echoes arrived (a Redis outage drains the ioredis
- * offline queue all at once) evicted ids and delivered those events a second time (audit Sep 26).
+ * offline queue all at once) evicted ids and delivered those events a second time.
  * An id per process has no capacity to run out of.
  */
 export const INSTANCE_ID: string = randomUUID();
@@ -49,7 +49,7 @@ export const INSTANCE_ID: string = randomUUID();
  * object, means there is no canonical-JSON question to get wrong.
  *
  * Why: consumers act on payloads (points-service credits `award_points` from ChallengeCompleted), and
- * anything that could reach Redis could PUBLISH a forged one (audit Sep 26). Only a holder of the
+ * anything that could reach Redis could PUBLISH a forged one. Only a holder of the
  * internal token can now produce a message a service will accept.
  *
  * ponytail: no replay window. A captured message can be re-sent by whoever can read the channel —
@@ -149,7 +149,7 @@ export async function connectEventBus(): Promise<void> {
     try {
         // Options object, password separate (config/redis.ts): a raw password in the URL either
         // failed to parse — and `new Redis` threw out of startService, crash-looping every service —
-        // or silently failed auth (audit #2). A bad URL is now the same as an unreachable Redis.
+        // or silently failed auth. A bad URL is now the same as an unreachable Redis.
         const conn = redisOptions();
         pub = new Redis({ ...conn, maxRetriesPerRequest: null, lazyConnect: true });
         sub = new Redis({ ...conn, maxRetriesPerRequest: null, lazyConnect: true });
@@ -223,7 +223,7 @@ export async function disconnectEventBus(): Promise<void> {
  *
  * Each listener is isolated. `bus.emit` stops at the first listener that throws, so one broken
  * consumer used to silently skip every other consumer of the same type and the `'*'` listeners —
- * and an async listener's rejection escaped the try/catch entirely (audit Sep 26). A consumer
+ * and an async listener's rejection escaped the try/catch entirely. A consumer
  * failing must not fail the request that produced the event either: the write already committed.
  */
 function deliver(event: DomainEvent): void {

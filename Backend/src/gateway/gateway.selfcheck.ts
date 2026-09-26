@@ -12,11 +12,11 @@ import { gzipSync } from 'zlib';
 import { drainUnreadBody } from '@bgsc/shared';
 import { createServiceProxy } from './proxy';
 import { isAuthAttempt, isCredentialAttempt, isInternalPath } from './routing';
-import { authAttemptIpCeiling, authAttemptLimiter, ceilingSkips, parseAttemptBody } from './rateLimit';
+import { attemptIdentity, authAttemptIpCeiling, authAttemptLimiter, ceilingSkips, parseAttemptBody } from './rateLimit';
 
 /* ------------------------------- routing -------------------------------- */
 
-// Audit Sep 26: Express routes case-insensitively and ignores a trailing slash, so an exact compare
+// Express routes case-insensitively and ignores a trailing slash, so an exact compare
 // let these reach the login handler through the general bucket.
 for (const p of ['/auth/login', '/auth/Login', '/AUTH/LOGIN', '/auth/login/', '/account/reactivate/']) {
     assert.ok(isAuthAttempt(p), `${p} is a strict-bucket path`);
@@ -33,6 +33,11 @@ assert.ok(isInternalPath('/INTERNAL/users') && isInternalPath('/internal/'), '/i
 const res200 = { statusCode: 200 } as never;
 assert.ok(ceilingSkips({ path: '/auth/login' } as never, res200) && ceilingSkips({ path: '/auth/register' } as never, res200), 'successful login/signup are free');
 assert.ok(!ceilingSkips({ path: '/auth/forgot-password' } as never, res200) && !ceilingSkips({ path: '/auth/resend-verification' } as never, res200), 'every reset/resend send counts toward the IP ceiling');
+
+// Phone OTP has no identifier in the body: the signed-in caller is the account being attempted.
+assert.strictEqual(attemptIdentity({ path: '/auth/phone/send-otp', user: { id: 'u-7' } } as never), 'u-7', 'phone OTP keys on the caller');
+assert.strictEqual(attemptIdentity({ path: '/auth/phone/send-otp' } as never), null, 'and has no key without a session');
+assert.strictEqual(attemptIdentity({ path: '/auth/login', body: { login: ' Ana@X.io ' } } as never), 'ana@x.io', 'login keys on the normalised identifier');
 
 /* ------------------------------ the limiter ------------------------------ */
 
@@ -82,18 +87,18 @@ async function limiterChecks(): Promise<void> {
         for (let i = 0; i < 6; i++) sends.push((await post('/auth/forgot-password', { email: 'v@x.io' })).status);
         assert.strictEqual(sends[5], 429, 'forgot-password is limited even though it always answers 200');
 
-        // Audit #2: the key is the field the route reads. A junk `login` on an email route used to
+        // The key is the field the route reads. A junk `login` on an email route used to
         // rotate the bucket; the victim's address stays throttled whatever else is in the body.
         const junk = await post('/auth/forgot-password', { email: 'v@x.io', login: `junk-${Date.now()}` });
         assert.strictEqual(junk.status, 429, 'a junk login field does not open a fresh bucket on an email route');
 
-        // Audit #2: successful sends do not count toward the per-IP ceiling (30), so a NAT can onboard.
+        // Successful sends do not count toward the per-IP ceiling (30), so a NAT can onboard.
         for (let i = 0; i < 35; i++) {
             const r = await post('/auth/register', { email: `s${i}@campus.edu` });
             assert.strictEqual(r.status, 201, `registration ${i + 1} from one IP is not throttled by the ceiling`);
         }
 
-        // Audit #2: a chunked or gzip body is parsed here, so those headers must not be forwarded.
+        // A chunked or gzip body is parsed here, so those headers must not be forwarded.
         const raw = JSON.stringify({ login: 'chunky', password: 'ok' });
         const chunked = await fetch(base + '/auth/login', {
             method: 'POST',

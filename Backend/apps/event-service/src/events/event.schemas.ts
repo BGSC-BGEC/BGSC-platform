@@ -24,7 +24,7 @@ const queryDate = z
 
 /**
  * A link a client renders: http(s), or one of our own `/uploads/...` files. `javascript:` and
- * `data:` URLs were accepted and handed to every browser that opened the event (audit #2).
+ * `data:` URLs were accepted and handed to every browser that opened the event.
  */
 const safeUrl = z
     .string()
@@ -132,11 +132,11 @@ export const CreateEventSchema = z.object({
  *
  * `CreateEventSchema.partial()` was the update schema, and under zod 4 a defaulted key inside
  * `.partial()` still fills its default: `PATCH { title }` came out carrying `type:'LE'`,
- * `auction:null`, `core_admins:[]`, … and `Object.assign` wrote all of it onto the event (audit
- * Sep 26, C2). A patch must describe exactly what the client sent. Arrays are left alone — they are
+ * `auction:null`, `core_admins:[]`, … and `Object.assign` wrote all of it onto the event. A
+ * patch must describe exactly what the client sent. Arrays are left alone — they are
  * replaced whole, so their element defaults are wanted.
  */
-export function patchOf(schema: z.ZodType): z.ZodType {
+function patchOf(schema: z.ZodType): z.ZodType {
     if (schema instanceof z.ZodDefault) return patchOf(schema.unwrap() as z.ZodType);
     if (schema instanceof z.ZodOptional) return patchOf(schema.unwrap() as z.ZodType);
     if (schema instanceof z.ZodNullable) return patchOf(schema.unwrap() as z.ZodType).nullable();
@@ -186,7 +186,7 @@ export const QueryParticipantsSchema = z.object({
     limit: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-export const RecordAttendanceItemSchema = z.object({
+const RecordAttendanceItemSchema = z.object({
     // Registration ids are uuids; anything else is a 422 here, not a wasted downstream lookup.
     registration_id: z.uuid(),
     attended: z.boolean(),
@@ -206,10 +206,10 @@ export const RefParamSchema = z.object({
     ref: z.string().min(1).max(200),
 });
 
+// The seat is idempotent per registration_id. An extra key a caller still sends (the retired
+// `idempotency_key`) is stripped by the non-strict object, not refused.
 export const ReserveSeatSchema = z.object({
     registration_id: z.string().min(1),
-    // The seat is idempotent per registration_id (the contract's key); this is accepted for the wire.
-    idempotency_key: z.string().min(1).optional(),
 });
 
 export const ReleaseSeatSchema = z.object({
@@ -222,7 +222,3 @@ export type UpdateEventInput = Partial<Omit<CreateEventInput, 'type' | 'auction'
 };
 export type QueryEventsInput = z.infer<typeof QueryEventsSchema>;
 export type QueryParticipantsInput = z.infer<typeof QueryParticipantsSchema>;
-export type RecordAttendanceInput = z.infer<typeof RecordAttendanceSchema>;
-export type ManageCaptainInput = z.infer<typeof ManageCaptainSchema>;
-export type ReserveSeatInput = z.infer<typeof ReserveSeatSchema>;
-export type ReleaseSeatInput = z.infer<typeof ReleaseSeatSchema>;

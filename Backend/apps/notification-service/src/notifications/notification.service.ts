@@ -7,6 +7,7 @@ import {
     UserStatus,
     notificationExpiry,
 } from '@bgsc/shared';
+import { Error as MongooseError } from 'mongoose';
 import { v4 as uuid } from 'uuid';
 import { allOf, keysetFilter, pageOf } from './cursor';
 import { ListNotificationsInput } from './notification.schemas';
@@ -39,6 +40,8 @@ const MONGO_DUPLICATE_KEY = 11000;
 interface MongoWriteError {
     code?: number;
     writeErrors?: { code?: number; err?: { code?: number } }[];
+    /** Unordered `insertMany`: one entry per input; a document that failed validation holds its error. */
+    results?: unknown[];
 }
 
 /** A single-document insert that collided with the `(dedupe_key, user_id)` unique index. */
@@ -53,6 +56,9 @@ function isDuplicate(err: unknown): boolean {
  * delivered broadcast, so it is rethrown.
  */
 function allDuplicates(err: unknown): boolean {
+    // Mongoose validates before sending. When the server then reports duplicates, the error thrown
+    // is the driver's, and the documents that failed validation appear only in `results`.
+    if ((err as MongoWriteError)?.results?.some((r) => r instanceof MongooseError.ValidationError)) return false;
     const errors = (err as MongoWriteError)?.writeErrors;
     if (!Array.isArray(errors) || errors.length === 0) return isDuplicate(err);
     return errors.every((e) => (e?.code ?? e?.err?.code) === MONGO_DUPLICATE_KEY);
@@ -118,7 +124,8 @@ export const INSERT_BATCH = 500;
  * first delivery from a replay.
  *
  * `ordered: false` is load-bearing: an ordered insert stops at the first duplicate, so a partially
- * delivered batch would never deliver its tail.
+ * delivered batch would never deliver its tail. `throwOnValidationError` is too: without it an
+ * unordered insert drops a document that fails validation and reports success.
  */
 export async function createMany(inputs: NotificationInput[]): Promise<number> {
     let created = 0;
@@ -126,7 +133,7 @@ export async function createMany(inputs: NotificationInput[]): Promise<number> {
     for (let i = 0; i < inputs.length; i += INSERT_BATCH) {
         const docs = inputs.slice(i, i + INSERT_BATCH).map(documentFor);
         try {
-            const inserted = await Notification.insertMany(docs, { ordered: false });
+            const inserted = await Notification.insertMany(docs, { ordered: false, throwOnValidationError: true });
             created += inserted.length;
         } catch (err) {
             if (!allDuplicates(err)) throw err;
@@ -189,7 +196,8 @@ export async function list(userId: string, input: ListNotificationsInput): Promi
 
     const rows = await Notification.find(allOf(conditions))
         .sort({ created_at: -1, _id: -1 })
-        .limit(input.limit)
+        // One extra row is the proof that a next page exists (`pageOf`).
+        .limit(input.limit + 1)
         .lean<INotification[]>();
 
     const { rows: page, next_cursor } = pageOf(rows, input.limit);

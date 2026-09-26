@@ -27,7 +27,7 @@ import {
  * decided against its owner on the LIVE actor, not the token's role claim.
  *
  * Submit and edit run the form's admin-written patterns, and a 422 costs the caller nothing — so
- * both are rate limited per user (audit #2, ReDoS).
+ * both are rate limited per user.
  */
 
 export const registrationRoutes = Router();

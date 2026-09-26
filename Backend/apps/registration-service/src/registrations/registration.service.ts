@@ -19,7 +19,7 @@ import {
 import { v4 as uuid } from 'uuid';
 import { SubmissionFile, validateAnswers } from './validation';
 import { releaseSeatQuietly, reserveSeat, settleRefusal } from '../clients/event-client';
-import { detachRegistration } from '../teams/team.service';
+import { captainHasTeam, detachRegistration, refuseLeavingDuringAuction } from '../teams/team.service';
 import { FileRefInput } from './registration.schemas';
 import { Actor, OwnerRef, isOwnerAdmin, ownerOfId, requireOwnerAdmin } from '../access';
 import { privatePathOf } from '../storage/storage';
@@ -31,7 +31,7 @@ const PRODUCER = 'registration-service';
  * as a 409; "no answer" — and 401/403, which mean OUR token or routing is wrong, not that the event
  * said no — is a 503 the caller can retry.
  */
-function seatCallError(err: unknown): unknown {
+export function seatCallError(err: unknown): unknown {
     if (!(err instanceof InternalCallError)) return err;
     if (err.outcomeUnknown || err.status === 401 || err.status === 403) return new ServiceError(503, 'event_service_unavailable');
     return new ServiceError(409, err.code);
@@ -39,7 +39,7 @@ function seatCallError(err: unknown): unknown {
 
 /**
  * No `is_admin`: nobody fills admin_only fields on their own submission — not even an event admin
- * registering for their own event. Admin answers go through `updateAdminAnswers` (audit #2).
+ * registering for their own event. Admin answers go through `updateAdminAnswers`.
  */
 interface SubmitRegistrationInput {
     form_id: string;
@@ -55,36 +55,25 @@ interface SubmitRegistrationInput {
  * ------------------------------------------------------------------ */
 
 /**
- * In-memory status change for a document that has not been saved yet (a new submission). Every
- * change to a STORED row goes through `casTransition` instead.
+ * Status change on a submission that has not been saved yet (a new one), which only ever moves to
+ * `submitted` or `confirmed`. Every change to a STORED row goes through `casTransition` instead.
  */
-export async function transition(
-    submission: IFormSubmission,
-    to: SubmissionStatus,
-    by: string,
-    reason: string | null
-): Promise<void> {
-    const from = submission.status;
+function transition(submission: IFormSubmission, to: 'submitted' | 'confirmed', by: string, reason: string | null): void {
+    submission.status_history.push({ from: submission.status, to, by, at: new Date(), reason });
     submission.status = to;
-    // The invariant is "set exactly when waitlisted", so every other status clears it.
-    submission.waitlist_position = to === 'waitlisted' ? await nextWaitlistPosition(submission.owner.id) : null;
-    // A team seat belongs to a confirmed registration — the model refuses any other combination.
-    if (to !== 'confirmed' && submission.context.event?.team_id) submission.context.event.team_id = null;
-    if (to === 'confirmed' && !submission.confirmed_at) submission.confirmed_at = new Date();
-    if (to === 'cancelled') submission.cancelled_at = new Date();
-    submission.status_history.push({ from, to, by, at: new Date(), reason });
+    if (to === 'confirmed') submission.confirmed_at = new Date();
 }
 
 /**
  * The one way a stored registration changes status: a compare-and-swap on the status the caller
  * read. Cancel, admin override and captain approval were read → check → `save()`, and scalar sets
- * carry no version check, so a double-clicked cancel released two seats and promoted two people
- * (backend-audit-2026-09-26 H7). Returns null when the row moved underneath the caller.
+ * carry no version check, so a double-clicked cancel released two seats and promoted two people.
+ * Returns null when the row moved underneath the caller.
  *
  * A query update skips the model's pre-validate hook, so the invariants it enforces are written
  * here: waitlist_position exactly when waitlisted, team link only while confirmed.
  */
-export async function casTransition(
+async function casTransition(
     sub: IFormSubmission,
     to: SubmissionStatus,
     by: string,
@@ -154,10 +143,19 @@ function announceConfirmed(submission: IFormSubmission): void {
     }
 }
 
+function publishWaitlisted(sub: IFormSubmission): void {
+    publish('RegistrationWaitlisted', PRODUCER, {
+        registration_id: sub._id,
+        owner: sub.owner,
+        user_id: sub.user.user_id,
+        position: sub.waitlist_position!,
+    });
+}
+
 /**
  * A registration left `confirmed` (or gave up a seat it may have held). `freed_seat` is true only
- * when the Event Service confirmed the release (H9). `previous_status` tells a waitlist exit from a
- * seat; `role` lets the Event Service drop a departing captain from the auction pool (§7).
+ * when the Event Service confirmed the release. `previous_status` tells a waitlist exit from a
+ * seat; `role` lets the Event Service drop a departing captain from the auction pool.
  */
 function publishLeft(sub: IFormSubmission, previousStatus: SubmissionStatus, freedSeat: boolean, reason: string): void {
     publish('RegistrationCancelled', PRODUCER, {
@@ -178,7 +176,7 @@ const MAY_HOLD_SEAT: SubmissionStatus[] = ['confirmed', 'submitted'];
 /**
  * Release a seat this row was given but does not use — unless the row is in fact confirmed. A CAS
  * loser used to release unconditionally, and when the winner had confirmed the SAME row (two
- * admins, or an admin and a promotion) that took the winner's seat away (audit #2).
+ * admins, or an admin and a promotion) that took the winner's seat away.
  */
 async function releaseUnlessConfirmed(sub: IFormSubmission): Promise<IFormSubmission | null> {
     const now = await FormSubmission.findById(sub._id);
@@ -196,9 +194,9 @@ async function releaseUnlessConfirmed(sub: IFormSubmission): Promise<IFormSubmis
  * registration id on the Event Service, so a retry — or a second caller — never counts twice.
  *
  * Throws `InternalCallError` when the answer is unknown or refused at the HTTP level; the row is
- * then untouched and still `submitted`, and a resubmit retries it.
+ * then untouched and still `submitted`, and the stranded sweep (or a resubmit) retries it.
  */
-async function reserveAndSettle(sub: IFormSubmission, by: string, reason: string): Promise<IFormSubmission> {
+export async function reserveAndSettle(sub: IFormSubmission, by: string, reason: string): Promise<IFormSubmission> {
     const eventId = sub.owner.id!;
     const result = await reserveSeat(eventId, sub._id);
 
@@ -214,14 +212,7 @@ async function reserveAndSettle(sub: IFormSubmission, by: string, reason: string
 
     const to = settleRefusal(result.reason);
     const done = await casTransition(sub, to, 'system', result.reason);
-    if (done && to === 'waitlisted') {
-        publish('RegistrationWaitlisted', PRODUCER, {
-            registration_id: done._id,
-            owner: done.owner,
-            user_id: done.user.user_id,
-            position: done.waitlist_position!,
-        });
-    }
+    if (done && to === 'waitlisted') publishWaitlisted(done);
     return done ?? (await FormSubmission.findById(sub._id)) ?? sub;
 }
 
@@ -234,7 +225,7 @@ export type PromoteOutcome =
 /**
  * waitlisted → confirmed. Exclusive by CAS: any number of instances (each processes the
  * event) or concurrent cancels may try the same row; reserve is idempotent per registration, and
- * only one status swap can win (H8).
+ * only one status swap can win.
  *
  * A deleted account is never promoted into a seat: its row is cancelled instead
  * and the caller moves on to the next head.
@@ -264,11 +255,14 @@ export async function promoteRegistration(sub: IFormSubmission, by: string, reas
 /** Heads tried per call: a head that raced or was skipped moves on to the next one, bounded. */
 const PROMOTE_ATTEMPTS = 10;
 
-/** Last status change was an admin moving a confirmed row onto the waitlist. */
+/**
+ * Last status change was an admin moving the row onto the waitlist, from any status: a seat is
+ * waitlisted by the system only when the event said `capacity_full`.
+ */
 const ADMIN_DEMOTED = {
     $let: {
         vars: { last: { $arrayElemAt: ['$status_history', -1] } },
-        in: { $and: [{ $eq: ['$$last.from', 'confirmed'] }, { $eq: ['$$last.to', 'waitlisted'] }, { $ne: ['$$last.by', 'system'] }] },
+        in: { $and: [{ $eq: ['$$last.to', 'waitlisted'] }, { $ne: ['$$last.by', 'system'] }] },
     },
 };
 
@@ -322,8 +316,8 @@ async function fieldsAt(form: IFormDefinition, version: number): Promise<FormFie
 
 /**
  * `files[]` names uploads; everything stored about them is read from the upload record, which must
- * be this user's, for this form and this field (backend-audit H5). An unknown reference is a
- * validation failure, not a silently trusted URL.
+ * be this user's, for this form and this field. An unknown reference is a validation failure, not a
+ * silently trusted URL.
  *
  * `existing` is the row's own stored files: on an edit, a reference to a file ALREADY on this
  * submission is kept as stored — rows written before `form_uploads` existed have no upload record,
@@ -341,11 +335,11 @@ async function resolveFiles(
     for (const u of uploads) byKey.set(`${u.field_key}|${u.url}`, u);
 
     const resolved: SubmissionFile[] = [];
-    const unknown: { field_key: string; code: string; message: string }[] = [];
+    const unknown: { key: string; code: string; message: string }[] = [];
     for (const ref of refs) {
         const upload = byKey.get(`${ref.field_key}|${ref.url}`);
         if (!upload) {
-            unknown.push({ field_key: ref.field_key, code: 'unknown_upload', message: 'File was not uploaded for this field' });
+            unknown.push({ key: ref.field_key, code: 'unknown_upload', message: 'File was not uploaded for this field' });
             continue;
         }
         resolved.push({ field_key: upload.field_key, url: upload.url, name: upload.name, size: upload.size, mime: upload.mime });
@@ -354,18 +348,25 @@ async function resolveFiles(
     return resolved;
 }
 
-function buildContext(ownerType: string, inputContext: SubmitRegistrationInput['context']): any {
+type EventTeaming = { is_teamed?: boolean; captain_application_required?: boolean } | undefined;
+
+function buildContext(ownerType: string, inputContext: SubmitRegistrationInput['context'], teaming: EventTeaming): any {
     if (ownerType === 'event') {
+        const role = inputContext?.event?.role ?? 'solo';
+        // registration-model.md §3.2.1: captain/member exist only on a teamed event, solo only on
+        // one that is not. The role is the client's claim, so it is checked against the event.
+        if ((role === 'solo') === !!teaming?.is_teamed) throw new ServiceError(422, 'role_mismatch');
         return {
             event: {
-                role: inputContext?.event?.role ?? 'solo',
+                role,
                 team_id: null,
                 team_visibility: inputContext?.event?.team_visibility ?? 'open',
-                // Member-set by design. ponytail: registration-model.md §4 also wants
+                // Member-set by design. ponytail: registration-model.md §3.2.1 also wants
                 // "auction event + role 'member' => base_price > 0"; enforce once it is needed.
                 base_price: inputContext?.event?.base_price ?? null,
                 captain_application: {
-                    status: inputContext?.event?.role === 'captain' ? 'pending' : 'none',
+                    // Without `captain_application_required` a captain is approved by registering.
+                    status: role !== 'captain' ? 'none' : teaming?.captain_application_required ? 'pending' : 'approved',
                     reviewed_by: null,
                     reviewed_at: null,
                     note: null,
@@ -377,6 +378,21 @@ function buildContext(ownerType: string, inputContext: SubmitRegistrationInput['
     // The team link on a challenge row is not the submitter's to choose.
     if (ownerType === 'challenge') return { challenge: { team_id: null } };
     return {};
+}
+
+/**
+ * A challenge's form takes registrations only while the challenge is `active` and inside its
+ * window (`window.opens_at..closes_at`, a null bound is open) — the event path gets the same from
+ * the Event Service's seat call, a challenge has no such call.
+ */
+async function requireChallengeOpen(challengeId: string | null): Promise<void> {
+    const challenge = await Challenge.findOne({ _id: challengeId, deleted_at: null }).select('status window').lean();
+    if (!challenge) throw new ServiceError(404, 'challenge_not_found');
+    if (challenge.status !== 'active') throw new ServiceError(409, 'challenge_not_active');
+    const now = Date.now();
+    const { opens_at, closes_at } = challenge.window ?? {};
+    if (opens_at && now < new Date(opens_at).getTime()) throw new ServiceError(409, 'challenge_not_open');
+    if (closes_at && now > new Date(closes_at).getTime()) throw new ServiceError(409, 'challenge_closed');
 }
 
 export async function submitRegistration(input: SubmitRegistrationInput): Promise<IFormSubmission> {
@@ -391,13 +407,21 @@ export async function submitRegistration(input: SubmitRegistrationInput): Promis
     /**
      * One active registration per owner. For an event the form must be THE event's registration
      * form: a second published form for the same event was a second seat for the same person, and
-     * the unique index is per form (backend-audit, registration medium).
+     * the unique index is per form.
      */
+    let teaming: EventTeaming;
+    let needsApproval = false;
     if (input.owner.type === 'event') {
-        const event = await Event.findOne({ _id: input.owner.id, deleted_at: null }).select('registration.form_id').lean();
+        const event = await Event.findOne({ _id: input.owner.id, deleted_at: null })
+            .select('registration.form_id registration.requires_approval teaming.is_teamed teaming.captain_application_required')
+            .lean();
         if (!event) throw new ServiceError(404, 'event_not_found');
         if (event.registration?.form_id !== form._id) throw new ServiceError(409, 'not_registration_form');
+        teaming = event.teaming;
+        // The row waits `submitted`, holding no seat, until an admin confirms it (which reserves).
+        needsApproval = !!event.registration.requires_approval;
     }
+    if (input.owner.type === 'challenge') await requireChallengeOpen(input.owner.id);
 
     const scope = { ...(input.owner.id ? { 'owner.id': input.owner.id } : { form_id: form._id }), 'user.user_id': input.user_id };
 
@@ -416,11 +440,13 @@ export async function submitRegistration(input: SubmitRegistrationInput): Promis
     const existing = await FormSubmission.findOne({ ...scope, status: { $in: ACTIVE_SUBMISSION_STATUS } });
     if (existing) {
         // A row stranded `submitted` by a reserve whose answer never came back. Resubmitting is the
-        // retry: reserve is idempotent per registration, so it cannot count twice (H9).
+        // retry: reserve is idempotent per registration, so it cannot count twice. A row waiting
+        // for an admin is not stranded.
         const stranded =
             existing.form_id === form._id &&
             existing.status === 'submitted' &&
             isEventRow(existing) &&
+            !needsApproval &&
             existing.context.event?.captain_application.status !== 'pending';
         if (!stranded) throw new ServiceError(409, 'already_registered');
         try {
@@ -450,17 +476,17 @@ export async function submitRegistration(input: SubmitRegistrationInput): Promis
         user: userSnapshotOf(user),
         answers: input.answers,
         files,
-        context: buildContext(input.owner.type, input.context),
+        context: buildContext(input.owner.type, input.context, teaming),
         status: 'draft',
         waitlist_position: null,
         status_history: [],
         submitted_at: new Date(),
     });
-    await transition(submission, 'submitted', input.user_id, null);
+    transition(submission, 'submitted', input.user_id, null);
 
     // Non-event registrations have no capacity to reserve: confirmed in the same insert.
     const noSeat = !isEventRow(submission);
-    if (noSeat) await transition(submission, 'confirmed', 'system', 'auto_confirmed');
+    if (noSeat) transition(submission, 'confirmed', 'system', 'auto_confirmed');
 
     // The unique partial index, not the read above, is what finally rejects a concurrent duplicate.
     try {
@@ -475,16 +501,17 @@ export async function submitRegistration(input: SubmitRegistrationInput): Promis
         return submission;
     }
 
-    // A captain waits for approval before occupying a seat.
-    if (submission.context.event?.captain_application.status === 'pending') {
+    // A captain waits for approval before occupying a seat, and so does everyone on an event that
+    // approves registrations by hand.
+    if (needsApproval || submission.context.event?.captain_application.status === 'pending') {
         return submission;
     }
 
     try {
         return await reserveAndSettle(submission, 'system', 'seat_reserved');
     } catch (err) {
-        // Not a refusal: the row stays `submitted`, which is exactly what it means, and a resubmit
-        // retries the same registration id.
+        // Not a refusal: the row stays `submitted`, which is exactly what it means, and the
+        // stranded sweep (or a resubmit) retries the same registration id.
         console.error(`[registration-service] reserve-seat failed for ${submission._id}:`, err);
         return submission;
     }
@@ -572,11 +599,11 @@ export async function registrationFile(
  * ------------------------------------------------------------------ */
 
 /**
- * `allow_edit_until: 'closes_at'` means the owner's registration window: the event's
- * `registration.closes_at`, a challenge's `window.closes_at` (null = evergreen). It used to be
- * treated as always open. A generic form has no window.
+ * The owner's registration window: the event's `registration.closes_at`, a challenge's
+ * `window.closes_at` (null = evergreen). A generic form has no window. It bounds both
+ * `allow_edit_until: 'closes_at'` (once treated as always open) and a user's own cancel.
  */
-async function editWindowOpen(owner: IFormSubmission['owner']): Promise<boolean> {
+async function windowOpen(owner: IFormSubmission['owner']): Promise<boolean> {
     const now = Date.now();
     if (owner.type === 'event' && owner.id) {
         const event = await Event.findById(owner.id).select('registration.closes_at').lean();
@@ -606,7 +633,7 @@ export async function updateRegistration(
     if (!form) throw new ServiceError(404, 'form_not_found');
     if (form.status === 'archived') throw new ServiceError(409, 'form_archived');
     if (form.settings.allow_edit_until === 'never') throw new ServiceError(409, 'edits_not_allowed');
-    if (form.settings.allow_edit_until === 'closes_at' && !(await editWindowOpen(registration.owner))) {
+    if (form.settings.allow_edit_until === 'closes_at' && !(await windowOpen(registration.owner))) {
         throw new ServiceError(409, 'edit_window_closed');
     }
 
@@ -655,8 +682,8 @@ export async function updateRegistration(
 
 /**
  * An admin of the owner fills the form's admin_only fields on SOMEONE ELSE's registration — the
- * only way those fields are ever written (audit #2: self-submit used to let a core member set them
- * on their own registration). Only admin_only, non-file keys; `null`/`''` clears one.
+ * only way those fields are ever written (self-submit used to let a core member set them on their
+ * own registration). Only admin_only, non-file keys; `null`/`''` clears one.
  *
  * ponytail: answers only. An admin_only FILE field has no write path yet; add an admin upload when a
  * form needs one.
@@ -678,7 +705,7 @@ export async function updateAdminAnswers(
 
     const errors = Object.keys(answers)
         .filter((k) => !allowed.has(k))
-        .map((k) => ({ field_key: k, code: 'not_admin_field', message: `Field '${k}' is not an admin field` }));
+        .map((k) => ({ key: k, code: 'not_admin_field', message: `Field '${k}' is not an admin field` }));
     const provided = adminFields
         .filter((f) => Object.prototype.hasOwnProperty.call(answers, f.key))
         // Checked as plain optional fields: the admin is filling them, visibility is the user's view.
@@ -707,15 +734,35 @@ export async function updateAdminAnswers(
  * Cancel / admin moves
  * ------------------------------------------------------------------ */
 
-/** Owner, or an admin of the owner. Anyone else: 404. */
+/**
+ * A captain gives up their seat only once nobody else depends on it: a team with other members is
+ * disbanded (or handed over) first, or it is left with a seatless captain.
+ *
+ * ponytail: read-then-write; a join landing between this read and the status CAS still strands
+ * that one team. A roster-side guard is the upgrade if it ever happens.
+ */
+async function refuseCaptainWithTeam(sub: IFormSubmission): Promise<void> {
+    if (sub.context.event?.role === 'captain' && (await captainHasTeam(sub.owner.id!, sub.user.user_id))) {
+        throw new ServiceError(409, 'captain_has_team');
+    }
+}
+
+/** Owner (inside the registration window), or an admin of the owner (any time). Anyone else: 404. */
 export async function cancelRegistration(registrationId: string, actor: Actor, reason?: string): Promise<IFormSubmission> {
     const registration = await getOwnRegistration(registrationId, actor);
     if (registration.status === 'cancelled') {
         throw new ServiceError(409, 'already_cancelled');
     }
     // Cancelling a rejected row would erase the rejection that `submitRegistration` checks for —
-    // the ban lifted by the person it bans (audit #2). It holds nothing to give back anyway.
+    // the ban lifted by the person it bans. It holds nothing to give back anyway.
     if (registration.status === 'rejected') throw new ServiceError(409, 'registration_rejected');
+    const admin = await isOwnerAdmin(registration.owner, actor);
+    if (!(await windowOpen(registration.owner)) && !admin) throw new ServiceError(409, 'cancel_window_closed');
+    if (registration.status === 'confirmed') {
+        await refuseCaptainWithTeam(registration);
+        // A player bought in a running auction stays until it finishes; an admin may still remove them.
+        if (!admin) await refuseLeavingDuringAuction(registration.context.event?.team_id);
+    }
 
     const from = registration.status;
     const done = await casTransition(registration, 'cancelled', actor.id, reason ?? 'user_cancel');
@@ -724,13 +771,19 @@ export async function cancelRegistration(registrationId: string, actor: Actor, r
         throw new ServiceError(409, now.status === 'cancelled' ? 'already_cancelled' : 'status_changed');
     }
 
-    // Idempotent on the Event Service, so asking for a `submitted` row is safe — and it is the only
-    // way to recover a seat a lost reserve answer left behind (H9).
+    // Idempotent on the Event Service, so asking for a `submitted` row is safe — and it gives back a
+    // seat a lost reserve answer left behind.
     const released = isEventRow(done) && MAY_HOLD_SEAT.includes(from) ? await releaseSeatQuietly(done.owner.id!, done._id) : false;
     if (from === 'confirmed') await detachRegistration(done._id, done.user.user_id, actor.id, 'registration_cancelled');
 
     publishLeft(done, from, released, reason ?? 'user_cancel');
     return done;
+}
+
+/** An admin of the owner, acting on someone ELSE's registration: nobody approves or overrides their own. */
+async function requireAdminOfOther(sub: IFormSubmission, actor: Actor): Promise<void> {
+    await requireOwnerAdmin(sub.owner, actor);
+    if (sub.user.user_id === actor.id) throw new ServiceError(403, 'cannot_review_own_registration');
 }
 
 /** The captain application's answer when an admin moves a still-pending captain by hand. */
@@ -750,14 +803,14 @@ export async function updateCaptainApplication(
     note?: string
 ): Promise<IFormSubmission> {
     const registration = await getRegistration(registrationId);
-    await requireOwnerAdmin(registration.owner, actor);
+    await requireAdminOfOther(registration, actor);
     if (!registration.context.event) {
         throw new ServiceError(400, 'not_event_registration');
     }
     /**
      * Pending AND still `submitted`, checked in the write itself. Without the status half an
      * approval resurrected a cancelled captain into a seat, and approving one an admin had already
-     * confirmed reserved a second seat (H6).
+     * confirmed reserved a second seat.
      */
     if (registration.context.event.captain_application.status !== 'pending' || registration.status !== 'submitted') {
         throw new ServiceError(409, 'application_not_pending');
@@ -789,7 +842,7 @@ export async function updateCaptainApplication(
     try {
         return await reserveAndSettle(approved, actor.id, 'captain_approved');
     } catch (err) {
-        // Still `submitted` and approved; a resubmit or an admin confirm settles it later.
+        // Still `submitted` and approved; the stranded sweep, a resubmit or an admin confirm settles it.
         console.error(`[registration-service] reserve-seat failed after approval of ${registration._id}:`, err);
         return approved;
     }
@@ -806,16 +859,19 @@ export async function updateRegistrationStatus(
     reason?: string
 ): Promise<IFormSubmission> {
     const registration = await getRegistration(registrationId);
-    await requireOwnerAdmin(registration.owner, actor);
+    await requireAdminOfOther(registration, actor);
 
     // A cancelled registration is the user's decision; re-registering is the path back.
     if (registration.status === 'cancelled') throw new ServiceError(409, 'registration_cancelled');
     if (registration.status === status) throw new ServiceError(409, 'already_in_status');
+    const isEvent = isEventRow(registration);
+    // Only an event has seats; a waitlisted challenge or generic row would never be promoted.
+    if (status === 'waitlisted' && !isEvent) throw new ServiceError(409, 'no_waitlist');
 
     const from = registration.status;
     const why = reason ?? 'admin_override';
     const application = applicationFor(registration, status, actor.id);
-    const isEvent = isEventRow(registration);
+    if (from === 'confirmed') await refuseCaptainWithTeam(registration);
 
     if (status === 'confirmed') {
         if (isEvent) {
@@ -826,7 +882,17 @@ export async function updateRegistrationStatus(
                 console.error(`[registration-service] reserve-seat failed for ${registration._id}:`, err);
                 throw seatCallError(err);
             }
-            if (!result.reserved) throw new ServiceError(409, result.reason);
+            if (!result.reserved) {
+                // Approving a `submitted` row into a full event waitlists it, as a submit would. By
+                // the system, so promotion picks it up: an admin move onto the waitlist is parked.
+                if (from === 'submitted' && result.reason === 'capacity_full') {
+                    const parked = await casTransition(registration, 'waitlisted', 'system', result.reason, { set: application });
+                    if (!parked) throw new ServiceError(409, 'status_changed');
+                    publishWaitlisted(parked);
+                    return parked;
+                }
+                throw new ServiceError(409, result.reason);
+            }
         }
 
         let done: IFormSubmission | null;
@@ -851,8 +917,9 @@ export async function updateRegistrationStatus(
     const released = isEvent && MAY_HOLD_SEAT.includes(from) ? await releaseSeatQuietly(done.owner.id!, done._id) : false;
     if (from === 'confirmed') await detachRegistration(done._id, done.user.user_id, actor.id, 'registration_demoted');
     // A demotion used to publish nothing: the leaderboard kept the entry and the freed seat never
-    // reached the waitlist.
+    // reached the waitlist. The demoted row itself is never promoted back (ADMIN_DEMOTED).
     if (from === 'confirmed' || released) publishLeft(done, from, released, 'admin_demoted');
+    if (status === 'waitlisted') publishWaitlisted(done);
     return done;
 }
 

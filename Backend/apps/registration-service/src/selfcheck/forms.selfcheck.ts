@@ -38,7 +38,7 @@ function validationRules() {
         [],
         { isAdmin: false }
     );
-    assert(errs.some((e) => e.field_key === 'seed' && e.code === 'admin_only'),
+    assert(errs.some((e) => e.key === 'seed' && e.code === 'admin_only'),
         'a hidden admin_only field must still reject a non-admin value');
     assert(!('seed' in smuggle), 'and the value must not survive into the stored answers');
 
@@ -84,12 +84,12 @@ function validationRules() {
         [{ field_key: 'doc', url: '/uploads/x.pdf', name: 'x.pdf', size: 10, mime: 'application/pdf' }],
         { isAdmin: false }
     );
-    assert(fileErrs.some((e) => e.field_key === 'doc' && e.code === 'admin_only'),
+    assert(fileErrs.some((e) => e.key === 'doc' && e.code === 'admin_only'),
         'a non-admin cannot attach a file to an admin_only field');
 
     console.log('✓ admin_only survives hiding, hidden answers are stripped, order does not matter');
 
-    console.log('10. Visibility and type strictness (backend-audit-2026-09-26 H4 + lows)...');
+    console.log('10. Visibility and type strictness...');
     const run = (answers: Record<string, unknown>, fields: any[], files: any[] = []) =>
         validateAnswers(answers, fields, files, { isAdmin: false });
 
@@ -101,13 +101,13 @@ function validationRules() {
             visible_if: { field_key: 'role', op: 'eq', value: 'guest' } }),
         field({ key: 'waiver', type: 'checkbox', required: true, visible_if: { field_key: 'attending', op: 'neq', value: 'no' } }),
     ];
-    assert(run({ role: 'player', attending: 'no' }, chain).some((e) => e.field_key === 'waiver' && e.code === 'required'),
+    assert(run({ role: 'player', attending: 'no' }, chain).some((e) => e.key === 'waiver' && e.code === 'required'),
         'a hidden controller cannot hide a required field');
 
     // Visibility reads the coerced value: "20" and 20 are the same answer.
     const numeric = [field({ key: 'age', type: 'number' }),
         field({ key: 'guard', required: true, visible_if: { field_key: 'age', op: 'eq', value: 20 } })];
-    assert(run({ age: '20' }, numeric).some((e) => e.field_key === 'guard'), 'visibility compares coerced values');
+    assert(run({ age: '20' }, numeric).some((e) => e.key === 'guard'), 'visibility compares coerced values');
 
     const one = (type: string, value: unknown, over: Record<string, unknown> = {}) =>
         run({ x: value }, [field({ key: 'x', type, ...over })]);
@@ -127,13 +127,30 @@ function validationRules() {
     const hiddenFiles = [{ field_key: 'doc', url: '/uploads/x.pdf', name: 'x', size: 1, mime: 'application/pdf' }];
     run({ q: 'no' }, [field({ key: 'q' }), field({ key: 'doc', type: 'file', visible_if: { field_key: 'q', op: 'eq', value: 'yes' } })], hiddenFiles);
     assert(hiddenFiles.length === 0, 'a hidden file field keeps no upload');
+    // A visible_if value is stored as the engine compares it: a date as its instant, a number as a
+    // number. Raw, "2026-01-01" never equalled the coerced date answer and the field stayed hidden.
+    const dated = CreateFormSchema.parse({
+        owner: { type: 'generic', id: null }, title: 't',
+        fields: [field({ key: 'day', type: 'date' }), field({ key: 'age', type: 'number', order: 1 }),
+            field({ key: 'late', required: true, order: 2, visible_if: { field_key: 'day', op: 'eq', value: '2026-01-01' } }),
+            field({ key: 'teen', required: true, order: 3, visible_if: { field_key: 'age', op: 'in', value: ['13', 14] } })],
+    });
+    assert.deepStrictEqual(dated.fields!.map((x: any) => x.visible_if?.value ?? null), [null, null, '2026-01-01T00:00:00.000Z', [13, 14]]);
+    const shown = run({ day: '2026-01-01', age: 13 }, dated.fields as any[]);
+    assert(shown.some((e) => e.key === 'late') && shown.some((e) => e.key === 'teen'), 'date and number conditions now match');
+    const badCond = CreateFormSchema.safeParse({
+        owner: { type: 'generic', id: null }, title: 't',
+        fields: [field({ key: 'age', type: 'number' }), field({ key: 'x', order: 1, visible_if: { field_key: 'age', op: 'eq', value: 'old' } })],
+    });
+    assert(!badCond.success && badCond.error.issues.some((i) => i.message === 'visible_if_value_invalid'),
+        'a condition no answer could ever meet is a 422 at save');
     console.log('✓ hidden controllers, coerced visibility and strict types enforced');
 
-    console.log('11. Admin patterns cannot stall the service (H3)...');
+    console.log('11. Admin patterns cannot stall the service...');
     assert(patternProblem('(') === 'pattern_invalid', 'an invalid pattern is refused at save');
     assert(patternProblem('^(a+)+$') === 'pattern_unsafe', 'a nested quantifier is refused at save');
     assert(patternProblem('^[A-Z]{2}[0-9]{4}$') === null, 'an ordinary pattern is accepted');
-    // Alternation inside a repeated group backtracks exponentially too (audit #2).
+    // Alternation inside a repeated group backtracks exponentially too.
     assert(patternProblem('^(a|a)+$') === 'pattern_unsafe' && patternProblem('^(\\w|\\d)*$') === 'pattern_unsafe',
         'a repeated alternation is refused at save');
     assert(patternProblem('^(?:cat|dog)$') === null && patternProblem('^(ab)?c$') === null, 'plain groups still pass');

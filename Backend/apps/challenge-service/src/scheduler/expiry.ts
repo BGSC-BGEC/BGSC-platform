@@ -20,7 +20,7 @@ const INTERVAL_MS = 60_000;
 const BATCH = 200;
 
 export async function tick(now: Date = new Date()): Promise<{ expired: number; completed: number }> {
-    // (A) Served by the partial index on { status, deadline_at } (Challenge.ts:378-381).
+    // (A) Served by the partial index on { status, deadline_at } (Challenge.ts).
     const due = await ChallengeParticipation.find({ status: 'accepted', deadline_at: { $lte: now } })
         .sort({ deadline_at: 1 })
         .limit(BATCH);
@@ -42,7 +42,7 @@ export async function tick(now: Date = new Date()): Promise<{ expired: number; c
         publish('ChallengeExpired', PRODUCER, { participation_id: p._id, challenge_id: p.challenge_id });
     }
 
-    // (B) Served by { status, window.closes_at } (Challenge.ts:182). `updateMany` runs no document
+    // (B) Served by { status, window.closes_at } (Challenge.ts). `updateMany` runs no document
     // middleware, which is fine here because nothing on this path is derived — and is exactly why
     // it must not also touch `counts`.
     const closed = await Challenge.updateMany(

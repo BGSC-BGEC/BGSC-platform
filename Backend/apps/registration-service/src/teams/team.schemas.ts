@@ -15,6 +15,9 @@ export const CreateTeamSchema = z.object({
     size_max: z.number().int().min(1).optional(),
 });
 
+/** The 8-character code `createTeam` issues (hex, stored uppercase). */
+export const JoinByCodeSchema = z.object({ code: z.string().trim().regex(/^[0-9a-fA-F]{8}$/) });
+
 export const InviteMemberSchema = z.object({
     user_id: z.string().uuid(),
 });
@@ -36,5 +39,6 @@ export const ListTeamsQuery = z.object({
 
 export type CreateTeamInput = z.infer<typeof CreateTeamSchema>;
 export type InviteMemberInput = z.infer<typeof InviteMemberSchema>;
+export type JoinByCodeInput = z.infer<typeof JoinByCodeSchema>;
 export type RemoveMemberInput = z.infer<typeof RemoveMemberSchema>;
 export type ListTeamsInput = z.infer<typeof ListTeamsQuery>;

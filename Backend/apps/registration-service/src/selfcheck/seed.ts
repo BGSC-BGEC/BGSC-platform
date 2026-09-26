@@ -59,6 +59,10 @@ export async function seedEvent(opts: {
     type?: string;
     auctionStatus?: string;
     maxParticipants?: number | null;
+    requiresApproval?: boolean;
+    /** Teamed events only; defaults to true so a captain registers pending. */
+    captainApplication?: boolean;
+    maxTeams?: number | null;
 }): Promise<string> {
     const id = opts.id ?? uuid();
     await Event.collection.insertOne({
@@ -79,10 +83,17 @@ export async function seedEvent(opts: {
             form_id: opts.formId,
             waitlist_enabled: true,
             max_participants: opts.maxParticipants ?? null,
+            requires_approval: opts.requiresApproval ?? false,
         },
         teaming: opts.teamSize
-            ? { is_teamed: true, team_size_min: opts.teamSize[0], team_size_max: opts.teamSize[1] }
-            : { is_teamed: false, team_size_min: null, team_size_max: null },
+            ? {
+                  is_teamed: true,
+                  team_size_min: opts.teamSize[0],
+                  team_size_max: opts.teamSize[1],
+                  max_teams: opts.maxTeams ?? null,
+                  captain_application_required: opts.captainApplication ?? true,
+              }
+            : { is_teamed: false, team_size_min: null, team_size_max: null, max_teams: null, captain_application_required: false },
     });
     return id;
 }
@@ -91,7 +102,7 @@ export async function seedEvent(opts: {
  * A stand-in Event Service speaking the contract: seat holders per event, idempotent
  * reserve/release, `capacity_full` when full with a waitlist, `waitlist_disabled` without one — and
  * every reply wrapped by the REAL `successEnvelope`. A client that forgets to unwrap reads
- * `reserved` as undefined against this stub, which is exactly how C1 shipped unnoticed.
+ * `reserved` as undefined against this stub, which is exactly how that bug once shipped unnoticed.
  */
 export interface EventStub {
     capacity: Map<string, number>;

@@ -176,8 +176,8 @@ const RANK_OF_LABEL: Record<string, RoleName> = {
 };
 
 /**
- * Owner decision (audit #2): an announcement is changed only by its author, or by someone who
- * STRICTLY outranks the author. Before this, any core member could rewrite, publish or delete a
+ * Owner decision: an announcement is changed only by its author, or by someone who STRICTLY
+ * outranks the author. Without it, any core member could rewrite, publish or delete a
  * coordinator's post as long as its audience floor was within their rank.
  *
  * The author's rank is their live role — a demoted author no longer shields their posts from the
@@ -197,11 +197,14 @@ async function assertMayEdit(a: Pick<IAnnouncement, 'author'>, editor: Editor): 
  * Perform a status transition as a compare-and-swap, so two concurrent callers cannot both make it.
  *
  * A read-then-write check lets both halves of a double-clicked Publish through — and each emits
- * its own `AnnouncementPublished`. Week 4's Broadcast Service turns that into two WhatsApp sends to
- * every mapped community group, which is exactly what Spec §9.4's rate limit exists to prevent.
+ * its own `AnnouncementPublished`, which the broadcast turns into two WhatsApp sends to every
+ * mapped community group: exactly what Spec §9.4's rate limit exists to prevent.
  *
  * Filtering on the statuses the transition is legal *from* means the loser matches nothing. On a
  * miss, "gone" and "someone else got there" are different answers, so they get different codes.
+ *
+ * Callers run `loadForEdit` first. Authorship checked ahead of the CAS cannot go stale: `author`
+ * never changes.
  */
 async function claim(
     id: string,
@@ -212,11 +215,6 @@ async function claim(
     publishAt?: Date
 ): Promise<IAnnouncement> {
     const scope = { _id: id, ...alive, ...rankFilter(editor.role) };
-    // Authorship first: `author` never changes, so a check ahead of the CAS cannot go stale.
-    const target = await Announcement.findOne(scope).select('author').lean<Pick<IAnnouncement, 'author'>>();
-    if (!target) throw new ServiceError(404, 'announcement_not_found');
-    await assertMayEdit(target, editor);
-
     const claimed = await Announcement.findOneAndUpdate(
         { ...scope, status: { $in: from }, ...(publishAt ? pinFitsExpiry(publishAt) : {}) },
         { $set: set },
@@ -259,7 +257,7 @@ async function auditCommitted(entry: Parameters<typeof recordAudit>[0]): Promise
  * a query update, which runs no document middleware. The 'teams' role floor needs no such
  * treatment: the hook raised it on the save that created the draft, so it is correct on disk.
  *
- * `delivery.*.requested`: Spec §6.4 auto-sends WhatsApp on publish. Week 4's Broadcast Service reads
+ * `delivery.*.requested`: Spec §6.4 auto-sends WhatsApp on publish. The Notification Service reads
  * these flags and writes the per-category rows back.
  */
 export function publishedSet(now: Date): Record<string, unknown> {
@@ -270,6 +268,26 @@ export function publishedSet(now: Date): Record<string, unknown> {
         'delivery.whatsapp.requested': true,
         'delivery.push.requested': true,
     };
+}
+
+/**
+ * `publishedSet` as an update pipeline that also caps `pinned_until` at the new `expires_at`. The
+ * scheduler's path: the pin was checked against `scheduled_for`, but the tick publishes at `now`,
+ * and at a clamped month end a later publish can expire earlier (Oct 30 23:00 → Feb 28 23:00,
+ * Oct 31 01:00 → Feb 28 01:00). A query update runs no hook, so nothing else would catch it; the
+ * HTTP path refuses instead (`pinFitsExpiry`).
+ */
+export function publishedPipeline(now: Date): Record<string, unknown>[] {
+    const expires = expiryFor(now);
+    return [
+        {
+            $set: {
+                ...publishedSet(now),
+                // `$gt` ranks null below any date, so an unpinned announcement stays unpinned.
+                pinned_until: { $cond: [{ $gt: ['$pinned_until', expires] }, expires, '$pinned_until'] },
+            },
+        },
+    ];
 }
 
 /** Everything that follows a won publish claim, for the HTTP path and the scheduler alike. */
@@ -482,8 +500,8 @@ export async function update(id: string, patch: UpdateAnnouncementInput, editor:
     const a = await loadForEdit(id, editor);
 
     // announcement-model.md §2.2: once it has left draft, categories and audience are frozen —
-    // the WhatsApp fan-out already went out against them, and Week 4 re-deriving from a changed
-    // list would double-send. The model does not enforce this; it has to be refused here.
+    // the WhatsApp fan-out already went out against them, and re-deriving it from a changed list
+    // would double-send. The model does not enforce this; it has to be refused here.
     const touchesAudience =
         patch.audience && (patch.audience.min_role !== undefined || patch.audience.event_id !== undefined);
     if (a.status !== 'draft' && (patch.categories || touchesAudience)) {
@@ -621,6 +639,7 @@ export async function publishOrSchedule(
 }
 
 export async function unschedule(id: string, editor: Editor): Promise<IAnnouncement> {
+    await loadForEdit(id, editor);
     // Compare-and-swap on status='scheduled': a concurrent publishOrSchedule would otherwise
     // be silently overwritten — `status='published'` would revert to `'draft'`, the emitted
     // AnnouncementPublished would point at a doc that no longer reflects it.
@@ -639,6 +658,7 @@ export async function unschedule(id: string, editor: Editor): Promise<IAnnouncem
 }
 
 export async function remove(id: string, editor: Editor): Promise<IAnnouncement> {
+    await loadForEdit(id, editor);
     // The `alive` precondition inside `claim` is what makes this a CAS: the second of two
     // concurrent deletes matches nothing and answers 404, so `AnnouncementDeleted` is emitted once.
     const deleted = await claim(id, editor, ANNOUNCEMENT_STATUS, { deleted_at: new Date() }, 'announcement_not_found');
@@ -667,46 +687,12 @@ const UNMAPPED = '(unmapped)';
 
 /**
  * The composer's label for a destination: enough to tell two groups apart, not the destination.
- * Idempotent — an already-masked label (what the Notification Service sends) passes unchanged —
- * which is what lets `maskLegacyGroupIds` run on every boot. Mirrors `dispatch.ts:maskDestination`.
+ * Idempotent — an already-masked label (what the Notification Service sends) passes unchanged.
+ * Mirrors `dispatch.ts:maskDestination`.
  */
 export function maskGroupId(groupId: string): string {
     if (groupId === UNMAPPED || groupId.startsWith(MASK)) return groupId;
     return groupId.length <= 4 ? MASK : `${MASK}${groupId.slice(-4)}`;
-}
-
-/**
- * One-off repair, run idempotently at boot: receipts written before masking existed carry the raw
- * destination (a phone number — PII) in `delivery.whatsapp.per_category.group_id`. Masks them in
- * place and touches nothing else; a second run finds nothing to do.
- *
- * ponytail: loads each affected document. There are a handful — WhatsApp never ran configured in
- * production — so no bulk pipeline.
- */
-export async function maskLegacyGroupIds(): Promise<number> {
-    const legacy = await Announcement.find({
-        'delivery.whatsapp.per_category': {
-            $elemMatch: { group_id: { $nin: [UNMAPPED], $not: new RegExp(`^${MASK}`) } },
-        },
-    })
-        .select('delivery.whatsapp.per_category')
-        .lean<Pick<IAnnouncement, '_id' | 'delivery'>[]>();
-
-    let masked = 0;
-    for (const a of legacy) {
-        for (const row of a.delivery.whatsapp.per_category) {
-            const label = maskGroupId(row.group_id);
-            if (label === row.group_id) continue;
-            // Guarded on the raw value, so a receipt that landed in between is not overwritten.
-            await Announcement.updateOne(
-                { _id: a._id },
-                { $set: { 'delivery.whatsapp.per_category.$[r].group_id': label } },
-                { arrayFilters: [{ 'r.category': row.category, 'r.group_id': row.group_id }] }
-            );
-            masked += 1;
-        }
-    }
-    return masked;
 }
 
 /**
@@ -757,8 +743,7 @@ async function applyWhatsAppRow(id: string, stored: StoredDeliveryRow): Promise<
 /**
  * Record what the Notification Service's broadcast actually did, per channel.
  *
- * The internal route was built only once it had a caller: Week 4's broadcast is
- * that caller. It is the ONLY write to `delivery.*` — publishing sets the two `requested` flags and
+ * The Notification Service's broadcast is the one caller. This is the ONLY write to `delivery.*` — publishing sets the two `requested` flags and
  * nothing else, because group ids are the broadcaster's configuration, not this service's.
  *
  * Every refusal happens before any write. Query updates run no document middleware, so the model's

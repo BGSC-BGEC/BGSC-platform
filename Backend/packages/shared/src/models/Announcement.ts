@@ -43,10 +43,24 @@ export const ROLE_GATED_MIN_ROLE: RoleName = 'core';
 export const ACTIVE_MONTHS = 4;
 export const ARCHIVE_MONTHS = 8;
 
-export function expiryFor(published_at: Date): Date {
-    const d = new Date(published_at);
-    d.setMonth(d.getMonth() + ACTIVE_MONTHS);
+/**
+ * `from` moved by `months` calendar months in UTC, the day clamped to the target month's last day:
+ * Oct 31 + 4 is Feb 28/29, not Mar 3. Local-time `setMonth` overflowed month ends, answered
+ * differently on an IST host and in a UTC container, and could put a later publish on an earlier
+ * expiry.
+ */
+export function addMonthsUTC(from: Date, months: number): Date {
+    const d = new Date(from);
+    const day = d.getUTCDate();
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() + months);
+    const lastDay = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+    d.setUTCDate(Math.min(day, lastDay));
     return d;
+}
+
+export function expiryFor(published_at: Date): Date {
+    return addMonthsUTC(published_at, ACTIVE_MONTHS);
 }
 
 export interface IAnnouncement extends Document<string> {
@@ -215,8 +229,8 @@ AnnouncementSchema.pre('validate', function (this: IAnnouncement) {
 /**
  * Keyset pagination sorts on `(field, _id)`, so the tiebreaker has to be IN the index or Mongo
  * fetches the whole match and sorts it in memory — correct, invisible at a few hundred rows, and a
- * 32MB sort abort at scale. Measured with `explain()` during the whole-backend audit (Sep 27):
- * before this, the plan was `SORT <- FETCH <- IXSCAN`.
+ * 32MB sort abort at scale. Measured with `explain()`: without `_id` in the index the plan was
+ * `SORT <- FETCH <- IXSCAN`.
  *
  * Each of these supersedes the same index without `_id`; an existing deployment keeps the old one
  * until it is dropped by hand (`adding-a-service.md §9` — adding an index is safe, altering one is

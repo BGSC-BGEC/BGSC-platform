@@ -1,18 +1,18 @@
 import { Request, Response } from 'express';
-import { wrap, Event, User, UserStatus } from '@bgsc/shared';
+import { wrap, Event, ServiceError, User, UserStatus } from '@bgsc/shared';
 import * as svc from './event.service';
-import { assertEventAdmin } from './access';
-import { putObject, sniffImage, IMAGE_MAX_BYTES } from '../storage/storage';
+import { TERMINAL_STATUSES, assertEventAdmin } from './access';
+import { deleteObject, putObject, sniffImage } from '../storage/storage';
 import { invalidateAuctionLiveCache } from '../auction/cache';
 
 /**
  * The actor for a guarded write: the document `requireActiveUser` loaded, not the token's claim —
- * the claim stays valid for up to fifteen minutes after a demotion (whole-backend audit, Sep 27).
+ * the claim stays valid for up to fifteen minutes after a demotion.
  * Every write route mounts `requireActiveUser`.
  */
 const writeActor = (req: Request) => ({ id: req.actor!._id, role: req.actor!.role });
 /**
- * The live viewer on an optional-auth read that shows admins more (participants): the token's
+ * The live viewer on an optional-auth read that shows admins more (participants, their stats): the token's
  * role could be fifteen minutes stale. A deleted or suspended account reads as the public.
  */
 const liveViewer = async (req: Request) => {
@@ -46,6 +46,8 @@ export const uploadMedia = wrap(async (req: Request, res: Response) => {
     const actor = writeActor(req);
     const event = await svc.findByRef(refOf(req), actor);
     assertEventAdmin(event, actor);
+    // Past and cancelled events are records; their media is frozen with them.
+    if (TERMINAL_STATUSES.includes(event.status)) throw new ServiceError(409, 'event_is_terminal');
 
     const kind = req.query.type ?? 'cover';
     if (kind !== 'cover' && kind !== 'logo') {
@@ -55,9 +57,6 @@ export const uploadMedia = wrap(async (req: Request, res: Response) => {
     const body = req.body as Buffer;
     if (!Buffer.isBuffer(body) || body.length === 0) {
         return void res.status(422).json({ error: 'validation_failed', fields: [{ key: 'body', code: 'empty' }] });
-    }
-    if (body.length > IMAGE_MAX_BYTES) {
-        return void res.status(413).json({ error: 'payload_too_large' });
     }
 
     const mime = sniffImage(body);
@@ -69,8 +68,16 @@ export const uploadMedia = wrap(async (req: Request, res: Response) => {
     const stored = await putObject(event._id, body, mime);
 
     // A targeted `$set`, not `save()`: one field changes, and a full save re-validated the whole
-    // document just to swap an image URL.
-    await Event.updateOne({ _id: event._id }, { $set: { [targetType]: stored.url } });
+    // document just to swap an image URL. The replaced file is removed (only if it is one of ours,
+    // and not still shown as the other image: cover and logo may point at the same file).
+    const otherType = kind === 'logo' ? 'cover_media_url' : 'logo_url';
+    const before = await Event.findOneAndUpdate(
+        { _id: event._id },
+        { $set: { [targetType]: stored.url } },
+        { projection: { logo_url: 1, cover_media_url: 1 } }
+    ).lean();
+    const replaced = (before?.[targetType] as string | null | undefined) ?? null;
+    if (replaced !== before?.[otherType]) await deleteObject(event._id, replaced);
     invalidateAuctionLiveCache(event._id);
 
     res.status(201).json({ url: stored.url, type: targetType, bytes: stored.bytes, mime: stored.mime });
@@ -89,7 +96,7 @@ export const participants = wrap(async (req: Request, res: Response) => {
 });
 
 export const participantStats = wrap(async (req: Request, res: Response) => {
-    res.json(await svc.getEventParticipantStats(refOf(req), req.user));
+    res.json(await svc.getEventParticipantStats(refOf(req), await liveViewer(req)));
 });
 
 export const waitlist = wrap(async (req: Request, res: Response) => {

@@ -4,7 +4,8 @@ import { invalidateAuctionLiveCache } from '../auction/cache';
 
 /**
  * Event-service domain event consumers:
- * 1. CaptainApproved: add the captain to `auction.captain_user_ids` of an auction league (Spec §5.5).
+ * 1. CaptainApproved (Registration Service publishes it on every captain confirmation): add the
+ *    captain to `auction.captain_user_ids` of an auction league (Spec §5.5).
  * 2. UserProfileUpdated / UserRestored: re-snapshot the name on `events.contacts` and on auction lots.
  * 3. UserDeleted: anonymize those same snapshots, and drop the contact detail.
  * 4. RegistrationCancelled: release the seat (idempotent) — a safety net for a release-seat call
@@ -27,7 +28,12 @@ interface RegistrationCancelledPayload {
     user_id?: string;
     role?: string;
     previous_status?: string;
+    /** True when Registration's own release-seat call confirmed the seat came back. */
+    freed_seat?: boolean;
 }
+
+/** Rows that may have held a seat when they left (a `submitted` one after a reserve whose answer was lost). */
+const MAY_HAVE_HELD_SEAT = ['confirmed', 'submitted'];
 
 const log = (what: string, err: unknown) => console.error(`[event-service] ${what} failed:`, err);
 
@@ -48,7 +54,7 @@ export function initializeConsumers(): void {
 /**
  * Only an auction league (`type: 'ALL'`) has captains. This used to create an auction block on
  * `LE` events through `updateOne`, which skips the model's invariant hook — every later save of
- * that event then failed it with a 500 (audit Sep 26, H25). A captain approved while the auction is
+ * that event then failed it with a 500. A captain approved while the auction is
  * paused is added too; only a finished auction is closed to new captains.
  */
 export async function handleCaptainApproved(payload: CaptainApprovedPayload): Promise<void> {
@@ -57,7 +63,8 @@ export async function handleCaptainApproved(payload: CaptainApprovedPayload): Pr
     try {
         const res = await Event.updateOne(
             { _id: event_id, type: 'ALL', auction: { $ne: null }, 'auction.status': { $ne: 'finished' } },
-            { $addToSet: { 'auction.captain_user_ids': user_id } }
+            { $addToSet: { 'auction.captain_user_ids': user_id } },
+            { timestamps: false } // bookkeeping: `updated_at` is the admin PATCH's version
         );
         if (res.modifiedCount === 1) invalidateAuctionLiveCache(event_id);
     } catch (err) {
@@ -135,18 +142,26 @@ export async function handleUserDeleted(payload: { user_id: string }): Promise<v
 export async function handleRegistrationCancelled(payload: RegistrationCancelledPayload): Promise<void> {
     if (payload.owner?.type !== 'event' || !payload.owner.id || !payload.registration_id) return;
     try {
-        // Late-delivered safety net: if the row is confirmed again by now (demote then re-confirm),
-        // it holds its seat legitimately and releasing here would let the event overbook.
-        const row = await FormSubmission.findById(payload.registration_id).select('status').lean();
-        if (row?.status === 'confirmed') return;
-        await releaseSeat(payload.owner.id, payload.registration_id);
+        // Safety net for a release Registration could not complete — and only that. When this
+        // cancellation already freed the seat (`freed_seat`), or the row never held one (it left the
+        // waitlist), any seat it holds now is a fresh one: an admin re-confirm reserves BEFORE it
+        // flips the row, so "not confirmed right now" used to strip that seat mid-confirm and leave a
+        // confirmed row seatless. A row confirmed again by now keeps its seat too.
+        // ponytail: a re-confirm racing a cancel whose own release failed can still lose its seat here;
+        // the seat reconciliation sweep does not re-add it. Closing that needs a per-seat generation.
+        const mayHold = payload.previous_status === undefined || MAY_HAVE_HELD_SEAT.includes(payload.previous_status);
+        if (!payload.freed_seat && mayHold) {
+            const row = await FormSubmission.findById(payload.registration_id).select('status').lean();
+            if (row?.status !== 'confirmed') await releaseSeat(payload.owner.id, payload.registration_id);
+        }
 
         // A confirmed captain who is cancelled leaves `auction.captain_user_ids` — a
         // cancelled captain could otherwise keep bidding (placeBid also re-checks the registration).
         if (payload.role === 'captain' && payload.previous_status === 'confirmed' && payload.user_id) {
             const res = await Event.updateOne(
                 { _id: payload.owner.id, type: 'ALL' },
-                { $pull: { 'auction.captain_user_ids': payload.user_id } }
+                { $pull: { 'auction.captain_user_ids': payload.user_id } },
+                { timestamps: false }
             );
             if (res.modifiedCount === 1) invalidateAuctionLiveCache(payload.owner.id);
         }

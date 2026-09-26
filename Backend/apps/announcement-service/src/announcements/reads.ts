@@ -10,7 +10,7 @@ import { Viewer, allOf, audienceFilter } from './audience';
  *
  * The two fields answer one question together. `last_seen_at` is a watermark: everything published
  * at or before it is read. `read_ids` holds the cards opened individually since. Both the badge and
- * the per-card dot use both, so "read all" clears the dots and not just the count.
+ * the per-card dot use both: opening a card lowers the badge, and "read all" clears the dots too.
  */
 
 /** announcement-model.md §3. Enforced by Mongo's own `$slice`, not by reading the array first. */
@@ -52,14 +52,15 @@ export async function markRead(userId: string, announcementId: string): Promise<
  * filter — add a `_id: { $nin }` when the badge has to track single reads.
  */
 export async function unreadCount(viewer: Viewer): Promise<number> {
-    const user = await User.findById(viewer.id).select('announcements.last_seen_at');
+    const user = await User.findById(viewer.id).select('announcements.last_seen_at announcements.read_ids');
     if (!user) throw new ServiceError(401, 'unauthorized');
 
     // Never seen the tab: everything currently visible is unread.
     const since = user.announcements?.last_seen_at ?? new Date(0);
+    const opened = user.announcements?.read_ids ?? [];
 
     return Announcement.countDocuments(
-        allOf([audienceFilter(viewer), { published_at: { $gt: since } }])
+        allOf([audienceFilter(viewer), { published_at: { $gt: since } }, { _id: { $nin: opened } }])
     );
 }
 

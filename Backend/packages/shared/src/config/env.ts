@@ -61,8 +61,6 @@ function parseGroupMap(raw: string | undefined): Record<string, string> {
 }
 
 export const config = {
-  /** Overridden per service; each passes its own port to startService(). */
-  port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   mongoUri: process.env.MONGO_URI || 'mongodb://bgsc_admin:bgsc_password@localhost:27017/bgsc_dev?authSource=admin',
   jwt: {
@@ -181,7 +179,7 @@ export const config = {
 
   /**
    * Where every service that stores files writes them, and where media-service serves `/uploads`
-   * from. ONE directory for the platform (audit Sep 26): four services each wrote a private
+   * from. ONE directory for the platform: four services each wrote a private
    * `apps/<svc>/uploads`, which was neither the mounted volume nor the directory the gateway's
    * `/uploads` route reads. Compose sets `/app/uploads` (one shared volume); on the host it is
    * `Backend/uploads`, beside the `.env`. Each service writes under its own prefix.
@@ -192,11 +190,11 @@ export const config = {
   redisUrl: process.env.REDIS_URL || '',
   /**
    * The Redis password, kept OUT of the URL. Pasted raw into `REDIS_URL`, a password containing
-   * `/ # ? %` made the URL unparseable (every service crash-looped) and `%40` silently failed auth
-   * (audit #2). Set here it overrides any password in the URL. See `redisOptions()`.
+   * `/ # ? %` made the URL unparseable (every service crash-looped) and `%40` silently failed auth.
+   * Set here it overrides any password in the URL. See `redisOptions()`.
    */
   redisPassword: process.env.REDIS_PASSWORD || '',
-  /** Verification-only previous bus key, for rotating INTERNAL_API_TOKEN. Blank = no rotation. */
+  /** Verification-only previous key (bus + /internal), for rotating INTERNAL_API_TOKEN. Blank = no rotation. */
   internalTokenPrevious: process.env.INTERNAL_API_TOKEN_PREVIOUS || '',
 
   /**

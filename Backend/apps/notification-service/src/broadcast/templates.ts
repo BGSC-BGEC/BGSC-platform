@@ -1,7 +1,7 @@
 import { NotificationCategory } from '@bgsc/shared';
 
 /**
- * The message templating system (MVP plan Week 4 Saturday).
+ * The message templating system.
  *
  * One registry keyed by notification type, so the wording of every message the platform sends is
  * in one file rather than inlined at six call sites. `{{var}}` interpolation, nothing more —
@@ -89,10 +89,11 @@ export const TEMPLATES = {
         title: 'Signed to {{team_name}}',
         body: '{{team_name}} bought you for {{amount}} in the {{event_title}} auction.',
     },
+    // The name stays in the title only: `onUserDeleted` re-renders the title and swaps the body for generic text.
     'auction.sold.captain': {
         category: 'event',
         title: 'You signed {{player_name}}',
-        body: '{{player_name}} joins {{team_name}} for {{amount}} in the {{event_title}} auction.',
+        body: 'Your new player joins {{team_name}} for {{amount}} in the {{event_title}} auction.',
     },
 } as const satisfies Record<string, Template>;
 

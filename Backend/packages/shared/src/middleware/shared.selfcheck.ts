@@ -109,7 +109,7 @@ publish('AnythingAtAll', 'p', {});
 assert.strictEqual(starred, 1, "'*' receives every event (audit / analytics consumers)");
 resetBus();
 
-// Listener isolation (audit Sep 26): EventEmitter.emit stopped at the first throwing listener, so a
+// Listener isolation: EventEmitter.emit stopped at the first throwing listener, so a
 // broken consumer silently starved every other consumer of the type and every '*' listener.
 {
     let after = 0;
@@ -132,7 +132,7 @@ resetBus();
     resetBus();
 }
 
-// Wire signing + own-message suppression (audit Sep 26): anything that could reach Redis could
+// Wire signing + own-message suppression: anything that could reach Redis could
 // publish a forged ChallengeCompleted, and own-echo suppression was a bounded id set.
 {
     const quiet = console.error;
@@ -149,7 +149,7 @@ resetBus();
     assert.strictEqual(decodeWire(JSON.stringify(wire)), null, 'a tampered payload fails the signature');
     assert.strictEqual(decodeWire('not json'), null, 'garbage is dropped, not thrown');
 
-    // Audit #2: rotating INTERNAL_API_TOKEN dropped every in-flight message. The previous key is
+    // Rotating INTERNAL_API_TOKEN dropped every in-flight message. The previous key is
     // accepted for verification only; anything else is still refused.
     const signedWithOld = (() => {
         const current = config.internalToken;
@@ -167,7 +167,7 @@ resetBus();
 
 /* ---------------------------- Redis connection ---------------------------- */
 
-// Audit #2: a raw password in REDIS_URL with `/ # ? %` crashed every service at boot, and ioredis
+// A raw password in REDIS_URL with `/ # ? %` crashed every service at boot, and ioredis
 // lets a URL password beat an options password. The password now travels on its own.
 {
     const pw = 'p/w#x?y%z@q';
@@ -232,7 +232,7 @@ async function auditChecks(): Promise<void> {
         /append-only/,
         'deleting audit rows'
     );
-    // Audit Sep 26: re-saving a loaded row and bulkWrite bypassed the query hooks.
+    // Re-saving a loaded row and bulkWrite bypassed the query hooks.
     const loaded = AuditLog.hydrate({ _id: 'a-1', actor_id: null, action: 'user.suspended', target_type: 'user', target_id: 'u-1', new_value: { status: 'suspended' } });
     loaded.reason = 'rewritten';
     await assert.rejects(() => loaded.save(), /append-only/, 're-saving a loaded audit row');
@@ -266,6 +266,22 @@ const refusal = runErr(new ServiceError(409, 'already_published'));
 assert.strictEqual(refusal.status, 409, 'a ServiceError keeps its status');
 assert.strictEqual(refusal.body.error, 'already_published', 'and its code');
 
+// One 422 shape: a service rule's per-field reasons arrive under `fields`, like validate()'s.
+{
+    const v = runErr(new ServiceError(422, 'validation_failed', [{ key: 'age', code: 'required' }]));
+    assert.deepStrictEqual(v.body, { error: 'validation_failed', fields: [{ key: 'age', code: 'required' }] }, 'ServiceError validation details are `fields`');
+    const other = runErr(new ServiceError(409, 'conflict', { at: 1 }));
+    assert.deepStrictEqual(other.body, { error: 'conflict', details: { at: 1 } }, 'other refusals keep `details`');
+}
+
+// After a response has started there is nothing left to send: hand it to Express, don't throw.
+{
+    let passed: unknown = null;
+    const res = { headersSent: true, status() { throw new Error('must not set a status'); } } as unknown as Response;
+    errorHandler('selfcheck')(new Error('mid-stream'), {} as Request, res, (e?: unknown) => { passed = e; });
+    assert.ok(passed instanceof Error, 'an error after headers are sent is passed on to Express');
+}
+
 // body-parser's own errors. A malformed body is the client's mistake, not the server's: answering
 // 500 tells the caller to retry something that can never succeed.
 const malformed = Object.assign(new SyntaxError('Unexpected token'), {
@@ -287,13 +303,18 @@ const hidden = runErr(internal);
 assert.strictEqual(hidden.status, 500, 'an untagged error is 500 even with a 4xx status on it');
 assert.strictEqual(hidden.body.error, 'internal_error', 'and leaks nothing');
 
-// Audit Sep 26: a ZodError that escapes validate() is the client's input, and a malformed
+// A ZodError that escapes validate() is the client's input, and a malformed
 // percent-escape in a path param (the router's URIError) is a bad request — neither is a 500.
 {
     const zerr = z.object({ n: z.number() }).safeParse({ n: 'x' }).error!;
     const zr = runErr(zerr);
     assert.strictEqual(zr.status, 422, 'an escaped ZodError is 422');
     assert.strictEqual(zr.body.error, 'validation_failed', 'with the validation code');
+    const merr = new (require('mongoose') as typeof import('mongoose')).Error.ValidationError();
+    merr.addError('full_name', new (require('mongoose') as typeof import('mongoose')).Error.ValidatorError({ path: 'full_name', type: 'required', message: 'x' }));
+    const mr = runErr(merr);
+    assert.strictEqual(mr.status, 422, 'a Mongoose ValidationError is the client\'s input, 422 not 500');
+    assert.deepStrictEqual(mr.body.fields, [{ key: 'full_name', code: 'required' }], 'naming the field and the rule');
     const ur = runErr(Object.assign(new URIError('Failed to decode param'), { status: 400 }));
     assert.strictEqual(ur.status, 400, 'a URIError from the router is 400');
 }
@@ -308,7 +329,7 @@ assert.strictEqual(hidden.body.error, 'internal_error', 'and leaks nothing');
     assert.strictEqual(isEnveloped([1]), false, 'arrays are wrapped');
 }
 
-// callInternal unwraps the envelope and types failures (audit C1).
+// callInternal unwraps the envelope and types failures.
 const callInternalChecks = (async () => {
     const { callInternal, InternalCallError, unwrapEnvelope } = require('../http/internal') as typeof import('../http/internal');
     assert.deepStrictEqual(unwrapEnvelope({ success: true, data: { reserved: true } }), { reserved: true }, 'unwrap takes data');
@@ -326,7 +347,7 @@ const callInternalChecks = (async () => {
     console.log('shared selfcheck: envelope, error mapping and callInternal passed');
 })().catch((err) => { console.error(err); process.exit(1); });
 
-// Audit #2: an unreadable 2xx body is outcome-unknown, not a null success; and event-admin scope.
+// An unreadable 2xx body is outcome-unknown, not a null success; and event-admin scope.
 // Chained after the check above: both stub the global `fetch`, and running them concurrently let
 // one test's stub answer the other's call.
 void callInternalChecks.then(async () => {

@@ -65,7 +65,7 @@ export interface Actor {
  *
  * An ANONYMOUS ticket from a signed-in user is keyed by the address too, never by the account: a
  * `user:<id>` throttle row stamped the same millisecond as an anonymous ticket is the reporter's
- * name written one collection over (audit Sep 26).
+ * name written one collection over.
  */
 export function subjectKey(submitter: Submitter, anonymous = submitter.user === null): string {
     if (submitter.user && !anonymous) return `user:${submitter.user._id}`;
@@ -97,7 +97,7 @@ export function rateSubject(ip: string | null): string {
 
 /**
  * Insert first, then count what arrived up to and including our own row. A count-then-insert let
- * every one of N parallel requests see "under the cap" and pass (audit #2); now each request is
+ * every one of N parallel requests see "under the cap" and pass; now each request is
  * counted before it is judged, so a burst of N lets at most the cap through — and a same-millisecond
  * tie errs towards refusing both, which is the right way for an abuse cap to be wrong. A refused
  * request takes its row back out, so a flood does not keep extending its own lockout.
@@ -193,7 +193,7 @@ async function create(
 
 /**
  * `ticket_no` is random and unique-indexed, so a collision is a retry rather than a read-then-write
- * race. Three attempts: at 2^40 possibilities the second is already paranoia.
+ * race. Three attempts: at 28^8 (about 2^38.5) possibilities the second is already paranoia.
  */
 async function insertWithUniqueNumber(fields: Record<string, unknown>): Promise<IFeedbackTicket> {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -216,7 +216,7 @@ export const submitContact = (input: SubmitContactInput, submitter: Submitter) =
  * Reads
  * ------------------------------------------------------------------ */
 
-const isStaff = (role: RoleName | undefined): boolean => !!role && roleRank(role) >= roleRank(STAFF_FLOOR);
+export const isStaff = (role: RoleName | undefined): boolean => !!role && roleRank(role) >= roleRank(STAFF_FLOOR);
 
 export interface ListResult {
     tickets: IFeedbackTicket[];
@@ -302,9 +302,10 @@ export async function setStatus(
         throw new ServiceError(422, 'illegal_transition', { from: current.status, to: input.status });
     }
 
+    const now = new Date();
     const set: Record<string, unknown> = { status: input.status };
     if (input.response) {
-        set.response = { body: input.response, by_user_id: actor.id, at: new Date() };
+        set.response = { body: input.response, by_user_id: actor.id, at: now };
     }
 
     const updated = await FeedbackTicket.findOneAndUpdate(
@@ -316,7 +317,7 @@ export async function setStatus(
                     from: current.status,
                     to: input.status,
                     by: actor.id,
-                    at: new Date(),
+                    at: now,
                     reason: input.response ? 'response sent' : null,
                 },
             },
@@ -348,6 +349,9 @@ export async function setStatus(
             ticket_id: updated._id,
             ticket_no: updated.ticket_no,
             reporter_user_id: updated.reporter.user_id,
+            // Which reply this is, from the write itself. Notification dedupes on it; reading
+            // `response.at` at consume time let two quick replies collapse into one notice.
+            responded_at: now.toISOString(),
         });
     }
 

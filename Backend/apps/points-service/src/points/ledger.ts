@@ -315,15 +315,3 @@ export async function ledgerSum(user_id: string): Promise<number> {
     ]);
     return row?.total ?? 0;
 }
-
-/**
- * Cache minus ledger. Non-zero needs a crash between the `$inc` and its compensation — narrow, and
- * the only window there is, which is why there is no nightly reconciliation job.
- */
-export async function drift(user_id: string): Promise<number> {
-    const [user, total] = await Promise.all([
-        User.findById(user_id).select('points_balance'),
-        ledgerSum(user_id),
-    ]);
-    return (user?.points_balance ?? 0) - total;
-}

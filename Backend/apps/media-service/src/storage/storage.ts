@@ -14,8 +14,8 @@ import { config } from '@bgsc/shared';
  *    registrations are other services' prefixes in the same directory.
  *  - `PENDING_DIR` holds files nobody has approved yet. It lives on the same volume so it survives
  *    a restart and an approval is a rename, but under a dot-directory, which the static mount
- *    ignores (`dotfiles: 'ignore'` → 404). A pending or rejected upload is never publicly served —
- *    before the Sep 26 audit, moderation hid the gallery row and served the file anyway.
+ *    ignores (`dotfiles: 'ignore'` → 404). A pending or rejected upload is never publicly served;
+ *    its uploader and moderators fetch it through `GET /media/:id/file`, which checks who is asking.
  */
 
 export const UPLOAD_DIR = config.uploadDir;
@@ -46,6 +46,32 @@ export interface SniffedMedia {
     ext: string;
 }
 
+const MP4_BRANDS = new Set([
+    'isom', 'iso2', 'iso3', 'iso4', 'iso5', 'iso6', 'iso7', 'iso8', 'iso9',
+    'mp41', 'mp42', 'mmp4', 'avc1', 'dash', 'M4V ', 'MSNV', 'XAVC', 'f4v ',
+]);
+/**
+ * Major brands that are not video however MP4-compatible they claim to be: HEIF/AVIF image
+ * sequences list `iso8`, and iTunes audio lists `mp42`/`isom`.
+ */
+const NOT_VIDEO_BRANDS = new Set(['heic', 'heix', 'mif1', 'msf1', 'avif', 'avis', 'M4A ', 'M4B ']);
+
+/**
+ * The `ftyp` box: major brand at 8..12, then (after the minor version) compatible brands from 16 to
+ * the box's end, four bytes each, bounded by what was sniffed. MP4 if the major brand or any
+ * compatible one is an MP4 brand — encoders put their own major brand first (`qt  `, `3gp4`, ...).
+ */
+function isMp4(buf: Buffer): boolean {
+    const major = buf.subarray(8, 12).toString('latin1');
+    if (NOT_VIDEO_BRANDS.has(major)) return false;
+    if (MP4_BRANDS.has(major)) return true;
+    const end = Math.min(buf.readUInt32BE(0), buf.length);
+    for (let i = 16; i + 4 <= end; i += 4) {
+        if (MP4_BRANDS.has(buf.subarray(i, i + 4).toString('latin1'))) return true;
+    }
+    return false;
+}
+
 /**
  * Sniff real media format directly from magic bytes.
  * Client-provided Content-Type headers and extensions are untrusted.
@@ -68,9 +94,10 @@ export function sniffMedia(buf: Buffer): SniffedMedia | null {
         return { mime: 'image/webp', type: 'image', ext: 'webp' };
     }
 
-    // MP4: offset 4-8 has 'ftyp'
+    // MP4: offset 4-8 has 'ftyp'. Every ISO-BMFF file has an `ftyp` box — HEIC, AVIF, QuickTime,
+    // 3GP, JPEG 2000 — so its brands decide whether it is an MP4 at all.
     if (buf.subarray(4, 8).toString('ascii') === 'ftyp') {
-        return { mime: 'video/mp4', type: 'video', ext: 'mp4' };
+        return isMp4(buf) ? { mime: 'video/mp4', type: 'video', ext: 'mp4' } : null;
     }
 
     // WebM: EBML header ID 0x1A 0x45 0xDF 0xA3
@@ -147,16 +174,21 @@ export const publishMediaObject = (key: string) => move(key, PENDING_DIR, UPLOAD
 /** Back to review: the file stops being served. */
 export const withdrawMediaObject = (key: string) => move(key, UPLOAD_DIR, PENDING_DIR);
 
-/** Whether the file exists in either tree — a legacy row can point at a file that never moved here. */
-export async function hasMediaObject(key: string): Promise<boolean> {
+/**
+ * Where the file is on disk, in either tree, or null — a legacy row can point at a file that never
+ * moved here. `key` must come from a stored row, never from a request.
+ */
+export async function locateMediaObject(key: string): Promise<string | null> {
     for (const root of [PENDING_DIR, UPLOAD_DIR]) {
+        let dest: string;
         try {
-            if (await exists(within(root, key))) return true;
+            dest = within(root, key);
         } catch {
-            return false;
+            return null;
         }
+        if (await exists(dest)) return dest;
     }
-    return false;
+    return null;
 }
 
 /**
@@ -164,7 +196,7 @@ export async function hasMediaObject(key: string): Promise<boolean> {
  *
  * Pending, public, pending again: a concurrent approve (pending → public) or withdraw (public →
  * pending) renames between two `rm`s, and a single pass in either order can miss the file and
- * orphan it in the tree it just moved to (audit #2). Three passes catch one move either way.
+ * orphan it in the tree it just moved to. Three passes catch one move either way.
  */
 export async function deleteMediaObject(key: string): Promise<void> {
     for (const root of [PENDING_DIR, UPLOAD_DIR, PENDING_DIR]) {

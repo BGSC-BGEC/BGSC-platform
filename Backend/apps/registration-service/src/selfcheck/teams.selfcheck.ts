@@ -47,7 +47,7 @@ async function main() {
     const eventId = uuid();
     const form = await formService.createForm({ owner: { type: 'event', id: eventId }, title: 'Team Event', fields: [NAME_FIELD], created_by: adminId });
     await formService.publishForm(form._id);
-    // The event, not the captain, says how big a team is (known issue 3).
+    // The event, not the captain, says how big a team is.
     await seedEvent({ id: eventId, formId: form._id, createdBy: adminId, teamSize: [2, 2] });
 
     const register = (userId: string, role: 'captain' | 'member', visibility: 'open' | 'closed' = 'open') =>
@@ -212,6 +212,62 @@ async function main() {
     await assert.rejects(() => teamService.disbandTeam(team._id), (err: any) => err.code === 'already_disbanded');
     console.log('✓');
 
+    console.log('11b. A disbanded name is free; max_teams; a captain with members cannot leave...');
+    const alpha2 = await teamService.createTeam({ owner: { type: 'event', id: eventId }, name: 'Alpha', captain_user_id: cap2._id });
+    assert.strictEqual(alpha2.name, 'Alpha', 'the disbanded team no longer holds its name');
+    await Event.collection.updateOne({ _id: eventId as any }, { $set: { 'teaming.max_teams': 1 } });
+    const cap3 = await seedUser('Cap Three');
+    const cap3Reg = await register(cap3._id, 'captain');
+    await registrationService.updateCaptainApplication(cap3Reg._id, admin, 'approved');
+    await assert.rejects(() => teamService.createTeam({ owner: { type: 'event', id: eventId }, name: 'Third', captain_user_id: cap3._id }),
+        (err: any) => err.status === 409 && err.code === 'max_teams_reached');
+    await Event.collection.updateOne({ _id: eventId as any }, { $set: { 'teaming.max_teams': null } });
+
+    const mate = await seedUser('Mate');
+    const mateReg = await register(mate._id, 'member');
+    await teamService.inviteMember(alpha2._id, cap2._id, mate._id);
+    await teamService.joinTeam(alpha2._id, mate._id);
+    await assert.rejects(() => registrationService.cancelRegistration(cap2Reg._id, as(cap2._id)), (err: any) => err.code === 'captain_has_team',
+        'a captain cannot walk out on a team that still has members');
+    await assert.rejects(() => registrationService.updateRegistrationStatus(cap2Reg._id, admin, 'rejected'), (err: any) => err.code === 'captain_has_team',
+        'nor be demoted out from under it');
+    await Team.updateOne({ _id: alpha2._id }, { $set: { status: 'locked' } });
+    assert.strictEqual(await teamService.captainHasTeam(eventId, cap2._id), false,
+        'a locked roster cannot be disbanded, so it does not bar removing its captain');
+    await Team.updateOne({ _id: alpha2._id }, { $set: { status: 'forming' } });
+    await teamService.removeMemberFromTeam(alpha2._id, mate._id, cap2._id);
+    await registrationService.cancelRegistration(cap2Reg._id, as(cap2._id));
+    assert.strictEqual((await teamService.getTeam(alpha2._id)).status, 'disbanded', 'a captain leaving alone takes the team along');
+    assert.strictEqual((await registrationService.getRegistration(mateReg._id)).context.event!.team_id, null);
+    console.log('✓');
+
+    console.log('11c. Without captain_application_required a captain is approved by registering...');
+    const freeForm = await formService.createForm({ owner: { type: 'event', id: uuid() }, title: 'Free', fields: [NAME_FIELD], created_by: adminId });
+    await formService.publishForm(freeForm._id);
+    const freeEvent = await seedEvent({ id: freeForm.owner.id!, formId: freeForm._id, createdBy: adminId, teamSize: [1, 3], captainApplication: false });
+    const freeCap = await registrationService.submitRegistration({
+        form_id: freeForm._id, owner: { type: 'event', id: freeEvent }, answers: { name: 'c' }, context: { event: { role: 'captain' } }, user_id: cap3._id,
+    });
+    assert(freeCap.status === 'confirmed' && freeCap.context.event!.captain_application.status === 'approved');
+    // A clash on the random invite code is a fresh draw, not a 500.
+    const realSave = Team.prototype.save;
+    let saves = 0;
+    Team.prototype.save = function (this: any, ...args: any[]) {
+        if (saves++ === 0) return Promise.reject(Object.assign(new Error('E11000'), { code: 11000, keyPattern: { invite_code: 1 } }));
+        return realSave.apply(this, args as any);
+    } as any;
+    let freeTeam;
+    try {
+        freeTeam = await teamService.createTeam({ owner: { type: 'event', id: freeEvent }, name: 'Free', captain_user_id: cap3._id });
+    } finally {
+        Team.prototype.save = realSave;
+    }
+    assert.strictEqual(saves, 2, 'retried once with a new code');
+    publish('EventCancelled', 'event-service', { event_id: freeEvent, title: 'x' });
+    await until(async () => (await teamService.getTeam(freeTeam._id)).status === 'disbanded');
+    assert.strictEqual((await teamService.getTeam(freeTeam._id)).status, 'disbanded', 'EventCancelled disbands the event\'s open teams');
+    console.log('✓');
+
     console.log('12. Challenge teams: no registrations, owner bounds, one team per user...');
     const challengeId = uuid();
     await Challenge.create({
@@ -239,7 +295,7 @@ async function main() {
         (err: any) => err.code === 'challenge_not_active');
     console.log('✓');
 
-    console.log('13. Rosters lock when the event runs; an unfinished auction league waits (§6)...');
+    console.log('13. Rosters lock when the event runs; an unfinished auction league waits...');
     const lockForm = await formService.createForm({ owner: { type: 'event', id: uuid() }, title: 'L', fields: [NAME_FIELD], created_by: adminId });
     const seedTeam = async (ownerId: string, name: string) =>
         Team.create({
@@ -265,7 +321,7 @@ async function main() {
     assert(await rosterLockSweep() >= 1, 'the sweep catches what the bus dropped');
     assert.strictEqual((await teamService.getTeam(t2._id)).status, 'locked');
 
-    console.log('14. Auction add-member is idempotent on request_id (§9)...');
+    console.log('14. Auction add-member is idempotent on request_id...');
     const auctionForm = await formService.createForm({ owner: { type: 'event', id: uuid() }, title: 'A', fields: [NAME_FIELD], created_by: adminId });
     await formService.publishForm(auctionForm._id);
     const auctionEvent = await seedEvent({ id: auctionForm.owner.id!, formId: auctionForm._id, createdBy: adminId, teamSize: [1, 3] });
@@ -303,6 +359,23 @@ async function main() {
         },
     });
     assert((await repeat).member_ops!.includes(key2), 'a repeat that saw the link but not the seat answers 200, not 409');
+    console.log('✓');
+
+    console.log('14b. Auction league rosters are bought, not joined, and hold still mid-auction...');
+    const liveLeague = await seedEvent({ formId: lockForm._id, createdBy: adminId, teamSize: [1, 3], type: 'ALL', auctionStatus: 'live' });
+    const leagueTeam = await seedTeam(liveLeague, 'Auctioned');
+    await Team.updateOne({ _id: leagueTeam._id }, { $set: { join_policy: 'open' } });
+    await assert.rejects(() => teamService.joinTeam(leagueTeam._id, player._id), (err: any) => err.code === 'auction_league');
+    await assert.rejects(() => teamService.inviteMember(leagueTeam._id, captain._id, player._id), (err: any) => err.code === 'auction_league');
+    await assert.rejects(() => teamService.refuseDuringAuction(leagueTeam), (err: any) => err.code === 'auction_in_progress');
+    // A bought player cancelling mid-auction would undo a paid sale: refused until it finishes.
+    const bought = await seedUser('Bought');
+    const boughtReg = await register(bought._id, 'member');
+    await FormSubmission.updateOne({ _id: boughtReg._id }, { $set: { 'context.event.team_id': leagueTeam._id } });
+    await assert.rejects(() => registrationService.cancelRegistration(boughtReg._id, as(bought._id)), (err: any) => err.code === 'auction_in_progress');
+    await Event.collection.updateOne({ _id: liveLeague as any }, { $set: { 'auction.status': 'finished' } });
+    await teamService.refuseDuringAuction(leagueTeam);
+    assert.strictEqual((await registrationService.cancelRegistration(boughtReg._id, as(bought._id))).status, 'cancelled', 'and allowed once it has');
     console.log('✓');
 
     console.log('15. Purse ops are idempotent and never clamp...');

@@ -1,5 +1,4 @@
-import { ServiceError } from '@bgsc/shared';
-import { Request, Response, NextFunction } from 'express';
+import { ServiceError, wrap } from '@bgsc/shared';
 import * as registrationService from './registration.service';
 import {
     AdminAnswersInput,
@@ -18,113 +17,64 @@ import { actorOf } from '../access';
  * admins, core+ for challenge/generic) — never "is core" on the token.
  */
 
-export async function submitRegistrationHandler(req: Request, res: Response, next: NextFunction) {
-    try {
-        const body = req.body as SubmitRegistrationInput;
-        const registration = await registrationService.submitRegistration({ ...body, user_id: req.user!.id });
-        res.status(201).json(registration);
-    } catch (err) {
-        next(err);
-    }
-}
+export const submitRegistrationHandler = wrap(async (req, res) => {
+    const body = req.body as SubmitRegistrationInput;
+    res.status(201).json(await registrationService.submitRegistration({ ...body, user_id: req.user!.id }));
+});
 
-export async function getMyRegistrationHandler(req: Request, res: Response, next: NextFunction) {
-    try {
-        const ownerId = typeof req.query.owner_id === 'string' ? req.query.owner_id : '';
-        if (!ownerId) {
-            throw new ServiceError(400, 'owner_id_required');
-        }
-        const registration = await registrationService.getMyRegistration(ownerId, req.user!.id);
-        if (!registration) {
-            throw new ServiceError(404, 'not_registered');
-        }
-        res.json(registration);
-    } catch (err) {
-        next(err);
-    }
-}
+/** `owner_id` is required by the route's query schema. */
+export const getMyRegistrationHandler = wrap(async (req, res) => {
+    const registration = await registrationService.getMyRegistration(req.query.owner_id as string, req.user!.id);
+    if (!registration) throw new ServiceError(404, 'not_registered');
+    res.json(registration);
+});
 
-export async function getRegistrationHandler(req: Request, res: Response, next: NextFunction) {
-    try {
-        res.json(await registrationService.getOwnRegistration(req.params.id as string, actorOf(req)));
-    } catch (err) {
-        next(err);
-    }
-}
+export const getRegistrationHandler = wrap(async (req, res) => {
+    res.json(await registrationService.getOwnRegistration(req.params.id as string, actorOf(req)));
+});
 
-export async function listRegistrationsHandler(req: Request, res: Response, next: NextFunction) {
-    try {
-        res.json(await registrationService.listRegistrations(req.query as unknown as ListRegistrationsInput, actorOf(req)));
-    } catch (err) {
-        next(err);
-    }
-}
+export const listRegistrationsHandler = wrap(async (req, res) => {
+    res.json(await registrationService.listRegistrations(req.query as unknown as ListRegistrationsInput, actorOf(req)));
+});
 
 /** `GET /registrations/:id/files/:field_key` — the only way a registration file leaves the disk. */
-export async function downloadFileHandler(req: Request, res: Response, next: NextFunction) {
-    try {
-        const file = await registrationService.registrationFile(req.params.id as string, req.params.field_key as string, actorOf(req));
-        // attachment() sets Content-Type from the (user-chosen) filename's extension, so the stored
-        // mime is written after it — `x.html` must not come back as text/html.
-        res.attachment(file.name);
-        res.setHeader('Content-Type', file.mime);
-        res.setHeader('X-Content-Type-Options', 'nosniff');
-        res.setHeader('Cache-Control', 'private, no-store');
-        // `send` ignores dotfile segments by default, and the store is `.private/`; the path is
-        // already confined to it by `privatePathOf`.
-        res.sendFile(file.path, { dotfiles: 'allow' }, (err) => {
-            if (err && !res.headersSent) next(new ServiceError(404, 'file_not_found'));
-        });
-    } catch (err) {
-        next(err);
-    }
-}
+export const downloadFileHandler = wrap(async (req, res) => {
+    const file = await registrationService.registrationFile(req.params.id as string, req.params.field_key as string, actorOf(req));
+    // attachment() sets Content-Type from the (user-chosen) filename's extension, so the stored
+    // mime is written after it — `x.html` must not come back as text/html.
+    res.attachment(file.name);
+    res.setHeader('Content-Type', file.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, no-store');
+    // `send` ignores dotfile segments by default, and the store is `.private/`; the path is
+    // already confined to it by `privatePathOf`.
+    await new Promise<void>((resolve, reject) =>
+        res.sendFile(file.path, { dotfiles: 'allow' }, (err) =>
+            err && !res.headersSent ? reject(new ServiceError(404, 'file_not_found')) : resolve()
+        )
+    );
+});
 
-export async function updateRegistrationHandler(req: Request, res: Response, next: NextFunction) {
-    try {
-        const registration = await registrationService.updateRegistration(
-            req.params.id as string,
-            req.user!.id,
-            req.body as UpdateRegistrationInput
-        );
-        res.json(registration);
-    } catch (err) {
-        next(err);
-    }
-}
+export const updateRegistrationHandler = wrap(async (req, res) => {
+    res.json(await registrationService.updateRegistration(req.params.id as string, req.user!.id, req.body as UpdateRegistrationInput));
+});
 
-export async function updateAdminAnswersHandler(req: Request, res: Response, next: NextFunction) {
-    try {
-        const { answers } = req.body as AdminAnswersInput;
-        res.json(await registrationService.updateAdminAnswers(req.params.id as string, actorOf(req), answers));
-    } catch (err) {
-        next(err);
-    }
-}
+export const updateAdminAnswersHandler = wrap(async (req, res) => {
+    const { answers } = req.body as AdminAnswersInput;
+    res.json(await registrationService.updateAdminAnswers(req.params.id as string, actorOf(req), answers));
+});
 
-export async function cancelRegistrationHandler(req: Request, res: Response, next: NextFunction) {
-    try {
-        const { reason } = req.body as CancelRegistrationInput;
-        res.json(await registrationService.cancelRegistration(req.params.id as string, actorOf(req), reason));
-    } catch (err) {
-        next(err);
-    }
-}
+export const cancelRegistrationHandler = wrap(async (req, res) => {
+    const { reason } = req.body as CancelRegistrationInput;
+    res.json(await registrationService.cancelRegistration(req.params.id as string, actorOf(req), reason));
+});
 
-export async function updateCaptainApplicationHandler(req: Request, res: Response, next: NextFunction) {
-    try {
-        const body = req.body as UpdateCaptainApplicationInput;
-        res.json(await registrationService.updateCaptainApplication(req.params.id as string, actorOf(req), body.status, body.note));
-    } catch (err) {
-        next(err);
-    }
-}
+export const updateCaptainApplicationHandler = wrap(async (req, res) => {
+    const body = req.body as UpdateCaptainApplicationInput;
+    res.json(await registrationService.updateCaptainApplication(req.params.id as string, actorOf(req), body.status, body.note));
+});
 
-export async function updateStatusHandler(req: Request, res: Response, next: NextFunction) {
-    try {
-        const body = req.body as UpdateStatusInput;
-        res.json(await registrationService.updateRegistrationStatus(req.params.id as string, actorOf(req), body.status, body.reason));
-    } catch (err) {
-        next(err);
-    }
-}
+export const updateStatusHandler = wrap(async (req, res) => {
+    const body = req.body as UpdateStatusInput;
+    res.json(await registrationService.updateRegistrationStatus(req.params.id as string, actorOf(req), body.status, body.reason));
+});

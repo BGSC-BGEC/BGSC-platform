@@ -16,6 +16,9 @@ async function anonymize(payload: { user_id: string }): Promise<void> {
     if (!user_id) return;
 
     try {
+        // Still deleted? A UserDeleted delivered late — after a UserRestored — must not erase a
+        // live account's name.
+        if (!(await User.exists({ _id: user_id, deleted_at: { $ne: null } }))) return;
         await Promise.all([
             Bracket.updateMany(
                 { participant_type: 'user', 'participants.id': user_id },

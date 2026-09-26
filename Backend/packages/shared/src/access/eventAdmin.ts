@@ -1,18 +1,15 @@
 import { Event, IEvent } from '../models/Event';
-import { ROLE_RANK, RoleName } from '../models/shared';
+import { roleRank as rank } from '../models/shared';
 import { ServiceError } from '../errors';
 
 // Ranked against the ladder directly, not via middleware/requireRole: that file relies on the
 // Express `req.user` augmentation declared elsewhere, and ts-node compiling it in isolation fails.
-const rank = (role: string): number => ROLE_RANK.indexOf(role as RoleName);
 
 /**
  * Who administers an event: its creator, a listed core admin, or coordinator+.
  *
- * One definition for every service that acts on an event's data. Audit #2 found that event, auction
- * and bracket writes checked this while registration, forms, teams, leaderboard scores, points
- * awards and media albums only checked "is core" — so any core member could confirm, reject, score
- * or pay out on any event on the platform.
+ * One definition for every service that acts on an event's data. A bare "is core" check would let
+ * any core member confirm, reject, score or pay out on any event on the platform.
  *
  * Always pass the LIVE actor (the document `requireActiveUser` loaded), never the token claim.
  */

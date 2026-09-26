@@ -5,7 +5,7 @@ import { config } from '../config/env';
  *
  * Every service wraps its replies in `{ success: true, data }` (`successEnvelope`), and the first
  * hand-written client read `result.reserved` off the wrapper — `undefined`, every time, so every
- * event registration settled as `rejected` (backend-audit-2026-09-26 C1). Unwrapping lives here so no
+ * event registration settled as `rejected`. Unwrapping lives here so no
  * caller can forget it again.
  *
  * Failure is typed, and the distinction matters:
@@ -64,7 +64,7 @@ export async function callInternal<T>(baseUrl: string, path: string, opts: Inter
     }
 
     // A 2xx whose body cannot be read (the abort landing mid-body, a proxy's HTML) is NOT a success
-    // with `null` data — the other side may well have applied the call. Outcome unknown (audit #2).
+    // with `null` data — the other side may well have applied the call. Outcome unknown.
     let parsed: unknown;
     let readFailed = false;
     try {

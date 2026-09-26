@@ -120,7 +120,7 @@ export async function updateForm(
     try {
         await form.validate();
     } catch (err) {
-        throw new ServiceError(422, 'validation_failed', [{ field_key: 'fields', code: 'invalid_form', message: (err as Error).message }]);
+        throw new ServiceError(422, 'validation_failed', [{ key: 'fields', code: 'invalid_form', message: (err as Error).message }]);
     }
     if (archive) {
         await FormDefinitionVersion.updateOne(

@@ -66,7 +66,7 @@ eventRoutes.use('/:ref/auction', eventAuctionRoutes);
 // Management (Core / Admin)
 // Writes rank the LIVE user document, not the token's role claim: a token outlives a demotion or a
 // suspension by up to fifteen minutes (adding-a-service.md §6.2). Admin reads of an event's
-// registrations (waitlist, attendance) do too, and are scoped to the event's admins (audit #2).
+// registrations (waitlist, attendance) do too, and are scoped to the event's admins.
 eventRoutes.post('/', requireAuth, requireActiveUser(UserRole.CORE), validate({ body: CreateEventSchema }), c.create);
 eventRoutes.patch(
     '/:ref',
@@ -75,10 +75,11 @@ eventRoutes.patch(
     validate({ params: RefParamSchema, body: UpdateEventSchema }),
     c.update
 );
-eventRoutes.delete('/:ref', requireAuth, requireActiveUser(UserRole.COORDINATOR), validate({ params: RefParamSchema }), c.remove);
+// Delete a draft: Core+ who administers it (model doc §5); the service checks the event-level right.
+eventRoutes.delete('/:ref', requireAuth, requireActiveUser(UserRole.CORE), validate({ params: RefParamSchema }), c.remove);
 
 // Media Upload (Poster / Logo). Event admins only — any signed-in user could replace any published
-// event's cover (audit Sep 26, H21); the service checks the event-level right.
+// event's cover; the service checks the event-level right.
 eventRoutes.post(
     '/:ref/media',
     requireAuth,

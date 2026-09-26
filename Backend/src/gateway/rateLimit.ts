@@ -15,7 +15,7 @@ const ipKey = (req: Request) => ipKeyGenerator(req.ip ?? '', 56);
 /**
  * The body field each strict path actually reads to pick an account. Keying every path on
  * `body.login ?? body.email` let a junk `login` field on an email route rotate the per-account
- * bucket at will (audit #2). Token paths (verify-email, reset-password) have no account to key on —
+ * bucket at will. Token paths (verify-email, reset-password) have no account to key on —
  * a fresh guess is a fresh token — so they fall to the IP alone; the phone OTP routes are the
  * signed-in caller.
  */
@@ -77,7 +77,7 @@ export const authAttemptLimiter = rateLimit({
  * IP spray five guesses at every account on the platform.
  *
  * It counts failures of logins and signups only: counting successful signups (register answers 201)
- * meant a campus NAT onboarding thirty students in fifteen minutes hit 429 (audit #2). The mail/OTP
+ * meant a campus NAT onboarding thirty students in fifteen minutes hit 429. The mail/OTP
  * send paths count EVERY call — they answer 200 whatever happens (no account enumeration), so a
  * failures-only rule would never count them and one IP could spray reset mail at every address.
  */
@@ -105,7 +105,6 @@ export const generalLimiter = rateLimit({
     message: { error: 'too_many_requests' },
     // Signed-in callers are limited per user; anonymous ones per IP. ipKeyGenerator normalises
     // IPv6 to a /64 subnet — using req.ip raw lets one IPv6 client rotate addresses past the limit.
+    // `/health` is answered before this runs (src/index.ts), so a probe is never throttled.
     keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req.ip ?? '', 64) ?? 'unknown',
-    // Health checks must never be throttled — a rate-limited probe reads as an outage.
-    skip: (req) => req.path === '/health',
 });

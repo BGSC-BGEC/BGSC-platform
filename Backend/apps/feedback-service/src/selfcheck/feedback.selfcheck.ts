@@ -51,7 +51,7 @@ async function main(): Promise<void> {
     assert.strictEqual(mine.contact_email, reporter.email, 'and replies go to the account address');
     assert.strictEqual(mine.status, 'submitted', 'the ladder starts at the bottom');
     assert.strictEqual(mine.kind, 'feedback');
-    // An attributed ticket replies to the account, whatever address the caller typed (audit Sep 26).
+    // An attributed ticket replies to the account, whatever address the caller typed.
     const redirected = await submitFeedback(ticketInput({ contact_email: 'victim@example.org' }), signedIn);
     assert.strictEqual(redirected.contact_email, reporter.email, 'a signed-in caller cannot aim the receipt at someone else');
     const oneLine = SubmitFeedbackSchema.parse(ticketInput({ subject: 'Hi\r\nBcc: everyone@example.org' }));
@@ -90,7 +90,7 @@ async function main(): Promise<void> {
     );
     assert.strictEqual(walkIn.reporter, null, 'a signed-out ticket is anonymous by construction');
 
-    // The anonymous receipt goes to an unverified address, so it echoes no caller text (audit #2).
+    // The anonymous receipt goes to an unverified address, so it echoes no caller text.
     const receipts: (string | null)[] = [];
     const realReceipt = FeedbackMailer.sendTicketReceipt;
     FeedbackMailer.sendTicketReceipt = async (_to, _no, subject) => void receipts.push(subject);
@@ -139,7 +139,7 @@ async function main(): Promise<void> {
     assert.notStrictEqual(rateSubject('2001:db8:1:2::1'), rateSubject('2001:db8:1:3::1'), 'a different /64 is not');
     assert.strictEqual(rateSubject('::ffff:1.2.3.4'), '1.2.3.4', 'a mapped v4 is the v4');
 
-    // Insert-first (audit #2): a parallel burst cannot all squeeze under the cap.
+    // Insert-first: a parallel burst cannot all squeeze under the cap.
     const burst = await Promise.allSettled(
         Array.from({ length: 12 }, () =>
             submitFeedback(ticketInput({ contact_email: 'burst@example.org', is_anonymous: true }), anon('198.51.100.99'))
@@ -189,7 +189,7 @@ async function main(): Promise<void> {
     assert.strictEqual(asBearer._id, secret._id, 'whoever holds an anonymous number may read it');
     console.log('✓ own ticket, staff, or the number itself — anything else is a 404');
 
-    // The staff view reads the LIVE role, not the token's (audit #2).
+    // The staff view reads the LIVE role, not the token's.
     const demoted = await seedUser('Former Core', UserRole.CORE);
     await User.updateOne({ _id: demoted._id }, { $set: { role: UserRole.USER } });
     assert.strictEqual((await liveViewer({ id: demoted._id })).role, 'user', 'a demotion bites before the token expires');
@@ -222,15 +222,40 @@ async function main(): Promise<void> {
     assert.ok(resolved.response?.body.includes('Fixed'), 'and what it said');
     assert.deepStrictEqual(
         responded,
-        [{ ticket_id: mine._id, ticket_no: mine.ticket_no, reporter_user_id: reporter._id }],
+        [{ ticket_id: mine._id, ticket_no: mine.ticket_no, reporter_user_id: reporter._id, responded_at: resolved.response!.at.toISOString() }],
         'a response on an attributed ticket publishes FeedbackResponded for the in-app notice'
     );
+    // Notification dedupes on `responded_at`, so it must name THIS reply — the one the write stored.
+    assert.strictEqual(typeof responded[0].responded_at, 'string');
     await setStatus(secret.ticket_no, { status: 'resolved', response: 'Thanks, looked into it.' }, staff(reviewer._id));
     assert.strictEqual(responded.length, 1, 'an anonymous ticket has nobody to notify');
 
     // A dispute has to be able to reopen a resolution, which is the one backwards move that exists.
     const reopened = await setStatus(mine.ticket_no, { status: 'under_review' }, staff(reviewer._id));
     assert.strictEqual(reopened.status, 'under_review', 'a resolved ticket can be reopened');
+
+    // Two staff at once: one move lands and one history row is written, whoever read first.
+    const racing = await Promise.allSettled([
+        setStatus(mine.ticket_no, { status: 'resolved' }, staff(reviewer._id)),
+        setStatus(mine.ticket_no, { status: 'resolved' }, staff(reviewer._id)),
+    ]);
+    assert.strictEqual(racing.filter((r) => r.status === 'fulfilled').length, 1, 'exactly one move lands');
+    assert.strictEqual((await FeedbackTicket.findOne({ ticket_no: mine.ticket_no }).lean())!.status_history.length, 4, 'with one history row');
+
+    // The loser that read BEFORE the winner wrote is refused by the compare-and-swap itself, not by
+    // the ladder: replay a reader holding the pre-move document.
+    const before = (await FeedbackTicket.findOne({ ticket_no: mine.ticket_no }))!;
+    await setStatus(mine.ticket_no, { status: 'closed' }, staff(reviewer._id));
+    const realFindOne = FeedbackTicket.findOne;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (FeedbackTicket as any).findOne = () => Promise.resolve(before);
+    try {
+        await expectError(() => setStatus(mine.ticket_no, { status: 'closed' }, staff(reviewer._id)), 'ticket_changed', 'a stale read loses the CAS');
+    } finally {
+        FeedbackTicket.findOne = realFindOne;
+    }
+    assert.strictEqual((await FeedbackTicket.findOne({ ticket_no: mine.ticket_no }).lean())!.status_history.length, 5, 'and writes no history');
+    console.log('✓ concurrent status moves are one compare-and-swap: one lands, the other is ticket_changed');
     console.log('✓ the status ladder moves forwards, records history, and can reopen a disputed result');
 
     const triaged = await setSeverity(mine.ticket_no, 'critical', staff(reviewer._id));
@@ -278,6 +303,7 @@ async function main(): Promise<void> {
 
     /* ---- a deleted account leaves no name behind ---------------------------- */
 
+    await User.updateOne({ _id: reporter._id }, { $set: { deleted_at: new Date() } });
     await handlers.handleUserDeleted({ user_id: reporter._id });
     const erased = await FeedbackTicket.findOne({ ticket_no: mine.ticket_no }).lean();
     assert.strictEqual(erased!.reporter!.display_name, 'Deleted user', 'the name goes');
@@ -286,15 +312,22 @@ async function main(): Promise<void> {
     assert.strictEqual(erased!.reporter!.user_id, reporter._id, 'the reference stays — it still has to resolve');
     assert.strictEqual(erased!.contact_email, null, 'and the account email copied onto it goes too');
 
+    await User.updateOne({ _id: reporter._id }, { $set: { deleted_at: null } });
     await handlers.handleUserRestored({ user_id: reporter._id });
     const restored = await FeedbackTicket.findOne({ ticket_no: mine.ticket_no }).lean();
     assert.strictEqual(restored!.reporter!.display_name, 'Priya Reporter', 'UserRestored brings the name back');
     assert.strictEqual(restored!.reporter!.deleted, false, 'and lowers the flag');
     assert.strictEqual(restored!.contact_email, reporter.email, 'and the reply address');
+
+    // A late (republished) UserDeleted after the restore must not erase the name again.
     await handlers.handleUserDeleted({ user_id: reporter._id });
+    const stillRestored = await FeedbackTicket.findOne({ ticket_no: mine.ticket_no }).lean();
+    assert.strictEqual(stillRestored!.reporter!.display_name, 'Priya Reporter', 'a stale UserDeleted for a live account is a no-op');
+    assert.strictEqual(stillRestored!.contact_email, reporter.email);
 
     // A deleted account never reappears through a late profile or restore event.
     await User.updateOne({ _id: reporter._id }, { $set: { deleted_at: new Date() } });
+    await handlers.handleUserDeleted({ user_id: reporter._id });
     await handlers.handleUserProfileUpdated({ user_id: reporter._id, changed_fields: ['full_name'] });
     await handlers.handleUserRestored({ user_id: reporter._id });
     const stillGone = await FeedbackTicket.findOne({ ticket_no: mine.ticket_no }).lean();

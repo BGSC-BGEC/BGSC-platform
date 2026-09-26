@@ -13,11 +13,17 @@ import { z } from 'zod';
 
 const Uuid = z.string().uuid();
 
+/**
+ * The largest field a draw takes, manual seeds included. A round robin of 256 is 255 rounds
+ * (an odd field plays n), so no round number above that can exist.
+ */
+export const MAX_FIELD = 256;
+
 export const GenerateBracketSchema = z.object({
     event_id: Uuid,
     seeding: z.enum(BRACKET_SEEDING).default('registration'),
-    /** Required for `manual`, refused otherwise — checked in the service against the real field. */
-    seeds: z.array(Uuid).min(2).max(256).optional(),
+    /** Required for `manual`, where the service checks it against the real field; ignored otherwise. */
+    seeds: z.array(Uuid).min(2).max(MAX_FIELD).optional(),
 });
 
 export const EventIdParams = z.object({ event_id: Uuid });
@@ -25,7 +31,7 @@ export const MatchIdParams = z.object({ id: Uuid });
 
 export const ListMatchesQuery = z.object({
     event_id: Uuid,
-    round: z.coerce.number().int().min(1).max(64).optional(),
+    round: z.coerce.number().int().min(1).max(MAX_FIELD - 1).optional(),
     status: z.enum(MATCH_STATUS).optional(),
 });
 

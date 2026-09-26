@@ -7,6 +7,7 @@ import {
     IPointTransaction,
     LeaderboardEntry,
     PointTransaction,
+    PointTxClaim,
     PointsSource,
     PointsType,
     ServiceError,
@@ -49,7 +50,7 @@ async function auditCommitted(entry: Parameters<typeof recordAudit>[0]): Promise
     }
 }
 
-/** Only places the rule table knows about can be awarded (Points.ts:186). */
+/** Only places the rule table knows about can be awarded: `event.podium.1..3` are the seeded rules. */
 const SEEDED_PODIUM_PLACES = 3;
 
 /** Only a credit may carry an expiry; the model refuses one on a debit. */
@@ -74,15 +75,18 @@ async function liveUser(user_id: string): Promise<{ points_balance: number }> {
 /**
  * Credits and debits, both as raw signed sums. Split by sign rather than by `type`: a negative
  * `adjust` is a clawback and a positive one is a grant, which `{ type: 'earn' }` would miscount.
+ * A refund is the one positive row that is not earned: it is a spend given back, so it nets against
+ * `spent` instead. `earned + spent` stays Σ amount either way.
  */
 async function totals(user_id: string): Promise<{ earned: number; spent: number }> {
+    const isRefund = { $eq: ['$type', 'refund'] };
     const [row] = await PointTransaction.aggregate<{ earned: number; spent: number }>([
         { $match: { user_id } },
         {
             $group: {
                 _id: null,
-                earned: { $sum: { $cond: [{ $gt: ['$amount', 0] }, '$amount', 0] } },
-                spent: { $sum: { $cond: [{ $lt: ['$amount', 0] }, '$amount', 0] } },
+                earned: { $sum: { $cond: [{ $and: [{ $gt: ['$amount', 0] }, { $not: [isRefund] }] }, '$amount', 0] } },
+                spent: { $sum: { $cond: [{ $or: [{ $lt: ['$amount', 0] }, isRefund] }, '$amount', 0] } },
             },
         },
     ]);
@@ -138,8 +142,6 @@ async function listLedger(scope: Record<string, unknown>, q: HistoryQuery): Prom
     const conditions: Record<string, unknown>[] = [scope];
     if (q.type) conditions.push({ type: q.type });
     if (q.source) conditions.push({ source: q.source });
-    // $and, never a spread: keysetFilter carries a top-level $or, and `{ ...a, ...b }` would keep
-    // only the second — dropping either the cursor or the scope that decides whose rows these are.
     if (q.cursor) conditions.push(keysetFilter(q.cursor));
 
     const rows = await PointTransaction.find(allOf(conditions))
@@ -152,7 +154,7 @@ async function listLedger(scope: Record<string, unknown>, q: HistoryQuery): Prom
 }
 
 /**
- * Served directly by `{ user_id: 1, created_at: -1 }` (Points.ts:129).
+ * Served directly by the `{ user_id: 1, created_at: -1, _id: -1 }` index.
  *
  * No `liveUser` check: a deleted user's rows stay in the ledger by design (relationships.md §3
  * anonymizes the user and keeps the history), and an admin investigating a balance needs to read
@@ -181,7 +183,7 @@ export interface BreakdownRow {
     count: number;
 }
 
-/** Served by `{ user_id: 1, source: 1 }` (Points.ts:130), which exists for exactly this query. */
+/** Served by the `{ user_id: 1, source: 1 }` index, which exists for exactly this query. */
 export async function breakdown(user_id: string): Promise<{ balance: number; breakdown: BreakdownRow[] }> {
     const [user, rows] = await Promise.all([
         liveUser(user_id),
@@ -293,12 +295,28 @@ export async function payPodium(
     if (payer.type === 'admin' && !isEventAdmin(event, { id: payer.actor.id, role: payer.actor.role ?? '' })) {
         throw new ServiceError(403, 'forbidden');
     }
-    // 'past' is the status that makes EventCompleted fire (event.service.ts:304).
+
+    const reason = `event.podium.${input.place}`;
+    const key = idempotencyKey.eventPodium(event._id, input.user_id);
+
+    // The key is (event, user), so one user takes one podium place per event. Looked up before any
+    // check that can change after the payment (the winner cancels, a rule is switched off): a replay
+    // of a place already paid is that payment, not a refusal. A call for a DIFFERENT place would
+    // otherwise come back as a silent "replay" carrying the first place's row — an admin correcting
+    // a mis-click would believe it went through. Refuse it by name and let them decide: the
+    // existing row stands until someone adjusts it deliberately.
+    const already = await PointTransaction.findOne({ idempotency_key: key });
+    if (already && already.reason !== reason) {
+        throw new ServiceError(409, 'already_awarded', { place: already.reason, amount: already.amount });
+    }
+    if (already) return { tx: already, replayed: true };
+
+    // 'past' is the status that makes EventCompleted fire.
     if (event.status !== 'past') throw new ServiceError(409, 'event_not_completed');
 
     const multipliers = event.points_pool.podium_multipliers;
     // Awardable only if the event pays that many places AND a rule exists for it: only
-    // event.podium.1..SEEDED_PODIUM_PLACES are seeded (Points.ts:186).
+    // event.podium.1..SEEDED_PODIUM_PLACES are seeded.
     if (input.place > multipliers.length || input.place > SEEDED_PODIUM_PLACES) {
         throw new ServiceError(422, 'place_not_awarded');
     }
@@ -327,39 +345,25 @@ export async function payPodium(
         }
     }
 
-    const reason = `event.podium.${input.place}`;
-    const key = idempotencyKey.eventPodium(event._id, input.user_id);
-
-    // The key is (event, user), so one user takes one podium place per event. A second call for a
-    // DIFFERENT place would otherwise come back as a silent "replay" carrying the first place's
-    // row — an admin correcting a mis-click would believe it went through. Refuse it by name and
-    // let them decide: the existing row stands until someone adjusts it deliberately.
-    const already = await PointTransaction.findOne({ idempotency_key: key });
-    if (already && already.reason !== reason) {
-        throw new ServiceError(409, 'already_awarded', { place: already.reason, amount: already.amount });
-    }
-
     // One participant per place. Several users may share it only as members of one team.
     // ponytail: read-then-write, so two admins awarding the same place to two people in the same
     // millisecond both land; a per-(event, place) marker row would close it if that ever happens.
-    if (!already) {
-        const holders = (
-            await PointTransaction.distinct('user_id', {
-                'reference.type': 'event',
-                'reference.id': event._id,
-                reason,
-                type: 'earn',
-            })
-        ).filter((u) => u !== input.user_id);
-        if (holders.length > 0) {
-            const sameTeam = await Team.exists({
-                'owner.type': 'event',
-                'owner.id': event._id,
-                status: { $ne: 'disbanded' },
-                'members.user_id': { $all: [input.user_id, ...holders] },
-            });
-            if (!sameTeam) throw new ServiceError(409, 'place_taken', { holders });
-        }
+    const holders = (
+        await PointTransaction.distinct('user_id', {
+            'reference.type': 'event',
+            'reference.id': event._id,
+            reason,
+            type: 'earn',
+        })
+    ).filter((u) => u !== input.user_id);
+    if (holders.length > 0) {
+        const sameTeam = await Team.exists({
+            'owner.type': 'event',
+            'owner.id': event._id,
+            status: { $ne: 'disbanded' },
+            'members.user_id': { $all: [input.user_id, ...holders] },
+        });
+        if (!sameTeam) throw new ServiceError(409, 'place_taken', { holders });
     }
 
     const override = event.points_pool.participation * multipliers[input.place - 1];
@@ -410,6 +414,13 @@ export async function recalculate(
     actor: Actor
 ): Promise<{ previous: number; balance: number; repaired: boolean }> {
     const user = await liveUser(user_id);
+    // A live writer that has already moved the balance but not yet written its row would read as
+    // drift, and "repairing" it would erase that write. Checked between the balance read and the
+    // sum: a write that moved the balance before the read still holds its claim until its row lands
+    // after the sum. A `moving` claim past its lease is a dead writer — exactly what this repairs.
+    if (await PointTxClaim.exists({ user_id, state: 'moving', lease_until: { $gte: new Date() } })) {
+        throw new ServiceError(409, 'write_in_flight');
+    }
     const total = await ledgerSum(user_id);
     if (total === user.points_balance) {
         await clearStaleClaims(user_id);
@@ -479,6 +490,17 @@ async function refundOf(spend: IPointTransaction): Promise<IPointTransaction | n
 }
 
 export async function spendForInvestment(input: SpendInput): Promise<{ tx: IPointTransaction; replayed: boolean }> {
+    // A retry is answered from the key first, before any check that can change after the first
+    // attempt landed (the event moved on, the rule was switched off). Refusing it would tell the
+    // caller "nothing taken" about a spend that stands, and it would give up on the points.
+    const earlier = await findSpend(input.user_id, input.reference.id, input.request_id);
+    if (earlier) {
+        // A spend that has since been given back is not a live debit: the caller must not credit
+        // the entry for money the user holds again.
+        if (await refundOf(earlier)) throw new ServiceError(409, 'request_voided');
+        return { tx: earlier, replayed: true };
+    }
+
     // The entry is BE-1's document and this is a read, so it goes straight to the model. Checked
     // because a debit whose reference names nothing can never be refunded: the event-cancel sweep
     // finds spends by their entry ids, and a typo would silently opt out of it.
@@ -532,7 +554,7 @@ export interface RefundInput {
 
 /**
  * The leaderboard's compensation. Bound to the spend it undoes: a refund with no spend behind it
- * would let a service token mint points (backend-audit-2026-09-26).
+ * would let a service token mint points.
  *
  * "No spend" is only an answer once it is final: the spend key is voided first, so a spend still in
  * flight can never land afterwards. While a writer holds the key the answer is 409

@@ -126,7 +126,7 @@ PointTransactionSchema.pre(
 );
 
 // The query hooks above never see a loaded row being re-saved, or a bulkWrite — both would rewrite
-// the ledger unchecked (audit Sep 26). Inserting a new row is the one write allowed.
+// the ledger unchecked. Inserting a new row is the one write allowed.
 PointTransactionSchema.pre('save', function (this: IPointTransaction) {
     if (!this.isNew) throw new Error('point_transactions is append-only: correct with a new adjust/refund row');
 });
@@ -235,7 +235,7 @@ export const idempotencyKey = {
     /**
      * Keyed on the SPEND row, never on a request id: the leaderboard's compensation and the
      * event-cancel sweep can both want to give the same spend back, and one shared key is what lets
-     * the unique index refuse the second (backend-audit-2026-09-26: two keys paid twice).
+     * the unique index refuse the second (two keys once paid one spend back twice).
      */
     investmentRefund: (spend_tx_id: string) => `leaderboard.investment.refund:${spend_tx_id}`,
     adminAdjust: (request_uuid: string) => `admin:${request_uuid}`,

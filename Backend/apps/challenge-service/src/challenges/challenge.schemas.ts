@@ -19,10 +19,9 @@ const Limit = z.coerce.number().int().min(1).max(50).default(20);
 const Cursor = z.string().max(400).optional();
 
 /**
- * Proof types are restricted to what Media Service has not yet enabled (`MVP_PROOF_TYPES`,
- * Challenge.ts:25). The model's enum accepts 'image' and 'video'; accepting them here would store
- * a challenge whose submissions can never be satisfied, because nothing can upload a file until
- * Week 4 (challenge-model.md §6).
+ * Proof types are restricted to `MVP_PROOF_TYPES` (Challenge.ts). The model's enum accepts 'image'
+ * and 'video'; accepting them here would store a challenge whose submissions can never be
+ * satisfied, because no Media Service upload is wired into a submission yet (challenge-model.md §6).
  */
 const MvpProofType = z.enum(MVP_PROOF_TYPES as [string, ...string[]]);
 
@@ -40,9 +39,16 @@ const HttpUrl = z
  * Field shapes WITHOUT defaults. The create body adds defaults on top; the update body must not
  * have any: zod 4 applies a `.default()` even inside `.partial()`, so `PATCH { title }` used to
  * arrive as a full document of defaults and silently wipe window, teaming, submission, reviewers,
- * the hidden-brief flag and the capacity cap (audit Sep 26, H1).
+ * the hidden-brief flag and the capacity cap.
  */
-const NullableDate = z.coerce.date().nullable();
+/**
+ * An ISO 8601 string (datetime with offset, or a plain date), then a Date. Not `z.coerce.date()`:
+ * that is `new Date(x)`, which turns `true` into 1970 and any number into an instant.
+ */
+const NullableDate = z
+    .union([z.iso.datetime({ offset: true }), z.iso.date()])
+    .transform((s) => new Date(s))
+    .nullable();
 const windowShape = {
     opens_at: NullableDate,
     closes_at: NullableDate,

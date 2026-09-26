@@ -18,7 +18,7 @@ Three things you were blocked on now exist and are verified. Three things change
 | Your service | `apps/auth-service/` | boots, `/health` 200, DB connected, indexes built. Add routes, nothing else |
 | Service bootstrap | `@bgsc/shared` → `createServiceApp`, `startService` | cors, json, security headers, health, 404, error envelope, index build, graceful shutdown |
 | Auth middleware | `@bgsc/shared` → `requireAuth`, `optionalAuth` | use on your protected routes, don't write your own |
-| Role middleware | `@bgsc/shared` → `requireRole`, `requireSelfOr` | Spec §7.1 ladder |
+| Role middleware | `@bgsc/shared` → `requireRole`, `requireActiveUser` | Spec §7.1 ladder |
 | `User` model | `@bgsc/shared` → `User`, `UserRole`, `UserStatus` | converted to project conventions, 3 bugs fixed |
 | Request validation | `@bgsc/shared` → `validate({ body: schema })` | zod, auto-maps to the 422 envelope in §5 |
 | Domain event bus | `@bgsc/shared` → `publish(type, producer, payload)` | emit `UserRegistered` / `UserLoggedIn` here. Redis-backed across services |
@@ -241,7 +241,6 @@ Everything exported, so you are not guessing at what exists:
 | `optionalAuth` | `middleware/requireAuth` | sets `req.user` when a token is present, **never rejects**. For routes whose response differs for a signed-in viewer |
 | `bearerToken(header)` | `middleware/requireAuth` | pure helper, exported for testing |
 | `requireRole(min)` | `middleware/requireRole` | `requireRole(UserRole.COORDINATOR)` = coordinator or above. Must run after `requireAuth` |
-| `requireSelfOr(min, getId)` | `middleware/requireRole` | passes if the caller is the target **or** outranks `min`. Takes the target id from the request so a handler cannot forget the check |
 | `rankOf(role)` | `middleware/requireRole` | position on the Spec §7.1 ladder |
 | `validate(schemas)` | `middleware/validate` | `{ body?, query?, params? }`, each a zod schema |
 | `publish(type, producer, payload)` | `events/publish` | emit a domain event; returns the envelope |

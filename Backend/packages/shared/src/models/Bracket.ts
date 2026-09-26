@@ -96,7 +96,6 @@ BracketSchema.pre('validate', function (this: IBracket) {
     if (new Set(ids).size !== ids.length) return fail('participants must be unique');
     const seeds = b.participants.map((p) => p.seed).sort((x, y) => x - y);
     if (seeds.some((s, i) => s !== i + 1)) return fail('seeds must be 1..n with no gaps');
-    return undefined as unknown as void;
 });
 
 // One bracket per event, enforced by the unique index the `event_id` field definition already
@@ -235,7 +234,6 @@ MatchSchema.pre('validate', function (this: IMatch) {
         return fail('a completed match has two participants');
     }
     if (m.a && m.b && m.a.id === m.b.id) return fail('a participant cannot play itself');
-    return undefined as unknown as void;
 });
 
 /** The draw's shape, and what makes the generator idempotent under a retry. */

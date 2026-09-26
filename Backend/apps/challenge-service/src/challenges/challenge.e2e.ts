@@ -155,6 +155,20 @@ async function main(): Promise<void> {
         assert.strictEqual(js.status, 422, 'a javascript: link is stored XSS, not a resource');
         pass('only http(s) URLs are accepted');
 
+        // Dates are ISO strings. `z.coerce.date()` took `true` as 1970 and a number as an instant.
+        for (const junk of [true, 0, 'next tuesday']) {
+            const r = await call('POST', '/challenges', { as: core, body: draftBody({ window: { opens_at: junk } }) });
+            assert.strictEqual(r.status, 422, `window.opens_at ${JSON.stringify(junk)} must be refused`);
+        }
+        const dated = await call('POST', '/challenges', {
+            as: core,
+            body: draftBody({ window: { opens_at: '2030-01-01T09:00:00+05:30', closes_at: '2030-02-01' } }),
+        });
+        assert.strictEqual(dated.status, 201);
+        assert.strictEqual(dated.body.window.opens_at, '2030-01-01T03:30:00.000Z');
+        assert.strictEqual(dated.body.window.closes_at, '2030-02-01T00:00:00.000Z');
+        pass('window dates take ISO datetimes (with offset) or dates, and refuse booleans and numbers');
+
         // Unpublished below Core: 404 by key (a 403 would confirm it exists), 403 as a list filter.
         assert.strictEqual((await call('GET', `/challenges/${challengeId}`, { as: member })).status, 404);
         assert.strictEqual((await call('GET', `/challenges/${challengeId}`, { as: core })).status, 200);
@@ -209,7 +223,7 @@ async function main(): Promise<void> {
         await call('POST', `/challenges/${hiddenId}/activate`, { as: core });
 
         // Through the real route and zod: a PATCH of one field used to arrive as a full document of
-        // schema defaults and wipe the hidden-brief flag, the cap and the reviewers (audit H1).
+        // schema defaults and wipe the hidden-brief flag, the cap and the reviewers.
         const renamed = await call('PATCH', `/challenges/${hiddenId}`, { as: core, body: { title: 'Renamed secret' } });
         assert.strictEqual(renamed.status, 200);
         assert.strictEqual(renamed.body.title, 'Renamed secret');
@@ -269,7 +283,7 @@ async function main(): Promise<void> {
             as: member,
             body: { proofs: [{ type: 'image', value: 'https://example.com/x.png' }] },
         });
-        assert.strictEqual(badProof.status, 422, 'image proofs need Media Service (Week 4)');
+        assert.strictEqual(badProof.status, 422, 'image proofs are not wired to Media Service yet');
 
         const submitted = await call('POST', `/challenges/participations/${participationId}/submit`, {
             as: member,

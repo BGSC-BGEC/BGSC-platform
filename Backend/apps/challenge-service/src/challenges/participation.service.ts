@@ -16,7 +16,7 @@ import {
 } from '@bgsc/shared';
 import { v4 as uuid } from 'uuid';
 import { lockTeam } from '../clients/registration-client';
-import { Actor, PRODUCER, getById } from './challenge.service';
+import { Actor, PRODUCER, alive, getById, isDuplicateKey } from './challenge.service';
 import { AcceptInput, MyParticipationsInput, ProgressInput, QueueInput, ReviewInput, SubmitInput } from './challenge.schemas';
 import { allOf, keysetFilter, keysetSort, pageOf } from './cursor';
 
@@ -27,10 +27,6 @@ import { allOf, keysetFilter, keysetSort, pageOf } from './cursor';
  * Every transition is a compare-and-swap. Read-then-save lets a double-click through twice, and
  * one of these transitions publishes an event that mints points on the other side of the bus.
  */
-
-const alive = { deleted_at: null };
-
-const isDuplicateKey = (err: unknown): boolean => (err as { code?: number } | null)?.code === 11000;
 
 /* ------------------------------------------------------------------ *
  * Accept
@@ -83,10 +79,12 @@ async function claimSlot(challenge_id: string, cap: number | null): Promise<void
     if (!claimed) throw new ServiceError(409, 'challenge_full');
 }
 
-const releaseSlot = (challenge_id: string): Promise<unknown> =>
-    Challenge.updateOne({ _id: challenge_id, 'counts.accepted': { $gt: 0 } }, { $inc: { 'counts.accepted': -1 } }).catch((err) =>
-        console.error(`[${PRODUCER}] failed to release a slot on ${challenge_id}:`, err)
-    );
+/** Undo a counter claim. Floored at zero, so a double release cannot drive it negative. */
+const giveBack = (challenge_id: string, counter: 'accepted' | 'approved'): Promise<unknown> =>
+    Challenge.updateOne(
+        { _id: challenge_id, [`counts.${counter}`]: { $gt: 0 } },
+        { $inc: { [`counts.${counter}`]: -1 } }
+    ).catch((err) => console.error(`[${PRODUCER}] failed to give back counts.${counter} on ${challenge_id}:`, err));
 
 export async function accept(
     challengeId: string,
@@ -110,18 +108,22 @@ async function acceptAsUser(
     // A teamed challenge is team-only, even at team_size_min 1 (a solo player is a team of one).
     // Letting both kinds in shared one `counts.accepted` between two caps — `max_participants` for
     // solos, `max_teams` for teams — so solos filled `max_teams` and teams ignored
-    // `max_participants`. One kind per challenge makes each cap mean exactly one thing (audit Sep 26).
+    // `max_participants`. One kind per challenge makes each cap mean exactly one thing.
     if (challenge.teaming.enabled) throw new ServiceError(409, 'team_required');
 
     const user = await User.findOne({ _id: actor.id, ...alive }).select('profile.full_name profile.avatar_url username');
     if (!user) throw new ServiceError(404, 'user_not_found');
 
-    // The mirror of the team path's `member_already_participating` guard. Teaming can be switched off after teams accepted,
-    // and then a member of an accepted team could accept alone: a second participation, a second
-    // idempotency key, and Points pays them twice. Only TEAM rows are checked here — a repeat solo
-    // accept is the unique index's job and keeps its own `already_accepted`.
-    if (await ChallengeParticipation.exists({ challenge_id: challenge._id, 'participant.type': 'team', member_user_ids: actor.id })) {
-        throw new ServiceError(409, 'member_already_participating');
+    // Before the slot is claimed, or a re-click at the cap reads `challenge_full` instead of
+    // `already_accepted`. One read answers both refusals: a solo row is a repeat accept, and a TEAM
+    // row is the mirror of the team path's overlap guard — teaming can be switched off after teams
+    // accepted, and a member coming back alone would be a second participation Points pays twice.
+    // The unique index still decides a race between two accepts.
+    const existing = await ChallengeParticipation.findOne({ challenge_id: challenge._id, member_user_ids: actor.id })
+        .select('participant.type')
+        .lean<Pick<IChallengeParticipation, 'participant'>>();
+    if (existing) {
+        throw new ServiceError(409, existing.participant.type === 'team' ? 'member_already_participating' : 'already_accepted');
     }
 
     await claimSlot(challenge._id, challenge.max_participants);
@@ -134,10 +136,11 @@ async function acceptAsUser(
                 avatar_url: user.profile?.avatar_url ?? null,
             },
             member_user_ids: [actor.id],
+            by: actor.id,
             now,
         });
     } catch (err) {
-        await releaseSlot(challenge._id);
+        await giveBack(challenge._id, 'accepted');
         throw err;
     }
 }
@@ -174,10 +177,14 @@ async function acceptAsTeam(
 
     // The unique index is on `participant.id`, which for a team is the TEAM id — so the same user
     // in two different teams on one challenge passes it, and then Points pays them twice, because
-    // it fans out over `member_user_ids` (points consumers.ts:203). A query is the only expression
-    // of this rule the model can't carry; it is racy in a millisecond window.
-    if (await ChallengeParticipation.exists({ challenge_id: challenge._id, member_user_ids: { $in: memberIds } })) {
-        throw new ServiceError(409, 'member_already_participating');
+    // it fans out over `member_user_ids` (points-service consumers.ts). A query is the only
+    // expression of this rule the model can't carry; it is racy in a millisecond window. Read
+    // before the slot is claimed, so this team re-clicking at the cap is `already_accepted`.
+    const existing = await ChallengeParticipation.findOne({ challenge_id: challenge._id, member_user_ids: { $in: memberIds } })
+        .select('participant.id')
+        .lean<Pick<IChallengeParticipation, 'participant'>>();
+    if (existing) {
+        throw new ServiceError(409, existing.participant.id === team._id ? 'already_accepted' : 'member_already_participating');
     }
 
     await claimSlot(challenge._id, challenge.teaming.max_teams);
@@ -191,10 +198,11 @@ async function acceptAsTeam(
                 avatar_url: team.logo_url ?? null,
             },
             member_user_ids: memberIds,
+            by: actor.id,
             now,
         });
     } catch (err) {
-        await releaseSlot(challenge._id);
+        await giveBack(challenge._id, 'accepted');
         throw err;
     }
 
@@ -209,6 +217,8 @@ async function insertParticipation(
     args: {
         participant: IChallengeParticipation['participant'];
         member_user_ids: string[];
+        /** The user who clicked accept — for a team, the captain, never the team id. */
+        by: string;
         now: Date;
     }
 ): Promise<IChallengeParticipation> {
@@ -226,7 +236,7 @@ async function insertParticipation(
         status: 'accepted',
         accepted_at: args.now,
         deadline_at: deadlineFor(challenge, args.now),
-        status_history: [{ from: 'none', to: 'accepted', by: args.participant.id, at: args.now }],
+        status_history: [{ from: 'none', to: 'accepted', by: args.by, at: args.now }],
     });
 
     try {
@@ -317,8 +327,13 @@ export async function submit(
     // A participation a reviewer has EVER rejected goes back to a reviewer, whatever the challenge
     // says now: otherwise flipping `auto_approve` on turns every rejection into a resubmit away
     // from a payout nobody approved.
+    //
+    // And never for a Core+ member — the separation of duties `review` enforces. Core+ may author a
+    // challenge (or switch `auto_approve` on, or set its price), so an auto-approve they accept
+    // themselves is a payout they approved for themselves.
     const everRejected = p.status_history.some((h) => h.to === 'rejected');
-    const to = challenge.submission.auto_approve && !everRejected ? 'approved' : 'under_review';
+    const autoApprove = challenge.submission.auto_approve && !everRejected && !(await hasStaffMember(p.member_user_ids));
+    const to = autoApprove ? 'approved' : 'under_review';
 
     // `p.status` was read a moment ago, so the `from` recorded below is that read's value. The CAS
     // filter bounds it to SUBMITTABLE_FROM either way, so the worst case is a history row naming
@@ -330,13 +345,7 @@ export async function submit(
     };
     // An auto-approved participation is approved HERE, so it has to carry the reward here too —
     // the review route is not involved and `fillRewardIds` does nothing without one.
-    if (to === 'approved') {
-        common.reward = {
-            points_awarded: p.challenge_snapshot.award_points,
-            point_transaction_ids: [],
-            hall_of_fame_entry_id: null,
-        };
-    }
+    if (to === 'approved') common.reward = rewardFor(p, challenge);
     const proofs = input.proofs.map((pr) => ({ ...pr, size_bytes: null, mime: null }));
     const filter = {
         _id: id,
@@ -351,22 +360,27 @@ export async function submit(
     // database, not by the read above: a double-clicked first submit used to count twice in
     // `counts.submitted` and write `version: 1` twice. The first CAS only matches a row with no
     // submission yet; everything else is a resubmit, whose version is `$inc`ed in the same write.
-    let updated = await ChallengeParticipation.findOneAndUpdate(
-        { ...filter, submission: null },
-        { $set: { ...common, submission: { proofs, notes: input.notes, submitted_at: now, version: 1 } }, $push },
-        { returnDocument: 'after' }
-    );
-    const firstSubmit = updated != null;
-    updated ??= await ChallengeParticipation.findOneAndUpdate(
-        { ...filter, submission: { $ne: null } },
-        {
-            $set: { ...common, 'submission.proofs': proofs, 'submission.notes': input.notes, 'submission.submitted_at': now },
-            $inc: { 'submission.version': 1 },
-            $push,
-        },
-        { returnDocument: 'after' }
-    );
-    if (!updated) throw new ServiceError(409, 'participation_not_submittable');
+    const write = async () => {
+        const first = await ChallengeParticipation.findOneAndUpdate(
+            { ...filter, submission: null },
+            { $set: { ...common, submission: { proofs, notes: input.notes, submitted_at: now, version: 1 } }, $push },
+            { returnDocument: 'after' }
+        );
+        if (first) return { updated: first, firstSubmit: true };
+        const again = await ChallengeParticipation.findOneAndUpdate(
+            { ...filter, submission: { $ne: null } },
+            {
+                $set: { ...common, 'submission.proofs': proofs, 'submission.notes': input.notes, 'submission.submitted_at': now },
+                $inc: { 'submission.version': 1 },
+                $push,
+            },
+            { returnDocument: 'after' }
+        );
+        return again && { updated: again, firstSubmit: false };
+    };
+    const written = to === 'approved' ? await withApproval(challenge._id, write) : await write();
+    if (!written) throw new ServiceError(409, 'participation_not_submittable');
+    const { updated, firstSubmit } = written;
 
     if (firstSubmit) await Challenge.updateOne({ _id: challenge._id }, { $inc: { 'counts.submitted': 1 } });
 
@@ -388,6 +402,49 @@ export async function submit(
 
 export function mayReview(challenge: IChallenge, userId: string, role: UserRole): boolean {
     return challenge.reviewers.includes(userId) || rankOf(role) >= rankOf(UserRole.CORE);
+}
+
+/** Core and every rank above it — the ranks that may author a challenge and approve on any. */
+const STAFF_ROLES = Object.values(UserRole).filter((r) => rankOf(r) >= rankOf(UserRole.CORE));
+
+/** One indexed read: does any member rank Core or above (live role, not a token's claim)? */
+async function hasStaffMember(member_user_ids: string[]): Promise<boolean> {
+    return (await User.exists({ _id: { $in: member_user_ids }, role: { $in: STAFF_ROLES } })) != null;
+}
+
+/**
+ * Reserve the approval on the challenge BEFORE the participation's compare-and-swap, and give it
+ * back if the swap lands nothing (lost a double-click, or threw).
+ *
+ * The reservation requires the challenge alive, and `softDelete` tombstones only while
+ * `counts.approved` is 0 — both are single writes to the challenge document, so they serialize.
+ * Reading the participation for "approved" and then tombstoning let an approve land between the
+ * two, leaving a paid row pointing at a deleted challenge.
+ */
+async function withApproval<T>(challenge_id: string, write: () => Promise<T | null>): Promise<T | null> {
+    const reserved = await Challenge.updateOne({ _id: challenge_id, ...alive }, { $inc: { 'counts.approved': 1 } });
+    if (reserved.matchedCount === 0) throw new ServiceError(404, 'challenge_not_found');
+    let result: T | null = null;
+    try {
+        result = await write();
+        return result;
+    } finally {
+        if (result == null) await giveBack(challenge_id, 'approved');
+    }
+}
+
+/**
+ * What an approval writes. The payout amount is the accept-time snapshot, never today's price, and
+ * the Hall of Fame flag is today's — frozen here so the replay sweep never consults a flag an admin
+ * changed afterwards. Only an approved participation may carry a reward (the model's hook).
+ */
+function rewardFor(p: IChallengeParticipation, challenge: IChallenge): NonNullable<IChallengeParticipation['reward']> {
+    return {
+        points_awarded: p.challenge_snapshot.award_points,
+        point_transaction_ids: [],
+        hall_of_fame_entry_id: null,
+        grants_hall_of_fame: challenge.grants_hall_of_fame,
+    };
 }
 
 const REVIEWABLE_FROM = ['submitted', 'under_review'] as const;
@@ -429,17 +486,9 @@ export async function review(
             reviewed_at: now,
         },
     };
-    // Only an approved participation may carry a reward (Challenge.ts:372); the payout amount is
-    // the snapshot, never today's price.
-    if (input.decision === 'approved') {
-        set.reward = {
-            points_awarded: existing.challenge_snapshot.award_points,
-            point_transaction_ids: [],
-            hall_of_fame_entry_id: null,
-        };
-    }
+    if (input.decision === 'approved') set.reward = rewardFor(existing, challenge);
 
-    const updated = await ChallengeParticipation.findOneAndUpdate(
+    const cas = () => ChallengeParticipation.findOneAndUpdate(
         { _id: id, status: { $in: from } },
         {
             $set: set,
@@ -455,6 +504,7 @@ export async function review(
         },
         { returnDocument: 'after' }
     );
+    const updated = input.decision === 'approved' ? await withApproval(challenge._id, cas) : await cas();
     // The loser of a double-click matches nothing. This is what makes "approved once" true under
     // concurrency rather than true in the common case — and an approve publishes a payout.
     if (!updated) throw new ServiceError(409, 'participation_not_reviewable');
@@ -462,6 +512,16 @@ export async function review(
     if (input.decision === 'approved') {
         await settleApproval(updated, challenge, actor);
     } else {
+        // Published BEFORE the audit: the rejection is already committed, and nothing replays this
+        // event, so an audit failure afterwards must not also cost the participant their notice.
+        publish('ChallengeRejected', PRODUCER, {
+            participation_id: id,
+            challenge_id: challenge._id,
+            reason: input.reason,
+            // 1-based ordinal of THIS rejection, from the document the CAS just wrote. Notification
+            // keys its dedupe on it; reading it at consume time raced a quick second rejection.
+            rejection_no: updated.status_history.filter((h) => h.to === 'rejected').length,
+        });
         await recordAudit({
             actor_id: actor.id,
             action: 'challenge.rejected',
@@ -471,14 +531,6 @@ export async function review(
             reason: input.reason,
             ip: actor.ip,
         });
-        publish('ChallengeRejected', PRODUCER, {
-            participation_id: id,
-            challenge_id: challenge._id,
-            reason: input.reason,
-            // 1-based ordinal of THIS rejection, from the document the CAS just wrote. Notification
-            // keys its dedupe on it; reading it at consume time raced a quick second rejection.
-            rejection_no: updated.status_history.filter((h) => h.to === 'rejected').length,
-        });
     }
     return updated;
 }
@@ -486,9 +538,10 @@ export async function review(
 /**
  * Everything an approval owes the rest of the platform. Called from exactly two places (the review
  * route and the auto-approve branch of submit) so there is one definition of "what approved means".
+ * `counts.approved` is not in here: `withApproval` reserved it before the transition.
  *
  * Publishes rather than calls: the Points Service consumes `ChallengeCompleted` and dedupes on
- * `challenge.completed:<participation_id>:<user_id>` (Points.ts:212), so a replay pays once and a
+ * `challenge.completed:<participation_id>:<user_id>` (Points.ts), so a replay pays once and a
  * synchronous call would buy nothing but a failure mode.
  */
 async function settleApproval(
@@ -496,8 +549,6 @@ async function settleApproval(
     challenge: IChallenge,
     actor: Actor
 ): Promise<void> {
-    await Challenge.updateOne({ _id: challenge._id }, { $inc: { 'counts.approved': 1 } });
-
     await recordAudit({
         actor_id: actor.id,
         action: 'challenge.approved',
@@ -512,7 +563,7 @@ async function settleApproval(
     });
 
     publishCompleted(p);
-    if (challenge.grants_hall_of_fame) publishLegend(p);
+    if (p.reward?.grants_hall_of_fame) publishLegend(p);
 }
 
 /**
@@ -526,7 +577,7 @@ export function publishCompleted(p: IChallengeParticipation): void {
         participant: { type: p.participant.type, id: p.participant.id },
         member_user_ids: p.member_user_ids,
         // The snapshot's amount, never today's. Points resolves `challenge.completed` with this as
-        // the override and the seeded rule's default is 0 (Points.ts:195) — so sending 0 or nothing
+        // the override and the seeded rule's default is 0 (Points.ts) — so sending 0 or nothing
         // pays nobody, silently. That is why this is never computed and never optional.
         award_points: p.challenge_snapshot.award_points,
     });
@@ -557,9 +608,10 @@ export async function withdraw(id: string, reason: string | null, actor: Actor):
 
     // `counts.accepted` is "slots consumed", and a withdrawal is an admin undo, so the slot comes
     // back. Expiry deliberately does NOT return it: the participant took their attempt and
-    // ran out of time. `counts.submitted` and `counts.approved` are cumulative totals and are never
-    // decremented — they answer "how many ever got that far", which a withdrawal does not unmake.
-    await Challenge.updateOne({ _id: existing.challenge_id, 'counts.accepted': { $gt: 0 } }, { $inc: { 'counts.accepted': -1 } });
+    // ran out of time. `counts.submitted` is a cumulative total and is never decremented — it
+    // answers "how many ever got that far", which a withdrawal does not unmake. (`approved` rows
+    // cannot be withdrawn, so `counts.approved` never moves here either.)
+    await giveBack(existing.challenge_id, 'accepted');
     await recordAudit({
         actor_id: actor.id,
         action: 'challenge.withdrawn',
@@ -581,11 +633,11 @@ export async function withdraw(id: string, reason: string | null, actor: Actor):
  * `PointsEarned`.
  *
  * The event route loses rows permanently and silently: `record()` returns early on a replay and
- * publishes nothing (points ledger.ts:114-115), and `PointsEarned.reference.id` is the challenge,
- * not the participation (ledger.ts:96). A dropped message would leave the array short forever.
+ * publishes nothing (points-service ledger.ts), and `PointsEarned.reference.id` is the challenge,
+ * not the participation. A dropped message would leave the array short forever.
  *
- * The key is exact and shared (`idempotencyKey.challengeCompleted`, Points.ts:212) and
- * `idempotency_key` is uniquely indexed (Points.ts:128), so this is one indexed lookup that
+ * The key is exact and shared (`idempotencyKey.challengeCompleted`, Points.ts) and
+ * `idempotency_key` is uniquely indexed, so this is one indexed lookup that
  * converges whatever the bus did. Reading another service's collection is the sanctioned form
  * (adding-a-service.md §6.5) — this writes nothing of theirs.
  */
@@ -639,7 +691,7 @@ const HAS_SUBMISSION = new Set<string>(['submitted', 'under_review', 'rejected']
 /**
  * The reviewer queue. **Oldest submission first** — it is a work queue, so whoever has waited
  * longest is reviewed first, which is also what `{ challenge_id, status, submission.submitted_at }`
- * (Challenge.ts:377) exists to serve.
+ * (Challenge.ts) exists to serve.
  *
  * It used to sort `accepted_at` descending: newest acceptance first, ignoring its own index, and
  * the reverse of the order a reviewer should work in. `challenge-model.md §5` had said ascending

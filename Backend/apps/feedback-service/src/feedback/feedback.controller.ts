@@ -30,14 +30,14 @@ function present(ticket: IFeedbackTicket, viewer: { id: string | null; role: Rol
             : ticket
     ) as IFeedbackTicket & { __v?: number };
     const { __v, contact_email, ...rest } = plain;
-    const staff = !!viewer.role && ['core', 'coordinator', 'founder'].includes(viewer.role);
+    const staff = svc.isStaff(viewer.role);
     const mine = ticket.reporter?.user_id && ticket.reporter.user_id === viewer.id;
     return staff || mine ? { ...rest, contact_email } : rest;
 }
 
 /**
  * The LIVE viewer: `req.actor` where `requireActiveUser` already loaded it, otherwise one read of
- * the user. Never the token claim — the staff view hands out reporters' addresses (audit #2).
+ * the user. Never the token claim — the staff view hands out reporters' addresses.
  */
 const viewerOf = async (req: Request): Promise<{ id: string | null; role: RoleName | undefined }> =>
     req.actor ? { id: req.actor._id, role: req.actor.role as RoleName } : svc.liveViewer(req.user);

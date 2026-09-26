@@ -9,9 +9,9 @@ import { Request, Response } from 'express';
 import { config } from '../config/env';
 import { UserRole } from '../models/User';
 import { requireAuth, optionalAuth, bearerToken, AuthUser } from './requireAuth';
-import { requireRole, requireSelfOr, rankOf } from './requireRole';
+import { requireRole, rankOf } from './requireRole';
 import { requireActiveUser } from './requireActiveUser';
-import { assertInternalTokenConfigured } from './requireServiceToken';
+import { assertInternalTokenConfigured, requireServiceToken, DEV_INTERNAL_TOKEN } from './requireServiceToken';
 
 type Handler = (req: Request, res: Response, next: () => void) => void;
 
@@ -112,6 +112,7 @@ assert.strictEqual(anon.user, undefined, 'anonymous request gets no req.user');
 const bad = run(optionalAuth, bearer('not.a.jwt'));
 assert.ok(bad.passed, 'optionalAuth treats a bad token as no token');
 assert.strictEqual(bad.user, undefined, 'a bad token must not populate req.user');
+assert.ok(run(optionalAuth, { authorization: 'Bearer logged_out' }).passed, "mobile's logged-out sentinel is a guest");
 
 const signed = run(optionalAuth, bearer(good));
 assert.ok(signed.passed && signed.user?.id === 'u-1', 'optionalAuth populates a valid token');
@@ -135,23 +136,6 @@ assert.ok(!tooLow.passed && tooLow.status === 403, 'core is forbidden, not unaut
 const noUser = run(coordinatorOnly, {});
 assert.strictEqual(noUser.status, 401, 'an anonymous caller gets 401, not 403 — 403 would confirm the route exists');
 
-/* ----------------------------- requireSelfOr ---------------------------- */
-
-const selfOrCoordinator = requireSelfOr(UserRole.COORDINATOR, (req) => (req.params as Record<string, string>)?.ref);
-const withRef = (ref: string, role: UserRole) =>
-    ({ user: { id: 'u-1', role }, params: { ref } } as unknown as Partial<Request>);
-
-assert.ok(run(selfOrCoordinator, {}, withRef('u-1', UserRole.USER)).passed, 'a user may act on their own record');
-assert.ok(run(selfOrCoordinator, {}, withRef('u-2', UserRole.COORDINATOR)).passed, 'a coordinator may act on anyone');
-
-const other = run(selfOrCoordinator, {}, withRef('u-2', UserRole.USER));
-assert.ok(!other.passed && other.status === 403, 'a user may not act on someone else');
-
-assert.strictEqual(run(selfOrCoordinator, {}).status, 401, 'requireSelfOr needs requireAuth to have run');
-
-// Audit Sep 26: an unknown role ranked -1, so every signed-in user cleared the bar.
-assert.throws(() => requireSelfOr('nope' as UserRole, () => undefined), /unknown role/, 'requireSelfOr refuses an unknown role at boot');
-
 /* --------------------------- requireActiveUser --------------------------- */
 
 // Mounted bare (`requireActiveUser` instead of `requireActiveUser()`) it used to throw on every
@@ -168,9 +152,26 @@ assert.throws(() => requireSelfOr('nope' as UserRole, () => undefined), /unknown
     assert.throws(() => requireActiveUser('nope' as UserRole), /unknown role/, 'a typo floor still fails at boot');
 }
 
+/* -------------------------- requireServiceToken -------------------------- */
+
+{
+    const call = (token?: string) => run(requireServiceToken as Handler, {}, {
+        header: (name: string) => (name === 'x-internal-token' ? token : undefined),
+    } as unknown as Partial<Request>);
+    const saved = config.internalTokenPrevious;
+    config.internalTokenPrevious = 'old-token';
+    assert.ok(call(config.internalToken).passed, 'the current internal token passes');
+    assert.ok(call('old-token').passed, 'during a rotation the previous token passes too');
+    assert.strictEqual(call('wrong').status, 401, 'anything else is 401');
+    assert.strictEqual(call(undefined).status, 401, 'no token is 401');
+    config.internalTokenPrevious = '';
+    assert.strictEqual(call('old-token').status, 401, 'with no rotation configured the old token is dead');
+    config.internalTokenPrevious = saved;
+}
+
 /* --------------------------- production guard ---------------------------- */
 
-// Audit Sep 26: the guard checked the JWT and internal secrets but not the committed Mongo root
+// The guard checked the JWT and internal secrets but not the committed Mongo root
 // password or a password-less Redis — the two things that opened the database and the bus.
 {
     const saved = { nodeEnv: config.nodeEnv, access: config.jwt.accessSecret, refresh: config.jwt.refreshSecret,
@@ -193,7 +194,7 @@ assert.throws(() => requireSelfOr('nope' as UserRole, () => undefined), /unknown
     assert.throws(() => assertInternalTokenConfigured(), /REDIS_URL/, 'the compose fallback Redis password is refused');
     config.redisUrl = '';
     assert.throws(() => assertInternalTokenConfigured(), /REDIS_URL/, 'no bus at all is refused in production');
-    // Audit #2: the password now travels in REDIS_PASSWORD, not the URL.
+    // The password now travels in REDIS_PASSWORD, not the URL.
     config.redisUrl = 'redis://redis:6379';
     config.redisPassword = 'real/secret#1';
     assert.doesNotThrow(() => assertInternalTokenConfigured(), 'a password in REDIS_PASSWORD satisfies the guard');
@@ -206,6 +207,10 @@ assert.throws(() => requireSelfOr('nope' as UserRole, () => undefined), /unknown
         () => assertInternalTokenConfigured({ datastores: false }),
         'the gateway, which holds no database or bus, is not asked for them'
     );
+    // A rotation that parks the published dev token as "previous" keeps it verifying everywhere.
+    config.internalTokenPrevious = DEV_INTERNAL_TOKEN;
+    assert.throws(() => assertInternalTokenConfigured({ datastores: false }), /INTERNAL_API_TOKEN_PREVIOUS/, 'a published previous token is refused');
+    config.internalTokenPrevious = '';
 
     Object.assign(config, { nodeEnv: saved.nodeEnv, internalToken: saved.internal, mongoUri: saved.mongo, redisUrl: saved.redis, redisPassword: saved.redisPassword });
     config.jwt.accessSecret = saved.access;

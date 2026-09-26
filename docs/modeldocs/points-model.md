@@ -122,11 +122,11 @@ Resolution order: trigger override → rule `default_amount`. If rule `enabled =
 | Consumed event | Rule | Idempotency key | Type |
 |---|---|---|---|
 | `ParticipantAttended` | `event.participation` | `event.participation:${registration_id}` | earn |
-| `RegistrationCancelled`, `ParticipantAttendanceRevoked` | reverse the participation credit if one exists (same key for both, so they and an event cancel reverse once) | `event.participation.reversal:${credit_tx_id}` | adjust (negative) |
-| `LeaderboardFrozen { reason: 'final', podium: [{ place, participant, user_ids[] }] }` (Sep 26) | `event.podium.N` per user in `user_ids` (team → its members); same function as `POST /points/award` | `event.podium:${event_id}:${user_id}` — shared with the admin route, so the two cannot both pay | earn |
+| `RegistrationCancelled`, `ParticipantAttendanceRevoked` | reverse the participation credit if one exists (same key for both, so they and an event cancel reverse once), less any part of it already expired (`expire:${credit_tx_id}`); fully expired ⇒ no row | `event.participation.reversal:${credit_tx_id}` | adjust (negative) |
+| `LeaderboardFrozen { reason: 'final', podium: [{ place, participant, user_ids[] }] }` (Sep 26) | `event.podium.N` per user in `user_ids` (team → its members); same function as `POST /points/award`. The key is looked up first, so a replay after the winner cancelled (or a rule changed) returns the paid row; a place the event does not pay (`place_not_awarded`, `event_pays_no_podium`, `rule_disabled`) is skipped, anything else is a `points.podium_conflict` audit row | `event.podium:${event_id}:${user_id}` — shared with the admin route, so the two cannot both pay | earn |
 | `EventCancelled` | (a) refund every `leaderboard.investment` spend whose entry belongs to the event; (b) reverse every `event.participation` earn for it — **refunds first**, or an investor who spent everything cannot afford the reversal | (a) `leaderboard.investment.refund:${spend_tx_id}` (b) `event.participation.reversal:${original_tx_id}` | (a) refund (b) adjust |
 | `ChallengeCompleted` (approved) | `challenge.completed`, one row per `member_user_ids[]`, amount from payload | `challenge.completed:${participation_id}:${user_id}` | earn |
-| Leaderboard Service internal call `POST /internal/points/spend` (only while the event is `ongoing`) | `leaderboard.investment` | `leaderboard.investment:${request_id}` (Leaderboard generates `request_id`) | spend |
+| Leaderboard Service internal call `POST /internal/points/spend` (only while the event is `ongoing`; a retry of a spend that landed is answered from its key first, whatever the event status or rule is now) | `leaderboard.investment` | `leaderboard.investment:${user_id}:${entry_id}:${request_id}` (Leaderboard generates `request_id`) | spend |
 | Leaderboard Service internal call `POST /internal/points/refund { user_id, reference, request_id }` (compensation) | gives back exactly the spend `leaderboard.investment:${request_id}` (same user, same entry; `amount` optional and only cross-checked); none → `404 spend_not_found` | `leaderboard.investment.refund:${spend_tx_id}` | refund |
 | Admin `POST /points/adjust` | `admin.manual` | `admin:${request_uuid}` | adjust |
 
@@ -137,7 +137,8 @@ Type semantics: `earn` and `refund` are always positive, `spend` and `expire` al
 ## 5. Balance cache & reconciliation
 
 - `users.points_balance` (User Service schema, BE-1) is written only by Points Service, **by direct `$inc`** — settled Sep 19, 2026.
-- **No nightly job**: `Σ amount` vs `points_balance` is one aggregate, reported as `ledger_synced` on the admin read at no extra cost, and repaired on demand by `POST /points/users/:id/recalculate` (compare-and-swapped, audited). Ledger wins. Build the sweep when something has actually drifted.
+- **No nightly job**: `Σ amount` vs `points_balance` is one aggregate, reported as `ledger_synced` on the admin read at no extra cost, and repaired on demand by `POST /points/users/:id/recalculate` (compare-and-swapped, audited). Ledger wins. It refuses `409 write_in_flight` while the user has a live `moving` key claim (a write between its `$inc` and its row), which would otherwise read as drift and be erased. Build the sweep when something has actually drifted.
+- `lifetime_earned` = Σ positive rows except `refund`; `lifetime_spent` = |Σ negative rows + Σ refunds| (a refund is a spend given back, not earnings).
 - Read of balance never touches the ledger.
 
 ## 6. Domain events emitted (Spec §8.1)

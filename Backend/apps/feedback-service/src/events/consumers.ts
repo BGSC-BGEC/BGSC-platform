@@ -53,6 +53,9 @@ async function handleUserDeleted(payload: { user_id: string }): Promise<void> {
     if (!user_id) return;
 
     try {
+        // User-service republishes UserDeleted for days. A late copy arriving after UserRestored
+        // must not erase the restored name again: act only on an account that is deleted NOW.
+        if (!(await User.exists({ _id: user_id, deleted_at: { $ne: null } }))) return;
         // The reply address goes too: on an attributed ticket it is the account's own email.
         await FeedbackTicket.updateMany(
             { 'reporter.user_id': user_id },

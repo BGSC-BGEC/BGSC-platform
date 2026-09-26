@@ -62,7 +62,9 @@ export function computeRating(inputs: RatingInputs, now: Date = new Date()): Rat
  */
 export async function gatherRatingInputs(user: IUser): Promise<RatingInputs> {
     const [participations, podiums, challenges] = await Promise.all([
-        FormSubmission.countDocuments({ 'user.user_id': user._id, status: 'confirmed' }),
+        // Event registrations only: a challenge's own form is already counted as `challenges`,
+        // and a generic form (a survey, say) is not a participation at all.
+        FormSubmission.countDocuments({ 'user.user_id': user._id, 'owner.type': 'event', status: 'confirmed' }),
         LeaderboardEntry.countDocuments({ 'participant.id': user._id, rank: { $ne: null, $lte: 3 } }),
         ChallengeParticipation.countDocuments({ member_user_ids: user._id, status: 'approved' }),
     ]);

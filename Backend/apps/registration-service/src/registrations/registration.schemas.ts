@@ -4,7 +4,7 @@ import { z } from 'zod';
 /**
  * A file answer names an upload by the url `POST /registrations/upload-file` returned. `name`,
  * `size` and `mime` are accepted so a client can echo the upload response back unchanged, and are
- * then ignored: the stored values come from the `form_uploads` record (backend-audit H5).
+ * then ignored: the stored values come from the `form_uploads` record.
  */
 const FileRef = z.object({
     field_key: z.string().max(32),

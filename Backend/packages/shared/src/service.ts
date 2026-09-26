@@ -57,7 +57,7 @@ export function successEnvelope(req: Request, res: Response, next: NextFunction)
  * Already an envelope: an error (`error` is a string code) or an explicit success envelope
  * (`success: true` AND `data`). The test used to be "has a top-level `success` or `error` key", which
  * let a payload like `{ success: true, count: 3 }` or `{ error: null, value: 1 }` through unwrapped
- * — the first with no `data`, the second reading as a failure (audit Sep 26).
+ * — the first with no `data`, the second reading as a failure.
  */
 export function isEnveloped(body: unknown): boolean {
     if (body === null || typeof body !== 'object' || Array.isArray(body)) return false;
@@ -157,16 +157,22 @@ export function createServiceApp(opts: ServiceOptions): Express {
  * The one error handler every service mounts. Exported so it can be checked directly, the way the
  * rest of the shared middleware is — no server, no sockets.
  *
- * Four args: Express identifies an error handler by arity, so `_next` must stay.
+ * Four args: Express identifies an error handler by arity, so `next` must stay.
  */
 export function errorHandler(serviceName: string) {
-    return function (err: Error, _req: Request, res: Response, _next: NextFunction): void {
+    return function (err: Error, _req: Request, res: Response, next: NextFunction): void {
+        // Once a response has started (a streamed file failing mid-way) there is no status left to
+        // send; Express's default handler closes the socket.
+        if (res.headersSent) return next(err);
+
         // A ServiceError is a deliberate, client-facing refusal. Mapping it centrally means a
         // handler cannot forget and turn a 409 into a 500.
+        // `validation_failed` always carries its per-field reasons as `fields`, the shape `validate()`
+        // and the ZodError branch below send, so a client reads one key whatever raised it.
         if (err instanceof ServiceError) {
-            res.status(err.status).json(
-                err.details === undefined ? { error: err.code } : { error: err.code, details: err.details }
-            );
+            const extra =
+                err.details === undefined ? {} : err.code === 'validation_failed' ? { fields: err.details } : { details: err.details };
+            res.status(err.status).json({ error: err.code, ...extra });
             return;
         }
 
@@ -189,6 +195,17 @@ export function errorHandler(serviceName: string) {
         // client's bad input, not a server fault.
         if (err instanceof ZodError) {
             res.status(422).json({ error: 'validation_failed', fields: issuesOf(err) });
+            return;
+        }
+
+        // A schema rule the zod layer did not repeat (a required field that trimmed to '', a length
+        // cap) is still the client's input. Keys and kinds only — a validator message can quote the
+        // stored value.
+        if (err instanceof mongoose.Error.ValidationError) {
+            // Logged too: a service that saved a value the model refuses is sometimes our fault.
+            console.warn(`[${serviceName}] model validation refused:`, Object.keys(err.errors).join(', '));
+            const fields = Object.entries(err.errors).map(([key, e]) => ({ key, code: (e as { kind?: string }).kind ?? 'invalid' }));
+            res.status(422).json({ error: 'validation_failed', fields });
             return;
         }
 

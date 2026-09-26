@@ -115,8 +115,7 @@ Things that grow unbounded (registrations, teams, bids, scores) live in their ow
 
   // ---- denormalized counters (updated with $inc by owner service) ----
   counts: {
-    registrations_confirmed: number,    // == seat_holders.length; moved only with it
-    teams: number
+    registrations_confirmed: number     // == seat_holders.length; moved only with it
   },
   seat_holders: string[],               // form_submissions._id holding a confirmed seat (reserve-seat ledger)
 
@@ -138,8 +137,8 @@ Things that grow unbounded (registrations, teams, bids, scores) live in their ow
 | `points_pool` | Copied from Spec §4.1 `points_pool{}`, expanded with the three toggles from §5.15.3 (participation, winner multipliers, sponsor bonus) plus investment. Points Service reads this when it consumes `ParticipantAttended` (participation, paid on attendance) and `LeaderboardFrozen { reason: 'final', podium }` (podium multipliers). |
 | `scoring.parameters` | Admin-defined per event. The **schema** lives here; the **values** per participant live in `leaderboard_entries.raw`. |
 | `auction.captain_user_ids` | Approved captains only. Approval happens through the registration flow; Event Service copies the ID here when Core approves. |
-| `counts` | Avoids `count()` on `form_submissions` for every card render. `registrations_confirmed` moves only inside a reserve/release (below). **`registrations_waitlisted` dropped (Sep 26 audit):** three writers kept it with non-idempotent `$inc`s and it drifted on every retry; the waitlist is counted from `form_submissions`. |
-| `seat_holders` | **Decision (Sep 26):** the seat ledger that makes `POST /internal/events/:id/reserve-seat` and `release-seat` idempotent per `registration_id`. Reserve = one `updateOne({ seat_holders: { $ne: reg }, counts.registrations_confirmed < max }, { $addToSet, $inc +1 })`; release = `$pull` + `$inc -1` guarded by `seat_holders: reg`. A retry after a lost answer can never count or free a seat twice. ponytail: embedded, one uuid per seat (~400k before the 16 MB cap); an `event_seats` collection is the upgrade. |
+| `counts` | Avoids `count()` on `form_submissions` for every card render. `registrations_confirmed` moves only inside a reserve/release (below). **`registrations_waitlisted` dropped:** three writers kept it with non-idempotent `$inc`s and it drifted on every retry; the waitlist is counted from `form_submissions`. **`teams` dropped:** nothing ever wrote it, so every payload said 0; count `teams` by `owner.id` when a screen needs it. |
+| `seat_holders` | **Decision (Sep 26):** the seat ledger that makes `POST /internal/events/:id/reserve-seat` and `release-seat` idempotent per `registration_id`. Reserve = one `updateOne({ seat_holders: { $ne: reg }, counts.registrations_confirmed < max }, { $addToSet, $inc +1 })`; release = `$pull` + `$inc -1` guarded by `seat_holders: reg`. A retry after a lost answer can never count or free a seat twice. **Reconciliation:** every 5 minutes the Event Service releases, through that same guarded release, the seats of capped `draft`/`upcoming`/`ongoing` events whose `form_submissions` row is missing, or has been `cancelled`/`rejected`/`waitlisted` for more than 10 minutes (`confirmed` and `submitted` rows are never touched); every such event, each row re-read right before its release so one confirmed meanwhile keeps its seat. Seat, captain-pool and auction-status writes do not bump `updated_at`: it is the version an admin `PATCH` CASes on (`409 event_changed_concurrently`). The `RegistrationCancelled` safety net releases only when that cancellation left a seat behind (`freed_seat: false`, `previous_status` confirmed/submitted) and the row is not confirmed again. ponytail: embedded, one uuid per seat (~400k before the 16 MB cap); an `event_seats` collection is the upgrade. |
 | Seat answers | `{ reserved: true }`, or `{ reserved: false, reason }` with `capacity_full` (full, waitlist on → Registration waitlists), `waitlist_disabled` (full, no waitlist → rejects), `event_closed` / `not_open` / `event_not_found` (→ rejects). Only `upcoming`/`ongoing` take seats; after `closes_at` only a row that is already `waitlisted` may be promoted in. |
 | `slug` | Deep links and the "Manage on Web" anchor (Spec §5.5 Spectator Bracket View). |
 
@@ -172,9 +171,9 @@ draft ──publish──> upcoming ──(start_at reached)──> ongoing ─�
 | `registration.opens_at` reached | scheduler | `status == 'upcoming'` | `EventRegistrationOpened` |
 | `registration.closes_at` reached | scheduler | — | `EventRegistrationClosed` |
 | upcoming → ongoing | scheduler | `now >= start_at` | `EventStarted` |
-| ongoing → past | scheduler or Core+ | — | `EventCompleted { event_id, winners[] }` |
+| ongoing → past | scheduler or Core+ | `type == 'ALL'`: `auction.status` is `finished` or `not_started` (else 409 `auction_not_finished`) | `EventCompleted { event_id, winners[] }` |
 | draft/upcoming/ongoing → cancelled | Coordinator+ | — | `EventCancelled` (consumers: Points reverses participation credits + refunds investments; Leaderboard drops entries; Registration disbands teams; auction lots dropped) |
-| delete draft | Core+ | `status == 'draft'` only; soft (`deleted_at`) | `EventDeleted` |
+| delete draft | Core+ who administers the event | `status == 'draft'` only; soft (`deleted_at`) | `EventDeleted` |
 
 `past` and `cancelled` are terminal. Published events are never deleted, only cancelled — registrations and ledger rows reference them.
 
@@ -210,7 +209,7 @@ draft ──publish──> upcoming ──(start_at reached)──> ongoing ─�
 | `{ status: 1, 'registration.closes_at': 1 }` | scheduler: close registration |
 | `{ deleted_at: 1 }` partial | exclude soft-deleted |
 
-`tags` declares `lowercase`/`trim` on the array **element** (`[{ type: String, lowercase: true }]`); on the array path Mongoose silently ignores them (Sep 26 audit).
+`tags` declares `lowercase`/`trim` on the array **element** (`[{ type: String, lowercase: true }]`); on the array path Mongoose silently ignores them.
 
 Text search on `title`/`description` deferred to Elasticsearch (Spec §13); for MVP a text index on `{ title: 'text', tags: 'text' }` is acceptable.
 
@@ -228,7 +227,7 @@ Spec §4.1 `Auction` entity is per-player; we call it a **lot** to avoid confusi
   oc_adjusted_price: number | null,   // after 3/7ths override (Spec §5.15.4)
   order: number,                      // position in auction sequence
 
-  status: 'queued' | 'on_block' | 'sold' | 'unsold',
+  status: 'queued' | 'on_block' | 'settling' | 'sold' | 'unsold',
   current_bid: number | null,
   current_bidder: { user_id: string, team_id: string } | null,
   timer_ends_at: Date | null,         // server-authoritative (Spec §11.4)
@@ -259,13 +258,13 @@ findOneAndUpdate(
   { $push: { bids }, $set: { current_bid, current_bidder, timer_ends_at: now + bid_timer_seconds }, $inc: { version: 1 } })
 ```
 
-No match ⇒ reject (stale version, timer expired, or lot closed). Purse is re-validated on close (`PlayerSold`) because a captain can hold the high bid on only one lot at a time but may have lost purse elsewhere in the meantime.
+No match ⇒ 409 `conflict_concurrent_bid` (stale version, timer expired, or lot closed). Pausing the auction bumps the on-block lot's `version`, so a bid read before the pause cannot land after it. A team with no purse yet (formed after the start) is given the start-time default through the same idempotent `auction-purses` call before its first bid. Purse is re-validated on close (`PlayerSold`) because a captain can hold the high bid on only one lot at a time but may have lost purse elsewhere in the meantime.
 
-Indexes: `{ event_id: 1, order: 1 }`, `{ event_id: 1, status: 1 }`, `{ 'player.user_id': 1, event_id: 1 }` unique, `one_lot_on_block_per_event` = `{ event_id: 1 }` unique partial on `status: 'on_block'` (two concurrent "raise next lot" calls: the loser gets 11000 and backs off).
+Indexes: `{ event_id: 1, order: 1 }`, `{ event_id: 1, status: 1 }`, `{ 'player.user_id': 1, event_id: 1 }` unique, `one_active_lot_per_event` = `{ event_id: 1 }` unique partial on `status ∈ { on_block, settling }` (two concurrent "raise next lot" calls: the loser gets 11000 and backs off).
 
-**Settlement (Sep 26).** The lot is claimed `on_block → sold` by CAS on `version`, then the Event Service asks Registration (owner of `teams`) over `/internal`: `debit-purse { amount, request_id: '<lot_id>:debit' }` → `add-member` → on a refusal `refund-purse { request_id: '<lot_id>:refund' }` and the lot goes `unsold` (`PlayerUnsold.reason`). An unknown outcome rolls the lot back to `on_block` with its timer expired, so an admin retry replays the same keyed calls. There is no direct `teams` write and no fallback. Auction start sets purses through `POST /internal/events/:id/auction-purses`; a captain budget override through `PATCH /internal/teams/:id/auction-budget`.
+**Settlement.** A lot with a winner is claimed `on_block → settling` by CAS on `version` (it holds the block and takes no bids), then the Event Service asks Registration (owner of `teams`) over `/internal`: `debit-purse { amount, request_id: '<lot_id>:<team_id>:debit' }` → `add-member` → on a refusal `refund-purse { request_id: '<lot_id>:<team_id>:refund' }` and the lot goes `unsold` (`PlayerUnsold.reason`). An unknown outcome — no answer, a 5xx, our token refused (401/403), the generic route-miss 404 `not_found`, or 422 `validation_failed` — leaves the lot `settling` (503); the next admin advance, auto-settle tick or close replays the same keyed calls. There is no direct `teams` write and no fallback. Auction start sets purses through `POST /internal/events/:id/auction-purses`; a captain budget override through `PATCH /internal/teams/:id/auction-budget`.
 
-Lot lifecycle: `queued → on_block → sold | unsold`. Emits `AuctionStarted`, `BidPlaced`, `BidClosed`, `PlayerSold`, `PlayerUnsold` (Spec §8.1).
+Lot lifecycle: `queued → on_block → settling → sold | unsold` (no winner: `on_block → unsold`). Emits `AuctionStarted`, `BidPlaced`, `BidClosed`, `PlayerSold`, `PlayerUnsold` (Spec §8.1).
 
 ponytail: bids embedded in the lot. Ceiling ≈ a few hundred bids per player; if bid history needs pagination or analytics, move to `auction_bids` collection.
 

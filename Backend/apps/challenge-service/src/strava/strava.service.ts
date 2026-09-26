@@ -9,6 +9,7 @@ import {
 } from '@bgsc/shared';
 import { randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
+import { PRODUCER, isDuplicateKey } from '../challenges/challenge.service';
 import { allOf, keysetFilter, keysetSort, pageOf } from '../challenges/cursor';
 import { ActivitiesInput } from './strava.schemas';
 import { apiGet, assertConfigured, credentialFor, deauthorize, exchange, freshToken, open, reauthRequired, seal } from './tokens';
@@ -23,7 +24,6 @@ import { apiGet, assertConfigured, credentialFor, deauthorize, exchange, freshTo
  * excluded from MVP, so this stays deliberately small.
  */
 
-const PRODUCER = 'challenge-service';
 const SCOPES = 'activity:read_all,profile:read_all';
 /** Bound one sync: Strava allows 200 requests / 15 min for the whole application. */
 const MAX_PAGES = 3;
@@ -144,8 +144,15 @@ export async function link(userId: string, code: string, state: string, scope: s
     // Relinking to a DIFFERENT athlete is a disconnect plus a connect: the old athlete's activities
     // and sync watermark belong to the old link, and keeping the watermark would skip the new
     // athlete's whole history.
-    const current = await StravaCredential.findOne({ user_id: userId }).select('athlete_id');
+    const current = await StravaCredential.findOne({ user_id: userId }).select('athlete_id scope');
     if (current && current.athlete_id !== athleteId) await unlink(userId);
+    // The sync cooldown survives a relink: resetting it on every link let a script loop
+    // link -> sync and spend the app-wide Strava budget the cooldown exists to protect. A new
+    // athlete is a new row (unlinked above), which starts with no cooldown anyway; the one stored
+    // state a relink genuinely cures is a grant whose scope could not read activities.
+    // ponytail: a token Strava revoked is not recorded locally, so that reconnect waits out the
+    // remaining cooldown (at most 5 minutes). Store a reauth flag if that ever annoys anyone.
+    const cured = current != null && current.athlete_id === athleteId && !!current.scope && !canReadActivities(current.scope);
 
     // Upsert, not insert: reconnecting must refresh the tokens rather than collide on the unique
     // user_id index. A query update runs NO document middleware, so the model's sealed-token
@@ -164,15 +171,14 @@ export async function link(userId: string, code: string, state: string, scope: s
                     refresh_token_enc: seal(tokens.refresh_token),
                     expires_at: new Date(tokens.expires_at * 1000),
                     scope,
-                    // A fresh grant may sync at once (e.g. right after a reauth-required reconnect).
-                    last_sync_started_at: null,
+                    ...(cured ? { last_sync_started_at: null } : {}),
                 },
                 $setOnInsert: { _id: randomUUID(), last_synced_at: null },
             },
             { upsert: true }
         );
     } catch (err) {
-        if ((err as { code?: number } | null)?.code === 11000) {
+        if (isDuplicateKey(err)) {
             // Someone else already linked this athlete. Refusing is the only safe answer: the
             // activities are keyed by Strava's id, so allowing it would move them between profiles.
             throw new ServiceError(409, 'strava_athlete_already_linked');
@@ -242,14 +248,14 @@ interface StravaActivityResponse {
  * `visibility: 'everyone'` (or, absent visibility, an explicit `private: false`); anything we
  * cannot read is private.
  */
-export function isPrivate(a: Pick<StravaActivityResponse, 'private' | 'visibility'>): boolean {
+function isPrivate(a: Pick<StravaActivityResponse, 'private' | 'visibility'>): boolean {
     if (a.private === true) return true;
     if (a.visibility != null) return a.visibility !== 'everyone';
     return a.private !== false;
 }
 
 /** One sync per user per window. Each sync spends up to MAX_PAGES + 1 of the app-wide budget. */
-export const SYNC_COOLDOWN_MS = 5 * 60_000;
+const SYNC_COOLDOWN_MS = 5 * 60_000;
 
 /**
  * The per-user cooldown, as a compare-and-swap on `last_sync_started_at`: a user hammering the

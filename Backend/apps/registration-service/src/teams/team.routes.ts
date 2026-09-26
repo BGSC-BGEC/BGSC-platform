@@ -4,6 +4,7 @@ import * as controller from './team.controller';
 import {
     CreateTeamSchema,
     InviteMemberSchema,
+    JoinByCodeSchema,
     RemoveMemberSchema,
     TeamIdParams,
     TeamMemberParams,
@@ -35,6 +36,9 @@ teamRoutes.post(
     validate({ params: TeamIdParams, body: InviteMemberSchema }),
     controller.inviteMemberHandler
 );
+
+// POST /teams/join-by-code - join with the code the captain shared (counts as their invite)
+teamRoutes.post('/join-by-code', requireAuth, requireActiveUser(), validate({ body: JoinByCodeSchema }), controller.joinByCodeHandler);
 
 // POST /teams/:id/join - accept an invite, or join an open team
 teamRoutes.post('/:id/join', requireAuth, requireActiveUser(), validate({ params: TeamIdParams }), controller.joinTeamHandler);

@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { ACCOUNT_DELETION_GRACE_DAYS, AuditLog, IUser, ServiceError, TOKEN_ALGORITHMS, User, UserRole, UserStatus, config, publish, recordAudit } from '@bgsc/shared';
+import { AuditLog, IUser, RESERVED_USERNAMES, ServiceError, TOKEN_ALGORITHMS, User, UserRole, UserStatus, config, publish, recordAudit, restorableUntil } from '@bgsc/shared';
 import { MailerService } from './mailer.service';
 import {
   RegisterInput,
@@ -22,6 +22,7 @@ export interface AuthResult {
     role: UserRole;
     status: UserStatus;
     is_email_verified: boolean;
+    is_phone_verified: boolean;
     profile: IUser['profile'];
   };
   tokens: TokenPair;
@@ -33,6 +34,13 @@ const OTP_TTL_MS = 5 * 60 * 1000;
 /** The Google callback's one-time login code: long enough for one redirect, no longer. */
 const LOGIN_CODE_TTL_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
+/**
+ * How long the token a rotation just retired is still treated as a benign late arrival. Two tabs
+ * (or a retry) refreshing with the same token: the loser can read the account after the winner's
+ * rotation, and without this it looked like a replay and logged the user out.
+ */
+export const REFRESH_REUSE_GRACE_MS = 30 * 1000;
+const GOOGLE_TIMEOUT_MS = 10_000;
 
 /** Replay window and page for the UserRestored sweep. */
 export const RESTORE_REPLAY_WINDOW_MS = 7 * DAY_MS;
@@ -50,7 +58,7 @@ export const isSafeReturnPath = (p: string): boolean => p.length <= 200 && /^\/(
  * One-time secrets are stored as sha256 digests. sha256, not bcrypt: every one of these is 256
  * random bits (or a signed JWT), so there is nothing to slow down, and bcrypt silently ignores
  * everything past byte 72 — which for a refresh JWT is the header plus half the user id, so every
- * refresh token a user was ever issued matched the stored hash (audit Sep 26, C3).
+ * refresh token a user was ever issued matched the stored hash.
  */
 export const sha256 = (value: string): string => crypto.createHash('sha256').update(value).digest('hex');
 
@@ -109,6 +117,7 @@ export class AuthService {
       role: user.role,
       status: user.status,
       is_email_verified: user.is_email_verified,
+      is_phone_verified: user.is_phone_verified,
       profile: user.profile,
     };
   }
@@ -135,13 +144,15 @@ export class AuthService {
    * Registers a new user.
    */
   static async register(input: RegisterInput): Promise<AuthResult> {
-    const existing = await User.findOne({
+    const existing = await User.find({
       $or: [{ email: input.email }, { username: input.username }],
-    });
+    }).select('+google_id');
 
-    if (existing) {
+    // Only an account past its restore window gives way; anything live or restorable is a conflict.
+    if (existing.some((u) => !this.pastRestore(u))) {
       throw new ServiceError(409, 'conflict');
     }
+    for (const u of existing) await this.releaseKeys(u);
 
     const passwordHash = await bcrypt.hash(input.password, 10);
     const verificationToken = crypto.randomBytes(32).toString('hex');
@@ -215,7 +226,7 @@ export class AuthService {
     const loginQuery = input.login.toLowerCase();
     const user = await User.findOne({
       $or: [{ email: loginQuery }, { username: loginQuery }],
-    }).select('+password_hash +refresh_token_hash');
+    }).select('+password_hash');
 
     const isMatch = await bcrypt.compare(input.password, user?.password_hash ?? TIMING_DUMMY_HASH);
     if (!user || !user.password_hash || !isMatch) {
@@ -224,7 +235,7 @@ export class AuthService {
 
     // Soft-deleted: the owner (password proven) is told how long a restore remains possible.
     if (user.status === UserStatus.DELETED) {
-      const until = this.restorableUntil(user);
+      const until = restorableUntil(user);
       if (until && Date.now() <= until.getTime()) {
         return {
           account_status: 'scheduled_for_deletion',
@@ -261,16 +272,60 @@ export class AuthService {
     };
   }
 
+  /** Deleted and past its restore window: it can never come back. */
+  private static pastRestore(user: IUser): boolean {
+    const until = restorableUntil(user);
+    return user.status === UserStatus.DELETED && until !== null && Date.now() > until.getTime();
+  }
+
   /**
-   * The stamped `restorable_until` wins over recomputing from `deleted_at`: it is what the user was
-   * told at deletion time and what User Service reports.
+   * An account past its restore window must not hold its email, username and verified phone
+   * against every future sign-up. They are rewritten to values nobody can register and the phone
+   * badge is dropped. The originals are kept in the audit row — nothing is erased — so a failed
+   * audit write puts them back and refuses. Call only for accounts `pastRestore` accepted.
    */
-  private static restorableUntil(user: IUser): Date | null {
-    if (!user.deleted_at) return null;
-    return (
-      user.deletion?.restorable_until ??
-      new Date(user.deleted_at.getTime() + ACCOUNT_DELETION_GRACE_DAYS * DAY_MS)
+  private static async releaseKeys(user: IUser): Promise<void> {
+    const released = { email: `deleted+${user._id}@invalid`, username: `deleted_${user._id}`, google_id: null, is_phone_verified: false };
+    const original = { email: user.email, username: user.username, google_id: user.google_id ?? null, is_phone_verified: user.is_phone_verified };
+    // Conditional on the keys just read: of two sign-ups racing for one tombstone, one releases it.
+    const claimed = await User.updateOne(
+      { _id: user._id, status: UserStatus.DELETED, email: user.email, username: user.username },
+      { $set: released }
     );
+    if (claimed.matchedCount === 0) return;
+    try {
+      await recordAudit({
+        actor_id: null,
+        action: 'user.keys_released',
+        target_type: 'user',
+        target_id: user._id,
+        previous_value: original,
+        new_value: released,
+        reason: 'restore window over; unique keys released for a new account',
+      });
+    } catch (err) {
+      // A sign-up may already hold the released email, so the put-back can itself fail; the audit
+      // failure is what the caller must see either way.
+      await User.updateOne({ _id: user._id, email: released.email }, { $set: original }).catch((e) =>
+        console.error(`[auth-service] CRITICAL: keys of ${user._id} released without an audit row and not restored:`, e)
+      );
+      throw err;
+    }
+  }
+
+  /** Signature and shape of a refresh token. Anything wrong with either is a plain 401. */
+  private static verifyRefresh(token: string): { sub: string; sid?: string } {
+    let payload: { sub?: unknown; sid?: string };
+    try {
+      // Algorithms pinned, exactly as the access-token verifier pins them: an unpinned verifier
+      // would accept a token an attacker signed with HS256 using the public key, if this ever
+      // moves to RS256. The refresh token is the long-lived one, so it is the worse one to leave open.
+      payload = jwt.verify(token, config.jwt.refreshSecret, { algorithms: TOKEN_ALGORITHMS }) as typeof payload;
+    } catch {
+      throw new ServiceError(401, 'unauthorized');
+    }
+    if (typeof payload.sub !== 'string') throw new ServiceError(401, 'unauthorized');
+    return payload as { sub: string; sid?: string };
   }
 
   /**
@@ -281,25 +336,18 @@ export class AuthService {
    * theft — so the session is ended. A token of an older family (another device, since replaced by
    * a newer sign-in) is just stale: plain 401, and the newer session survives. Rotation is a
    * compare-and-swap on the digest: of two refreshes racing on the same token, exactly one wins.
+   * The token the last rotation retired is not a replay for REFRESH_REUSE_GRACE_MS: the losing tab
+   * of that race may read the account after the winner rotated it, and must not end the session.
    *
    * ponytail: one refresh digest per user, so a second device's login retires the first device's
    * session. Store a digest per device when multi-device sessions are wanted.
    */
   static async refreshToken(oldRefreshToken: string): Promise<TokenPair> {
-    let payload: { sub: string; sid?: string };
-    try {
-      // Algorithms pinned, exactly as the access-token verifier pins them: an unpinned verifier
-      // would accept a token an attacker signed with HS256 using the public key, if this ever
-      // moves to RS256. The refresh token is the long-lived one, so it is the worse one to leave open.
-      payload = jwt.verify(oldRefreshToken, config.jwt.refreshSecret, {
-        algorithms: TOKEN_ALGORITHMS,
-      }) as { sub: string; sid?: string };
-    } catch {
-      throw new ServiceError(401, 'unauthorized');
-    }
-    if (typeof payload.sub !== 'string') throw new ServiceError(401, 'unauthorized');
+    const payload = this.verifyRefresh(oldRefreshToken);
 
-    const user = await User.findById(payload.sub).select('+refresh_token_hash +refresh_session_id');
+    const user = await User.findById(payload.sub).select(
+      '+refresh_token_hash +refresh_session_id +refresh_previous_hash +refresh_rotated_at'
+    );
     if (!user || !user.refresh_token_hash) {
       throw new ServiceError(401, 'unauthorized');
     }
@@ -313,7 +361,12 @@ export class AuthService {
         typeof payload.sid === 'string' &&
         typeof user.refresh_session_id === 'string' &&
         digestsMatch(payload.sid, user.refresh_session_id);
-      if (sameFamily) {
+      const justRetired =
+        !!user.refresh_previous_hash &&
+        digestsMatch(presented, user.refresh_previous_hash) &&
+        !!user.refresh_rotated_at &&
+        Date.now() - user.refresh_rotated_at.getTime() < REFRESH_REUSE_GRACE_MS;
+      if (sameFamily && !justRetired) {
         // Replay of a retired token of the live session: end it. Conditional on the digest we
         // read, so this cannot wipe a session that rotated again in the meantime.
         await User.updateOne(
@@ -328,7 +381,14 @@ export class AuthService {
     const tokens = this.generateTokenPair(user, payload.sid ?? crypto.randomUUID());
     const rotated = await User.updateOne(
       { _id: user._id, refresh_token_hash: presented },
-      { $set: { ...this.sessionSet(tokens), last_active_at: new Date() } }
+      {
+        $set: {
+          ...this.sessionSet(tokens),
+          refresh_previous_hash: presented,
+          refresh_rotated_at: new Date(),
+          last_active_at: new Date(),
+        },
+      }
     );
     if (rotated.matchedCount === 0) {
       // Lost the race to a concurrent refresh with the same token.
@@ -345,6 +405,18 @@ export class AuthService {
     await User.findByIdAndUpdate(userId, {
       $set: { refresh_token_hash: null, refresh_session_id: null },
     });
+  }
+
+  /**
+   * Logout for a client whose access token has expired: the refresh token names the session. Ends
+   * it only while that token is still the current one — a stale token ends nothing.
+   */
+  static async logoutWithRefreshToken(refreshToken: string): Promise<void> {
+    const { sub } = this.verifyRefresh(refreshToken);
+    await User.updateOne(
+      { _id: sub, refresh_token_hash: sha256(refreshToken) },
+      { $set: { refresh_token_hash: null, refresh_session_id: null } }
+    );
   }
 
   /**
@@ -457,7 +529,7 @@ export class AuthService {
       throw new ServiceError(401, 'unauthorized');
     }
 
-    const until = this.restorableUntil(user)!;
+    const until = restorableUntil(user)!;
     if (new Date() > until) {
       throw new ServiceError(410, 'account_permanently_deleted');
     }
@@ -470,7 +542,7 @@ export class AuthService {
     if (prior === UserStatus.SUSPENDED) {
       throw new ServiceError(403, 'forbidden');
     }
-    const restoredStatus = prior === UserStatus.PENDING_VERIFICATION ? prior : UserStatus.ACTIVE;
+    const restoredStatus = UserStatus.ACTIVE;
 
     const previous = { status: user.status, deleted_at: user.deleted_at };
     const deletionBlock = user.toObject().deletion ?? null;
@@ -589,8 +661,6 @@ export class AuthService {
       redirect_uri: config.google.callbackUrl,
       response_type: 'code',
       scope: 'openid email profile',
-      access_type: 'offline',
-      prompt: 'consent',
       state: this.signState(nonce, state),
     });
 
@@ -602,7 +672,7 @@ export class AuthService {
    *
    * A signed state alone proved nothing: anyone could mint one by visiting `/auth/google`, finish
    * consent with their own Google account, and hand a victim the callback URL — logging the victim
-   * into the attacker's account (audit Sep 26). The nonce inside the signed state must now equal the
+   * into the attacker's account. The nonce inside the signed state must now equal the
    * nonce cookie set on the browser that started the flow, and an attacker cannot plant that cookie.
    *
    * The caller's own `state` (a return path, typically) rides along and comes back out.
@@ -645,8 +715,14 @@ export class AuthService {
       throw new ServiceError(503, 'google_oauth_not_configured');
     }
 
+    // A hung Google must not hold this request open: bounded, and a clean 502 when it trips.
+    const googleDown = (): never => {
+      throw new ServiceError(502, 'google_unreachable');
+    };
+
     // 1. Exchange code for Google tokens
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+      signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS),
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -656,7 +732,7 @@ export class AuthService {
         redirect_uri: config.google.callbackUrl,
         grant_type: 'authorization_code',
       }),
-    });
+    }).catch(googleDown);
 
     if (!tokenResponse.ok) {
       throw new ServiceError(401, 'google_token_exchange_failed');
@@ -667,7 +743,8 @@ export class AuthService {
     // 2. Fetch user profile from Google
     const userinfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
       headers: { Authorization: `Bearer ${tokenData.access_token}` },
-    });
+      signal: AbortSignal.timeout(GOOGLE_TIMEOUT_MS),
+    }).catch(googleDown);
 
     if (!userinfoResponse.ok) {
       throw new ServiceError(401, 'google_userinfo_failed');
@@ -684,7 +761,7 @@ export class AuthService {
    *
    * Only a Google-VERIFIED email may match an existing account. Google lets an account carry an
    * address it never verified, so matching on the bare email let anyone who registered a Google
-   * account with a victim's address sign in as the victim (audit Sep 26).
+   * account with a victim's address sign in as the victim.
    */
   static async upsertGoogleUser(googleUser: GoogleProfile): Promise<IUser> {
     if (!googleUser.id || typeof googleUser.email !== 'string' || !googleUser.email) {
@@ -696,15 +773,30 @@ export class AuthService {
 
     const email = googleUser.email.toLowerCase();
     // google_id first: it is the stable identity. Email only when no account holds this google_id.
-    let user = await User.findOne({ google_id: googleUser.id }).select('+google_id');
+    // An account past its restore window is gone for good: its keys go to the account made below.
+    const unlessExpired = async (u: IUser | null): Promise<IUser | null> =>
+      u && this.pastRestore(u) ? (await this.releaseKeys(u), null) : u;
+
+    let user = await unlessExpired(await User.findOne({ google_id: googleUser.id }).select('+google_id +password_hash'));
     let linkingByEmail = false;
     if (!user) {
-      user = await User.findOne({ email }).select('+google_id');
+      user = await unlessExpired(await User.findOne({ email }).select('+google_id +password_hash'));
       // Already linked to a different Google account: never re-link by email.
       if (user && user.google_id && user.google_id !== googleUser.id) {
         throw new ServiceError(409, 'conflict');
       }
       linkingByEmail = !!user;
+    }
+
+    if (user?.status === UserStatus.DELETED) {
+      // Google just proved who this is, so say how to come back. Reactivation takes a password,
+      // which an account made by Google sign-in never had: that one sets one by reset first.
+      throw new ServiceError(403, 'account_deactivated', {
+        account_status: 'scheduled_for_deletion',
+        restore_with: user.password_hash
+          ? 'POST /account/reactivate'
+          : 'POST /auth/forgot-password, then POST /account/reactivate',
+      });
     }
 
     if (user) {
@@ -726,8 +818,9 @@ export class AuthService {
       return user;
     }
 
-    let baseUsername = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_');
-    if (baseUsername.length < 3) baseUsername = `user_${baseUsername}`;
+    // Held to the register rules: [a-z0-9_], 3–30 chars with room for a suffix, never reserved.
+    let baseUsername = email.split('@')[0].toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 20);
+    if (baseUsername.length < 3 || RESERVED_USERNAMES.includes(baseUsername)) baseUsername = `user_${baseUsername}`;
     let candidate = baseUsername;
     let counter = 1;
     while (await User.findOne({ username: candidate })) {
@@ -988,9 +1081,11 @@ export class AuthService {
       _id: { $ne: user._id },
       'profile.phone_number': phoneNumber,
       is_phone_verified: true,
-    }).select('_id');
+    }).select('+google_id');
     if (taken) {
-      throw new ServiceError(409, 'phone_number_taken');
+      // A holder past its restore window can never use the number again; it gives the number up.
+      if (!this.pastRestore(taken)) throw new ServiceError(409, 'phone_number_taken');
+      await this.releaseKeys(taken);
     }
 
     try {

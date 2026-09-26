@@ -9,8 +9,7 @@ import * as svc from '../announcements/announcement.service';
  * constant time. "Not exposed on the gateway" is a deployment assumption, not an access control.
  *
  * One route, because there is exactly one caller — the Notification Service, writing back what its
- * broadcast did. Built now rather than in Week 2 because a
- * contract with no second party is a guess.
+ * broadcast did.
  *
  * Note what this route cannot do: every field it accepts is an OUTCOME. There is no way to ask this
  * service to send anything, so a leaked internal token cannot be turned into a broadcast.

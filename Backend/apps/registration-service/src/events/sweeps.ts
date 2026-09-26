@@ -1,13 +1,14 @@
 import { Event, FormSubmission } from '@bgsc/shared';
-import { promoteNext } from '../registrations/registration.service';
-import { lockReadyRosters } from '../teams/team.service';
+import { promoteNext, reserveAndSettle } from '../registrations/registration.service';
+import { disbandEventTeams, lockReadyRosters } from '../teams/team.service';
 
 /**
- * Replay sweeps. The bus is Redis pub/sub with no outbox: an event published while
- * this service was down is gone. So what the consumers do on `EventStarted` / `AuctionClosed` /
- * `RegistrationCancelled` is also re-derived from state every 5 minutes. Both are idempotent (a
- * roster lock is a CAS; a promotion needs a free seat and a CAS on the row), so a sweep that
- * overlaps a live consumer changes nothing twice.
+ * Replay sweeps. The bus is Redis pub/sub with no outbox: an event published while this service
+ * was down is gone. So what the consumers do on `EventStarted` / `AuctionClosed` / `EventCancelled`
+ * / `RegistrationCancelled` is also re-derived from state every 5 minutes, along with seat reserves
+ * whose answer was lost. All are idempotent (a roster lock and a disband are CASes; a promotion
+ * needs a free seat and a CAS on the row; a reserve is idempotent per registration), so a sweep
+ * that overlaps a live consumer changes nothing twice.
  */
 
 const SWEEP_MS = 5 * 60 * 1000;
@@ -39,6 +40,17 @@ export async function rosterLockSweep(now = new Date()): Promise<number> {
     return locked;
 }
 
+/** Events cancelled within the window whose open teams a lost `EventCancelled` left standing. */
+export async function cancelledTeamsSweep(now = new Date()): Promise<number> {
+    const events = await Event.find({ status: 'cancelled', cancelled_at: { $gte: new Date(now.getTime() - WINDOW_MS) } })
+        .select('_id')
+        .limit(PAGE)
+        .lean();
+    let disbanded = 0;
+    for (const e of events) disbanded += await disbandEventTeams(e._id);
+    return disbanded;
+}
+
 /**
  * Events with a free seat and a waitlist: a release whose `RegistrationCancelled` was lost, or a
  * safety-net release (a CAS loser giving a seat back) never promoted anyone.
@@ -67,6 +79,52 @@ export async function promotionSweep(): Promise<number> {
     return promoted;
 }
 
+/** A `submitted` row younger than this may be a reserve still in flight, not a stranded one. */
+const STRANDED_AFTER_MS = 60_000;
+
+/**
+ * Event rows left `submitted` by a reserve whose answer never came back (timeout, 5xx) — at submit,
+ * or after a captain's approval. Nothing else retries them: the user's resubmit is the only other
+ * path, and a user who saw an error rarely comes back. Reserve is idempotent per registration id,
+ * so a retry never counts twice, and the settle is a CAS. Rows waiting for an admin (a pending
+ * captain, or an event that approves by hand) are not stranded.
+ */
+export async function strandedSweep(now = new Date()): Promise<number> {
+    const events = await Event.find({
+        status: { $in: ['upcoming', 'ongoing'] },
+        deleted_at: null,
+        'registration.requires_approval': { $ne: true },
+    })
+        .select('_id')
+        .sort({ start_at: 1 })
+        .limit(PAGE)
+        .lean();
+    if (events.length === 0) return 0;
+
+    const rows = await FormSubmission.find({
+        'owner.type': 'event',
+        'owner.id': { $in: events.map((e) => e._id) },
+        status: 'submitted',
+        'context.event.captain_application.status': { $ne: 'pending' },
+        updated_at: { $lt: new Date(now.getTime() - STRANDED_AFTER_MS) },
+    })
+        .sort({ updated_at: 1 })
+        .limit(PAGE);
+
+    let settled = 0;
+    for (const row of rows) {
+        try {
+            await reserveAndSettle(row, 'system', 'seat_reserved');
+            settled++;
+        } catch (err) {
+            // The Event Service is not answering: every other row would fail the same way. Next tick.
+            console.error(`[registration-service] stranded retry failed for ${row._id}:`, err);
+            break;
+        }
+    }
+    return settled;
+}
+
 let running = false;
 
 export function startSweeps(): void {
@@ -75,6 +133,8 @@ export function startSweeps(): void {
         running = true;
         try {
             await rosterLockSweep();
+            await cancelledTeamsSweep();
+            await strandedSweep();
             await promotionSweep();
         } catch (err) {
             console.error('[registration-service] sweep failed:', err);
