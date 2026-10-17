@@ -18,6 +18,8 @@ export function useAuthViewModel() {
   const [password, setPassword] = useState('');
   const [repeatPassword, setRepeatPassword] = useState('');
   const [contact, setContact] = useState('+91 ');
+  const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [otpCode, setOtpCode] = useState('');
@@ -72,8 +74,8 @@ export function useAuthViewModel() {
 
     if (!password) {
       errors.password = 'Password is required';
-    } else if (password.length < 6) {
-      errors.password = 'Password must be at least 6 characters';
+    } else if (password.length < 8) {
+      errors.password = 'Password must be at least 8 characters';
     }
 
     if (password !== repeatPassword) {
@@ -90,7 +92,13 @@ export function useAuthViewModel() {
     }
 
     setFieldErrors({});
-    const success = await auth.register(trimmedEmail, password, contact.trim());
+    const success = await auth.register({
+      email: trimmedEmail,
+      password,
+      contact: contact.trim(),
+      fullName: fullName.trim(),
+      username: username.trim(),
+    });
     if (success) {
       onNavigateToOtp?.(trimmedEmail);
     }
@@ -122,8 +130,8 @@ export function useAuthViewModel() {
 
     if (!password) {
       errors.password = 'Password is required';
-    } else if (password.length < 6) {
-      errors.password = 'Password must be at least 6 characters';
+    } else if (password.length < 8) {
+      errors.password = 'Password must be at least 8 characters';
     }
 
     if (password !== repeatPassword) {
@@ -167,6 +175,10 @@ export function useAuthViewModel() {
   return {
     // State
     email,
+    fullName,
+    setFullName,
+    username,
+    setUsername,
     setEmail: (v: string) => {
       setEmail(v);
       clearFieldError('email');

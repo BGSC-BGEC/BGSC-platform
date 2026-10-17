@@ -29,12 +29,16 @@ export default function RegisterScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const { register, googleSignIn, isLoading, error, clearError } = useAuth();
 
+  const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [repeatPassword, setRepeatPassword] = useState('');
   const [contact, setContact] = useState('+91 ');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<{
+    fullName?: string;
+    username?: string;
     email?: string;
     password?: string;
     repeatPassword?: string;
@@ -46,6 +50,18 @@ export default function RegisterScreen() {
     clearError();
     const errors: typeof fieldErrors = {};
 
+    const trimmedName = fullName.trim();
+    if (trimmedName.length < 2) {
+      errors.fullName = 'Please enter your full name';
+    }
+
+    const trimmedUsername = username.trim();
+    if (!trimmedUsername) {
+      errors.username = 'Username is required';
+    } else if (!/^[a-zA-Z0-9_]{3,30}$/.test(trimmedUsername)) {
+      errors.username = '3–30 letters, numbers or underscores';
+    }
+
     const trimmedEmail = email.trim();
     if (!trimmedEmail) {
       errors.email = 'Email is required';
@@ -55,8 +71,8 @@ export default function RegisterScreen() {
 
     if (!password) {
       errors.password = 'Password is required';
-    } else if (password.length < 6) {
-      errors.password = 'Password must be at least 6 characters';
+    } else if (password.length < 8) {
+      errors.password = 'Password must be at least 8 characters';
     }
 
     if (password !== repeatPassword) {
@@ -73,10 +89,15 @@ export default function RegisterScreen() {
     }
 
     setFieldErrors({});
-    const success = await register(trimmedEmail, password, contact.trim());
-    if (success) {
-      navigation.navigate('OTP', { email: trimmedEmail });
-    }
+    // The backend signs new members in straight away; the navigator switches to
+    // the app once the session is stored. Email is verified via the emailed link.
+    await register({
+      email: trimmedEmail,
+      username: trimmedUsername,
+      fullName: trimmedName,
+      password,
+      contact: contact.trim(),
+    });
   };
 
   const handleGooglePress = async () => {
@@ -127,6 +148,31 @@ export default function RegisterScreen() {
             />
 
             <View style={styles.form}>
+              <TextInput
+                label="FULL NAME"
+                value={fullName}
+                onChangeText={(text) => {
+                  setFullName(text);
+                  if (fieldErrors.fullName) setFieldErrors((p) => ({ ...p, fullName: undefined }));
+                }}
+                placeholder="Your name"
+                autoCapitalize="words"
+                error={fieldErrors.fullName}
+              />
+
+              <TextInput
+                label="USERNAME"
+                value={username}
+                onChangeText={(text) => {
+                  setUsername(text);
+                  if (fieldErrors.username) setFieldErrors((p) => ({ ...p, username: undefined }));
+                }}
+                placeholder="player_one"
+                autoCapitalize="none"
+                autoCorrect={false}
+                error={fieldErrors.username}
+              />
+
               <TextInput
                 label="EMAIL"
                 value={email}

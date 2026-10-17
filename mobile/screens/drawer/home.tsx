@@ -56,7 +56,7 @@ export default function Home() {
             </Typography>
           </Card.Body>
           <Card.Footer>
-            <Button label="Register Now" variant="primary" size="sm" onPress={() => navigation.navigate('EventRegistration')} />
+            <Button label="Register Now" variant="primary" size="sm" onPress={() => navigation.navigate('MainTabs', { screen: 'EventsTab' })} />
           </Card.Footer>
         </Card>
 
@@ -72,7 +72,7 @@ export default function Home() {
             </Typography>
           </Card.Body>
           <Card.Footer>
-            <Button label="View Details" variant="outline" size="sm" onPress={() => navigation.navigate('EventDetails')} />
+            <Button label="View Details" variant="outline" size="sm" onPress={() => navigation.navigate('MainTabs', { screen: 'EventsTab' })} />
           </Card.Footer>
         </Card>
 

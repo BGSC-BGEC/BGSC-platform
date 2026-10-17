@@ -5,21 +5,34 @@ import { AuthBackground, AuthBackButton, AuthCard } from '../../src/auth';
 import { TextInput } from '../../src/forms/TextInput';
 import { Button } from '../../src/components/Button';
 import { Typography } from '../../src/typography/Typography';
+import { authRepository } from '../../src/repositories/AuthRepository';
+import { getErrorMessage } from '../../src/api/client';
 
 export default function ForgotPassword() {
   const navigation = useNavigation<any>();
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const submit = () => {
+  const submit = async () => {
     setMessage(null);
     setError(null);
-    if (!email.trim() || !email.includes('@')) {
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed || !trimmed.includes('@')) {
       setError('Enter the university email linked to your BGSC account.');
       return;
     }
-    setMessage(`A reset link has been sent to ${email.trim()}.`);
+    setSubmitting(true);
+    try {
+      await authRepository.forgotPassword(trimmed);
+      // The server answers the same way whether or not the account exists.
+      setMessage(`If an account exists for ${trimmed}, a reset link is on its way. The link is valid for 1 hour.`);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -46,7 +59,7 @@ export default function ForgotPassword() {
                 <Button label="Back to login" variant="outline" labelColor="#111111" fullWidth onPress={() => navigation.goBack()} />
               </View>
             ) : (
-              <Button label="Send reset link" fullWidth onPress={submit} />
+              <Button label="Send reset link" fullWidth loading={submitting} onPress={() => void submit()} />
             )}
           </AuthCard>
         </ScrollView>

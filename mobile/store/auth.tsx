@@ -1,10 +1,13 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
-import { Platform } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
-import { authRepository, type User } from '../src/repositories/AuthRepository';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+
+import { authRepository, type RegisterDto, type User } from '../src/repositories/AuthRepository';
+import { getErrorMessage, setSessionExpiredHandler } from '../src/api/client';
+import { tokenStorage } from '../src/api/tokenStorage';
 
 interface AuthContextType {
   isLoggedIn: boolean;
+  /** True while a stored session is being restored on app start */
+  isBootstrapping: boolean;
   user: User | null;
   authToken: string | null;
   isLoading: boolean;
@@ -12,177 +15,129 @@ interface AuthContextType {
   pendingEmail: string | null;
   setPendingEmail: (email: string | null) => void;
   login: (emailOrUsername: string, password?: string) => Promise<boolean>;
-  register: (email: string, password?: string, contact?: string) => Promise<boolean>;
+  register: (dto: RegisterDto) => Promise<boolean>;
   verifyOtp: (email: string, code: string) => Promise<boolean>;
   completeProfile: (password?: string, contact?: string) => Promise<boolean>;
   googleSignIn: () => Promise<{ success: boolean; requiresProfileCompletion?: boolean }>;
+  forgotPassword: (email: string) => Promise<boolean>;
+  refreshUser: () => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
 
 export const AuthContext = createContext<AuthContextType | null>(null);
 
-const TOKEN_KEY = 'authToken';
-
-const DEFAULT_USER: User = {
-  id: '001',
-  username: 'Jeet',
-  email: 'jeet@example.com',
-  role: 'user',
-};
-
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const [isLoggedIn, setIsLoggedIn] = useState(true);
-  const [user, setUser] = useState<User | null>(DEFAULT_USER);
-  const [authToken, setAuthToken] = useState<string | null>('mock_token_dev');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [user, setUser] = useState<User | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
 
+  const dropSession = useCallback(() => {
+    setUser(null);
+    setAuthToken(null);
+    setIsLoggedIn(false);
+  }, []);
+
   useEffect(() => {
-    // Check persisted token on startup
+    // Refresh token rejected by the server → send the member back to login.
+    setSessionExpiredHandler(dropSession);
+    return () => setSessionExpiredHandler(null);
+  }, [dropSession]);
+
+  useEffect(() => {
     const bootstrap = async () => {
       try {
-        let token: string | null = null;
-        if (Platform.OS === 'web') {
-          token = localStorage.getItem(TOKEN_KEY);
-        } else {
-          token = await SecureStore.getItemAsync(TOKEN_KEY);
-        }
-        if (token === 'logged_out') {
-          setIsLoggedIn(false);
-          setUser(null);
-          setAuthToken(null);
-        } else if (token) {
-          setAuthToken(token);
-          setUser(DEFAULT_USER);
-          setIsLoggedIn(true);
-        }
+        if (!(await authRepository.hasStoredSession())) return;
+        // /users/me transparently refreshes an expired access token.
+        const me = await authRepository.me();
+        const { accessToken } = await tokenStorage.get();
+        setUser(me);
+        setAuthToken(accessToken);
+        setIsLoggedIn(true);
       } catch (err) {
-        console.error('Error bootstrapping auth:', err);
+        console.warn('Could not restore session:', err);
+        await tokenStorage.clear();
+        dropSession();
+      } finally {
+        setIsBootstrapping(false);
       }
     };
     void bootstrap();
-  }, []);
+  }, [dropSession]);
 
-  const saveToken = async (token: string) => {
-    setAuthToken(token);
-    try {
-      if (Platform.OS === 'web') {
-        localStorage.setItem(TOKEN_KEY, token);
-      } else {
-        await SecureStore.setItemAsync(TOKEN_KEY, token);
-      }
-    } catch (e) {
-      console.warn('Error saving token to secure store:', e);
-    }
-  };
-
-  const removeToken = async () => {
-    setAuthToken(null);
-    try {
-      if (Platform.OS === 'web') {
-        localStorage.removeItem(TOKEN_KEY);
-      } else {
-        await SecureStore.deleteItemAsync(TOKEN_KEY);
-      }
-    } catch (e) {
-      console.warn('Error removing token from secure store:', e);
-    }
-  };
-
-  const login = async (emailOrUsername: string, password?: string): Promise<boolean> => {
+  const run = async (task: () => Promise<void>): Promise<boolean> => {
     setIsLoading(true);
     setError(null);
     try {
+      await task();
+      return true;
+    } catch (err) {
+      setError(getErrorMessage(err));
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const login = (emailOrUsername: string, password?: string) =>
+    run(async () => {
       const res = await authRepository.login({ emailOrUsername, password });
-      await saveToken(res.token);
+      setAuthToken(res.token);
       setUser(res.user);
       setIsLoggedIn(true);
-      return true;
-    } catch (err: any) {
-      setError(err?.message || 'Login failed. Please check your credentials.');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    });
 
-  const register = async (email: string, password?: string, contact?: string): Promise<boolean> => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      await authRepository.register({ email, password, contact });
-      setPendingEmail(email);
-      return true;
-    } catch (err: any) {
-      setError(err?.message || 'Registration failed.');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const register = (dto: RegisterDto) =>
+    run(async () => {
+      const res = await authRepository.register(dto);
+      setAuthToken(res.token);
+      setUser(res.user);
+      setPendingEmail(res.user.isEmailVerified ? null : res.user.email);
+      setIsLoggedIn(true);
+    });
 
-  const verifyOtp = async (email: string, code: string): Promise<boolean> => {
-    setIsLoading(true);
-    setError(null);
-    try {
+  const verifyOtp = (email: string, code: string) =>
+    run(async () => {
       const res = await authRepository.verifyOtp(email, code);
-      await saveToken(res.token);
       setUser(res.user);
       setIsLoggedIn(true);
       setPendingEmail(null);
-      return true;
-    } catch (err: any) {
-      setError(err?.message || 'Invalid or expired verification code.');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    });
 
-  const completeProfile = async (password?: string, contact?: string): Promise<boolean> => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await authRepository.completeProfile({ password, contact });
-      await saveToken(res.token);
+  const completeProfile = (_password?: string, contact?: string) =>
+    run(async () => {
+      const res = await authRepository.completeProfile({ contact });
       setUser(res.user);
       setIsLoggedIn(true);
-      return true;
-    } catch (err: any) {
-      setError(err?.message || 'Failed to complete profile.');
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
+    });
+
+  const googleSignIn = async () => {
+    const ok = await run(async () => {
+      await authRepository.googleSignIn();
+    });
+    return { success: ok, requiresProfileCompletion: false };
   };
 
-  const googleSignIn = async (): Promise<{ success: boolean; requiresProfileCompletion?: boolean }> => {
-    setIsLoading(true);
-    setError(null);
+  const forgotPassword = (email: string) =>
+    run(async () => {
+      await authRepository.forgotPassword(email);
+    });
+
+  const refreshUser = async () => {
     try {
-      const res = await authRepository.googleSignIn();
-      if (res.requiresProfileCompletion) {
-        setUser(res.user);
-        return { success: true, requiresProfileCompletion: true };
-      }
-      await saveToken(res.token);
-      setUser(res.user);
-      setIsLoggedIn(true);
-      return { success: true, requiresProfileCompletion: false };
-    } catch (err: any) {
-      setError(err?.message || 'Google sign-in was cancelled or failed.');
-      return { success: false };
-    } finally {
-      setIsLoading(false);
+      setUser(await authRepository.me());
+    } catch (err) {
+      console.warn('Could not refresh user:', err);
     }
   };
 
   const logout = async () => {
-    await saveToken('logged_out');
-    setUser(null);
-    setIsLoggedIn(false);
+    await authRepository.logout();
+    dropSession();
   };
 
   const clearError = () => setError(null);
@@ -191,6 +146,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     <AuthContext.Provider
       value={{
         isLoggedIn,
+        isBootstrapping,
         user,
         authToken,
         isLoading,
@@ -202,6 +158,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         verifyOtp,
         completeProfile,
         googleSignIn,
+        forgotPassword,
+        refreshUser,
         logout,
         clearError,
       }}
