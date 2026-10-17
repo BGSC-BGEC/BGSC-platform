@@ -10,15 +10,13 @@ import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { useAuth } from '../../store/auth';
+import { useConfirmLogout } from '../../src/hooks/useConfirmLogout';
 
 export default function Profile() {
   const { colors } = useTheme();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const navigation = useNavigation();
-
-  const handleLogout = async () => {
-    await logout();
-  };
+  const handleLogout = useConfirmLogout();
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>

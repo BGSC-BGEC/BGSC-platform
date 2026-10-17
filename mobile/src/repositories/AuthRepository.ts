@@ -1,12 +1,18 @@
-import apiClient from '../../services/apiclient';
+import { api, ApiError } from '../api/client';
+import { resolveMediaUrl } from '../api/config';
+import { tokenStorage } from '../api/tokenStorage';
+import type { ApiUser, AuthResult } from '../api/types';
 
 export interface User {
   id: string;
   username: string;
   email: string;
+  fullName?: string;
   contact?: string;
   role: string;
   avatar_url?: string;
+  isEmailVerified?: boolean;
+  pointsBalance?: number;
 }
 
 export interface AuthResponse {
@@ -22,8 +28,9 @@ export interface LoginDto {
 
 export interface RegisterDto {
   email: string;
-  password?: string;
-  repeatPassword?: string;
+  username: string;
+  fullName: string;
+  password: string;
   contact?: string;
 }
 
@@ -33,130 +40,148 @@ export interface CompleteProfileDto {
   contact?: string;
 }
 
+export function mapUser(raw: ApiUser): User {
+  return {
+    id: raw.id,
+    username: raw.username,
+    email: raw.email,
+    fullName: raw.profile?.full_name ?? undefined,
+    contact: raw.profile?.phone_number ?? undefined,
+    role: raw.role,
+    avatar_url: resolveMediaUrl(raw.profile?.avatar_url),
+    isEmailVerified: raw.is_email_verified,
+    pointsBalance: raw.points_balance,
+  };
+}
+
+/** Backend wants E.164 (+919876543210); the form pre-fills "+91 ". */
+function toE164(contact?: string): string | null {
+  const digits = (contact ?? '').replace(/[\s()-]/g, '');
+  return /^\+\d{8,15}$/.test(digits) ? digits : null;
+}
+
+async function persist(result: AuthResult): Promise<AuthResponse> {
+  await tokenStorage.set(result.tokens.access_token, result.tokens.refresh_token);
+  return { user: mapUser(result.user), token: result.tokens.access_token };
+}
+
 export class AuthRepository {
-  /**
-   * Log in user with email/username and password
-   */
+  /** POST /auth/login — `login` accepts an email or a username. */
   async login(dto: LoginDto): Promise<AuthResponse> {
     try {
-      const response = await apiClient.post<AuthResponse>('/auth/login', {
-        email: dto.emailOrUsername,
+      const result = await api.post<AuthResult>('/auth/login', {
+        login: dto.emailOrUsername,
         password: dto.password,
       });
-      return response.data;
-    } catch (error) {
-      // Fallback dummy for development/offline testing
-      return {
-        user: {
-          id: 'user_001',
-          username: dto.emailOrUsername.includes('@')
-            ? dto.emailOrUsername.split('@')[0]
-            : dto.emailOrUsername,
-          email: dto.emailOrUsername.includes('@')
-            ? dto.emailOrUsername
-            : `${dto.emailOrUsername}@example.com`,
-          role: 'user',
-        },
-        token: 'dev_auth_token_mock',
-      };
+      return persist(result);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        throw new Error('Incorrect email/username or password.');
+      }
+      if (err instanceof ApiError && err.code === 'account_deactivated') {
+        const days = (err.body?.days_remaining as number | undefined) ?? undefined;
+        throw new Error(
+          `This account is scheduled for deletion${days !== undefined ? ` (${days} days left to restore)` : ''}. Contact the BGSC team to restore it.`,
+        );
+      }
+      if (err instanceof ApiError && err.status === 403) {
+        throw new Error('This account has been suspended.');
+      }
+      throw err;
     }
   }
 
-  /**
-   * Register new user account
-   */
-  async register(dto: RegisterDto): Promise<{ success: boolean; email: string }> {
+  /** POST /auth/register — the account is signed in immediately. */
+  async register(dto: RegisterDto): Promise<AuthResponse> {
     try {
-      const response = await apiClient.post('/auth/register', {
+      const result = await api.post<AuthResult>('/auth/register', {
         email: dto.email,
+        username: dto.username,
+        full_name: dto.fullName,
         password: dto.password,
-        contact: dto.contact,
       });
-      return response.data;
-    } catch (error) {
-      return {
-        success: true,
-        email: dto.email,
-      };
+      const response = await persist(result);
+
+      // Contact number is optional and stored on the profile, not the account.
+      const phone = toE164(dto.contact);
+      if (phone) {
+        try {
+          const updated = await api.patch<ApiUser>('/users/me', { phone_number: phone });
+          response.user = mapUser(updated);
+        } catch {
+          // Non-blocking: the member can add their number later from Edit profile.
+        }
+      }
+      return response;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        throw new Error('That email or username is already registered.');
+      }
+      if (err instanceof ApiError && err.code === 'validation_failed') {
+        const field = err.fields?.[0]?.key;
+        if (field === 'username') throw new Error('Usernames are 3–30 letters, numbers or underscores.');
+        if (field === 'password') throw new Error('Passwords must be at least 8 characters.');
+        if (field === 'email') throw new Error('Please enter a valid email address.');
+        if (field === 'full_name') throw new Error('Please enter your full name.');
+      }
+      throw err;
     }
   }
 
-  /**
-   * Verify OTP code sent to user email
-   */
-  async verifyOtp(email: string, code: string): Promise<AuthResponse> {
-    try {
-      const response = await apiClient.post<AuthResponse>('/auth/verify-otp', {
-        email,
-        code,
-      });
-      return response.data;
-    } catch (error) {
-      return {
-        user: {
-          id: 'user_001',
-          username: email.split('@')[0] || 'student',
-          email,
-          role: 'user',
-        },
-        token: 'dev_auth_token_mock',
-      };
-    }
+  /** GET /users/me — used to restore a session on app start. */
+  async me(): Promise<User> {
+    return mapUser(await api.get<ApiUser>('/users/me'));
   }
 
   /**
-   * Complete user profile (for Google Sign Up users)
+   * Email verification is link based (no OTP); this re-sends the link.
+   * POST /auth/resend-verification always answers 200.
    */
+  async resendVerification(email: string): Promise<void> {
+    await api.post('/auth/resend-verification', { email });
+  }
+
+  async verifyOtp(_email: string, _code: string): Promise<AuthResponse> {
+    throw new Error('Email verification now happens through the link sent to your inbox.');
+  }
+
   async completeProfile(dto: CompleteProfileDto): Promise<AuthResponse> {
-    try {
-      const response = await apiClient.post<AuthResponse>('/auth/complete-profile', {
-        password: dto.password,
-        contact: dto.contact,
-      });
-      return response.data;
-    } catch (error) {
-      return {
-        user: {
-          id: 'user_001',
-          username: 'student_google',
-          email: 'student@example.com',
-          contact: dto.contact,
-          role: 'user',
-        },
-        token: 'dev_auth_token_mock',
-      };
-    }
+    const phone = toE164(dto.contact);
+    const updated = await api.patch<ApiUser>('/users/me', phone ? { phone_number: phone } : {});
+    const { accessToken } = await tokenStorage.get();
+    return { user: mapUser(updated), token: accessToken ?? '' };
   }
 
   /**
-   * Google OAuth sign-in initiation
+   * The backend only supports Google sign-in through a browser redirect to the
+   * web app, and it is disabled until GOOGLE_CLIENT_ID/SECRET are configured.
    */
   async googleSignIn(): Promise<AuthResponse> {
-    // Simulated Google OAuth flow
-    return {
-      user: {
-        id: 'google_001',
-        username: 'GoogleUser',
-        email: 'googleuser@gmail.com',
-        role: 'user',
-      },
-      token: 'dev_google_token_mock',
-      requiresProfileCompletion: true,
-    };
+    throw new Error('Google sign-in is not available in the mobile app yet. Please use your email and password.');
   }
 
-  /**
-   * Forgot password request
-   */
+  /** POST /auth/forgot-password — always 200 so accounts cannot be enumerated. */
   async forgotPassword(email: string): Promise<{ success: boolean }> {
+    await api.post('/auth/forgot-password', { email });
+    return { success: true };
+  }
+
+  /** POST /auth/logout — best effort, tokens are always cleared locally. */
+  async logout(): Promise<void> {
     try {
-      await apiClient.post('/auth/forgot-password', { email });
-      return { success: true };
-    } catch (error) {
-      return { success: true };
+      const { refreshToken } = await tokenStorage.get();
+      await api.post('/auth/logout', refreshToken ? { refresh_token: refreshToken } : {});
+    } catch {
+      // Ignore — the session is dropped locally regardless.
+    } finally {
+      await tokenStorage.clear();
     }
+  }
+
+  async hasStoredSession(): Promise<boolean> {
+    const { accessToken, refreshToken } = await tokenStorage.get();
+    return Boolean(accessToken || refreshToken);
   }
 }
 
 export const authRepository = new AuthRepository();
-

@@ -1,82 +1,185 @@
-import { useMemo, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { FlatList, RefreshControl, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
 import { Card } from '../../src/components/Card';
+import { FilterChips } from '../../src/components/FilterChips';
 import { SectionHeader } from '../../src/components/SectionHeader';
 import { AppHeader } from '../../src/components/AppHeader';
 import { SearchInput } from '../../src/forms/SearchInput';
+import { EmptyState } from '../../src/feedback/EmptyState';
+import { ErrorState } from '../../src/feedback/ErrorState';
+import { Skeleton } from '../../src/feedback/Skeleton';
+import { Spinner } from '../../src/feedback/Spinner';
 import { Typography } from '../../src/typography/Typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
-import { MOCK_EVENTS } from '../../src/mock/events';
-import type { EventCategory } from '../../src/types/event';
+import { eventsRepository } from '../../src/repositories/EventsRepository';
+import { getErrorMessage } from '../../src/api/client';
+import type { ApiEvent, EventCategory, EventStatus } from '../../src/api/types';
+import { capacityLabel, eventStatusPill, EVENT_CATEGORY_LABELS, EVENT_TYPE_LABELS, formatDateTime } from '../../src/utils/format';
 
-const CATEGORIES: Array<'All' | EventCategory> = ['All', 'Football', 'Cricket', 'Esports', 'Fitness', 'Community'];
+type CategoryFilter = 'all' | EventCategory;
+type TimeFilter = 'active' | 'ongoing' | 'past';
+
+const CATEGORIES: Array<{ label: string; value: CategoryFilter }> = [
+  { label: 'All', value: 'all' },
+  ...(Object.keys(EVENT_CATEGORY_LABELS) as EventCategory[]).map((value) => ({ label: EVENT_CATEGORY_LABELS[value], value })),
+];
+
+const TIME_FILTERS: Array<{ label: string; value: TimeFilter }> = [
+  { label: 'Upcoming & live', value: 'active' },
+  { label: 'Happening now', value: 'ongoing' },
+  { label: 'Past events', value: 'past' },
+];
+
+const STATUS_FOR: Record<TimeFilter, EventStatus[]> = {
+  active: ['upcoming', 'ongoing'],
+  ongoing: ['ongoing'],
+  past: ['past'],
+};
 
 export default function Events() {
   const { colors } = useTheme();
   const navigation = useNavigation<any>();
   const [search, setSearch] = useState('');
-  const [category, setCategory] = useState<'All' | EventCategory>('All');
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState<CategoryFilter>('all');
+  const [time, setTime] = useState<TimeFilter>('active');
+
+  const [events, setEvents] = useState<ApiEvent[]>([]);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const requestId = useRef(0);
 
-  const events = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return MOCK_EVENTS.filter((event) => {
-      const matchesCategory = category === 'All' || event.category === category;
-      const matchesSearch = !query || `${event.title} ${event.location} ${event.category}`.toLowerCase().includes(query);
-      return matchesCategory && matchesSearch;
-    });
-  }, [category, search]);
+  const load = useCallback(
+    async (mode: 'initial' | 'refresh' | 'more', fromCursor: string | null = null) => {
+      const id = ++requestId.current;
+      if (mode === 'initial') setLoading(true);
+      if (mode === 'refresh') setRefreshing(true);
+      if (mode === 'more') setLoadingMore(true);
+      try {
+        const res = await eventsRepository.list({
+          category: category === 'all' ? undefined : [category],
+          status: STATUS_FOR[time],
+          search: query || undefined,
+          sort: time === 'past' ? 'date_desc' : 'date_asc',
+          cursor: fromCursor,
+        });
+        if (id !== requestId.current) return;
+        setEvents((prev) => (mode === 'more' ? [...prev, ...res.events] : res.events));
+        setCursor(res.next_cursor);
+        setError(null);
+      } catch (err) {
+        if (id !== requestId.current) return;
+        setError(getErrorMessage(err));
+      } finally {
+        if (id === requestId.current) {
+          setLoading(false);
+          setRefreshing(false);
+          setLoadingMore(false);
+        }
+      }
+    },
+    [category, time, query],
+  );
 
-  const refresh = () => {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 500);
+  useEffect(() => {
+    void load('initial');
+  }, [load]);
+
+  const openEvent = (event: ApiEvent) => navigation.navigate('EventDetails', { eventId: event.slug || event._id });
+
+  const header = (
+    <View style={styles.header}>
+      <SearchInput value={search} onChangeText={setSearch} onSearch={(text) => setQuery(text.trim())} placeholder="Search events" />
+      <FilterChips options={CATEGORIES} value={category} onChange={setCategory} />
+      <FilterChips options={TIME_FILTERS} value={time} onChange={setTime} />
+      <SectionHeader
+        title={time === 'past' ? 'Past events' : time === 'ongoing' ? 'Happening now' : 'Upcoming'}
+        badge={loading ? undefined : events.length}
+      />
+    </View>
+  );
+
+  const renderEvent = ({ item: event }: { item: ApiEvent }) => {
+    const pill = eventStatusPill(event);
+    return (
+      <Card variant="solid" onPress={() => openEvent(event)} accessibilityLabel={`Open ${event.title}`}>
+        <Card.Header
+          title={event.title}
+          subtitle={`${formatDateTime(event.start_at)}${event.venue ? ` · ${event.venue}` : ''}`}
+          rightAction={<Badge label={pill.label} variant={pill.variant} />}
+        />
+        <Card.Body>
+          <Typography variant="body" color="textMuted">
+            {EVENT_CATEGORY_LABELS[event.category]} · {EVENT_TYPE_LABELS[event.type]} · {capacityLabel(event)}
+          </Typography>
+        </Card.Body>
+        <Card.Footer>
+          <Button
+            label={pill.registrationOpen ? 'Register' : event.auction?.status === 'live' ? 'Watch auction' : 'View details'}
+            size="sm"
+            variant={pill.registrationOpen ? 'primary' : 'outline'}
+            onPress={() => openEvent(event)}
+          />
+          {event.auction?.status === 'live' ? <Badge label="Auction live" variant="primary" /> : null}
+        </Card.Footer>
+      </Card>
+    );
   };
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
       <AppHeader title="Events" />
-      <ScrollView
+      <FlatList
+        data={loading || error ? [] : events}
+        keyExtractor={(item) => item._id}
+        renderItem={renderEvent}
+        ListHeaderComponent={header}
+        ItemSeparatorComponent={() => <View style={styles.separator} />}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={colors.accent} />}
-      >
-        <SearchInput value={search} onChangeText={setSearch} placeholder="Search events" />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
-          {CATEGORIES.map((item) => (
-            <Pressable
-              key={item}
-              onPress={() => setCategory(item)}
-              style={[styles.filter, { backgroundColor: category === item ? colors.accent : colors.surface, borderColor: colors.border }]}
-            >
-              <Typography variant="caption" color={category === item ? 'textOnAccent' : 'text'}>{item}</Typography>
-            </Pressable>
-          ))}
-        </ScrollView>
-        <SectionHeader title="Upcoming" badge={events.length} />
-        {events.length === 0 ? (
-          <Card variant="inner">
-            <Typography variant="h3">No events found</Typography>
-            <Typography variant="body" color="textMuted">Try another search or category.</Typography>
-          </Card>
-        ) : events.map((event) => (
-          <Card key={event.id} variant="solid" onPress={() => navigation.navigate('EventDetails', { eventId: event.id })} accessibilityLabel={`Open ${event.title}`}>
-            <Card.Header title={event.title} subtitle={`${event.dateLabel} · ${event.location}`} rightAction={<Badge label={event.status} variant={event.status === 'Open' ? 'success' : event.status === 'Full' ? 'warning' : 'slate'} />} />
-            <Card.Body><Typography variant="body" color="textMuted">{event.category} · {event.capacityLabel}</Typography></Card.Body>
-            <Card.Footer><Button label={event.status === 'Open' ? 'Register' : 'View details'} size="sm" variant={event.status === 'Open' ? 'primary' : 'outline'} onPress={() => navigation.navigate('EventDetails', { eventId: event.id })} /></Card.Footer>
-          </Card>
-        ))}
-      </ScrollView>
+        keyboardShouldPersistTaps="handled"
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} tintColor={colors.accent} />}
+        onEndReachedThreshold={0.4}
+        onEndReached={() => {
+          if (cursor && !loadingMore && !loading) void load('more', cursor);
+        }}
+        ListEmptyComponent={
+          loading ? (
+            <View style={styles.skeletons}>
+              <Skeleton.Card />
+              <Skeleton.Card />
+              <Skeleton.Card />
+            </View>
+          ) : error ? (
+            <ErrorState title="Could not load events" message={error} onRetry={() => void load('initial')} />
+          ) : (
+            <Card variant="inner">
+              <EmptyState
+                icon="calendar"
+                title="No events found"
+                description={query ? 'Try another search or category.' : 'New events will appear here as soon as they are announced.'}
+              />
+            </Card>
+          )
+        }
+        ListFooterComponent={loadingMore ? <Spinner style={styles.footer} /> : null}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { padding: 20, gap: 16, paddingBottom: 32 },
-  filters: { gap: 8, paddingVertical: 2 },
-  filter: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 9 },
+  content: { padding: 20, paddingBottom: 32 },
+  header: { gap: 16, marginBottom: 16 },
+  separator: { height: 16 },
+  skeletons: { gap: 16 },
+  footer: { paddingVertical: 16 },
 });

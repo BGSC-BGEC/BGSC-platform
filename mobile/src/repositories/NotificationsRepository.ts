@@ -1,4 +1,5 @@
-import apiClient from '../../services/apiclient';
+import { api } from '../api/client';
+import { tokenStorage } from '../api/tokenStorage';
 
 export interface Notification {
   id: string;
@@ -16,91 +17,82 @@ export interface NotificationsResponse {
   total: number;
 }
 
+interface ApiNotification {
+  _id: string;
+  category: 'announcement' | 'event' | 'challenge' | 'system';
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, unknown>;
+  read_at: string | null;
+  created_at: string;
+}
+
+function mapType(n: ApiNotification): Notification['type'] {
+  if (n.category === 'announcement') return 'announcement';
+  if (n.category === 'event') return 'event';
+  if (/sold|won|confirmed|approved|earned/.test(n.type)) return 'success';
+  if (/rejected|declined|cancel|unsold|warning/.test(n.type)) return 'warning';
+  return 'info';
+}
+
+async function signedIn() {
+  const { accessToken } = await tokenStorage.get();
+  return Boolean(accessToken);
+}
+
 export class NotificationsRepository {
-  /**
-   * Fetch user notifications with pagination
-   */
-  async getNotifications(page: number = 1, limit: number = 20): Promise<NotificationsResponse> {
-    try {
-      const response = await apiClient.get<NotificationsResponse>('/notifications', {
-        params: { page, limit },
-      });
-      return response.data;
-    } catch (error) {
-      // Fallback mock data for development
-      return {
-        notifications: [
-          {
-            id: '1',
-            title: 'New Event: Football Championship',
-            message: 'Registration is now open for the Football Championship!',
-            type: 'event',
-            read: false,
-            createdAt: new Date().toISOString(),
-          },
-          {
-            id: '2',
-            title: 'Points Earned!',
-            message: 'You earned 150 points from the Coding Workshop',
-            type: 'success',
-            read: false,
-            createdAt: new Date(Date.now() - 3600000).toISOString(),
-          },
-          {
-            id: '3',
-            title: 'System Announcement',
-            message: 'Platform maintenance scheduled for tomorrow at 2 AM',
-            type: 'announcement',
-            read: true,
-            createdAt: new Date(Date.now() - 86400000).toISOString(),
-          },
-        ],
-        unreadCount: 2,
-        total: 3,
-      };
-    }
+  /** GET /notifications — in-app inbox (cursor paginated; first page only here). */
+  async getNotifications(_page: number = 1, limit: number = 20): Promise<NotificationsResponse> {
+    if (!(await signedIn())) return { notifications: [], unreadCount: 0, total: 0 };
+    const res = await api.get<{ notifications: ApiNotification[]; next_cursor: string | null }>('/notifications', {
+      params: { limit },
+    });
+    const notifications = res.notifications.map<Notification>((n) => ({
+      id: n._id,
+      title: n.title,
+      message: n.body,
+      type: mapType(n),
+      read: Boolean(n.read_at),
+      createdAt: n.created_at,
+      data: n.data,
+    }));
+    return {
+      notifications,
+      unreadCount: notifications.filter((n) => !n.read).length,
+      total: notifications.length,
+    };
   }
 
-  /**
-   * Get unread notification count only
-   */
+  /** GET /notifications/unread-count */
   async getUnreadCount(): Promise<number> {
-    try {
-      const response = await apiClient.get<{ count: number }>('/notifications/unread-count');
-      return response.data.count;
-    } catch (error) {
-      return 2; // Mock unread count
-    }
+    if (!(await signedIn())) return 0;
+    const res = await api.get<{ count: number }>('/notifications/unread-count');
+    return res.count;
   }
 
-  /**
-   * Mark notification as read
-   */
+  /** POST /notifications/:id/read */
   async markAsRead(notificationId: string): Promise<void> {
     try {
-      await apiClient.patch(`/notifications/${notificationId}/read`);
+      await api.post(`/notifications/${notificationId}/read`);
     } catch (error) {
       console.log('Error marking notification as read:', error);
     }
   }
 
-  /**
-   * Mark all notifications as read
-   */
+  /** POST /notifications/read-all */
   async markAllAsRead(): Promise<void> {
     try {
-      await apiClient.patch('/notifications/mark-all-read');
+      await api.post('/notifications/read-all');
     } catch (error) {
       console.log('Error marking all notifications as read:', error);
     }
   }
 
-  /**
-   * Delete a notification
-   */
+  /** DELETE /notifications/:id — dismisses the notification */
   async deleteNotification(notificationId: string): Promise<void> {
     try {
-      await apiClient.delete(`/notifications/${notificationId}`);
+      await api.delete(`/notifications/${notificationId}`);
     } catch (error) {
       console.log('Error deleting notification:', error);
     }

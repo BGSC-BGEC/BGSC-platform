@@ -10,6 +10,7 @@ import Profile from './profile';
 import Announcement from './announcement';
 import HallOfFame from './hall-of-fame';
 import Feedback from './feedback';
+import Media from './media';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 const Tab = createBottomTabNavigator();
@@ -83,6 +84,7 @@ export default function BottomTabsLayout() {
         component={Announcement}
         options={{
           tabBarButton: () => null, // Hide from bottom tabs
+          tabBarItemStyle: { display: 'none' }, // ...and give its slot no width
           tabBarLabel: 'Announcements',
         }}
       />
@@ -91,7 +93,17 @@ export default function BottomTabsLayout() {
         component={HallOfFame}
         options={{
           tabBarButton: () => null, // Hide from bottom tabs
+          tabBarItemStyle: { display: 'none' }, // ...and give its slot no width
           tabBarLabel: 'Hall of Fame',
+        }}
+      />
+      <Tab.Screen
+        name="MediaTab"
+        component={Media}
+        options={{
+          tabBarButton: () => null, // Hide from bottom tabs
+          tabBarItemStyle: { display: 'none' }, // ...and give its slot no width
+          tabBarLabel: 'Media',
         }}
       />
       <Tab.Screen
@@ -99,6 +111,7 @@ export default function BottomTabsLayout() {
         component={Feedback}
         options={{
           tabBarButton: () => null, // Hide from bottom tabs
+          tabBarItemStyle: { display: 'none' }, // ...and give its slot no width
           tabBarLabel: 'Feedback',
         }}
       />
