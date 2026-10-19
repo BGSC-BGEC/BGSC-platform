@@ -2,6 +2,58 @@
 **Start Date:** September 5, 2026 (Friday)  
 **Working Schedule:** Saturdays & Sundays, 8 hours/day (weekday work optional)
 
+## Frontend Implementation Tally — October 19, 2026
+
+**Scope:** Current `mobile/` and `web/` source compared against the frontend tasks in this plan. `Legacy/` was excluded from inspection and edits. Backend completion claims and the original schedule are unchanged; this audit does not validate backend readiness or revise deadlines.
+
+**How to read the checklists:** A checked subtask means its stated UI or code exists in source. Static/mock displays can satisfy a display-only subtask, but do not establish live feature completion. Parent tasks remain unchecked when any requirement is missing, mocked instead of integrated, or unverified. Audit notes distinguish **implemented in source**, **partial**, **pending**, and **unverified**. No completion percentage is assigned because screen presence does not measure working user journeys.
+
+**Overall:** Mobile has the design system, navigation shell, authentication screens and several feature prototypes. Most feature data and mutations are static, mocked or local. Web admin has the shell, login, dashboard cards and a read-only user directory; most management routes contain placeholder text. Neither frontend is established as MVP-ready by this source review.
+
+### Mobile compared with the plan
+
+| Planned area | Tally | Source evidence and remaining work |
+|---|---|---|
+| Project architecture | Partial | [App entry](../mobile/App.tsx), [navigation](../mobile/screens/drawer/layout.tsx), [auth context](../mobile/store/auth.tsx), [API client](../mobile/services/apiclient.ts). Mobile environment setup/example remains missing. |
+| Design system | Implemented in source | [Theme](../mobile/src/theme/ThemeProvider.tsx), [components](../mobile/src/components/index.ts), [forms](../mobile/src/forms/index.ts), [feedback states](../mobile/src/feedback/index.ts), [responsive helpers](../mobile/src/responsive/index.ts), [typography](../mobile/src/typography/index.ts) and [icons](../mobile/src/icons/index.ts). |
+| Authentication and protected access | Partial | [Login](../mobile/screens/login/login.tsx), [registration](../mobile/screens/login/register.tsx), [OTP](../mobile/screens/login/otp.tsx), [profile completion](../mobile/screens/login/complete-profile.tsx) and secure token storage exist. [Repository](../mobile/src/repositories/AuthRepository.ts) returns mock success on API failure; Google sign-in is simulated. [Forgot password](../mobile/screens/login/forgot-password.tsx) never calls the repository. Startup defaults to authenticated mock state. |
+| Landing and app shell | Partial | [Bottom tabs](../mobile/screens/drawer/bottom-tabs-layout.tsx), drawer, home and [notification header](../mobile/src/components/AppHeader.tsx) exist. Dedicated landing/onboarding/splash work remains. |
+| Events and registration | Partial | [Event list](../mobile/screens/drawer/events.tsx), [details](../mobile/screens/events/event-details.tsx), [conditional form and confirmation](../mobile/screens/events/registration.tsx) use [mock data and in-memory submissions](../mobile/src/mock/events.ts). API-backed listing/refresh, dynamic form schema, durable submissions and gallery remain. |
+| Profile and history | Partial | [Profile](../mobile/screens/drawer/profile.tsx), [edit form](../mobile/screens/profile/edit-profile.tsx) and [history](../mobile/screens/profile/history.tsx) exist. Stats/history are static, save only alerts, and image upload, full settings, user card and suggestions remain. |
+| Announcements | Partial | [Static list/cards](../mobile/screens/drawer/announcement.tsx) exist. API data, detail screen, priority levels and filtering remain. |
+| Auction | Partial | [Spectator view](../mobile/screens/events/auction.tsx) has mock bids, wallets and local timer. [Mobile console](../mobile/screens/events/auction-console.tsx) changes local status only. Bid submission, synchronized state, winner/My Bids screens and role enforcement remain. |
+| Points and leaderboard | Partial | Profile/home totals and [rankings](../mobile/screens/drawer/leaderboard.tsx) are static. Transactions, breakdown, API data, leaderboard filters/tabs, podium and refresh remain. |
+| Challenges and Strava | Pending | [Home](../mobile/screens/drawer/home.tsx) has an inactive Challenges tile. No dedicated challenge or Strava flow was found. |
+| Media | Pending | No mobile media screen or route was found. |
+| Homepage, broadcasts and notifications | Partial | [Home](../mobile/screens/drawer/home.tsx) has static event cards. Header inbox calls [notification repository](../mobile/src/repositories/NotificationsRepository.ts), which falls back to mock data and swallows mutation failures. Broadcasts, push setup, WhatsApp and complete quick actions remain. |
+| Hall of Fame | Partial | [Static feature/community cards](../mobile/screens/drawer/hall-of-fame.tsx) exist. API data, member detail, carousel, timeline, filtering and tabs remain. |
+| Feedback, contact and brackets | Partial | [Feedback form](../mobile/screens/drawer/feedback.tsx) exists; Send has an empty handler. Contact, FAQ, bracket UI and working submissions remain. |
+| Popups, testing and release | Partial / unverified | Registration/notification modals and Terms/Privacy alerts exist. Bid and delete/logout confirmations remain. No device testing, full journey validation or production build/deployment was performed for this audit. |
+
+### Web admin compared with the plan
+
+| Planned area | Tally | Source evidence and remaining work |
+|---|---|---|
+| Admin setup and authentication | Partial | [React/Vite dependencies](../web/package.json), [layout](../web/src/components/layout/adminLayout.tsx), [sidebar](../web/src/components/layout/sidebar.tsx), [login](../web/src/pages/Login.tsx) and [role guard](../web/src/components/RequireAuth.tsx) exist. Tailwind styling is configured; the planned admin component library is absent. [Auth store](../web/src/stores/authStore.ts) authenticates a mock admin when live login fails. |
+| Dashboard and basic user management | Partial | [Dashboard cards](../web/src/pages/Dashboard.tsx) use fixtures. [User directory](../web/src/pages/Users.tsx) supports local search/role/status filtering and a [detail modal](../web/src/components/users/UserDetailModal.tsx). [User service](../web/src/services/userService.ts) attempts API reads with fixture fallback. [Table](../web/src/components/users/UserTable.tsx) has no pagination. |
+| Complete user management | Pending | Editing, deletion, bulk actions, role changes, export and activity logs are missing. Existing search/filter and member total do not complete this task group. |
+| Events, form builder and registrations | Pending | [Router](../web/src/app/router.tsx) renders placeholder events content. Creation/editing, dynamic forms, participants, responses, exports and communication remain. |
+| Auction, points, leaderboard and challenges | Pending | Auction and leaderboard routes are placeholders. No functional points or challenge management exists. Mobile demo console is not a web admin implementation. |
+| Media, broadcasts, Hall of Fame, feedback and brackets | Pending | Media, feedback and tournament routes are placeholders. Management workflows and live analytics remain. Announcements is also a placeholder route. |
+| Testing, polish and deployment | Unverified | Browser workflows, permissions, production build, deployment and production testing were not performed or established by this audit. |
+
+### Main gaps before frontend feature completion
+
+1. Replace automatic mock authentication/success fallbacks with real error handling; bootstrap authenticated state from a validated session and complete token expiry/refresh behavior. Refresh-token storage in web is present, but no automatic refresh workflow was found in either client.
+2. Confirm API contracts and wire feature repositories to actual data. Mobile currently assumes `{ user, token }`, while the web login client expects `{ user, tokens: { access_token, refresh_token } }`; compatibility with the backend remains to be checked.
+3. Replace in-memory registration and local-only profile/auction actions with durable API operations; complete backend-schema-driven forms and bidding.
+4. Build missing mobile features and the web management modules currently represented by placeholders.
+5. Validate real user journeys, failure/expired-session behavior, Android/iOS and browser behavior, then production builds and deployment.
+
+**Verification limit:** This is a static source audit. No backend services were started, no API calls were validated, and no app/browser/device tests or production builds were run. Older mobile implementation notes were cross-checked against source rather than treated as proof of completion. The detailed frontend checklists below now reflect this tally.
+
+---
+
 ## Dual Deadline Strategy
 
 ### 🎯 Deadline 1 (Best Case): September 27, 2026 (Saturday)
@@ -159,62 +211,68 @@
 
 **Saturday Sep 5 (8h):**
 - [ ] **FE-Mobile-1: Project Architecture Setup** (8h)
-  - Initialize mobile project structure
-  - Setup navigation (React Navigation/Flutter routing)
-  - Configure state management (Redux/Provider/Bloc)
-  - Setup API client and environment configs
-  - Create folder structure
-  - Setup authentication flow skeleton
-  - Environment variables configuration
+  - **Audit (October 19):** Partial — Expo/React Native, navigation, React Context, Axios and folder structure exist. EXPO_PUBLIC_API_URL is referenced; mobile environment setup/example is missing.
+  - [x] Initialize mobile project structure
+  - [x] Setup navigation (React Navigation/Flutter routing)
+  - [x] Configure state management (Redux/Provider/Bloc)
+  - [x] Setup API client and environment configs
+  - [x] Create folder structure
+  - [x] Setup authentication flow skeleton
+  - [ ] Environment variables configuration
 
-- [ ] **FE-Mobile-2: Design System Foundation** (8h)
-  - Create color palette and theme constants
-  - Build reusable UI components (Buttons, Inputs, Cards, Headers)
-  - Typography system
-  - Setup responsive utilities
-  - Icon library setup
-  - Loading and error state components
-  - Form components (text input, dropdowns, etc.)
+- [x] **FE-Mobile-2: Design System Foundation** (8h)
+  - **Audit (October 19):** Implemented in source — theme tokens, typography, reusable components, responsive helpers, icons, feedback states and form controls exist. Device-level visual verification remains separate.
+  - [x] Create color palette and theme constants
+  - [x] Build reusable UI components (Buttons, Inputs, Cards, Headers)
+  - [x] Typography system
+  - [x] Setup responsive utilities
+  - [x] Icon library setup
+  - [x] Loading and error state components
+  - [x] Form components (text input, dropdowns, etc.)
 
 **Sunday Sep 6 (8h):**
 - [ ] **FE-Mobile-1: Authentication UI & Integration** (8h)
-  - Login screen UI
-  - Registration screen UI
-  - Forgot password UI
-  - Connect to backend Auth APIs
-  - Implement token storage (secure storage)
-  - Setup authentication state management
-  - Protected route implementation
+  - **Audit (October 19):** Partial — login, registration, OTP, profile completion and forgot-password UI exist. API calls return mock success on failure; startup defaults to a mock authenticated user. Forgot-password UI only displays a local success message. Live integration and secure route enforcement remain incomplete.
+  - [x] Login screen UI
+  - [x] Registration screen UI
+  - [x] Forgot password UI
+  - [ ] Connect to backend Auth APIs
+  - [x] Implement token storage (secure storage)
+  - [x] Setup authentication state management
+  - [ ] Protected route implementation
 
 - [ ] **FE-Mobile-2: Landing Page & App Shell** (8h)
-  - Landing page with app intro
-  - Onboarding screens (app tour/walkthrough)
-  - Splash screen
-  - Homepage layout and structure
-  - Bottom navigation bar
-  - Header with notifications icon
+  - **Audit (October 19):** Partial — home layout, bottom tabs, drawer and notification header exist. No dedicated landing, onboarding or configured splash implementation was found.
+  - [ ] Landing page with app intro
+  - [ ] Onboarding screens (app tour/walkthrough)
+  - [ ] Splash screen
+  - [x] Homepage layout and structure
+  - [x] Bottom navigation bar
+  - [x] Header with notifications icon
 
 **Deliverable:** Mobile project setup + Auth working + Landing page + App shell
 
 #### Frontend Web Admin (FE-Admin)
 
 **Saturday Sep 5 (8h):**
-- [X] **Admin Dashboard Setup** (8h)
-  [X] Initialize React/Next.js admin project
-  [X] Setup admin routing and layout
-  [X] Install and configure admin UI library (MUI/Ant Design/Shadcn)
-  [X] Create sidebar navigation structure
-  [X] Setup authentication guards
-  [X] Admin login page
-  [X] Dashboard layout with sidebar
+- [ ] **Admin Dashboard Setup** (8h)
+  - **Audit (October 19):** Partial — React/Vite, React Router, Tailwind, sidebar, layout, login page and client role guard exist. Planned admin component library is not installed. Guard code exists, but mock login fallback prevents production-ready authentication.
+  - [x] Initialize React/Next.js admin project
+  - [x] Setup admin routing and layout
+  - [ ] Install and configure admin UI library (MUI/Ant Design/Shadcn)
+  - [x] Create sidebar navigation structure
+  - [x] Setup authentication guards
+  - [x] Admin login page
+  - [x] Dashboard layout with sidebar
 
 **Sunday Sep 6 (8h):**
-- [X] **Admin Auth & User Management - Part 1** (8h)
-  [X] Admin authentication integration
-  [X] Dashboard home page with stats cards
-  [X] Users list table (with pagination, search, filter)
-  [X] User detail view modal
-  [X] User basic actions (view, search)
+- [ ] **Admin Auth & User Management - Part 1** (8h)
+  - **Audit (October 19):** Partial — login/user API clients, static dashboard cards, local search/role/status filters and detail modal exist. Failed login authenticates a mock admin; failed user fetch returns fixtures. Table has no pagination. Previously checked parent task is reopened.
+  - [ ] Admin authentication integration
+  - [x] Dashboard home page with stats cards
+  - [ ] Users list table (with pagination, search, filter)
+  - [x] User detail view modal
+  - [x] User basic actions (view, search)
 
 **Deliverable:** Admin panel setup + Admin auth + Basic user management
 
@@ -270,42 +328,46 @@
 
 **Saturday Sep 12 (8h):**
 - [ ] **FE-Mobile-1: Events List & Filters** (8h)
-  - Events feed/list view
-  - Event card component
-  - Category filters UI
-  - Search and filter controls
-  - Event status indicators
-  - Empty states and loading
-  - Pull-to-refresh
+  - **Audit (October 19):** Partial — cards, local search/category filters, status badges and empty state use MOCK_EVENTS. Refresh runs a timer without fetching data; API loading/error states are missing.
+  - [x] Events feed/list view
+  - [x] Event card component
+  - [x] Category filters UI
+  - [x] Search and filter controls
+  - [x] Event status indicators
+  - [ ] Empty states and loading
+  - [ ] Pull-to-refresh
 
 - [ ] **FE-Mobile-2: User Profile Page** (8h)
-  - Profile screen layout
-  - Player card component
-  - User card component
-  - User info section
-  - Edit profile UI
-  - Profile image upload
-  - Settings screen basic structure
+  - **Audit (October 19):** Partial — profile, embedded player stats and edit form exist. Stats are hardcoded; no separate user-card component, image upload or dedicated settings screen exists. Save only displays an alert and does not persist changes; contact input is fixed.
+  - [x] Profile screen layout
+  - [x] Player card component
+  - [ ] User card component
+  - [x] User info section
+  - [x] Edit profile UI
+  - [ ] Profile image upload
+  - [ ] Settings screen basic structure
 
 **Sunday Sep 13 (8h):**
 - [ ] **FE-Mobile-1: Event Details & Registration** (8h)
-  - Event detail screen
-  - Event information display (full details)
-  - Event image gallery
-  - Dynamic registration form rendering
-  - Form field validation
-  - League-specific registration
-  - Registration submission
-  - Registration confirmation screen
+  - **Audit (October 19):** Partial — mock details, conditional individual/team/captain/player forms, validation and confirmation modal exist. Forms are hardcoded rather than backend-schema driven; submission updates only an in-memory Set/Map. Live league registration and image gallery remain pending.
+  - [x] Event detail screen
+  - [x] Event information display (full details)
+  - [ ] Event image gallery
+  - [ ] Dynamic registration form rendering
+  - [x] Form field validation
+  - [ ] League-specific registration
+  - [ ] Registration submission
+  - [x] Registration confirmation screen
 
 - [ ] **FE-Mobile-2: Announcements & Profile Enhancement** (8h)
-  - Announcements list view
-  - Announcement detail view
-  - Announcement card component
-  - Priority indicators and badges
-  - Filter by category
-  - History section in profile (past events)
-  - Events suggestion section in profile
+  - **Audit (October 19):** Partial — two static announcement cards with a New badge and mock profile/event history exist. Detail route, priority mapping, category filters, suggestions and API data are missing.
+  - [x] Announcements list view
+  - [ ] Announcement detail view
+  - [x] Announcement card component
+  - [ ] Priority indicators and badges
+  - [ ] Filter by category
+  - [x] History section in profile (past events)
+  - [ ] Events suggestion section in profile
 
 **Deliverable:** Events + Registration + Announcements + Profile functional
 
@@ -313,23 +375,25 @@
 
 **Saturday Sep 12 (8h):**
 - [ ] **User Management - Complete** (8h)
-  - User edit form
-  - User delete confirmation
-  - Bulk actions (approve, suspend, delete)
-  - User statistics and filters
-  - User roles management
-  - Export user data
-  - User activity logs
+  - **Audit (October 19):** Pending — search/filter and total count exist under Part 1. Editing, deletion, bulk actions, fuller statistics, role mutation, exports and activity logs are missing.
+  - [ ] User edit form
+  - [ ] User delete confirmation
+  - [ ] Bulk actions (approve, suspend, delete)
+  - [ ] User statistics and filters
+  - [ ] User roles management
+  - [ ] Export user data
+  - [ ] User activity logs
 
 **Sunday Sep 13 (8h):**
 - [ ] **Event Management - Part 1** (8h)
-  - Events list table with filters
-  - Event creation form (basic details)
-  - Event categories management
-  - Event status management (draft, publish, close)
-  - Event image upload
-  - Event duplication feature
-  - Event preview
+  - **Audit (October 19):** Pending — /events renders placeholder text; no management form, table or event actions exist.
+  - [ ] Events list table with filters
+  - [ ] Event creation form (basic details)
+  - [ ] Event categories management
+  - [ ] Event status management (draft, publish, close)
+  - [ ] Event image upload
+  - [ ] Event duplication feature
+  - [ ] Event preview
 
 **Deliverable:** Complete user management + Event management started
 
@@ -387,44 +451,48 @@
 
 **Saturday Sep 19 (8h):**
 - [ ] **FE-Mobile-1: Auction Interface** (8h)
-  - Auction event view
-  - Bidding interface
-  - Current bid display
-  - Bid history view
-  - Auction timer/countdown
-  - Bid submission with confirmation popup
-  - Winner announcement screen
-  - My bids view
+  - **Audit (October 19):** Partial — spectator view shows mock player/bid/wallet data and local countdown. Bid entry/submission, confirmation, winner screen and My Bids are missing. Mobile console changes only local status, has no role gate and does not synchronize with spectator view.
+  - [x] Auction event view
+  - [ ] Bidding interface
+  - [x] Current bid display
+  - [x] Bid history view
+  - [x] Auction timer/countdown
+  - [ ] Bid submission with confirmation popup
+  - [ ] Winner announcement screen
+  - [ ] My bids view
 
 - [ ] **FE-Mobile-2: Points System UI** (8h)
-  - Points display in profile
-  - Points history screen
-  - Transaction list view
-  - Points breakdown by source
-  - Points earning opportunities section
-  - Visual points indicator/badge
-  - Points animations
+  - **Audit (October 19):** Partial — static totals and badges appear in home/profile/rankings. Event history includes sample awards; dedicated transactions, source breakdown, earning flow and animations are missing.
+  - [x] Points display in profile
+  - [ ] Points history screen
+  - [ ] Transaction list view
+  - [ ] Points breakdown by source
+  - [ ] Points earning opportunities section
+  - [x] Visual points indicator/badge
+  - [ ] Points animations
 
 **Sunday Sep 20 (8h):**
 - [ ] **FE-Mobile-1: Leaderboard Page** (8h)
-  - Leaderboard screen layout
-  - Leaderboard list (ranked)
-  - Filter controls (by event, category, time period)
-  - User position highlight
-  - Pull-to-refresh
-  - Podium view for top 3
-  - Scroll to my position
-  - Leaderboard tabs (global, events, challenges)
+  - **Audit (October 19):** Partial — static three-player rankings and hardcoded current-position highlight exist. API data, filters, refresh, podium, scroll-to-self and tabs are missing.
+  - [x] Leaderboard screen layout
+  - [x] Leaderboard list (ranked)
+  - [ ] Filter controls (by event, category, time period)
+  - [x] User position highlight
+  - [ ] Pull-to-refresh
+  - [ ] Podium view for top 3
+  - [ ] Scroll to my position
+  - [ ] Leaderboard tabs (global, events, challenges)
 
 - [ ] **FE-Mobile-2: Challenges & Strava** (8h)
-  - Challenges list view
-  - Challenge detail view
-  - Challenge participation UI
-  - Challenge progress tracking
-  - Active vs completed challenges tabs
-  - Strava connection screen
-  - Strava OAuth flow integration
-  - Connected accounts display
+  - **Audit (October 19):** Pending — only a static Challenges tile exists; no challenge screens, participation/progress flows or Strava connection/OAuth implementation was found.
+  - [ ] Challenges list view
+  - [ ] Challenge detail view
+  - [ ] Challenge participation UI
+  - [ ] Challenge progress tracking
+  - [ ] Active vs completed challenges tabs
+  - [ ] Strava connection screen
+  - [ ] Strava OAuth flow integration
+  - [ ] Connected accounts display
 
 **Deliverable:** Auction + Points + Leaderboard + Challenges + Strava functional
 
@@ -432,23 +500,25 @@
 
 **Saturday Sep 19 (8h):**
 - [ ] **Event Management - Part 2** (8h)
-  - Event registration form builder (drag-drop fields)
-  - Form field types (text, dropdown, checkbox, etc.)
-  - Auction setup interface for events
-  - Event participants management view
-  - Event registration responses view
-  - Export registrations to CSV
-  - Participant communication tools
+  - **Audit (October 19):** Pending — no web form builder, auction setup, participant/response management, registration export or communication tooling exists.
+  - [ ] Event registration form builder (drag-drop fields)
+  - [ ] Form field types (text, dropdown, checkbox, etc.)
+  - [ ] Auction setup interface for events
+  - [ ] Event participants management view
+  - [ ] Event registration responses view
+  - [ ] Export registrations to CSV
+  - [ ] Participant communication tools
 
 **Sunday Sep 20 (8h):**
 - [ ] **Auction, Points & Leaderboard Admin** (8h)
-  - Auction management (view, monitor, close)
-  - Winner selection and confirmation
-  - Manual points adjustment interface
-  - Points rules configuration
-  - View all leaderboards
-  - Leaderboard filters and export
-  - Challenge management interface (create, edit, delete)
+  - **Audit (October 19):** Pending — /auction and /leaderboard are placeholders. Local mobile auction controls do not implement these web-admin requirements.
+  - [ ] Auction management (view, monitor, close)
+  - [ ] Winner selection and confirmation
+  - [ ] Manual points adjustment interface
+  - [ ] Points rules configuration
+  - [ ] View all leaderboards
+  - [ ] Leaderboard filters and export
+  - [ ] Challenge management interface (create, edit, delete)
 
 **Deliverable:** Complete event + auction management + Points/Leaderboard admin
 
@@ -508,44 +578,48 @@
 
 **Saturday Sep 26 (8h):**
 - [ ] **FE-Mobile-1: Media Page** (8h)
-  - Media gallery view
-  - Image grid layout (masonry/grid)
-  - Video player integration
-  - Media filters (by event, date, type)
-  - Full-screen media viewer with swipe
-  - Share media functionality
-  - Media upload (if user-generated)
+  - **Audit (October 19):** Pending — no mobile media screen or navigation route was found.
+  - [ ] Media gallery view
+  - [ ] Image grid layout (masonry/grid)
+  - [ ] Video player integration
+  - [ ] Media filters (by event, date, type)
+  - [ ] Full-screen media viewer with swipe
+  - [ ] Share media functionality
+  - [ ] Media upload (if user-generated)
 
 - [ ] **FE-Mobile-2: Homepage - Broadcast & Content** (8h)
-  - Broadcast message display widget on homepage
-  - Live announcements banner
-  - Notification center/inbox
-  - Push notification setup
-  - WhatsApp redirect integration
-  - Featured events section on homepage
-  - Quick actions (register, leaderboard, challenges)
-  - Recent activity feed
-  - Upcoming events widget
+  - **Audit (October 19):** Partial — static upcoming/featured cards and notification inbox exist. Notification requests fall back to mocks; read updates swallow failures. Broadcast/banner, push, WhatsApp, activity feed and complete quick actions are missing; Challenges/Rewards tiles have no actions.
+  - [ ] Broadcast message display widget on homepage
+  - [ ] Live announcements banner
+  - [x] Notification center/inbox
+  - [ ] Push notification setup
+  - [ ] WhatsApp redirect integration
+  - [x] Featured events section on homepage
+  - [ ] Quick actions (register, leaderboard, challenges)
+  - [ ] Recent activity feed
+  - [x] Upcoming events widget
 
 **Sunday Sep 27 (8h):**
 - [ ] **FE-Mobile-1: Hall of Fame Page** (8h)
-  - Hall of Fame list view
-  - Featured members carousel
-  - Member detail page
-  - Achievements display with badges
-  - Timeline view
-  - Search and filter by category
-  - Hall of Fame categories tabs
+  - **Audit (October 19):** Partial — static featured/community cards and year badge exist. API entries, achievement-specific badges, carousel, member detail, timeline, search/filter and category tabs are missing.
+  - [x] Hall of Fame list view
+  - [ ] Featured members carousel
+  - [ ] Member detail page
+  - [ ] Achievements display with badges
+  - [ ] Timeline view
+  - [ ] Search and filter by category
+  - [ ] Hall of Fame categories tabs
 
 - [ ] **FE-Mobile-2: Feedback, Contact & Brackets** (8h)
-  - Feedback form screen with categories
-  - Contact us form screen
-  - Form validation
-  - Submission success/error handling
-  - FAQ section (static content)
-  - Tournament bracket view (spectator)
-  - Bracket navigation through rounds
-  - Match/game display
+  - **Audit (October 19):** Partial — category/message UI and blank-message button guard exist. Send has an empty handler; full validation/submission, contact, FAQ and brackets are missing.
+  - [x] Feedback form screen with categories
+  - [ ] Contact us form screen
+  - [ ] Form validation
+  - [ ] Submission success/error handling
+  - [ ] FAQ section (static content)
+  - [ ] Tournament bracket view (spectator)
+  - [ ] Bracket navigation through rounds
+  - [ ] Match/game display
 
 **Deliverable:** Media + Homepage complete + Hall of Fame + Feedback + Brackets
 
@@ -553,24 +627,26 @@
 
 **Saturday Sep 26 (8h):**
 - [ ] **Media & Broadcast Management** (8h)
-  - Media library view (grid/list with filters)
-  - Media upload interface (bulk upload)
-  - Media approval workflow
-  - Media categorization and tagging
-  - Broadcast message creation interface
-  - Broadcast scheduling
-  - Broadcast history and analytics
+  - **Audit (October 19):** Pending — /media is placeholder text; no library/upload/approval or broadcast management exists.
+  - [ ] Media library view (grid/list with filters)
+  - [ ] Media upload interface (bulk upload)
+  - [ ] Media approval workflow
+  - [ ] Media categorization and tagging
+  - [ ] Broadcast message creation interface
+  - [ ] Broadcast scheduling
+  - [ ] Broadcast history and analytics
 
 **Sunday Sep 27 (8h):**
 - [ ] **Hall of Fame, Feedback & Brackets** (8h)
-  - Hall of Fame management (add/edit/delete entries)
-  - Achievement management
-  - Feedback inbox view
-  - Contact submissions view
-  - Response interface for feedback/contact
-  - Tournament bracket setup UI
-  - Bracket management (update results)
-  - Analytics dashboard (users, events, engagement)
+  - **Audit (October 19):** Pending — /feedback and /tournaments are placeholders. Hall of Fame management, achievements, response workflows and live analytics are missing.
+  - [ ] Hall of Fame management (add/edit/delete entries)
+  - [ ] Achievement management
+  - [ ] Feedback inbox view
+  - [ ] Contact submissions view
+  - [ ] Response interface for feedback/contact
+  - [ ] Tournament bracket setup UI
+  - [ ] Bracket management (update results)
+  - [ ] Analytics dashboard (users, events, engagement)
 
 **Deliverable:** All admin features complete
 
@@ -616,31 +692,33 @@
 
 **Saturday Oct 17 (8h):**
 - [ ] **Both: Feature Testing & PopUps** (8h each)
-  - **FE-Mobile-1:** All PopUps implementation
-    - Event registration popup
-    - Bid confirmation popup
-    - Success/error popups (reusable)
-    - Info/warning popups
-    - Terms and conditions popup
-    - Confirmation dialogs (delete, logout, etc.)
+  - **Audit (October 19):** Partial — registration and notification modals, Terms/Privacy alerts and reusable inline feedback components exist. Bid confirmation and delete/logout confirmation dialogs are missing. Device, network/offline and full journey testing remain unverified.
+  - [ ] **FE-Mobile-1:** All PopUps implementation
+    - [x] Event registration popup
+    - [ ] Bid confirmation popup
+    - [ ] Success/error popups (reusable)
+    - [ ] Info/warning popups
+    - [x] Terms and conditions popup
+    - [ ] Confirmation dialogs (delete, logout, etc.)
   
-  - **FE-Mobile-2:** Complete user journey testing
-    - Test registration → login → events → auction → profile flow
-    - Cross-device testing (Android/iOS)
-    - Network error handling testing
-    - Offline behavior testing
-    - Create prioritized bug list
+  - [ ] **FE-Mobile-2:** Complete user journey testing
+    - [ ] Test registration → login → events → auction → profile flow
+    - [ ] Cross-device testing (Android/iOS)
+    - [ ] Network error handling testing
+    - [ ] Offline behavior testing
+    - [ ] Create prioritized bug list
 
 **Sunday Oct 18 (8h):**
 - [ ] **Both: Bug Fixes & Final Polish** (8h each)
-  - Fix critical and high-priority bugs
-  - UI/UX refinements
-  - Loading states and error messages polish
-  - Animations and transitions
-  - Performance optimization (image caching, lazy loading)
-  - Accessibility improvements
-  - Build production APK/IPA
-  - Final testing on production backend
+  - **Audit (October 19):** Unverified — styling, transitions and feedback primitives exist; final polish, accessibility/performance checks, production APK/IPA builds and production-backend testing are not established by this source audit.
+  - [ ] Fix critical and high-priority bugs
+  - [ ] UI/UX refinements
+  - [ ] Loading states and error messages polish
+  - [ ] Animations and transitions
+  - [ ] Performance optimization (image caching, lazy loading)
+  - [ ] Accessibility improvements
+  - [ ] Build production APK/IPA
+  - [ ] Final testing on production backend
 
 **Deliverable:** Tested, polished, production-ready mobile app
 
@@ -648,25 +726,27 @@
 
 **Saturday Oct 17 (8h):**
 - [ ] **Admin Testing & Missing Features** (8h)
-  - Complete any remaining admin features
-  - Test all admin workflows
-  - User management testing
-  - Event creation and management testing
-  - Auction management testing
-  - Media management testing
-  - Communications testing
-  - Create bug list
+  - **Audit (October 19):** Unverified — no browser/admin workflow testing was performed for this source audit; missing modules prevent completion.
+  - [ ] Complete any remaining admin features
+  - [ ] Test all admin workflows
+  - [ ] User management testing
+  - [ ] Event creation and management testing
+  - [ ] Auction management testing
+  - [ ] Media management testing
+  - [ ] Communications testing
+  - [ ] Create bug list
 
 **Sunday Oct 18 (8h):**
 - [ ] **Admin Bug Fixes & Deployment** (8h)
-  - Fix critical bugs
-  - UI polish and consistency
-  - Admin permissions and security testing
-  - Help documentation for admin users
-  - Build production bundle
-  - Deploy to hosting
-  - Domain and SSL setup
-  - Final production testing
+  - **Audit (October 19):** Unverified — production build/deployment, permission checks, documentation and production testing are not established by this source audit.
+  - [ ] Fix critical bugs
+  - [ ] UI polish and consistency
+  - [ ] Admin permissions and security testing
+  - [ ] Help documentation for admin users
+  - [ ] Build production bundle
+  - [ ] Deploy to hosting
+  - [ ] Domain and SSL setup
+  - [ ] Final production testing
 
 **Deliverable:** Production-ready web admin panel deployed
 
@@ -968,11 +1048,11 @@ MVP is ready when:
 
 ---
 
-**Document Version:** 2.0  
-**Last Updated:** September 5, 2026  
+**Document Version:** 2.1 (frontend implementation tally)\
+**Last Updated:** October 19, 2026\
 **Owner:** BGSC Platform Team  
 **Team Size:** 5 people (2 BE, 2 FE-Mobile, 1 FE-Admin)  
-**Next Review:** End of Week 2 (September 13, 2026)
+**Next Review:** After frontend API integration and user-journey validation
 
 ---
 
