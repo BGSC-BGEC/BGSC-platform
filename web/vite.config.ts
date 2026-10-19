@@ -12,7 +12,7 @@ export default defineConfig({
     server: {
       port: 5173,
       proxy: {
-        '^/(api|auth|users|events|forms|registrations|announcements)': {
+        '^/(api|auth|users|events|forms|registrations|announcements|brackets|matches)': {
           target: 'http://localhost:3000',
           changeOrigin: true,
           secure: false,
