@@ -102,10 +102,38 @@ export async function getUserById(id: string): Promise<User | null> {
     }
 }
 
+export async function updateUserStatus(
+  id: string,
+  newStatus: 'active' | 'suspended',
+  reason = 'Admin console status update'
+): Promise<User | null> {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const user = DEFAULT_USER_DATA.find((u) => u.id === id)
+    if (user) {
+      user.status = newStatus
+      return { ...user }
+    }
+    return null
+  }
+
+  try {
+    const raw = await apiClient.patch<RawBackendUser>(`/users/${id}/status`, {
+      status: newStatus,
+      reason,
+    })
+    return raw ? mapBackendUser(raw) : null
+  } catch (error) {
+    console.warn(`[userService] Failed to update status for user ${id}:`, error)
+    return null
+  }
+}
+
 export const userService = {
     getUsers,
     getUserById,
     updateUserRole,
+    updateUserStatus,
 }
 
 export default userService
