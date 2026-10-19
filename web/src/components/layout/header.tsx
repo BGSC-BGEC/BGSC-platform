@@ -10,9 +10,9 @@ export const Header: React.FC = () => {
     const currentPath = location.pathname.replace('/', '').trim()
     const pageTitle = currentPath ? currentPath.toUpperCase() : 'DASHBOARD'
 
-    const handleLogout = () => {
-    logout()
-    navigate('/login')
+    const handleLogout = async () => {
+      await logout()
+      navigate('/login')
     }
 
     return (
