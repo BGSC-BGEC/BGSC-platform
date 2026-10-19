@@ -243,6 +243,7 @@ rounded transition-colors"
         )}
 
         <UserDetailModal
+        key={selectedUser?.id}
         isOpen={isModalOpen}
         user={selectedUser}
         onClose={handleCloseModal}

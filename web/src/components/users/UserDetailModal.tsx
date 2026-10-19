@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import type { User } from '../../types/user'
 import { userService } from '../../services/userService'
 
@@ -19,16 +19,16 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
     const [isConfirming, setIsConfirming] = useState(false)
     const [actionError, setActionError] = useState<string | null>(null)
 
-    useEffect(() => {
+    const handleClose = useCallback(() => {
         setIsConfirming(false)
         setActionError(null)
-        setIsUpdating(false)
-    }, [user?.id, isOpen])
+        onClose()
+    }, [onClose])
 
     useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
-        onClose()
+        handleClose()
         }
     }
 
@@ -39,7 +39,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
     return () => {
         window.removeEventListener('keydown', handleKeyDown)
     }
-    }, [isOpen, onClose])
+    }, [isOpen, handleClose])
 
     if (!isOpen || !user) {
     return null
@@ -65,7 +65,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
     return (
     <div
         className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-        onClick={onClose}
+        onClick={handleClose}
     >
         <div
         className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-lg w-full p-6 space-y-4"
@@ -77,7 +77,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
             </h2>
             <button
             type="button"
-            onClick={onClose}
+            onClick={handleClose}
             className="px-2 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-white cursor-pointer"
             >
             X
@@ -172,7 +172,7 @@ export const UserDetailModal: React.FC<UserDetailModalProps> = ({
                     </div>
                     <button
                         type="button"
-                        onClick={onClose}
+                        onClick={handleClose}
                         className="px-4 py-1.5 text-xs border border-black text-black hover:bg-black hover:text-white rounded transition-colors cursor-pointer"
                     >
                         Close
