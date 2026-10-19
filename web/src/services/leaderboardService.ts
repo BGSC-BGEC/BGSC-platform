@@ -83,7 +83,7 @@ export async function getGlobalLeaderboard(
   try {
     const res = await apiClient.get<
       { standings?: RawBackendStanding[] } | RawBackendStanding[]
-    >(`/leaderboard/global?period=${period}&domain=${domain}`)
+    >(`/leaderboards/global?period=${period}&domain=${domain}`)
 
     const list = Array.isArray(res) ? res : res?.standings || []
     return list.map(mapBackendStanding)

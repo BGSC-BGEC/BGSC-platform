@@ -58,7 +58,7 @@ export async function updateUserRole(
     }
 
     try {
-    const raw = await apiClient.put<RawBackendUser>(`/users/${id}/role`, {
+    const raw = await apiClient.patch<RawBackendUser>(`/users/${id}/role`, {
         role: newRole,
         reason,
     })
@@ -82,7 +82,7 @@ export async function getUsers(): Promise<User[]> {
         return rawList.map(mapBackendUser)
         } catch (error) {
         console.warn('[userService] Backend unreachable, falling back to mock data:', error)
-        return DEFAULT_USER_DATA
+        return isMock ? DEFAULT_USER_DATA : []
     }
 }
 
@@ -98,7 +98,7 @@ export async function getUserById(id: string): Promise<User | null> {
         return raw ? mapBackendUser(raw) : null
         } catch (error) {
             console.warn(`[userService] Backend unreachable for user ${id}, falling back to mock:`, error)
-            return DEFAULT_USER_DATA.find((u) => u.id === id) || null
+            return isMock ? DEFAULT_USER_DATA.find((u) => u.id === id) || null : null
     }
 }
 
