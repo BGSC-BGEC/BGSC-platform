@@ -41,11 +41,17 @@ export const AuctionControlPanel: React.FC<AuctionControlPanelProps> = ({
     e.preventDefault()
     if (!activeLot) return
 
+    const teamToBid = selectedTeamId || teams[0]?.team_id || ''
+    if (!teamToBid) {
+      setBiddingError('Please select a franchise team.')
+      return
+    }
+
     setBiddingError(null)
     setIsBidding(true)
 
     try {
-      await onPlaceBid(selectedTeamId, nextBidAmount)
+      await onPlaceBid(teamToBid, nextBidAmount)
     } catch (err) {
       setBiddingError(err instanceof Error ? err.message : 'Failed to place bid')
     } finally {
@@ -132,7 +138,7 @@ export const AuctionControlPanel: React.FC<AuctionControlPanelProps> = ({
         >
           {/* Team Dropdown */}
           <select
-            value={selectedTeamId}
+            value={selectedTeamId || teams[0]?.team_id || ''}
             onChange={(e) => setSelectedTeamId(e.target.value)}
             disabled={!activeLot || isBidding}
             className="flex-1 px-3 py-2 text-xs border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black truncate"

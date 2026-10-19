@@ -8,6 +8,7 @@ import { Events } from '../pages/Events'
 import { Announcements } from '../pages/Announcements'
 import { Tournaments } from '../pages/Tournaments'
 import { Leaderboard } from '../pages/Leaderboard'
+import { Auction } from '../pages/Auction'
 
 export const router = createBrowserRouter([
     { path: '/login', element: <Login /> },
@@ -38,12 +39,8 @@ export const router = createBrowserRouter([
             element: <Tournaments />,
         },
         {
-        path: 'auction',
-        element: (
-            <div className="p-6 rounded border border-gray-200 bg-white text-gray-700 text-sm">
-            Auctions page
-            </div>
-        ),
+            path: 'auction',
+            element: <Auction />,
         },
         {
         path: 'media',
