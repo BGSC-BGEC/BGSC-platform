@@ -88,11 +88,13 @@ export async function getMedia(filters?: MediaFilters): Promise<MediaItem[]> {
 
   try {
     const queryString = buildQuery()
-    const res = await apiClient.get<MediaItem[]>(`/media${queryString}`)
-    return res
+    const res = await apiClient.get<MediaItem[] | { items?: MediaItem[] }>(
+      `/media${queryString}`
+    )
+    return Array.isArray(res) ? res : res?.items || []
   } catch (error) {
-    console.warn('[mediaService] Fetch media failed, using mock data:', error)
-    return applyMockFilters()
+    console.warn('[mediaService] Fetch media failed:', error)
+    return isMock ? applyMockFilters() : []
   }
 }
 
@@ -103,11 +105,13 @@ export async function getAlbums(): Promise<MediaAlbum[]> {
   }
 
   try {
-    const res = await apiClient.get<MediaAlbum[]>('/media/albums')
-    return res
+    const res = await apiClient.get<MediaAlbum[] | { items?: MediaAlbum[] }>(
+      '/media/albums'
+    )
+    return Array.isArray(res) ? res : res?.items || []
   } catch (error) {
-    console.warn('[mediaService] Fetch albums failed, using mock data:', error)
-    return structuredClone(mockAlbums)
+    console.warn('[mediaService] Fetch albums failed:', error)
+    return isMock ? structuredClone(mockAlbums) : []
   }
 }
 
@@ -155,6 +159,9 @@ export async function uploadMedia(
     const res = await apiClient.post<MediaItem>('/media/upload', payload)
     return res
   } catch (error) {
+    if (!isMock) {
+      throw error
+    }
     console.warn('[mediaService] Upload failed, falling back to local state:', error)
     return applyMockUpload()
   }
@@ -201,6 +208,9 @@ export async function moderateMedia(
     })
     return res
   } catch (error) {
+    if (!isMock) {
+      throw error
+    }
     console.warn(
       `[mediaService] Moderation for ${id} failed, updating local mock:`,
       error
@@ -227,6 +237,9 @@ export async function deleteMedia(id: string): Promise<{ success: boolean }> {
     await apiClient.delete(`/media/${id}`)
     return { success: true }
   } catch (error) {
+    if (!isMock) {
+      throw error
+    }
     console.warn(
       `[mediaService] Delete for ${id} failed, updating local mock:`,
       error

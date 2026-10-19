@@ -86,11 +86,14 @@ export async function getInbox(
 
   try {
     const queryString = buildQuery()
-    const res = await apiClient.get<FeedbackTicket[]>(`/feedback${queryString}`)
-    return res
+    const res = await apiClient.get<
+      FeedbackTicket[] | { tickets?: FeedbackTicket[] }
+    >(`/feedback${queryString}`)
+    const list = Array.isArray(res) ? res : res?.tickets || []
+    return list
   } catch (error) {
-    console.warn('[feedbackService] Fetch inbox failed, using mock data:', error)
-    return applyMockFilters()
+    console.warn('[feedbackService] Fetch inbox failed:', error)
+    return isMock ? applyMockFilters() : []
   }
 }
 
@@ -110,14 +113,17 @@ export async function getTicket(ticketNo: string): Promise<FeedbackTicket> {
     const res = await apiClient.get<FeedbackTicket>(`/feedback/${ticketNo}`)
     return res
   } catch (error) {
-    console.warn(`[feedbackService] Fetch ticket ${ticketNo} failed, using mock:`, error)
-    const ticket = mockTickets.find(
-      (t) => t.ticket_no === ticketNo || t.id === ticketNo
-    )
-    if (!ticket) {
-      throw new Error(`Ticket ${ticketNo} not found.`, { cause: error })
+    console.warn(`[feedbackService] Fetch ticket ${ticketNo} failed:`, error)
+    if (isMock) {
+      const ticket = mockTickets.find(
+        (t) => t.ticket_no === ticketNo || t.id === ticketNo
+      )
+      if (!ticket) {
+        throw new Error(`Ticket ${ticketNo} not found.`, { cause: error })
+      }
+      return structuredClone(ticket)
     }
-    return structuredClone(ticket)
+    throw error
   }
 }
 
@@ -170,6 +176,9 @@ export async function updateStatus(
     )
     return res
   } catch (error) {
+    if (!isMock) {
+      throw error
+    }
     console.warn(
       `[feedbackService] Update status for ${ticketNo} failed, updating local mock:`,
       error
@@ -234,6 +243,9 @@ export async function updateSeverity(
     )
     return res
   } catch (error) {
+    if (!isMock) {
+      throw error
+    }
     console.warn(
       `[feedbackService] Update severity for ${ticketNo} failed, updating local mock:`,
       error

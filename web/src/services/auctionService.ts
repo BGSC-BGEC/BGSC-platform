@@ -31,7 +31,10 @@ export async function getLiveAuction(
     return res
   } catch (error) {
     console.warn(`[auctionService] Live state fetch failed for ${eventId}, using mock:`, error)
-    return structuredClone(mockAuctionState)
+    if (isMock) {
+      return structuredClone(mockAuctionState)
+    }
+    throw error
   }
 }
 
@@ -56,11 +59,14 @@ export async function getLots(
     return res
   } catch (error) {
     console.warn(`[auctionService] Lots fetch failed for ${eventId}, using mock:`, error)
-    let result = structuredClone(mockLots)
-    if (status) {
-      result = result.filter((lot) => lot.status === status)
+    if (isMock) {
+      let result = structuredClone(mockLots)
+      if (status) {
+        result = result.filter((lot) => lot.status === status)
+      }
+      return result
     }
-    return result
+    return []
   }
 }
 
@@ -143,10 +149,13 @@ export async function placeBid(
     return structuredClone(mockAuctionState)
   }
 
-  const res = await apiClient.post<LiveAuctionState>(`/lots/${lotId}/bid`, {
-    amount,
-    version,
-  })
+  const res = await apiClient.post<LiveAuctionState>(
+    `/auction/lots/${lotId}/bid`,
+    {
+      amount,
+      version,
+    }
+  )
   return res
 }
 
@@ -234,7 +243,7 @@ export async function advanceLot(
     settledLot: AuctionLot
     nextLot: AuctionLot | null
     state: LiveAuctionState
-  }>(`/lots/${lotId}/advance`)
+  }>(`/auction/lots/${lotId}/advance`)
   return res
 }
 
@@ -248,7 +257,7 @@ export async function pauseAuction(
   }
 
   const res = await apiClient.post<LiveAuctionState>(
-    `/events/${eventId}/pause`
+    `/auction/events/${eventId}/pause`
   )
   return res
 }
@@ -263,7 +272,7 @@ export async function resumeAuction(
   }
 
   const res = await apiClient.post<LiveAuctionState>(
-    `/events/${eventId}/resume`
+    `/auction/events/${eventId}/resume`
   )
   return res
 }
