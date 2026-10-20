@@ -180,6 +180,7 @@ export interface FormSubmission {
   owner: { type: string; id: string | null };
   user: UserSnapshot;
   answers: Record<string, unknown>;
+  files?: Array<{ field_key: string; url: string; name: string; size: number; mime: string }>;
   context: {
     event?: {
       role: RegistrationRole;
@@ -205,6 +206,8 @@ export interface Team {
   captain_user_id: string;
   members: Array<UserSnapshot & { joined_at: string }>;
   join_policy: 'open' | 'invite_only' | 'closed';
+  /** 8 characters; visible to the captain */
+  invite_code?: string;
   size_min: number | null;
   size_max: number | null;
   status: 'forming' | 'complete' | 'locked' | 'disbanded';
@@ -385,4 +388,70 @@ export interface HallOfFameEntry {
   featured: boolean;
   featured_order: number | null;
   created_at: string;
+}
+
+// ---------------------------------------------------------------- announcements
+export type AnnouncementCategory =
+  | 'bgec'
+  | 'fitsoc'
+  | 'airball'
+  | 'offside'
+  | 'powerplay'
+  | 'around_the_net'
+  | 'deuce'
+  | 'highlight'
+  | 'teams';
+export type AnnouncementPriority = 'normal' | 'important' | 'urgent';
+
+export interface Announcement {
+  _id: string;
+  title: string;
+  /** Plain text; paragraphs separated by blank lines */
+  body: string;
+  media_url: string | null;
+  categories: AnnouncementCategory[];
+  tags: string[];
+  priority: AnnouncementPriority;
+  audience: { min_role: string; event_id: string | null };
+  author: { user_id: string; display_name: string; role_label: string; avatar_url: string | null; deleted?: boolean };
+  published_at: string | null;
+  /** Pinned while this is in the future */
+  pinned_until: string | null;
+  /** Only present for signed-in members */
+  unread?: boolean;
+}
+
+export interface AnnouncementList {
+  announcements: Announcement[];
+  next_cursor: string | null;
+}
+
+/** GET /announcements/heads — one entry per coordinator/founder with their latest post. */
+export interface AnnouncementHead {
+  coordinator: { user_id: string; display_name: string; avatar_url: string | null; role_label: string };
+  announcement: Announcement | null;
+}
+
+// ----------------------------------------------------------------------- points
+export interface PointsSummary {
+  balance: number;
+  lifetime_earned: number;
+  lifetime_spent: number;
+}
+
+export interface PointTransaction {
+  id: string;
+  amount: number;
+  type: 'earn' | 'spend' | 'refund' | 'adjust' | 'expire';
+  source: 'event' | 'challenge' | 'leaderboard' | 'store' | 'engagement' | 'sponsor' | 'admin';
+  /** Machine key such as "event.participation" */
+  reason: string;
+  reference: { type: string | null; id: string | null };
+  balance_after: number;
+  created_at: string;
+}
+
+export interface PointTransactionPage {
+  transactions: PointTransaction[];
+  next_cursor: string | null;
 }

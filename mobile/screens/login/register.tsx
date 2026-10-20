@@ -1,328 +1,200 @@
-import React, { useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import React, { useCallback, useMemo, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { StackActions, useFocusEffect, useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 
 import { useAuth } from '../../store/auth';
-import {
-  AuthBackground,
-  AuthCard,
-  AuthHeader,
-  AuthTabs,
-  AuthCheckbox,
-  AuthDivider,
-  GoogleButton,
-} from '../../src/auth';
+import { AuthScaffold } from '../../src/auth/AuthScaffold';
+import { AuthTabs } from '../../src/auth/AuthTabs';
+import { AuthBanner } from '../../src/auth/AuthBanner';
 import { TextInput } from '../../src/forms/TextInput';
+import { Checkbox } from '../../src/forms/Checkbox';
+import { Button } from '../../src/components/Button';
+import { Icon } from '../../src/icons/Icon';
 import { Typography } from '../../src/typography/Typography';
+import { FONT_FAMILIES } from '../../src/theme/typography';
+import { useTheme } from '../../src/theme/ThemeProvider';
 
+type Field = 'fullName' | 'username' | 'email' | 'password' | 'repeat';
+
+const USERNAME = /^[a-zA-Z0-9_]{3,30}$/;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Advisory strength rules — the backend only requires 8+ characters. */
+const RULES = [
+  { label: '8+ chars', test: (p: string) => p.length >= 8 },
+  { label: 'Uppercase', test: (p: string) => /[A-Z]/.test(p) },
+  { label: 'Number', test: (p: string) => /\d/.test(p) },
+  { label: 'Symbol', test: (p: string) => /[^A-Za-z0-9]/.test(p) },
+];
+const STRENGTH_COPY = ['Too short', 'Weak — keep going', 'Okay — add a number or symbol', 'Good — add a symbol to make it strong', 'Strong password'];
+
+/** v2 Create account (56:1996). Sign-up continues to Verify email → Get started. */
 export default function RegisterScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<any>>();
-  const { register, googleSignIn, isLoading, error, clearError } = useAuth();
+  const navigation = useNavigation<NavigationProp<ParamListBase>>();
+  const { register, isLoading, error, clearError } = useAuth();
+  const { colors } = useTheme();
 
-  const [fullName, setFullName] = useState('');
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [repeatPassword, setRepeatPassword] = useState('');
-  const [contact, setContact] = useState('+91 ');
-  const [termsAccepted, setTermsAccepted] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<{
-    fullName?: string;
-    username?: string;
-    email?: string;
-    password?: string;
-    repeatPassword?: string;
-    contact?: string;
-    terms?: string;
-  }>({});
+  const [form, setForm] = useState({ fullName: '', username: '', email: '', contact: '+91 ', password: '', repeat: '' });
+  const [agreed, setAgreed] = useState(false);
+  const [errors, setErrors] = useState<Partial<Record<Field | 'terms', string>>>({});
 
-  const handleRegisterPress = async () => {
+  // The auth error is shared across Login/Register/Restore: drop it when leaving this screen.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useFocusEffect(useCallback(() => clearError, []));
+
+  const set = (key: keyof typeof form) => (value: string) => {
+    setForm((f) => ({ ...f, [key]: value }));
+    if (errors[key as Field]) setErrors((e) => ({ ...e, [key]: undefined }));
+  };
+
+  const passed = useMemo(() => RULES.map((r) => r.test(form.password)), [form.password]);
+  const score = form.password ? passed.filter(Boolean).length : 0;
+  const meterColor = score >= 4 ? colors.success : score >= 2 ? colors.warning : colors.danger;
+
+  const submit = async () => {
     clearError();
-    const errors: typeof fieldErrors = {};
+    const e: typeof errors = {};
+    if (form.fullName.trim().length < 2) e.fullName = 'Enter your full name.';
+    if (!USERNAME.test(form.username.trim())) e.username = '3–30 letters, numbers or underscores.';
+    if (!EMAIL.test(form.email.trim())) e.email = 'Enter a valid email address.';
+    if (form.password.length < 8) e.password = 'Use at least 8 characters.';
+    if (form.repeat !== form.password) e.repeat = 'Passwords don’t match.';
+    if (!agreed) e.terms = 'Accept the Terms to continue.';
+    setErrors(e);
+    if (Object.values(e).some(Boolean)) return;
 
-    const trimmedName = fullName.trim();
-    if (trimmedName.length < 2) {
-      errors.fullName = 'Please enter your full name';
-    }
-
-    const trimmedUsername = username.trim();
-    if (!trimmedUsername) {
-      errors.username = 'Username is required';
-    } else if (!/^[a-zA-Z0-9_]{3,30}$/.test(trimmedUsername)) {
-      errors.username = '3–30 letters, numbers or underscores';
-    }
-
-    const trimmedEmail = email.trim();
-    if (!trimmedEmail) {
-      errors.email = 'Email is required';
-    } else if (!trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
-      errors.email = 'Please enter a valid university email';
-    }
-
-    if (!password) {
-      errors.password = 'Password is required';
-    } else if (password.length < 8) {
-      errors.password = 'Password must be at least 8 characters';
-    }
-
-    if (password !== repeatPassword) {
-      errors.repeatPassword = 'Passwords do not match';
-    }
-
-    if (!termsAccepted) {
-      errors.terms = 'You must agree to the Terms of Service';
-    }
-
-    if (Object.keys(errors).length > 0) {
-      setFieldErrors(errors);
-      return;
-    }
-
-    setFieldErrors({});
-    // The backend signs new members in straight away; the navigator switches to
-    // the app once the session is stored. Email is verified via the emailed link.
     await register({
-      email: trimmedEmail,
-      username: trimmedUsername,
-      fullName: trimmedName,
-      password,
-      contact: contact.trim(),
+      fullName: form.fullName.trim(),
+      username: form.username.trim(),
+      email: form.email.trim(),
+      password: form.password,
+      contact: form.contact.trim(),
     });
-  };
-
-  const handleGooglePress = async () => {
-    clearError();
-    const result = await googleSignIn();
-    if (result.success && result.requiresProfileCompletion) {
-      navigation.navigate('GetStarted');
-    }
-  };
-
-  const handleToSPress = () => {
-    Alert.alert(
-      'Terms of Service',
-      'By using the BGSC Platform, you agree to abide by BITS Goa campus community guidelines and respect tournament rules.',
-      [{ text: 'Understood' }]
-    );
-  };
-
-  const handlePrivacyPress = () => {
-    Alert.alert(
-      'Privacy Policy',
-      'Your university credentials and match data are kept strictly confidential within the campus student community.',
-      [{ text: 'Understood' }]
-    );
+    // On success the navigator swaps to onboarding (Verify email) on its own.
   };
 
   return (
-    <AuthBackground>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.keyboard}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <AuthCard>
-            <AuthHeader />
+    <AuthScaffold onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}>
+      <View style={styles.heading}>
+        <Typography variant="displayHero" color="text" style={styles.title}>
+          Join BGSC.
+        </Typography>
+        <Typography variant="body" color="textMuted">
+          Takes a minute. You’ll verify your email next.
+        </Typography>
+      </View>
 
-            <AuthTabs
-              mode="register"
-              onChange={(mode) => {
-                if (mode === 'login') {
-                  navigation.navigate('Login');
-                }
-              }}
+      <AuthTabs mode="register" onChange={() => navigation.dispatch(StackActions.replace('Login'))} />
+
+      {error ? <AuthBanner message={error} /> : null}
+
+      <TextInput label="FULL NAME" value={form.fullName} onChangeText={set('fullName')} autoComplete="name" textContentType="name" error={errors.fullName} />
+      <TextInput
+        label="USERNAME"
+        value={form.username}
+        onChangeText={set('username')}
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoComplete="username-new"
+        error={errors.username}
+      />
+      <TextInput
+        label="BITS EMAIL"
+        value={form.email}
+        onChangeText={set('email')}
+        placeholder="f2025xxxx@goa.bits-pilani.ac.in"
+        keyboardType="email-address"
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoComplete="email"
+        textContentType="emailAddress"
+        error={errors.email}
+      />
+      <TextInput
+        label="PHONE"
+        value={form.contact}
+        onChangeText={set('contact')}
+        keyboardType="phone-pad"
+        autoComplete="tel"
+        textContentType="telephoneNumber"
+        helperText="We’ll send a 6-digit code to verify it later."
+      />
+
+      <View style={styles.passwordBlock}>
+        <TextInput
+          label="PASSWORD"
+          value={form.password}
+          onChangeText={set('password')}
+          secureTextEntry
+          autoComplete="password-new"
+          textContentType="newPassword"
+          error={errors.password}
+        />
+        <View style={styles.meter} accessibilityLabel={`Password strength: ${STRENGTH_COPY[score]}`}>
+          {RULES.map((r, i) => (
+            <View
+              key={r.label}
+              style={[styles.meterBar, { backgroundColor: i < score ? meterColor : colors.surfaceInner }]}
             />
-
-            <View style={styles.form}>
-              <TextInput
-                label="FULL NAME"
-                value={fullName}
-                onChangeText={(text) => {
-                  setFullName(text);
-                  if (fieldErrors.fullName) setFieldErrors((p) => ({ ...p, fullName: undefined }));
-                }}
-                placeholder="Your name"
-                autoCapitalize="words"
-                error={fieldErrors.fullName}
-              />
-
-              <TextInput
-                label="USERNAME"
-                value={username}
-                onChangeText={(text) => {
-                  setUsername(text);
-                  if (fieldErrors.username) setFieldErrors((p) => ({ ...p, username: undefined }));
-                }}
-                placeholder="player_one"
-                autoCapitalize="none"
-                autoCorrect={false}
-                error={fieldErrors.username}
-              />
-
-              <TextInput
-                label="EMAIL"
-                value={email}
-                onChangeText={(text) => {
-                  setEmail(text);
-                  if (fieldErrors.email) setFieldErrors((p) => ({ ...p, email: undefined }));
-                }}
-                placeholder="example@email.com"
-                autoCapitalize="none"
-                autoCorrect={false}
-                error={fieldErrors.email}
-              />
-
-              <TextInput
-                label="PASSWORD"
-                value={password}
-                onChangeText={(text) => {
-                  setPassword(text);
-                  if (fieldErrors.password) setFieldErrors((p) => ({ ...p, password: undefined }));
-                }}
-                placeholder="••••••••"
-                secureTextEntry
-                error={fieldErrors.password}
-              />
-
-              <TextInput
-                label="REPEAT PASSWORD"
-                value={repeatPassword}
-                onChangeText={(text) => {
-                  setRepeatPassword(text);
-                  if (fieldErrors.repeatPassword) setFieldErrors((p) => ({ ...p, repeatPassword: undefined }));
-                }}
-                placeholder="••••••••"
-                secureTextEntry
-                error={fieldErrors.repeatPassword}
-              />
-
-              <TextInput
-                label="CONTACT"
-                value={contact}
-                onChangeText={(text) => {
-                  setContact(text);
-                  if (fieldErrors.contact) setFieldErrors((p) => ({ ...p, contact: undefined }));
-                }}
-                placeholder="+91"
-                keyboardType="phone-pad"
-                error={fieldErrors.contact}
-              />
-
-              <AuthCheckbox
-                checked={termsAccepted}
-                onChange={(checked) => {
-                  setTermsAccepted(checked);
-                  if (fieldErrors.terms) setFieldErrors((p) => ({ ...p, terms: undefined }));
-                }}
-                type="terms"
-                onToSPress={handleToSPress}
-                onPrivacyPress={handlePrivacyPress}
-              />
-
-              {fieldErrors.terms ? (
-                <Typography variant="bodySmall" color="danger" style={styles.fieldError}>
-                  {fieldErrors.terms}
-                </Typography>
-              ) : null}
-
-              {error ? (
-                <Typography variant="bodySmall" color="danger" align="center" style={styles.errorBanner}>
-                  {error}
-                </Typography>
-              ) : null}
-
-              <Pressable
-                disabled={isLoading}
-                onPress={handleRegisterPress}
-                style={({ pressed }) => [
-                  styles.registerButton,
-                  pressed && styles.buttonPressed,
-                  isLoading && styles.buttonDisabled,
-                ]}
-              >
-                {isLoading ? (
-                  <ActivityIndicator size="small" color="#111111" />
-                ) : (
-                  <Typography variant="button" style={styles.registerButtonText}>
-                    Sign Up
-                  </Typography>
-                )}
-              </Pressable>
-
-              <AuthDivider />
-
-              <GoogleButton
-                label="Sign Up with google"
-                onPress={handleGooglePress}
-                disabled={isLoading}
-              />
+          ))}
+        </View>
+        {form.password ? (
+          <Typography variant="bodySmall" color="text">
+            {STRENGTH_COPY[score]}
+          </Typography>
+        ) : null}
+        <View style={styles.rules}>
+          {RULES.map((r, i) => (
+            <View
+              key={r.label}
+              style={[styles.rule, { backgroundColor: passed[i] ? colors.successMuted : colors.surfaceInner }]}
+            >
+              <Icon name={passed[i] ? 'check' : 'plus'} size={12} color={passed[i] ? 'success' : 'textMuted'} />
+              <Typography color={passed[i] ? 'text' : 'textMuted'} style={styles.ruleText}>
+                {r.label}
+              </Typography>
             </View>
-          </AuthCard>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </AuthBackground>
+          ))}
+        </View>
+      </View>
+
+      <TextInput
+        label="REPEAT PASSWORD"
+        value={form.repeat}
+        onChangeText={set('repeat')}
+        secureTextEntry
+        autoComplete="password-new"
+        error={errors.repeat}
+      />
+
+      <View>
+        <Checkbox
+          checked={agreed}
+          onChange={(v) => {
+            setAgreed(v);
+            if (errors.terms) setErrors((e) => ({ ...e, terms: undefined }));
+          }}
+          label="I agree to the Terms and Privacy Policy."
+        />
+        {errors.terms ? (
+          <Typography variant="bodySmall" style={{ color: colors.dangerText }}>
+            {errors.terms}
+          </Typography>
+        ) : null}
+      </View>
+
+      <Button label="Create account" onPress={submit} loading={isLoading} fullWidth />
+    </AuthScaffold>
   );
 }
 
 const styles = StyleSheet.create({
-  keyboard: {
-    flex: 1,
-  },
-  scroll: {
-    flexGrow: 1,
-    justifyContent: 'flex-end',
-  },
-  form: {
-    gap: 13,
-  },
-  fieldError: {
-    fontSize: 11,
-    marginTop: -4,
-    paddingHorizontal: 4,
-  },
-  errorBanner: {
-    marginVertical: -4,
-  },
-  registerButton: {
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.10,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  buttonPressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.99 }],
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  registerButtonText: {
-    color: '#111111',
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  heading: { gap: 4 },
+  title: { fontSize: 38, lineHeight: 52 },
+  passwordBlock: { gap: 8 },
+  meter: { flexDirection: 'row', gap: 4 },
+  meterBar: { flex: 1, height: 4, borderRadius: 999 },
+  rules: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 8, rowGap: 6 },
+  rule: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999 },
+  ruleText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, lineHeight: 15 },
 });
-

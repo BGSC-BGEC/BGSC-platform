@@ -17,6 +17,7 @@ export type BadgeVariant =
   | 'success'
   | 'warning'
   | 'danger'
+  | 'info'
   | 'muted';
 
 export interface BadgeProps {
@@ -52,9 +53,8 @@ export function Badge({
       break;
     case 'secondary':
     case 'slate':
-      // v2 "Muted" pill tone
       textColor = colors.textMuted;
-      bgColor = colors.surfaceInner;
+      bgColor = colors.mutedTint;
       borderColor = colors.border;
       break;
     case 'success':
@@ -68,14 +68,19 @@ export function Badge({
       borderColor = colors.warning;
       break;
     case 'danger':
-      textColor = colors.danger;
+      textColor = colors.dangerText;
       bgColor = colors.dangerMuted;
       borderColor = colors.danger;
+      break;
+    case 'info':
+      textColor = colors.info;
+      bgColor = colors.infoMuted;
+      borderColor = colors.info;
       break;
     case 'muted':
     default:
       textColor = colors.textMuted;
-      bgColor = colors.surfaceMuted;
+      bgColor = colors.mutedTint;
       borderColor = colors.border;
       break;
   }
@@ -87,8 +92,9 @@ export function Badge({
       style={[
         styles.badge,
         {
-          height: isSmall ? 22 : 26,
-          paddingHorizontal: isSmall ? 8 : 10,
+          minHeight: isSmall ? 20 : 23,
+          maxWidth: '100%',
+          paddingHorizontal: isSmall ? 8 : 12,
           backgroundColor: outlined ? 'transparent' : bgColor,
           borderColor: outlined ? borderColor : 'transparent',
           borderWidth: outlined ? 1 : 0,
@@ -105,9 +111,11 @@ export function Badge({
         />
       )}
       <Typography
-        variant={isSmall ? 'labelSmall' : 'label'}
+        variant="labelSmall"
+        numberOfLines={1}
         style={[
           styles.labelText,
+          { flexShrink: 1 },
           { color: textColor },
         ]}
       >
@@ -128,9 +136,11 @@ const styles = StyleSheet.create({
   icon: {
     marginRight: 4,
   },
+  // v2/Pill: Inter SemiBold 10/15, +0.6 tracking, uppercase
   labelText: {
     fontSize: 10,
-    lineHeight: 12,
+    lineHeight: 15,
+    letterSpacing: 0.6,
   },
 });
 

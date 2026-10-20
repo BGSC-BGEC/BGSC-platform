@@ -86,7 +86,8 @@ export function AppHeader({
       {showNotifications ? (
         <>
           <Pressable
-            onPress={() => navigation.navigate('Notifications')}
+            // pop: go back to an existing copy instead of stacking another (v7 navigate always pushes)
+            onPress={() => navigation.navigate('Notifications', undefined, { pop: true })}
             accessibilityRole="button"
             accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
             hitSlop={6}
@@ -96,7 +97,7 @@ export function AppHeader({
             {unread > 0 ? <View style={[styles.dot, { backgroundColor: colors.danger, borderColor: colors.surface }]} /> : null}
           </Pressable>
           <Pressable
-            onPress={() => navigation.navigate('Profile')}
+            onPress={() => navigation.navigate('Profile', undefined, { pop: true })}
             accessibilityRole="button"
             accessibilityLabel="Your profile"
             hitSlop={6}

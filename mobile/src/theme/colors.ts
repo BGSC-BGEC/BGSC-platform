@@ -4,12 +4,14 @@
  */
 
 export const PALETTE = {
-  // Light mode - Soft beige/cream tones
-  lightBase: '#E8E4DF',           // Main background (light warm gray)
-  lightCard: '#EBE7E2',           // Card surface
-  lightCardInner: '#F5F2ED',      // Inner card layer (lighter)
-  lightText: '#4A4A4A',           // Primary text
-  lightTextMuted: '#8A8A8A',      // Secondary text
+  // Light mode — the v2 "Auth" palette (sign-in / sign-up screens)
+  lightBase: '#FFF8F2',           // Main background (warm cream)
+  lightCard: '#FFF8F2',           // Card surface
+  lightCardInner: '#FFFFFF',      // Inputs, tab track
+  lightText: '#111111',           // Primary text
+  lightTextMuted: '#6B7280',      // Secondary text
+  lightBorder: '#E5E7EB',         // Hairlines and input borders
+  lightDangerText: '#C0392B',     // Danger text on cream
   lightShadowDark: '#D1CCC7',     // Dark shadow
   lightShadowLight: '#FFFFFF',    // Light highlight shadow
 
@@ -101,6 +103,9 @@ export interface UIThemeColors {
   info: string;
   infoMuted: string;
 
+  /** 16% neutral tint (muted pills) */
+  mutedTint: string;
+
   /** Utility */
   white: string;
   black: string;
@@ -124,7 +129,7 @@ export const lightThemeColors: UIThemeColors = {
   shadowDark: PALETTE.lightShadowDark,
   shadowLight: PALETTE.lightShadowLight,
 
-  border: withAlpha(PALETTE.lightText, 0.1),
+  border: PALETTE.lightBorder,
   borderActive: PALETTE.orange,
 
   primary: PALETTE.orange,
@@ -136,18 +141,19 @@ export const lightThemeColors: UIThemeColors = {
   accentMuted: withAlpha(PALETTE.orange, 0.16),
 
   success: PALETTE.green,
-  successMuted: withAlpha(PALETTE.green, 0.15),
+  successMuted: withAlpha(PALETTE.green, 0.16),
 
   warning: PALETTE.yellow,
-  warningMuted: withAlpha(PALETTE.yellow, 0.15),
+  warningMuted: withAlpha(PALETTE.yellow, 0.16),
 
   danger: PALETTE.red,
-  dangerMuted: withAlpha(PALETTE.red, 0.15),
-  dangerText: PALETTE.redText,
+  dangerMuted: withAlpha(PALETTE.red, 0.16),
+  dangerText: PALETTE.lightDangerText,
 
   info: PALETTE.blue,
-  infoMuted: withAlpha(PALETTE.blue, 0.15),
+  infoMuted: withAlpha(PALETTE.blue, 0.16),
 
+  mutedTint: withAlpha('#9A9A9A', 0.16),
   white: PALETTE.white,
   black: PALETTE.black,
   surfaceHighlight: withAlpha(PALETTE.orange, 0.08),
@@ -182,18 +188,19 @@ export const darkThemeColors: UIThemeColors = {
   accentMuted: withAlpha(PALETTE.orange, 0.16),
 
   success: PALETTE.green,
-  successMuted: withAlpha(PALETTE.green, 0.15),
+  successMuted: withAlpha(PALETTE.green, 0.16),
 
   warning: PALETTE.yellow,
-  warningMuted: withAlpha(PALETTE.yellow, 0.15),
+  warningMuted: withAlpha(PALETTE.yellow, 0.16),
 
   danger: PALETTE.red,
-  dangerMuted: withAlpha(PALETTE.red, 0.15),
+  dangerMuted: withAlpha(PALETTE.red, 0.16),
   dangerText: PALETTE.redText,
 
   info: PALETTE.blue,
-  infoMuted: withAlpha(PALETTE.blue, 0.15),
+  infoMuted: withAlpha(PALETTE.blue, 0.16),
 
+  mutedTint: withAlpha('#9A9A9A', 0.16),
   white: PALETTE.white,
   black: PALETTE.black,
   surfaceHighlight: withAlpha(PALETTE.orange, 0.08),

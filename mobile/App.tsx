@@ -1,7 +1,7 @@
 import React from 'react';
-import { Platform } from 'react-native';
+import { Platform, StatusBar } from 'react-native';
 import { useFonts } from 'expo-font';
-import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, Inter_900Black } from '@expo-google-fonts/inter';
 import { DMSerifDisplay_400Regular } from '@expo-google-fonts/dm-serif-display';
 import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
 import DrawerLayout from './screens/drawer/layout';
@@ -24,6 +24,7 @@ export default function App() {
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
+    Inter_900Black,
     DMSerifDisplay_400Regular,
     JetBrainsMono_500Medium,
   });
@@ -33,6 +34,7 @@ export default function App() {
   return (
     <AuthProvider>
       <ThemeProvider initialMode="dark">
+        <StatusBar barStyle="light-content" />
         <PopupProvider>
           <DrawerLayout />
         </PopupProvider>

@@ -1,103 +1,53 @@
 import React from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
+
 import { Typography } from '../typography/Typography';
+import { FONT_FAMILIES } from '../theme/typography';
+import { useTheme } from '../theme/ThemeProvider';
 
 interface AuthTabsProps {
   mode: 'login' | 'register';
   onChange: (mode: 'login' | 'register') => void;
 }
 
-export function AuthTabs({
-  mode,
-  onChange,
-}: AuthTabsProps) {
-  const handleSelect = (selectedMode: 'login' | 'register') => {
-    if (selectedMode === mode) return;
-    void Haptics.selectionAsync();
-    onChange(selectedMode);
-  };
+const TABS = [
+  { mode: 'login', label: 'Log in' },
+  { mode: 'register', label: 'Sign up' },
+] as const;
 
+/** v2 Log in / Sign up segmented switch on the auth screens. */
+export function AuthTabs({ mode, onChange }: AuthTabsProps) {
+  const { colors } = useTheme();
   return (
-    <View style={styles.container}>
-      <Pressable
-        onPress={() => handleSelect('login')}
-        style={[
-          styles.tab,
-          mode === 'login' && styles.activeTab,
-        ]}
-      >
-        <Typography
-          variant="bodySmall"
-          style={[
-            styles.tabText,
-            mode === 'login' ? styles.activeTabText : styles.inactiveTabText,
-          ]}
-        >
-          Login
-        </Typography>
-      </Pressable>
-
-      <Pressable
-        onPress={() => handleSelect('register')}
-        style={[
-          styles.tab,
-          mode === 'register' && styles.activeTab,
-        ]}
-      >
-        <Typography
-          variant="bodySmall"
-          style={[
-            styles.tabText,
-            mode === 'register' ? styles.activeTabText : styles.inactiveTabText,
-          ]}
-        >
-          Sign Up
-        </Typography>
-      </Pressable>
+    <View style={[styles.track, { backgroundColor: colors.surfaceInner }]} accessibilityRole="tablist">
+      {TABS.map((tab) => {
+        const active = tab.mode === mode;
+        return (
+          <Pressable
+            hitSlop={8}
+            key={tab.mode}
+            onPress={() => {
+              if (active) return;
+              void Haptics.selectionAsync();
+              onChange(tab.mode);
+            }}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: active }}
+            style={styles.tab}
+          >
+            <Typography color={active ? 'text' : 'textMuted'} style={styles.label}>
+              {tab.label}
+            </Typography>
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    height: 38,
-    borderRadius: 20,
-    backgroundColor: '#ECE6E0',
-    padding: 3,
-    marginBottom: 20,
-  },
-  tab: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 17,
-  },
-  activeTab: {
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.10,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  tabText: {
-    fontSize: 13,
-  },
-  activeTabText: {
-    color: '#111111',
-    fontWeight: '700',
-  },
-  inactiveTabText: {
-    color: '#666666',
-    fontWeight: '500',
-  },
+  track: { flexDirection: 'row', gap: 4, padding: 4, borderRadius: 999 },
+  tab: { flex: 1, alignItems: 'center', padding: 8, borderRadius: 12 },
+  label: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 12, lineHeight: 15 },
 });

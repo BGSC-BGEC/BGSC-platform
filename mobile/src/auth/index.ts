@@ -1,10 +1,6 @@
-export * from './AuthBackground';
-export * from './AuthCard';
-export * from './AuthHeader';
+export * from './AuthScaffold';
 export * from './AuthTabs';
 export * from './AuthBackButton';
-export * from './AuthDivider';
+export * from './AuthBanner';
+export * from './BrandMark';
 export * from './GoogleButton';
-export * from './OtpCells';
-export * from './AuthCheckbox';
-

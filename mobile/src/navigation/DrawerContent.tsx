@@ -59,7 +59,8 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
 
   const go = (route: string) => {
     navigation.closeDrawer();
-    navigation.navigate(route);
+    // pop: reuse an existing copy of a stack route (Profile, Settings) instead of stacking another.
+    navigation.navigate(route, undefined, { pop: true });
   };
 
   const badge: Record<string, string | undefined> = {

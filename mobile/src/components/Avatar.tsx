@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View, type ViewStyle } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Image } from 'expo-image';
 
 import { useTheme } from '../theme/ThemeProvider';
@@ -11,11 +11,13 @@ export interface AvatarProps {
   name?: string | null;
   uri?: string | null;
   size?: number;
-  style?: ViewStyle;
+  /** Fallback background (defaults to solid primary) */
+  color?: string;
+  style?: StyleProp<ViewStyle>;
 }
 
 /** Circular avatar with an orange initials fallback (same as the profile header). */
-export function Avatar({ name, uri, size = 40, style }: AvatarProps) {
+export function Avatar({ name, uri, size = 40, color, style }: AvatarProps) {
   const { colors } = useTheme();
   const source = resolveMediaUrl(uri);
   const radius = size / 2;
@@ -24,7 +26,7 @@ export function Avatar({ name, uri, size = 40, style }: AvatarProps) {
     <View
       style={[
         styles.base,
-        { width: size, height: size, borderRadius: radius, backgroundColor: colors.primarySolid },
+        { width: size, height: size, borderRadius: radius, backgroundColor: color ?? colors.primarySolid },
         style,
       ]}
     >

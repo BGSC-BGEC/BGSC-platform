@@ -1,231 +1,150 @@
-import React, { useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { StackActions, useFocusEffect, useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 
 import { useAuth } from '../../store/auth';
-import {
-  AuthBackground,
-  AuthCard,
-  AuthHeader,
-  AuthTabs,
-  AuthCheckbox,
-  AuthDivider,
-  GoogleButton,
-} from '../../src/auth';
+import { AuthScaffold } from '../../src/auth/AuthScaffold';
+import { AuthTabs } from '../../src/auth/AuthTabs';
+import { AuthBanner } from '../../src/auth/AuthBanner';
+import { BrandMark } from '../../src/auth/BrandMark';
+import { GoogleButton } from '../../src/auth/GoogleButton';
 import { TextInput } from '../../src/forms/TextInput';
+import { Switch } from '../../src/forms/Switch';
+import { Button } from '../../src/components/Button';
 import { Typography } from '../../src/typography/Typography';
-import { PALETTE, withAlpha } from '../../src/theme/colors';
+import { FONT_FAMILIES } from '../../src/theme/typography';
+import { useTheme } from '../../src/theme/ThemeProvider';
 
+type FieldErrors = { login?: string; password?: string };
+
+/** v2 Login (55:2048) — email or username + password; deleted accounts continue to Restore. */
 export default function LoginScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<any>>();
-  const { login, googleSignIn, isLoading, error, clearError } = useAuth();
+  const navigation = useNavigation<NavigationProp<ParamListBase>>();
+  const { login, googleSignIn, isLoading, error, clearError, restoreCandidate } = useAuth();
 
-  const [emailOrUsername, setEmailOrUsername] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
+  const [keepLoggedIn, setKeepLoggedIn] = useState(true);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
-  const handleLoginPress = async () => {
+  // The auth error is shared across Login/Register/Restore: drop it when leaving this screen.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useFocusEffect(useCallback(() => clearError, []));
+
+  // Right password on a soft-deleted account: offer the restore instead of an error.
+  useEffect(() => {
+    if (restoreCandidate) navigation.navigate('RestoreAccount');
+  }, [restoreCandidate, navigation]);
+
+  const submit = async () => {
     clearError();
-    const errors: { email?: string; password?: string } = {};
-
-    if (!emailOrUsername.trim()) {
-      errors.email = 'Email or username is required';
-    }
-    if (!password) {
-      errors.password = 'Password is required';
-    }
-
-    if (Object.keys(errors).length > 0) {
-      setFieldErrors(errors);
-      return;
-    }
-
-    setFieldErrors({});
-    await login(emailOrUsername.trim(), password);
-  };
-
-  const handleGooglePress = async () => {
-    clearError();
-    const result = await googleSignIn();
-    if (result.success && result.requiresProfileCompletion) {
-      navigation.navigate('GetStarted');
-    }
-  };
-
-  const handleForgotPassword = () => {
-    navigation.navigate('ForgotPassword');
+    const errors: FieldErrors = {};
+    if (!identifier.trim()) errors.login = 'Enter your BITS email or username.';
+    if (!password) errors.password = 'Enter your password.';
+    setFieldErrors(errors);
+    if (errors.login || errors.password) return;
+    await login(identifier.trim(), password);
   };
 
   return (
-    <AuthBackground>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.keyboard}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scroll}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <AuthCard>
-            <AuthHeader />
+    <AuthScaffold onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}>
+      <BrandMark />
+      <View style={styles.heading}>
+        <Typography variant="displayHero" color="text" style={styles.title}>
+          Welcome back.
+        </Typography>
+        <Typography variant="body" color="textMuted">
+          Log in with your BITS email or username.
+        </Typography>
+      </View>
 
-            <AuthTabs
-              mode="login"
-              onChange={(mode) => {
-                if (mode === 'register') {
-                  navigation.navigate('Register');
-                }
-              }}
-            />
+      <AuthTabs mode="login" onChange={() => navigation.dispatch(StackActions.replace('Register'))} />
 
-            <View style={styles.form}>
-              <TextInput
-                label="EMAIL OR USERNAME"
-                value={emailOrUsername}
-                onChangeText={(text) => {
-                  setEmailOrUsername(text);
-                  if (fieldErrors.email) setFieldErrors((p) => ({ ...p, email: undefined }));
-                }}
-                placeholder="example@email.com"
-                autoCapitalize="none"
-                autoCorrect={false}
-                error={fieldErrors.email}
-              />
+      {error ? <AuthBanner message={error} /> : null}
 
-              <View style={styles.passwordFieldContainer}>
-                <View style={styles.passwordHeader}>
-                  <Pressable onPress={handleForgotPassword} style={styles.forgotLink}>
-                    <Typography variant="labelSmall" style={styles.forgotText}>
-                      Forgot?
-                    </Typography>
-                  </Pressable>
-                </View>
-                <TextInput
-                  label="PASSWORD"
-                  value={password}
-                  onChangeText={(text) => {
-                    setPassword(text);
-                    if (fieldErrors.password) setFieldErrors((p) => ({ ...p, password: undefined }));
-                  }}
-                  placeholder="••••••••"
-                  secureTextEntry
-                  error={fieldErrors.password}
-                />
-              </View>
+      <TextInput
+        label="EMAIL OR USERNAME"
+        value={identifier}
+        onChangeText={(t) => {
+          setIdentifier(t);
+          if (fieldErrors.login) setFieldErrors((p) => ({ ...p, login: undefined }));
+        }}
+        placeholder="f2025xxxx@goa.bits-pilani.ac.in"
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoComplete="username"
+        textContentType="username"
+        returnKeyType="next"
+        error={fieldErrors.login}
+      />
+      <TextInput
+        label="PASSWORD"
+        value={password}
+        onChangeText={(t) => {
+          setPassword(t);
+          if (fieldErrors.password) setFieldErrors((p) => ({ ...p, password: undefined }));
+        }}
+        placeholder="••••••••"
+        secureTextEntry
+        autoComplete="password"
+        textContentType="password"
+        returnKeyType="go"
+        onSubmitEditing={submit}
+        error={fieldErrors.password}
+      />
 
-              <AuthCheckbox
-                checked={rememberMe}
-                onChange={setRememberMe}
-                type="remember"
-              />
+      <View style={styles.row}>
+        {/* Sessions always persist in SecureStore; the switch mirrors the v2 design. */}
+        <Switch value={keepLoggedIn} onValueChange={setKeepLoggedIn} accessibilityLabel="Keep me logged in" />
+        <Typography variant="body" color="text" style={styles.rowLabel}>
+          Keep me logged in
+        </Typography>
+        <Pressable onPress={() => navigation.navigate('ForgotPassword')} hitSlop={8} accessibilityRole="link">
+          <Typography color="text" style={styles.link}>
+            Forgot password?
+          </Typography>
+        </Pressable>
+      </View>
 
-              {error ? (
-                <Typography variant="bodySmall" color="danger" align="center" style={styles.errorBanner}>
-                  {error}
-                </Typography>
-              ) : null}
+      <Button label="Log in" onPress={submit} loading={isLoading} fullWidth />
 
-              <Pressable
-                disabled={isLoading}
-                onPress={handleLoginPress}
-                style={({ pressed }) => [
-                  styles.loginButton,
-                  pressed && styles.buttonPressed,
-                  isLoading && styles.buttonDisabled,
-                ]}
-              >
-                {isLoading ? (
-                  <ActivityIndicator size="small" color="#111111" />
-                ) : (
-                  <Typography variant="button" style={styles.loginButtonText}>
-                    Login
-                  </Typography>
-                )}
-              </Pressable>
+      <OrDivider />
 
-              <AuthDivider />
+      <GoogleButton
+        label="Continue with Google"
+        disabled={isLoading}
+        onPress={async () => {
+          clearError();
+          await googleSignIn();
+        }}
+      />
 
-              <GoogleButton
-                label="Login with google"
-                onPress={handleGooglePress}
-                disabled={isLoading}
-              />
-            </View>
-          </AuthCard>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </AuthBackground>
+      <Typography variant="bodySmall" color="textMuted" align="center">
+        By continuing you agree to the Terms and Privacy Policy.
+      </Typography>
+    </AuthScaffold>
+  );
+}
+
+function OrDivider() {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.divider}>
+      <View style={[styles.line, { backgroundColor: colors.border }]} />
+      <Typography variant="bodySmall" color="textMuted">
+        or
+      </Typography>
+      <View style={[styles.line, { backgroundColor: colors.border }]} />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  keyboard: {
-    flex: 1,
-  },
-  scroll: {
-    flexGrow: 1,
-    justifyContent: 'flex-end',
-  },
-  form: {
-    gap: 14,
-  },
-  passwordFieldContainer: {
-    position: 'relative',
-  },
-  passwordHeader: {
-    position: 'absolute',
-    right: 4,
-    top: 0,
-    zIndex: 10,
-  },
-  forgotLink: {
-    padding: 2,
-  },
-  forgotText: {
-    color: '#6E665D',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  errorBanner: {
-    marginVertical: -4,
-  },
-  loginButton: {
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.10,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  buttonPressed: {
-    opacity: 0.9,
-    transform: [{ scale: 0.99 }],
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  loginButtonText: {
-    color: '#111111',
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  heading: { gap: 4 },
+  title: { fontSize: 38, lineHeight: 52 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  rowLabel: { flex: 1, fontSize: 13 },
+  link: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 13, lineHeight: 20, textDecorationLine: 'underline' },
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  line: { flex: 1, height: 1 },
 });

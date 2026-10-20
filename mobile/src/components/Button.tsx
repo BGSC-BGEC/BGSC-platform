@@ -38,11 +38,13 @@ export interface ButtonProps {
   accessibilityLabel?: string;
   labelColor?: string;
   style?: ViewStyle;
+  /** Outer wrapper style — use for flex sizing inside rows (`{ flex: 1 }`) */
+  containerStyle?: ViewStyle;
 }
 
 const SIZE_SPECS = {
   sm: { height: 36, px: 16, fontSize: 13, iconSize: 'xs' as const },
-  md: { height: 48, px: 20, fontSize: 15, iconSize: 'sm' as const },
+  md: { height: 48, px: 20, fontSize: 14, iconSize: 'sm' as const },
   lg: { height: 54, px: 24, fontSize: 16, iconSize: 'md' as const },
 };
 
@@ -60,6 +62,7 @@ export function Button({
   accessibilityLabel,
   labelColor,
   style,
+  containerStyle,
 }: ButtonProps) {
   const { colors, isDark, shadow } = useTheme();
   const [scale] = useState(() => new Animated.Value(1));
@@ -115,8 +118,8 @@ export function Button({
   let textColor: string = colors.text;
 
   switch (variant) {
-    case 'primary': // Orange CTA
-      backgroundColor = colors.primary;
+    case 'primary': // v2 solid orange — white text passes contrast
+      backgroundColor = colors.primarySolid;
       textColor = colors.primaryText;
       break;
     case 'secondary': // Deep Moss Green
@@ -149,6 +152,7 @@ export function Button({
     <Animated.View
       style={[
         fullWidth && styles.fullWidth,
+        containerStyle,
         { transform: [{ scale }], opacity },
       ]}
     >
@@ -164,7 +168,7 @@ export function Button({
           styles.button,
           fullWidth && styles.fullWidth,
           {
-            height: spec.height,
+            minHeight: spec.height,
             paddingHorizontal: spec.px,
             borderRadius,
             backgroundColor: isDisabled ? colors.surfaceMuted : backgroundColor,
@@ -210,8 +214,12 @@ export function Button({
             )}
             <Typography
               variant="button"
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.8}
               style={[
                 styles.label,
+                styles.shrink,
                 { fontSize: spec.fontSize, color: isDisabled ? colors.textSubtle : resolvedTextColor },
               ]}
             >
@@ -232,6 +240,7 @@ export function Button({
 }
 
 const styles = StyleSheet.create({
+  shrink: { flexShrink: 1 },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
