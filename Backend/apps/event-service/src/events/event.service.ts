@@ -615,6 +615,10 @@ export async function getEventEligibility(
     return { eligible: true, reason: null, capacity_status: capacityStatus, ...baseResult };
 }
 
+/**
+ * A user can re-register after a rejection (e.g. captain declined), so several rows may exist:
+ * the newest one is the current registration.
+ */
 export async function getMyEventRegistration(ref: string, userId: string): Promise<IFormSubmission | null> {
     const event = await findByRef(ref);
     return FormSubmission.findOne({
@@ -622,7 +626,7 @@ export async function getMyEventRegistration(ref: string, userId: string): Promi
         'owner.id': event._id,
         'user.user_id': userId,
         status: { $ne: 'cancelled' },
-    });
+    }).sort({ created_at: -1 });
 }
 
 /**
