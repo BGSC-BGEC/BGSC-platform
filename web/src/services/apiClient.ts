@@ -1,5 +1,5 @@
 const BASE_URL: string =
-(import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:3000/api'
+  (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:3000'
 
 // 2. Custom options interface allowing flexible JSON payloads
 interface RequestOptions extends Omit<RequestInit, 'body'> {
@@ -83,6 +83,9 @@ export const apiClient = {
 
     put: <T>(endpoint: string, data?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>) =>
     request<T>(endpoint, { ...options, method: 'PUT', body: data }),
+
+    patch: <T>(endpoint: string, data?: unknown, options?: Omit<RequestOptions, 'method' | 'body'>) =>
+    request<T>(endpoint, { ...options, method: 'PATCH', body: data }),
 
     delete: <T>(endpoint: string, options?: Omit<RequestOptions, 'method' | 'body'>) =>
     request<T>(endpoint, { ...options, method: 'DELETE' }),

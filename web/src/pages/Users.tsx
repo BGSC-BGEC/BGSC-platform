@@ -86,6 +86,11 @@ useEffect(() => {
     setSelectedUser(null)
     }
 
+    const handleUserUpdated = (updatedUser: User) => {
+    setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)))
+    setSelectedUser(updatedUser)
+    }
+
     const handleReset = () => {
     setSearchTerm('')
     setRoleFilter('all')
@@ -238,9 +243,11 @@ rounded transition-colors"
         )}
 
         <UserDetailModal
+        key={selectedUser?.id}
         isOpen={isModalOpen}
         user={selectedUser}
         onClose={handleCloseModal}
+        onUserUpdated={handleUserUpdated}
         />
     </div>
     )
