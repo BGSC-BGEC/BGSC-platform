@@ -104,7 +104,7 @@ export default function RegisterScreen() {
     clearError();
     const result = await googleSignIn();
     if (result.success && result.requiresProfileCompletion) {
-      navigation.navigate('CompleteProfile');
+      navigation.navigate('GetStarted');
     }
   };
 

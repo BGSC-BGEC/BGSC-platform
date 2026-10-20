@@ -65,13 +65,14 @@ export function useTheme(): ThemeContextValue {
   const context = useContext(ThemeContext);
   if (context) return context;
 
-  // Standalone fallback: hook into themeStore + systemScheme directly
-  const resolved: ThemeMode = 'dark';
+  // Outside a provider (tests, previews): plain dark theme
   return {
-    mode: resolved,
-    isDark: resolved === 'dark',
-    colors: resolved === 'dark' ? darkThemeColors : lightThemeColors,
+    mode: 'dark',
+    isDark: true,
+    colors: darkThemeColors,
     setMode: () => undefined,
+    shadow: (type) => getNeumorphicShadow(type, 'dark'),
+    neumorphic: (bg, shadowType, radius) => getNeumorphicStyle(bg, shadowType, 'dark', radius),
   };
 }
 

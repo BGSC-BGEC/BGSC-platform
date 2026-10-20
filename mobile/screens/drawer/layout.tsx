@@ -1,20 +1,21 @@
 import * as React from 'react';
-import {
-  createDrawerNavigator,
-  DrawerContentScrollView,
-  DrawerItem,
-  type DrawerContentComponentProps,
-} from '@react-navigation/drawer';
+import { createDrawerNavigator } from '@react-navigation/drawer';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 
 import BottomTabsLayout from './bottom-tabs-layout';
+import Events from './events';
+import Leaderboard from './leaderboard';
+import HallOfFame from './hall-of-fame';
+import Media from './media';
+import Feedback from './feedback';
+import Profile from './profile';
 import { useAuth } from '../../store/auth';
 import { useTheme } from '../../src/theme/ThemeProvider';
-import { useConfirmLogout } from '../../src/hooks/useConfirmLogout';
 import { Spinner } from '../../src/feedback/Spinner';
+import { DrawerContent } from '../../src/navigation/DrawerContent';
+import { placeholder } from '../placeholder';
 
 import LoginScreen from '../login/login';
 import RegisterScreen from '../login/register';
@@ -30,77 +31,59 @@ import EventLeaderboard from '../events/event-leaderboard';
 import MediaViewer from '../media/media-viewer';
 import HallOfFameDetail from '../hall-of-fame/hall-of-fame-detail';
 
+// Route names and params are the contract in docs/mobile-v2-build-split.md §3.
+// Placeholders keep every route navigable until its v2 screen lands — swap them for the real component.
+
+const Stub = {
+  Challenges: placeholder('Challenges', { drawerRoot: true }),
+  Announcement: placeholder('Announcement'),
+  JoinATeam: placeholder('Join a team'),
+  Players: placeholder('Players'),
+  MyBids: placeholder('My bids'),
+  Match: placeholder('Match'),
+  Points: placeholder('Points'),
+  Challenge: placeholder('Challenge'),
+  Strava: placeholder('Strava'),
+  Settings: placeholder('Settings'),
+  DeleteAccount: placeholder('Delete account'),
+  Notifications: placeholder('Notifications'),
+  VerifyPhone: placeholder('Verify phone'),
+  FeedbackSent: placeholder('Feedback sent'),
+  MyTickets: placeholder('My tickets'),
+  Help: placeholder('Help'),
+  Welcome: placeholder('Welcome'),
+  RestoreAccount: placeholder('Restore account'),
+};
+
 const Stack = createNativeStackNavigator();
 const Drawer = createDrawerNavigator();
 
-const ACTIVE_TINT = '#FF6B35';
-const INACTIVE_TINT = '#6E665D';
-const LOGOUT_TINT = '#D32F2F';
-
-// Every drawer entry opens a tab inside MainTabs, so the highlight has to follow
-// the focused tab rather than the drawer route (which is always MainTabs).
-const DRAWER_ITEMS: Array<{ label: string; tab: string; icon: React.ComponentProps<typeof Ionicons>['name'] }> = [
-  { label: 'Home', tab: 'HomeTab', icon: 'home-outline' },
-  { label: 'Announcements', tab: 'AnnouncementsTab', icon: 'megaphone-outline' },
-  { label: 'Hall of Fame', tab: 'HallOfFameTab', icon: 'star-outline' },
-  { label: 'Media', tab: 'MediaTab', icon: 'images-outline' },
-  { label: 'Feedback', tab: 'FeedbackTab', icon: 'chatbox-outline' },
-];
-
-function focusedTab(state: DrawerContentComponentProps['state']): string {
-  const main = state.routes.find((r) => r.name === 'MainTabs');
-  const tabs = main?.state;
-  if (!tabs || tabs.index == null) return 'HomeTab';
-  return tabs.routes[tabs.index]?.name ?? 'HomeTab';
-}
-
-function DrawerContent(props: DrawerContentComponentProps) {
-  const confirmLogout = useConfirmLogout();
-  const current = focusedTab(props.state);
-
-  return (
-    <DrawerContentScrollView {...props}>
-      {DRAWER_ITEMS.map((item) => (
-        <DrawerItem
-          key={item.tab}
-          label={item.label}
-          focused={current === item.tab}
-          activeTintColor={ACTIVE_TINT}
-          inactiveTintColor={INACTIVE_TINT}
-          icon={({ color, size }) => <Ionicons name={item.icon} size={size} color={color} />}
-          onPress={() => {
-            props.navigation.navigate('MainTabs', { screen: item.tab });
-            props.navigation.closeDrawer();
-          }}
-        />
-      ))}
-      <DrawerItem
-        label="Logout"
-        labelStyle={{ color: LOGOUT_TINT, fontWeight: '700' }}
-        activeTintColor={LOGOUT_TINT}
-        inactiveTintColor={LOGOUT_TINT}
-        icon={({ color, size }) => <Ionicons name="log-out-outline" size={size} color={color} />}
-        onPress={() => {
-          props.navigation.closeDrawer();
-          void confirmLogout();
-        }}
-      />
-    </DrawerContentScrollView>
-  );
-}
-
-function DrawerWithTabs() {
+/** Sections reachable from the sidebar; each shows the menu button in its header. */
+function AppDrawer() {
+  const { colors } = useTheme();
   return (
     <Drawer.Navigator
       drawerContent={(props) => <DrawerContent {...props} />}
       screenOptions={{
         headerShown: false,
-        drawerActiveTintColor: ACTIVE_TINT,
-        drawerInactiveTintColor: INACTIVE_TINT,
         drawerType: 'front',
+        drawerStyle: {
+          width: 312,
+          backgroundColor: colors.surface,
+          borderTopRightRadius: 24,
+          borderBottomRightRadius: 24,
+          overflow: 'hidden',
+        },
+        overlayColor: 'rgba(0, 0, 0, 0.62)',
       }}
     >
       <Drawer.Screen name="MainTabs" component={BottomTabsLayout} />
+      <Drawer.Screen name="Events" component={Events} />
+      <Drawer.Screen name="Leaderboard" component={Leaderboard} />
+      <Drawer.Screen name="Challenges" component={Stub.Challenges} />
+      <Drawer.Screen name="HallOfFame" component={HallOfFame} />
+      <Drawer.Screen name="Media" component={Media} />
+      <Drawer.Screen name="Feedback" component={Feedback} />
     </Drawer.Navigator>
   );
 }
@@ -109,15 +92,64 @@ function DrawerWithTabs() {
 function LoggedInStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
-      <Stack.Screen name="App" component={DrawerWithTabs} />
+      <Stack.Screen name="App" component={AppDrawer} />
+
+      {/* A · home & announcements */}
+      <Stack.Screen name="AnnouncementDetail" component={Stub.Announcement} />
+
+      {/* B · events & registration */}
       <Stack.Screen name="EventDetails" component={EventDetails} />
       <Stack.Screen name="EventRegistration" component={EventRegistration} />
-      <Stack.Screen name="EventLeaderboard" component={EventLeaderboard} />
+      <Stack.Screen name="TeamJoin" component={Stub.JoinATeam} />
+
+      {/* C · live auction */}
       <Stack.Screen name="Auction" component={Auction} />
-      <Stack.Screen name="MediaViewer" component={MediaViewer} options={{ animation: 'fade', presentation: 'fullScreenModal' }} />
-      <Stack.Screen name="HallOfFameDetail" component={HallOfFameDetail} />
-      <Stack.Screen name="EditProfile" component={EditProfile} />
+      <Stack.Screen name="AuctionLots" component={Stub.Players} />
+      <Stack.Screen name="MyBids" component={Stub.MyBids} />
+
+      {/* D · leaderboards & brackets */}
+      <Stack.Screen name="EventLeaderboard" component={EventLeaderboard} />
+      <Stack.Screen name="Match" component={Stub.Match} />
+
+      {/* E · points, challenges & Strava */}
+      <Stack.Screen name="Points" component={Stub.Points} />
       <Stack.Screen name="History" component={History} />
+      <Stack.Screen name="ChallengeDetail" component={Stub.Challenge} />
+      <Stack.Screen name="StravaConnect" component={Stub.Strava} />
+
+      {/* F · profile, settings & notifications */}
+      <Stack.Screen name="Profile" component={Profile} />
+      <Stack.Screen name="EditProfile" component={EditProfile} />
+      <Stack.Screen name="Settings" component={Stub.Settings} />
+      <Stack.Screen name="DeleteAccount" component={Stub.DeleteAccount} />
+      <Stack.Screen name="Notifications" component={Stub.Notifications} />
+      <Stack.Screen name="PhoneOtp" component={Stub.VerifyPhone} />
+
+      {/* H · hall of fame, media & feedback */}
+      <Stack.Screen name="HallOfFameDetail" component={HallOfFameDetail} />
+      <Stack.Screen
+        name="MediaViewer"
+        component={MediaViewer}
+        options={{ animation: 'fade', presentation: 'fullScreenModal' }}
+      />
+      <Stack.Screen name="FeedbackSuccess" component={Stub.FeedbackSent} />
+      <Stack.Screen name="MyTickets" component={Stub.MyTickets} />
+      <Stack.Screen name="ContactFaq" component={Stub.Help} />
+    </Stack.Navigator>
+  );
+}
+
+function AuthStack() {
+  return (
+    // TODO(G2): initial route becomes Landing once the v2 landing screen is built.
+    <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false, animation: 'fade' }}>
+      <Stack.Screen name="Landing" component={Stub.Welcome} />
+      <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="Register" component={RegisterScreen} />
+      <Stack.Screen name="VerifyEmail" component={OtpScreen} />
+      <Stack.Screen name="GetStarted" component={CompleteProfileScreen} />
+      <Stack.Screen name="RestoreAccount" component={Stub.RestoreAccount} />
+      <Stack.Screen name="ForgotPassword" component={ForgotPassword} />
     </Stack.Navigator>
   );
 }
@@ -136,26 +168,7 @@ function DrawerLayout() {
 
   if (isBootstrapping) return <BootSplash />;
 
-  return (
-    <NavigationContainer>
-      {isLoggedIn ? (
-        <LoggedInStack />
-      ) : (
-        <Stack.Navigator
-          screenOptions={{
-            headerShown: false,
-            animation: 'fade',
-          }}
-        >
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="Register" component={RegisterScreen} />
-          <Stack.Screen name="OTP" component={OtpScreen} />
-          <Stack.Screen name="CompleteProfile" component={CompleteProfileScreen} />
-          <Stack.Screen name="ForgotPassword" component={ForgotPassword} />
-        </Stack.Navigator>
-      )}
-    </NavigationContainer>
-  );
+  return <NavigationContainer>{isLoggedIn ? <LoggedInStack /> : <AuthStack />}</NavigationContainer>;
 }
 
 export default DrawerLayout;

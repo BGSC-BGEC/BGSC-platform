@@ -38,7 +38,7 @@ export default function Home() {
               </View>
             </View>
           </Card>
-          <Button label="View Leaderboard" size="sm" variant="primary" onPress={() => navigation.navigate('MainTabs', { screen: 'LeaderboardTab' })} />
+          <Button label="View Leaderboard" size="sm" variant="primary" onPress={() => navigation.navigate('Leaderboard')} />
         </Card>
 
         <SectionHeader title="Upcoming Events" subtitle="Don't miss out" />
@@ -56,7 +56,7 @@ export default function Home() {
             </Typography>
           </Card.Body>
           <Card.Footer>
-            <Button label="Register Now" variant="primary" size="sm" onPress={() => navigation.navigate('MainTabs', { screen: 'EventsTab' })} />
+            <Button label="Register Now" variant="primary" size="sm" onPress={() => navigation.navigate('Events')} />
           </Card.Footer>
         </Card>
 
@@ -72,7 +72,7 @@ export default function Home() {
             </Typography>
           </Card.Body>
           <Card.Footer>
-            <Button label="View Details" variant="outline" size="sm" onPress={() => navigation.navigate('MainTabs', { screen: 'EventsTab' })} />
+            <Button label="View Details" variant="outline" size="sm" onPress={() => navigation.navigate('Events')} />
           </Card.Footer>
         </Card>
 

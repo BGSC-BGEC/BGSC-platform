@@ -21,7 +21,7 @@ export interface RadioGroupProps<T = string> {
   options: RadioOption<T>[];
   value: T;
   onChange: (value: T) => void;
-  color?: 'primary' | 'secondary' | 'accent';
+  color?: 'primary' | 'accent';
   containerStyle?: ViewStyle;
 }
 
@@ -35,9 +35,7 @@ export function RadioGroup<T = string>({
   const { colors } = useTheme();
 
   const activeColor =
-    color === 'secondary'
-      ? colors.secondary
-      : color === 'accent'
+    color === 'accent'
       ? colors.accent
       : colors.primary;
 

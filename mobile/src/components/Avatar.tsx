@@ -24,7 +24,7 @@ export function Avatar({ name, uri, size = 40, style }: AvatarProps) {
     <View
       style={[
         styles.base,
-        { width: size, height: size, borderRadius: radius, backgroundColor: colors.primary },
+        { width: size, height: size, borderRadius: radius, backgroundColor: colors.primarySolid },
         style,
       ]}
     >
@@ -34,7 +34,7 @@ export function Avatar({ name, uri, size = 40, style }: AvatarProps) {
         <Typography
           variant="button"
           color="primaryText"
-          style={{ fontSize: Math.max(11, size * 0.38), lineHeight: Math.max(14, size * 0.5) }}
+          style={{ fontSize: Math.max(11, size * 0.33), lineHeight: Math.max(14, size * 0.5) }}
         >
           {initials(name)}
         </Typography>

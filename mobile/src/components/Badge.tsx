@@ -51,14 +51,11 @@ export function Badge({
       borderColor = colors.accent;
       break;
     case 'secondary':
-      textColor = colors.secondaryText;
-      bgColor = colors.secondary;
-      borderColor = colors.secondary;
-      break;
     case 'slate':
-      textColor = colors.slate;
-      bgColor = colors.slateMuted;
-      borderColor = colors.slate;
+      // v2 "Muted" pill tone
+      textColor = colors.textMuted;
+      bgColor = colors.surfaceInner;
+      borderColor = colors.border;
       break;
     case 'success':
       textColor = colors.success;
