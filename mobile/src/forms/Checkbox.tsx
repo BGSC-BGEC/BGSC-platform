@@ -17,7 +17,7 @@ export interface CheckboxProps {
   label?: string;
   subtitle?: string;
   disabled?: boolean;
-  color?: 'primary' | 'secondary' | 'accent';
+  color?: 'primary' | 'accent';
   style?: ViewStyle;
 }
 
@@ -39,9 +39,7 @@ export function Checkbox({
   };
 
   const activeColor =
-    color === 'secondary'
-      ? colors.secondary
-      : color === 'accent'
+    color === 'accent'
       ? colors.accent
       : colors.primary;
 
@@ -71,7 +69,7 @@ export function Checkbox({
           <Icon
             name="check"
             size={14}
-            color={color === 'secondary' ? colors.secondaryText : colors.primaryText}
+            color={colors.primaryText}
           />
         )}
       </View>

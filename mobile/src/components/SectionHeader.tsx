@@ -35,7 +35,7 @@ export function SectionHeader({
 
         {badge !== undefined && (
           <View style={styles.badge}>
-            <Typography variant="labelSmall" color="accentText">
+            <Typography variant="labelSmall" color="primary">
               {badge}
             </Typography>
           </View>

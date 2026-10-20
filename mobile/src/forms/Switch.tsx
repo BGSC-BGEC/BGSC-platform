@@ -13,7 +13,7 @@ export interface SwitchProps {
   value: boolean;
   onValueChange: (value: boolean) => void;
   disabled?: boolean;
-  color?: 'primary' | 'secondary' | 'accent';
+  color?: 'primary' | 'accent';
   accessibilityLabel?: string;
   style?: ViewStyle;
 }
@@ -51,9 +51,7 @@ export function Switch({
   };
 
   const activeTrackColor =
-    color === 'secondary'
-      ? colors.secondary
-      : color === 'accent'
+    color === 'accent'
       ? colors.accent
       : colors.primary;
 

@@ -1,5 +1,8 @@
 {
   "dependencies": {
+    "@expo-google-fonts/dm-serif-display": "^0.4.2",
+    "@expo-google-fonts/inter": "^0.4.2",
+    "@expo-google-fonts/jetbrains-mono": "^0.4.1",
     "@expo/metro-runtime": "~57.0.15",
     "@expo/vector-icons": "^15.0.2",
     "@react-navigation/bottom-tabs": "^7.4.10",
@@ -9,6 +12,7 @@
     "axios": "^1.20.0",
     "expo": "^57.0.20",
     "expo-blur": "~57.0.2",
+    "expo-font": "~57.0.4",
     "expo-haptics": "~57.0.2",
     "expo-image": "~57.0.4",
     "expo-image-picker": "~57.0.20",
@@ -20,11 +24,13 @@
     "react-native-reanimated": "4.5.1",
     "react-native-safe-area-context": "^5.9.1",
     "react-native-screens": "^4.27.0",
+    "react-native-svg": "15.15.4",
     "react-native-url-polyfill": "^4.0.0",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
     "@types/node": "^26.4.1",
+    "react-native-svg-transformer": "^1.5.3",
     "typescript": "~6.0.3"
   }
 }

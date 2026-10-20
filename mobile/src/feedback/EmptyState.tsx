@@ -72,7 +72,7 @@ export function EmptyState({
             },
           ]}
         >
-          <Typography variant="button" color="accentText">
+          <Typography variant="button" color="primary">
             {actionLabel}
           </Typography>
         </Pressable>

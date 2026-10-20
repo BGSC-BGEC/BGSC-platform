@@ -4,6 +4,7 @@ import type { ComponentProps } from 'react';
 
 import { useTheme } from '../theme/ThemeProvider';
 import type { UIThemeColors } from '../theme/colors';
+import { V2_ICONS, type V2IconName } from './v2';
 
 export type IoniconsName = ComponentProps<typeof Ionicons>['name'];
 
@@ -71,7 +72,7 @@ export const ICON_ALIASES: Record<string, IoniconsName> = {
 };
 
 export type IconAliasName = keyof typeof ICON_ALIASES;
-export type IconName = IconAliasName | IoniconsName;
+export type IconName = V2IconName | IconAliasName | IoniconsName;
 
 export interface IconProps {
   name: IconName;
@@ -97,6 +98,10 @@ export function Icon({
   // Resolve color
   const resolvedColor =
     color in colors ? colors[color as keyof UIThemeColors] : color;
+
+  // v2 set first, Ionicons for anything the v2 set doesn't cover
+  const V2 = (V2_ICONS as Record<string, (typeof V2_ICONS)[V2IconName] | undefined>)[name];
+  if (V2) return <V2 width={pixelSize} height={pixelSize} color={resolvedColor} style={style} />;
 
   // Resolve alias
   const resolvedName: IoniconsName = (ICON_ALIASES[name] ?? name) as IoniconsName;

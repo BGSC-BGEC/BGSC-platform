@@ -10,7 +10,6 @@
  * - Loading & Feedback: Skeleton, Spinner, LoadingOverlay, ErrorState, EmptyState, Alert
  * - Form Controls: TextInput, TextArea, SearchInput, Select, Checkbox, Switch, RadioGroup
  * - UI Components: Button, ButtonGroup, Card, Header, SectionHeader, Badge
- * - Interactive Gallery: UIShowcase
  */
 
 export * from './theme';
@@ -20,5 +19,4 @@ export * from './icons';
 export * from './feedback';
 export * from './forms';
 export * from './components';
-export * from './Showcase';
 

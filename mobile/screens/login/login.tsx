@@ -59,7 +59,7 @@ export default function LoginScreen() {
     clearError();
     const result = await googleSignIn();
     if (result.success && result.requiresProfileCompletion) {
-      navigation.navigate('CompleteProfile');
+      navigation.navigate('GetStarted');
     }
   };
 

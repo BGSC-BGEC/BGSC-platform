@@ -114,13 +114,13 @@ export function IconButton({
       backgroundColor = colors.primary;
       iconColor = colors.primaryText;
       break;
-    case 'secondary': // Deep Moss Green
-      backgroundColor = colors.secondary;
-      iconColor = colors.secondaryText;
+    case 'secondary':
+      backgroundColor = colors.surfaceInner;
+      iconColor = colors.text;
       break;
     case 'accent': // Orange
       backgroundColor = colors.accent;
-      iconColor = colors.accentText;
+      iconColor = colors.primaryText;
       break;
     case 'outline':
       backgroundColor = 'transparent';
@@ -177,7 +177,7 @@ export function IconButton({
             ]}
           >
             {typeof badge === 'number' && (
-              <Typography variant="labelSmall" color="accentText" style={styles.badgeText}>
+              <Typography variant="labelSmall" color="primaryText" style={styles.badgeText}>
                 {badge > 99 ? '99+' : badge}
               </Typography>
             )}

@@ -18,14 +18,16 @@ export const PALETTE = {
   darkCard: '#33383D',            // Card surface
   darkCardInner: '#3A4045',       // Inner card layer (lighter)
   darkText: '#E8E8E8',            // Primary text
-  darkTextMuted: '#9A9A9A',       // Secondary text
+  darkTextMuted: '#ABABAB',       // Secondary text (v2 contrast fix)
   darkShadowDark: '#1E2226',      // Dark shadow
   darkShadowLight: '#3D4449',     // Light highlight shadow
 
   // Accent colors
   orange: '#E07A3F',              // Primary CTA (warm orange)
   orangeDark: '#D4632A',          // Darker orange for press states
+  orangeSolid: '#BD5420',         // Solid orange behind white text (avatars) — passes contrast
   red: '#E74C3C',                 // Error/love/favorite
+  redText: '#FF6B5E',             // Danger text on dark surfaces
   blue: '#5B8FA8',                // Info/links
   green: '#34D27B',               // Success
   yellow: '#F59E0B',              // Warning
@@ -80,6 +82,8 @@ export interface UIThemeColors {
   primaryText: string;
   /** Darker primary for press states */
   primaryDark: string;
+  /** Solid primary fill behind white text (avatars, badges) */
+  primarySolid: string;
 
   /** Accent colors */
   accent: string;
@@ -92,6 +96,8 @@ export interface UIThemeColors {
   warningMuted: string;
   danger: string;
   dangerMuted: string;
+  /** Danger-coloured text (Log out, destructive links) */
+  dangerText: string;
   info: string;
   infoMuted: string;
 
@@ -124,9 +130,10 @@ export const lightThemeColors: UIThemeColors = {
   primary: PALETTE.orange,
   primaryText: PALETTE.white,
   primaryDark: PALETTE.orangeDark,
+  primarySolid: PALETTE.orangeSolid,
 
   accent: PALETTE.orange,
-  accentMuted: withAlpha(PALETTE.orange, 0.15),
+  accentMuted: withAlpha(PALETTE.orange, 0.16),
 
   success: PALETTE.green,
   successMuted: withAlpha(PALETTE.green, 0.15),
@@ -136,6 +143,7 @@ export const lightThemeColors: UIThemeColors = {
 
   danger: PALETTE.red,
   dangerMuted: withAlpha(PALETTE.red, 0.15),
+  dangerText: PALETTE.redText,
 
   info: PALETTE.blue,
   infoMuted: withAlpha(PALETTE.blue, 0.15),
@@ -168,9 +176,10 @@ export const darkThemeColors: UIThemeColors = {
   primary: PALETTE.orange,
   primaryText: PALETTE.white,
   primaryDark: PALETTE.orangeDark,
+  primarySolid: PALETTE.orangeSolid,
 
   accent: PALETTE.orange,
-  accentMuted: withAlpha(PALETTE.orange, 0.15),
+  accentMuted: withAlpha(PALETTE.orange, 0.16),
 
   success: PALETTE.green,
   successMuted: withAlpha(PALETTE.green, 0.15),
@@ -180,6 +189,7 @@ export const darkThemeColors: UIThemeColors = {
 
   danger: PALETTE.red,
   dangerMuted: withAlpha(PALETTE.red, 0.15),
+  dangerText: PALETTE.redText,
 
   info: PALETTE.blue,
   infoMuted: withAlpha(PALETTE.blue, 0.15),

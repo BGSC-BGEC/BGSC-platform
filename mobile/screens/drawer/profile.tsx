@@ -8,6 +8,7 @@ import { Typography } from '../../src/typography/Typography';
 import { Card } from '../../src/components/Card';
 import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
+import { AppHeader } from '../../src/components/AppHeader';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { useAuth } from '../../store/auth';
 import { useConfirmLogout } from '../../src/hooks/useConfirmLogout';
@@ -19,7 +20,9 @@ export default function Profile() {
   const handleLogout = useConfirmLogout();
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+    <SafeAreaView edges={['left', 'right', 'bottom']} style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      {/* Pushed route in v2 (no longer a tab) — header gives it a way back. */}
+      <AppHeader title="Profile" showBackButton showMenuButton={false} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Profile Header */}
         <View style={styles.profileHeader}>

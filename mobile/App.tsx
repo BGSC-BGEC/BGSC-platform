@@ -1,5 +1,9 @@
 import React from 'react';
 import { Platform } from 'react-native';
+import { useFonts } from 'expo-font';
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
+import { DMSerifDisplay_400Regular } from '@expo-google-fonts/dm-serif-display';
+import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
 import DrawerLayout from './screens/drawer/layout';
 import { AuthProvider } from './store/auth';
 import { ThemeProvider } from './src/theme/ThemeProvider';
@@ -14,6 +18,18 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') {
 }
 
 export default function App() {
+  // Names match FONT_FAMILIES in src/theme/typography.ts
+  const [fontsLoaded, fontError] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    DMSerifDisplay_400Regular,
+    JetBrainsMono_500Medium,
+  });
+  // On a load error render anyway with system fonts rather than hanging on a blank screen.
+  if (!fontsLoaded && !fontError) return null;
+
   return (
     <AuthProvider>
       <ThemeProvider initialMode="dark">
