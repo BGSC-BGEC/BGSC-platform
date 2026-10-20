@@ -62,7 +62,7 @@ export function SearchInput({
         styles.container,
         {
           borderColor: focused ? colors.borderActive : colors.border,
-          backgroundColor: colors.surfaceMuted,
+          backgroundColor: colors.surfaceInner,
         },
         containerStyle,
       ]}
@@ -75,8 +75,8 @@ export function SearchInput({
 
       <Icon
         name="search"
-        size="sm"
-        color={focused ? 'text' : 'textSubtle'}
+        size={18}
+        color={focused ? 'text' : 'textMuted'}
         style={styles.searchIcon}
       />
 
@@ -84,7 +84,7 @@ export function SearchInput({
         value={value}
         onChangeText={handleChange}
         placeholder={placeholder}
-        placeholderTextColor={colors.textSubtle}
+        placeholderTextColor={colors.textMuted}
         autoFocus={autoFocus}
         returnKeyType="search"
         onSubmitEditing={() => onSearch?.(value)}
@@ -101,7 +101,7 @@ export function SearchInput({
           accessibilityLabel="Clear search"
           style={styles.clearButton}
         >
-          <Icon name="close" size="xs" color="textSubtle" />
+          <Icon name="close" size="xs" color="textMuted" />
         </Pressable>
       )}
     </View>
@@ -110,16 +110,16 @@ export function SearchInput({
 
 const styles = StyleSheet.create({
   container: {
-    height: 44,
-    borderRadius: 999,
+    height: 48,
+    borderRadius: 16,
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     overflow: 'hidden',
   },
   searchIcon: {
-    marginRight: 8,
+    marginRight: 12,
   },
   input: {
     flex: 1,

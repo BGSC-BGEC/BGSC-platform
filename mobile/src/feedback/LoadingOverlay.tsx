@@ -31,6 +31,8 @@ export function LoadingOverlay({
       transparent={transparent}
       animationType="fade"
       statusBarTranslucent
+      // Blocking by design: back does nothing while work is in flight.
+      onRequestClose={() => undefined}
     >
       <View style={styles.backdrop}>
         <BlurView

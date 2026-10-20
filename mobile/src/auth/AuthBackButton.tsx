@@ -1,62 +1,36 @@
 import React from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  type ViewStyle,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { Pressable, StyleSheet, type ViewStyle } from 'react-native';
+
+import { Icon } from '../icons/Icon';
+import { useTheme } from '../theme/ThemeProvider';
 
 interface AuthBackButtonProps {
   onPress: () => void;
   style?: ViewStyle;
 }
 
-export function AuthBackButton({
-  onPress,
-  style,
-}: AuthBackButtonProps) {
-  const handlePress = () => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onPress();
-  };
-
+/** v2 square back button for auth screens (sits over the hero). */
+export function AuthBackButton({ onPress, style }: AuthBackButtonProps) {
+  const { colors } = useTheme();
   return (
     <Pressable
-      onPress={handlePress}
+      onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel="Go back"
+      hitSlop={8}
       style={({ pressed }) => [
         styles.button,
+        { backgroundColor: colors.surface, borderColor: colors.border },
         pressed && styles.pressed,
         style,
       ]}
     >
-      <Ionicons name="arrow-back" size={20} color="#111111" />
+      <Icon name="arrow-left" size={20} color="text" />
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  button: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.10,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  pressed: {
-    opacity: 0.8,
-    transform: [{ scale: 0.96 }],
-  },
+  button: { padding: 8, borderRadius: 12, borderWidth: 1 },
+  pressed: { opacity: 0.6 },
 });
-

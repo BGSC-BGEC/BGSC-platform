@@ -53,7 +53,7 @@ export function Skeleton({
           width,
           height,
           borderRadius,
-          backgroundColor: colors.border,
+          backgroundColor: colors.surfaceInner,
           opacity: opacityAnim,
         },
         style,
@@ -118,6 +118,21 @@ export function SkeletonCard({ style }: { style?: ViewStyle }) {
   );
 }
 
+/** v2 skeleton for EventCard lists — cover block + three text bars. */
+export function SkeletonEventCard({ style }: { style?: ViewStyle }) {
+  const { colors } = useTheme();
+  return (
+    <View style={[styles.eventCard, { borderColor: colors.border, backgroundColor: colors.surface }, style]}>
+      <Skeleton height={110} borderRadius={0} />
+      <View style={styles.eventBody}>
+        <Skeleton width={220} height={16} borderRadius={6} />
+        <Skeleton width={160} height={10} borderRadius={6} />
+        <Skeleton width={120} height={10} borderRadius={6} />
+      </View>
+    </View>
+  );
+}
+
 // Attach subcomponents
 Skeleton.Circle = SkeletonCircle;
 Skeleton.Text = SkeletonText;
@@ -127,6 +142,8 @@ const styles = StyleSheet.create({
   textGroup: {
     width: '100%',
   },
+  eventCard: { width: '100%', borderRadius: 24, borderWidth: 1, overflow: 'hidden' },
+  eventBody: { padding: 20, gap: 12 },
   card: {
     width: '100%',
     padding: 16,

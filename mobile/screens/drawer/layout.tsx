@@ -2,7 +2,6 @@ import * as React from 'react';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { View } from 'react-native';
 
 import BottomTabsLayout from './bottom-tabs-layout';
 import Events from './events';
@@ -13,14 +12,16 @@ import Feedback from './feedback';
 import Profile from './profile';
 import { useAuth } from '../../store/auth';
 import { useTheme } from '../../src/theme/ThemeProvider';
-import { Spinner } from '../../src/feedback/Spinner';
 import { DrawerContent } from '../../src/navigation/DrawerContent';
 import { placeholder } from '../placeholder';
 
+import SplashScreen from '../login/splash';
+import LandingScreen from '../login/landing';
 import LoginScreen from '../login/login';
 import RegisterScreen from '../login/register';
-import OtpScreen from '../login/otp';
-import CompleteProfileScreen from '../login/complete-profile';
+import VerifyEmailScreen from '../login/verify-email';
+import GetStartedScreen from '../login/get-started';
+import RestoreAccountScreen from '../login/restore-account';
 import ForgotPassword from '../login/forgot-password';
 import EventDetails from '../events/event-details';
 import EventRegistration from '../events/registration';
@@ -30,16 +31,16 @@ import History from '../profile/history';
 import EventLeaderboard from '../events/event-leaderboard';
 import MediaViewer from '../media/media-viewer';
 import HallOfFameDetail from '../hall-of-fame/hall-of-fame-detail';
+import AnnouncementDetailScreen from '../announcements/announcement-detail';
+import TeamJoin from '../events/team-join';
+import AuctionLots from '../events/auction-lots';
+import MyBids from '../events/my-bids';
 
 // Route names and params are the contract in docs/mobile-v2-build-split.md §3.
 // Placeholders keep every route navigable until its v2 screen lands — swap them for the real component.
 
 const Stub = {
   Challenges: placeholder('Challenges', { drawerRoot: true }),
-  Announcement: placeholder('Announcement'),
-  JoinATeam: placeholder('Join a team'),
-  Players: placeholder('Players'),
-  MyBids: placeholder('My bids'),
   Match: placeholder('Match'),
   Points: placeholder('Points'),
   Challenge: placeholder('Challenge'),
@@ -51,8 +52,6 @@ const Stub = {
   FeedbackSent: placeholder('Feedback sent'),
   MyTickets: placeholder('My tickets'),
   Help: placeholder('Help'),
-  Welcome: placeholder('Welcome'),
-  RestoreAccount: placeholder('Restore account'),
 };
 
 const Stack = createNativeStackNavigator();
@@ -95,17 +94,17 @@ function LoggedInStack() {
       <Stack.Screen name="App" component={AppDrawer} />
 
       {/* A · home & announcements */}
-      <Stack.Screen name="AnnouncementDetail" component={Stub.Announcement} />
+      <Stack.Screen name="AnnouncementDetail" component={AnnouncementDetailScreen} />
 
       {/* B · events & registration */}
       <Stack.Screen name="EventDetails" component={EventDetails} />
       <Stack.Screen name="EventRegistration" component={EventRegistration} />
-      <Stack.Screen name="TeamJoin" component={Stub.JoinATeam} />
+      <Stack.Screen name="TeamJoin" component={TeamJoin} />
 
       {/* C · live auction */}
       <Stack.Screen name="Auction" component={Auction} />
-      <Stack.Screen name="AuctionLots" component={Stub.Players} />
-      <Stack.Screen name="MyBids" component={Stub.MyBids} />
+      <Stack.Screen name="AuctionLots" component={AuctionLots} />
+      <Stack.Screen name="MyBids" component={MyBids} />
 
       {/* D · leaderboards & brackets */}
       <Stack.Screen name="EventLeaderboard" component={EventLeaderboard} />
@@ -141,34 +140,42 @@ function LoggedInStack() {
 
 function AuthStack() {
   return (
-    // TODO(G2): initial route becomes Landing once the v2 landing screen is built.
-    <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false, animation: 'fade' }}>
-      <Stack.Screen name="Landing" component={Stub.Welcome} />
+    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade' }}>
+      <Stack.Screen name="Landing" component={LandingScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
-      <Stack.Screen name="VerifyEmail" component={OtpScreen} />
-      <Stack.Screen name="GetStarted" component={CompleteProfileScreen} />
-      <Stack.Screen name="RestoreAccount" component={Stub.RestoreAccount} />
+      <Stack.Screen name="RestoreAccount" component={RestoreAccountScreen} />
       <Stack.Screen name="ForgotPassword" component={ForgotPassword} />
     </Stack.Navigator>
   );
 }
 
-function BootSplash() {
-  const { colors } = useTheme();
+/** Signed in straight from sign-up: verify email, then pick interests, then the app. */
+function OnboardingStack({ start }: { start: 'VerifyEmail' | 'GetStarted' }) {
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
-      <Spinner size="large" />
-    </View>
+    <Stack.Navigator initialRouteName={start} screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
+      <Stack.Screen name="GetStarted" component={GetStartedScreen} />
+    </Stack.Navigator>
   );
 }
 
 function DrawerLayout() {
-  const { isLoggedIn, isBootstrapping } = useAuth();
+  const { isLoggedIn, isBootstrapping, onboarding } = useAuth();
 
-  if (isBootstrapping) return <BootSplash />;
+  if (isBootstrapping) return <SplashScreen />;
 
-  return <NavigationContainer>{isLoggedIn ? <LoggedInStack /> : <AuthStack />}</NavigationContainer>;
+  return (
+    <NavigationContainer>
+      {!isLoggedIn ? (
+        <AuthStack />
+      ) : onboarding ? (
+        <OnboardingStack start={onboarding === 'verify' ? 'VerifyEmail' : 'GetStarted'} />
+      ) : (
+        <LoggedInStack />
+      )}
+    </NavigationContainer>
+  );
 }
 
 export default DrawerLayout;

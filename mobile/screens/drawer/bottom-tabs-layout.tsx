@@ -4,7 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Home from './home';
 import Announcement from './announcement';
 import { TabBar } from '../../src/navigation/TabBar';
-import { placeholder } from '../placeholder';
+import Social from './social';
 
 const Tab = createBottomTabNavigator();
 
@@ -14,9 +14,7 @@ export default function BottomTabsLayout() {
     <Tab.Navigator tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
       <Tab.Screen name="HomeTab" component={Home} options={{ tabBarLabel: 'Home' }} />
       <Tab.Screen name="AnnouncementsTab" component={Announcement} options={{ tabBarLabel: 'Announcements' }} />
-      <Tab.Screen name="SocialTab" component={SocialPlaceholder} options={{ tabBarLabel: 'Social' }} />
+      <Tab.Screen name="SocialTab" component={Social} options={{ tabBarLabel: 'Social' }} />
     </Tab.Navigator>
   );
 }
-
-const SocialPlaceholder = placeholder('Social', { drawerRoot: true });

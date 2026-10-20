@@ -10,6 +10,7 @@ export const FONT_FAMILIES = {
   bodyMedium: 'Inter_500Medium',
   bodySemiBold: 'Inter_600SemiBold',
   bodyBold: 'Inter_700Bold',
+  bodyBlack: 'Inter_900Black',
 
   mono: 'JetBrainsMono_500Medium',
 } as const;

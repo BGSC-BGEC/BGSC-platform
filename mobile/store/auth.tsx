@@ -1,7 +1,12 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 
-import { authRepository, type RegisterDto, type User } from '../src/repositories/AuthRepository';
-import { getErrorMessage, setSessionExpiredHandler } from '../src/api/client';
+import {
+  AccountDeactivatedError,
+  authRepository,
+  type RegisterDto,
+  type User,
+} from '../src/repositories/AuthRepository';
+import { ApiError, getErrorMessage, setSessionExpiredHandler } from '../src/api/client';
 import { tokenStorage } from '../src/api/tokenStorage';
 
 interface AuthContextType {
@@ -12,17 +17,28 @@ interface AuthContextType {
   authToken: string | null;
   isLoading: boolean;
   error: string | null;
-  pendingEmail: string | null;
-  setPendingEmail: (email: string | null) => void;
+  /** Signed in but still on the post-sign-up steps (verify email → interests). */
+  onboarding: OnboardingStep | null;
+  setOnboarding: (step: OnboardingStep | null) => void;
+  /** Set when login hit a soft-deleted account that can still be restored. */
+  restoreCandidate: RestoreCandidate | null;
   login: (emailOrUsername: string, password?: string) => Promise<boolean>;
   register: (dto: RegisterDto) => Promise<boolean>;
-  verifyOtp: (email: string, code: string) => Promise<boolean>;
-  completeProfile: (password?: string, contact?: string) => Promise<boolean>;
+  restoreAccount: () => Promise<boolean>;
+  cancelRestore: () => void;
   googleSignIn: () => Promise<{ success: boolean; requiresProfileCompletion?: boolean }>;
   forgotPassword: (email: string) => Promise<boolean>;
   refreshUser: () => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
+}
+
+export type OnboardingStep = 'verify' | 'interests';
+
+export interface RestoreCandidate {
+  login: string;
+  password: string;
+  daysRemaining: number | null;
 }
 
 export const AuthContext = createContext<AuthContextType | null>(null);
@@ -34,11 +50,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [onboarding, setOnboarding] = useState<OnboardingStep | null>(null);
+  const [restoreCandidate, setRestoreCandidate] = useState<RestoreCandidate | null>(null);
 
   const dropSession = useCallback(() => {
     setUser(null);
     setAuthToken(null);
+    setOnboarding(null);
     setIsLoggedIn(false);
   }, []);
 
@@ -60,7 +78,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setIsLoggedIn(true);
       } catch (err) {
         console.warn('Could not restore session:', err);
-        await tokenStorage.clear();
+        // Only a rejected session is dropped; offline at launch keeps the tokens for the next start.
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) await tokenStorage.clear();
         dropSession();
       } finally {
         setIsBootstrapping(false);
@@ -85,10 +104,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const login = (emailOrUsername: string, password?: string) =>
     run(async () => {
-      const res = await authRepository.login({ emailOrUsername, password });
-      setAuthToken(res.token);
-      setUser(res.user);
-      setIsLoggedIn(true);
+      try {
+        const res = await authRepository.login({ emailOrUsername, password });
+        setAuthToken(res.token);
+        setUser(res.user);
+        setIsLoggedIn(true);
+        // The auth payload is a slim user; pull the full profile (points, rank) in the background.
+        void refreshUser();
+      } catch (err) {
+        // Not an error for the form: the login screen moves on to Restore account.
+        if (err instanceof AccountDeactivatedError) {
+          setRestoreCandidate({ login: emailOrUsername, password: password ?? '', daysRemaining: err.daysRemaining });
+          return;
+        }
+        throw err;
+      }
     });
 
   const register = (dto: RegisterDto) =>
@@ -96,24 +126,35 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       const res = await authRepository.register(dto);
       setAuthToken(res.token);
       setUser(res.user);
-      setPendingEmail(res.user.isEmailVerified ? null : res.user.email);
+      // Sign-up lands on the onboarding steps before the main app.
+      setOnboarding(res.user.isEmailVerified ? 'interests' : 'verify');
       setIsLoggedIn(true);
     });
 
-  const verifyOtp = (email: string, code: string) =>
+  const restoreAccount = () =>
     run(async () => {
-      const res = await authRepository.verifyOtp(email, code);
+      if (!restoreCandidate) throw new Error('Log in again to restore your account.');
+      let res;
+      try {
+        res = await authRepository.reactivate({
+          emailOrUsername: restoreCandidate.login,
+          password: restoreCandidate.password,
+        });
+      } catch (err) {
+        // Held credentials no longer work (password changed, window lapsed): start over from Login.
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+          throw new Error('We couldn’t restore this account. Go back and log in again.');
+        }
+        throw err;
+      }
+      setRestoreCandidate(null);
+      setAuthToken(res.token);
       setUser(res.user);
       setIsLoggedIn(true);
-      setPendingEmail(null);
+      void refreshUser();
     });
 
-  const completeProfile = (_password?: string, contact?: string) =>
-    run(async () => {
-      const res = await authRepository.completeProfile({ contact });
-      setUser(res.user);
-      setIsLoggedIn(true);
-    });
+  const cancelRestore = () => setRestoreCandidate(null);
 
   const googleSignIn = async () => {
     const ok = await run(async () => {
@@ -129,7 +170,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const refreshUser = async () => {
     try {
-      setUser(await authRepository.me());
+      const me = await authRepository.me();
+      // Logged out while this was in flight: don't resurrect the user.
+      if (!(await tokenStorage.get()).accessToken) return;
+      setUser(me);
     } catch (err) {
       console.warn('Could not refresh user:', err);
     }
@@ -151,12 +195,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         authToken,
         isLoading,
         error,
-        pendingEmail,
-        setPendingEmail,
+        onboarding,
+        setOnboarding,
+        restoreCandidate,
         login,
         register,
-        verifyOtp,
-        completeProfile,
+        restoreAccount,
+        cancelRestore,
         googleSignIn,
         forgotPassword,
         refreshUser,

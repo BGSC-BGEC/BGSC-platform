@@ -4,6 +4,7 @@ import * as Haptics from 'expo-haptics';
 
 import { useTheme } from '../theme/ThemeProvider';
 import { Typography } from '../typography/Typography';
+import { FONT_FAMILIES } from '../theme/typography';
 
 export interface FilterChipOption<T extends string> {
   label: string;
@@ -18,8 +19,8 @@ export interface FilterChipsProps<T extends string> {
 }
 
 /**
- * Horizontal pill filter row (category / type / period selectors).
- * Selected chip uses the primary orange, others sit on the card surface.
+ * v2/Chip row — single-select filters (category / type / period).
+ * Selected chip is solid orange with white text; others sit on the inner surface.
  */
 export function FilterChips<T extends string>({ options, value, onChange, style }: FilterChipsProps<T>) {
   const { colors } = useTheme();
@@ -43,10 +44,12 @@ export function FilterChips<T extends string>({ options, value, onChange, style 
             accessibilityState={{ selected }}
             style={[
               styles.chip,
-              { backgroundColor: selected ? colors.accent : colors.surface, borderColor: colors.border },
+              selected
+                ? { backgroundColor: colors.primarySolid, borderColor: colors.primarySolid }
+                : { backgroundColor: colors.surfaceInner, borderColor: colors.border },
             ]}
           >
-            <Typography variant="caption" color={selected ? 'primaryText' : 'text'}>
+            <Typography variant="caption" color={selected ? 'primaryText' : 'text'} style={styles.label}>
               {option.label}
             </Typography>
           </Pressable>
@@ -58,5 +61,6 @@ export function FilterChips<T extends string>({ options, value, onChange, style 
 
 const styles = StyleSheet.create({
   row: { gap: 8, paddingVertical: 2 },
-  chip: { borderWidth: 1, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 9 },
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
+  label: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 12, lineHeight: 15 },
 });

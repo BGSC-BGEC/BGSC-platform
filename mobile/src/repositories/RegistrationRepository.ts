@@ -16,6 +16,8 @@ export interface SubmitRegistrationDto {
   files?: UploadedFormFile[];
   role: RegistrationRole;
   teamVisibility?: 'open' | 'invite_only' | 'closed';
+  /** Auction-league members: their starting price in the player pool */
+  basePrice?: number | null;
 }
 
 export class RegistrationRepository {
@@ -35,9 +37,15 @@ export class RegistrationRepository {
         event: {
           role: dto.role,
           ...(dto.role === 'captain' && dto.teamVisibility ? { team_visibility: dto.teamVisibility } : {}),
+          ...(dto.basePrice != null ? { base_price: dto.basePrice } : {}),
         },
       },
     });
+  }
+
+  /** PATCH /registrations/:id — edit answers while registration is open. */
+  update(registrationId: string, answers: Record<string, unknown>, files?: UploadedFormFile[]): Promise<FormSubmission> {
+    return api.patch<FormSubmission>(`/registrations/${registrationId}`, { answers, ...(files?.length ? { files } : {}) });
   }
 
   /** GET /registrations — the caller's own registrations, newest first (bare array). */
@@ -52,9 +60,14 @@ export class RegistrationRepository {
     });
   }
 
-  /** GET /teams?owner_id= — teams forming for an event (bare array). */
-  teamsForEvent(eventId: string): Promise<Team[]> {
-    return api.get<Team[]>('/teams', { params: { owner_id: eventId, limit: 100 } });
+  /** GET /teams?owner_id=&status= — teams still taking players by default; `all` includes complete/locked/disbanded (bare array). */
+  teamsForEvent(eventId: string, status: 'forming' | 'all' = 'forming'): Promise<Team[]> {
+    return api.get<Team[]>('/teams', { params: { owner_id: eventId, ...(status === 'all' ? {} : { status }), limit: 100 } });
+  }
+
+  /** GET /teams/:id — roster with members. */
+  getTeam(teamId: string): Promise<Team> {
+    return api.get<Team>(`/teams/${teamId}`);
   }
 
   /** POST /teams — only an approved, confirmed captain can create a team. */

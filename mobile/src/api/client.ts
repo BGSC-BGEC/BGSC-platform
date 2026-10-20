@@ -69,6 +69,35 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
   insufficient_purse: 'Your team does not have enough credits for this bid.',
   bid_below_minimum: 'Your bid is below the minimum allowed.',
   conflict_concurrent_bid: 'Someone bid just before you. The price has been refreshed — try again.',
+  // teams
+  team_full: 'This team is already full.',
+  team_name_taken: 'That team name is taken. Try another.',
+  team_not_found: 'This team no longer exists.',
+  team_disbanded: 'This team has been disbanded.',
+  team_is_disbanded: 'This team has been disbanded.',
+  team_not_open: 'This team is not taking players right now.',
+  team_not_accepting_members: 'This team is not taking players right now.',
+  invite_only: 'This team is invite only. Ask the captain for their code.',
+  invite_code_not_found: 'That invite code doesn’t match any team.',
+  already_in_team: 'You are already on a team for this event.',
+  already_member: 'You are already on this team.',
+  captain_already_has_team: 'You already have a team for this event.',
+  captain_not_approved: 'Core hasn’t approved you as captain yet.',
+  not_registered_as_member: 'Register for this event as a member to join a team.',
+  member_not_registered: 'Register for this event first.',
+  max_teams_reached: 'This event has reached its team limit.',
+  teaming_not_enabled: 'This event doesn’t use teams.',
+  auction_league: 'Teams in this event are picked at the auction.',
+  edit_window_closed: 'Registration is closed, so details can no longer be edited.',
+  edits_not_allowed: 'This event doesn’t allow editing registrations.',
+  cannot_edit_inactive_registration: 'This registration is no longer active.',
+  already_cancelled: 'This registration was already cancelled.',
+  auction_in_progress: 'The auction is in progress — this can’t change right now.',
+  event_service_unavailable: 'Events are temporarily unavailable. Please try again shortly.',
+  mime_not_accepted: 'That file type isn’t accepted. Use JPG, PNG, WEBP or PDF.',
+  unsupported_media_type: 'That file type isn’t accepted. Use JPG, PNG, WEBP or PDF.',
+  payload_too_large: 'That file is too big. The limit is 10MB.',
+  empty_body: 'The file was empty. Pick it again.',
   // leaderboards
   no_leaderboard_for_event: 'This event does not have a leaderboard.',
   entry_not_found: 'You do not have a position on this leaderboard yet.',
@@ -118,9 +147,10 @@ http.interceptors.request.use(async (config) => {
 });
 
 // Single-flight refresh: concurrent 401s share one /auth/refresh call.
-let refreshing: Promise<string | null> | null = null;
+let refreshing: Promise<string | null | undefined> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+/** New access token; null when the server rejected the refresh; undefined when it couldn't be reached (keep the session). */
+async function refreshAccessToken(): Promise<string | null | undefined> {
   const { refreshToken } = await tokenStorage.get();
   if (!refreshToken) return null;
   try {
@@ -130,12 +160,14 @@ async function refreshAccessToken(): Promise<string | null> {
     // Refresh tokens rotate, so both must be stored.
     await tokenStorage.set(tokens.access_token, tokens.refresh_token);
     return tokens.access_token as string;
-  } catch {
-    return null;
+  } catch (err) {
+    const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+    return status != null && status >= 400 && status < 500 ? null : undefined;
   }
 }
 
-const NO_REFRESH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout'];
+// '/account/reactivate' runs on held credentials of a deleted account; a 401 there is final, not a refresh cue.
+const NO_REFRESH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout', '/account/reactivate'];
 
 http.interceptors.response.use(
   (response) => {
@@ -161,6 +193,8 @@ http.interceptors.response.use(
         config.headers.Authorization = `Bearer ${newToken}`;
         return http(config);
       }
+      // Offline or server down: a network blip must not log anyone out.
+      if (newToken === undefined) return Promise.reject(new ApiError(0, 'network_error'));
       const { accessToken } = await tokenStorage.get();
       if (accessToken) {
         await tokenStorage.clear();

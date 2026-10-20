@@ -14,22 +14,57 @@ import type { UploadedFormFile } from '../repositories/RegistrationRepository';
 
 export type FormValues = Record<string, unknown>;
 
-/** Applies a field's `visible_if` rule against the current answers. */
-export function isFieldVisible(field: FormField, values: FormValues): boolean {
-  if (field.admin_only) return false;
-  const rule = field.visible_if;
-  if (!rule) return true;
-  const actual = values[rule.field_key];
-  switch (rule.op) {
-    case 'eq':
-      return actual === rule.value;
-    case 'neq':
-      return actual !== rule.value;
-    case 'in':
-      return Array.isArray(rule.value) && rule.value.includes(actual as never);
-    default:
-      return true;
-  }
+/**
+ * Mirrors the server's visibility rules (registration-service validation.ts) so the form never
+ * hides a field the server will still require:
+ *  - the controller's answer is compared after the same coercion the server applies
+ *    (numbers as numbers, trimmed text, dates as ISO strings), and
+ *  - a field whose controller is itself hidden is evaluated against "no answer" (rules chain).
+ */
+export function visibleFields(fields: FormField[], values: FormValues): FormField[] {
+  const byKey = new Map(fields.map((f) => [f.key, f]));
+  const memo = new Map<string, boolean>();
+  const visiting = new Set<string>();
+
+  const coerced = (field: FormField): unknown => {
+    const raw = values[field.key];
+    if (raw === undefined || raw === null || raw === '') return undefined;
+    if (field.type === 'number') {
+      const n = typeof raw === 'number' ? raw : Number(raw);
+      return Number.isFinite(n) ? n : undefined;
+    }
+    if (field.type === 'date') {
+      const d = new Date(raw as string);
+      return isNaN(d.getTime()) ? undefined : d.toISOString();
+    }
+    if (typeof raw === 'string') return raw.trim() || undefined;
+    return raw;
+  };
+
+  const isVisible = (field: FormField): boolean => {
+    if (field.admin_only) return false;
+    const known = memo.get(field.key);
+    if (known !== undefined) return known;
+    const rule = field.visible_if;
+    if (!rule) return true;
+    if (visiting.has(field.key)) return false; // cycle: hidden, like the server
+    visiting.add(field.key);
+    const controller = byKey.get(rule.field_key);
+    let shown = true; // unknown controller: show rather than drop an answer
+    if (controller) {
+      const v = isVisible(controller) ? coerced(controller) : undefined;
+      shown =
+        rule.op === 'eq' ? v === rule.value
+        : rule.op === 'neq' ? v !== rule.value
+        : rule.op === 'in' ? Array.isArray(rule.value) && rule.value.includes(v)
+        : true;
+    }
+    visiting.delete(field.key);
+    memo.set(field.key, shown);
+    return shown;
+  };
+
+  return fields.filter(isVisible).sort((x, y) => x.order - y.order);
 }
 
 function isEmpty(value: unknown): boolean {
@@ -54,7 +89,7 @@ export function validateField(field: FormField, value: unknown, file?: UploadedF
   }
 
   const v = field.validation;
-  const text = typeof value === 'string' ? value.trim() : '';
+  const text = typeof value === 'string' ? value.trim() : String(value);
 
   switch (field.type) {
     case 'number': {
@@ -68,7 +103,7 @@ export function validateField(field: FormField, value: unknown, file?: UploadedF
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return 'Enter a valid email address.';
       break;
     case 'phone':
-      if (!/^\+?[\d\s()-]{7,20}$/.test(text)) return 'Enter a valid phone number.';
+      if (!/^\+?[0-9 ().-]{5,40}$/.test(text)) return 'Enter a valid phone number.';
       break;
     case 'url':
       if (!/^https?:\/\/\S+$/i.test(text)) return 'Enter a full link starting with https://';

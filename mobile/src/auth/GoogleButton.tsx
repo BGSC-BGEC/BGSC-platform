@@ -1,12 +1,9 @@
 import React from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  View,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import { Pressable, StyleSheet } from 'react-native';
+
 import { Typography } from '../typography/Typography';
+import { FONT_FAMILIES } from '../theme/typography';
+import { useTheme } from '../theme/ThemeProvider';
 
 interface GoogleButtonProps {
   label: string;
@@ -14,33 +11,24 @@ interface GoogleButtonProps {
   disabled?: boolean;
 }
 
-export function GoogleButton({
-  label,
-  onPress,
-  disabled = false,
-}: GoogleButtonProps) {
-  const handlePress = () => {
-    if (disabled) return;
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onPress();
-  };
+const GOOGLE_BLUE = '#4285F5';
 
+/** v2 "Continue with Google" — bordered card button with the blue G. */
+export function GoogleButton({ label, onPress, disabled = false }: GoogleButtonProps) {
+  const { colors } = useTheme();
   return (
     <Pressable
-      onPress={handlePress}
+      onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={label}
       style={({ pressed }) => [
         styles.button,
-        pressed && styles.pressed,
-        disabled && styles.disabled,
+        { backgroundColor: colors.surface, borderColor: colors.border, opacity: disabled ? 0.5 : pressed ? 0.8 : 1 },
       ]}
     >
-      <View style={styles.iconContainer}>
-        <Ionicons name="logo-google" size={18} color="#EA4335" />
-      </View>
-      <Typography variant="button" style={styles.label}>
+      <Typography style={styles.g}>G</Typography>
+      <Typography color="text" style={styles.label}>
         {label}
       </Typography>
     </Pressable>
@@ -48,38 +36,7 @@ export function GoogleButton({
 }
 
 const styles = StyleSheet.create({
-  button: {
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#FFFFFF',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 3,
-  },
-  pressed: {
-    opacity: 0.88,
-    transform: [{ scale: 0.99 }],
-  },
-  disabled: {
-    opacity: 0.5,
-  },
-  iconContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  label: {
-    color: '#222222',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  button: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 16, borderRadius: 16, borderWidth: 1 },
+  g: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 18, lineHeight: 24, color: GOOGLE_BLUE },
+  label: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 14, lineHeight: 20 },
 });
-

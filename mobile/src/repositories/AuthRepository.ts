@@ -34,10 +34,12 @@ export interface RegisterDto {
   contact?: string;
 }
 
-export interface CompleteProfileDto {
-  password?: string;
-  repeatPassword?: string;
-  contact?: string;
+/** Login hit a soft-deleted account: the password was right, the account can still be restored. */
+export class AccountDeactivatedError extends Error {
+  constructor(public daysRemaining: number | null) {
+    super('This account is scheduled for deletion.');
+    this.name = 'AccountDeactivatedError';
+  }
 }
 
 export function mapUser(raw: ApiUser): User {
@@ -79,10 +81,10 @@ export class AuthRepository {
         throw new Error('Incorrect email/username or password.');
       }
       if (err instanceof ApiError && err.code === 'account_deactivated') {
-        const days = (err.body?.days_remaining as number | undefined) ?? undefined;
-        throw new Error(
-          `This account is scheduled for deletion${days !== undefined ? ` (${days} days left to restore)` : ''}. Contact the BGSC team to restore it.`,
-        );
+        throw new AccountDeactivatedError((err.body?.days_remaining as number | undefined) ?? null);
+      }
+      if (err instanceof ApiError && err.status === 429) {
+        throw new Error('Too many attempts. Wait 15 minutes, then try again.');
       }
       if (err instanceof ApiError && err.status === 403) {
         throw new Error('This account has been suspended.');
@@ -141,15 +143,28 @@ export class AuthRepository {
     await api.post('/auth/resend-verification', { email });
   }
 
-  async verifyOtp(_email: string, _code: string): Promise<AuthResponse> {
-    throw new Error('Email verification now happens through the link sent to your inbox.');
+  /** POST /account/reactivate — restores a soft-deleted account and signs it in. */
+  async reactivate(dto: LoginDto): Promise<AuthResponse> {
+    try {
+      const result = await api.post<AuthResult>('/account/reactivate', {
+        login: dto.emailOrUsername,
+        password: dto.password,
+      });
+      return persist(result);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 410) {
+        throw new Error('This account is gone for good. You can sign up again with the same email.');
+      }
+      if (err instanceof ApiError && err.code === 'admin_review_required') {
+        throw new Error('This account needs a quick check by the BGSC team before it can be restored.');
+      }
+      throw err;
+    }
   }
 
-  async completeProfile(dto: CompleteProfileDto): Promise<AuthResponse> {
-    const phone = toE164(dto.contact);
-    const updated = await api.patch<ApiUser>('/users/me', phone ? { phone_number: phone } : {});
-    const { accessToken } = await tokenStorage.get();
-    return { user: mapUser(updated), token: accessToken ?? '' };
+  /** PATCH /users/me — onboarding interests (free-form labels). */
+  async setInterests(interests: string[]): Promise<User> {
+    return mapUser(await api.patch<ApiUser>('/users/me', { interests }));
   }
 
   /**

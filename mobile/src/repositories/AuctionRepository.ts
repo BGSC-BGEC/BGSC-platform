@@ -4,7 +4,7 @@ import type { AuctionLiveState, AuctionLot, LotStatus } from '../api/types';
 export class AuctionRepository {
   /**
    * GET /auction/events/:ref/live — the live block, timer and team purses.
-   * Cached for ~750ms server side; there is no websocket, so poll about once a second.
+   * Cached for ~750ms server side; there is no websocket, so poll every ~2s (gateway limit is 100 req/min).
    */
   live(eventRef: string): Promise<AuctionLiveState> {
     return api.get<AuctionLiveState>(`/auction/events/${encodeURIComponent(eventRef)}/live`);

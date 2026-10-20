@@ -1,13 +1,9 @@
 import React from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  View,
-  type ViewStyle,
-} from 'react-native';
+import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 
 import { Typography } from '../typography/Typography';
-import { Icon } from '../icons/Icon';
+import { FONT_FAMILIES } from '../theme/typography';
+import { useTheme } from '../theme/ThemeProvider';
 
 export interface SectionHeaderProps {
   title: string;
@@ -18,82 +14,46 @@ export interface SectionHeaderProps {
   style?: ViewStyle;
 }
 
-export function SectionHeader({
-  title,
-  subtitle,
-  badge,
-  actionLabel,
-  onAction,
-  style,
-}: SectionHeaderProps) {
+/** v2/SectionHeader — serif section title with an optional orange "See all" action. */
+export function SectionHeader({ title, subtitle, badge, actionLabel, onAction, style }: SectionHeaderProps) {
+  const { colors } = useTheme();
   return (
     <View style={[styles.container, style]}>
-      <View style={styles.titleRow}>
-        <Typography variant="h3" color="text">
-          {title}
-        </Typography>
-
-        {badge !== undefined && (
-          <View style={styles.badge}>
-            <Typography variant="labelSmall" color="primary">
-              {badge}
+      <View style={styles.row}>
+        <View style={styles.titleRow}>
+          <Typography variant="h2" color="text" numberOfLines={1} style={styles.title}>
+            {title}
+          </Typography>
+          {badge !== undefined && (
+            <View style={[styles.badge, { backgroundColor: colors.accentMuted }]}>
+              <Typography variant="labelSmall" color="primary">
+                {badge}
+              </Typography>
+            </View>
+          )}
+        </View>
+        {actionLabel && onAction ? (
+          <Pressable onPress={onAction} hitSlop={8} accessibilityRole="button" accessibilityLabel={actionLabel}>
+            <Typography variant="button" color="primary" style={styles.action}>
+              {actionLabel}
             </Typography>
-          </View>
-        )}
+          </Pressable>
+        ) : null}
       </View>
-
-      {subtitle && (
-        <Typography variant="caption" color="textMuted">
+      {subtitle ? (
+        <Typography variant="bodySmall" color="textMuted">
           {subtitle}
         </Typography>
-      )}
-
-      {actionLabel && onAction && (
-        <Pressable
-          onPress={onAction}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel={actionLabel}
-          style={styles.actionButton}
-        >
-          <Typography variant="button" color="accent" style={styles.actionText}>
-            {actionLabel}
-          </Typography>
-          <Icon name="chevron-right" size="xs" color="accent" />
-        </Pressable>
-      )}
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    paddingVertical: 8,
-    gap: 4,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 999,
-    backgroundColor: 'rgba(224, 122, 63, 0.85)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionButton: {
-    position: 'absolute',
-    right: 0,
-    top: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  actionText: {
-    fontSize: 13,
-  },
+  container: { gap: 2 },
+  row: { flexDirection: 'row', alignItems: 'center', minHeight: 30, gap: 12 },
+  titleRow: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  title: { flexShrink: 1 },
+  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
+  action: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 13, lineHeight: 20 },
 });
-
