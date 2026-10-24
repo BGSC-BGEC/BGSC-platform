@@ -1,0 +1,155 @@
+{
+  "mobile": {
+    "pageId": "2:2",
+    "screenCount": 88,
+    "nodeTypes": {
+      "FRAME": 920,
+      "TEXT": 914,
+      "INSTANCE": 447,
+      "RECTANGLE": 14,
+      "VECTOR": 172
+    },
+    "instances": 447,
+    "autoLayoutContainers": 733,
+    "prototypeConnections": 355,
+    "flowStartingPoints": [
+      {
+        "nodeId": "6:3",
+        "name": "Current mobile \u2014 Login"
+      },
+      {
+        "nodeId": "6:150",
+        "name": "Current mobile \u2014 Home"
+      },
+      {
+        "nodeId": "9:502",
+        "name": "Planned mobile workflows"
+      }
+    ],
+    "imageFilledNodes": [
+      {
+        "id": "6:6",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      },
+      {
+        "id": "6:39",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      },
+      {
+        "id": "6:84",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      },
+      {
+        "id": "6:99",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      },
+      {
+        "id": "6:109",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      },
+      {
+        "id": "6:132",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      },
+      {
+        "id": "6:1617",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      },
+      {
+        "id": "6:1631",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      },
+      {
+        "id": "6:1652",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      },
+      {
+        "id": "6:1662",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      },
+      {
+        "id": "6:2447",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      },
+      {
+        "id": "6:2459",
+        "name": "Image / source auth-cat.gif",
+        "width": 390,
+        "height": 280
+      }
+    ],
+    "badFonts": [],
+    "zeroSizeTexts": [],
+    "invalidDestinations": []
+  },
+  "admin": {
+    "pageId": "2:3",
+    "screenCount": 60,
+    "nodeTypes": {
+      "FRAME": 547,
+      "TEXT": 1277,
+      "INSTANCE": 782,
+      "RECTANGLE": 7
+    },
+    "instances": 782,
+    "autoLayoutContainers": 547,
+    "prototypeConnections": 581,
+    "flowStartingPoints": [
+      {
+        "nodeId": "6:2479",
+        "name": "Current admin \u2014 Login"
+      },
+      {
+        "nodeId": "6:2497",
+        "name": "Current admin \u2014 Dashboard"
+      },
+      {
+        "nodeId": "9:1448",
+        "name": "Planned admin workflows"
+      }
+    ],
+    "imageFilledNodes": [],
+    "badFonts": [],
+    "zeroSizeTexts": [],
+    "invalidDestinations": []
+  },
+  "html": {
+    "checkedScreens": 148,
+    "httpFailures": [],
+    "pageErrors": [],
+    "journeys": [
+      "Login \u2192 Home \u2192 Events \u2192 Details",
+      "Planned admin \u2192 Form builder \u2192 Field configuration",
+      "Contact fields \u2192 Confirmation",
+      "Layout outline toggle"
+    ],
+    "additionalChecks": [
+      "All public relative links and assets exist",
+      "All planned screens reachable from hubs",
+      "Catalogue search and hub-to-splash link passed"
+    ]
+  },
+  "visualReview": "Representative mobile Home, admin Dashboard and admin form-builder inspected; horizontal row heights and shared control text sizing corrected."
+}
