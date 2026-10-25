@@ -7,7 +7,6 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
-import { NEU_SHADOWS } from '../theme/shadow';
 
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from '../icons/Icon';
@@ -18,6 +17,7 @@ export interface TextInputProps extends Omit<RNTextInputProps, 'style'> {
   label?: string;
   error?: string | null;
   helperText?: string;
+  showCharCount?: boolean;
   leftIcon?: IconName;
   rightIcon?: IconName;
   allowClear?: boolean;
@@ -35,6 +35,8 @@ export function TextInput({
   secureTextEntry = false,
   error,
   helperText,
+  showCharCount = false,
+  maxLength,
   leftIcon,
   rightIcon,
   allowClear = false,
@@ -49,6 +51,7 @@ export function TextInput({
   const [passwordHidden, setPasswordHidden] = useState(secureTextEntry);
 
   const hasValue = Boolean(value && value.length > 0);
+  const currentLength = value?.length ?? 0;
   const borderColor = error
     ? colors.danger
     : focused
@@ -66,13 +69,10 @@ export function TextInput({
       <View
         style={[
           styles.inputContainer,
-          NEU_SHADOWS.raisedSmall,
           {
-            borderRadius: rounded ? 24 : 14,
+            borderRadius: rounded ? 16 : 14,
             backgroundColor: colors.surface,
-            borderColor: focused
-              ? colors.borderActive
-              : 'transparent',
+            borderColor,
             opacity: disabled ? 0.5 : 1,
           },
         ]}
@@ -89,12 +89,14 @@ export function TextInput({
         )}
 
         <RNTextInput
+          accessibilityLabel={label}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
           placeholderTextColor={colors.textSubtle}
           secureTextEntry={passwordHidden}
           editable={!disabled}
+          maxLength={maxLength}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           style={[
@@ -141,18 +143,33 @@ export function TextInput({
         )}
       </View>
 
-      {error ? (
-        <Typography variant="bodySmall" color="danger" style={styles.feedbackText}>
-          {error}
-        </Typography>
-      ) : helperText ? (
-        <Typography variant="bodySmall" color="textSubtle" style={styles.feedbackText}>
-          {helperText}
-        </Typography>
+      {error || helperText || (showCharCount && maxLength) ? (
+        <View style={styles.footerRow}>
+          {error ? (
+            <Typography variant="bodySmall" color="danger" style={styles.feedbackText}>
+              {error}
+            </Typography>
+          ) : helperText ? (
+            <Typography variant="bodySmall" color="textSubtle" style={styles.feedbackText}>
+              {helperText}
+            </Typography>
+          ) : (
+            <View />
+          )}
+          {showCharCount && maxLength ? (
+            <Typography variant="caption" color="textSubtle">
+              {currentLength}/{maxLength}
+            </Typography>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
 }
+
+/** Alias per mobile-v2-build-split.md Phase 0 contract (`src/forms/Field.tsx`). */
+export const Field = TextInput;
+export type FieldProps = TextInputProps;
 
 const styles = StyleSheet.create({
   wrapper: {
@@ -165,7 +182,8 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 52,
+    minHeight: 52,
+    borderWidth: 1,
     paddingHorizontal: 12,
   },
   leftIconWrapper: {
@@ -177,8 +195,8 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: FONT_FAMILIES.bodyRegular,
     fontSize: 15,
-    height: '100%',
-    paddingVertical: 0,
+    minHeight: 50,
+    paddingVertical: 12,
   },
   inputLeftPadded: {
     paddingLeft: 4,
@@ -188,7 +206,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  footerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   feedbackText: {
+    flex: 1,
     fontSize: 11,
     marginTop: 2,
     paddingHorizontal: 4,

@@ -59,7 +59,7 @@ export function TextArea({
           {
             minHeight,
             borderColor,
-            backgroundColor: colors.surfaceMuted,
+            backgroundColor: colors.surface,
             opacity: disabled ? 0.5 : 1,
           },
         ]}
@@ -71,6 +71,7 @@ export function TextArea({
         />
 
         <RNTextInput
+          accessibilityLabel={label}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}

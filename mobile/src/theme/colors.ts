@@ -109,6 +109,7 @@ export interface UIThemeColors {
   /** Utility */
   white: string;
   black: string;
+  overlay: string;
   surfaceHighlight: string;
 }
 
@@ -156,6 +157,7 @@ export const lightThemeColors: UIThemeColors = {
   mutedTint: withAlpha('#9A9A9A', 0.16),
   white: PALETTE.white,
   black: PALETTE.black,
+  overlay: withAlpha(PALETTE.black, 0.65),
   surfaceHighlight: withAlpha(PALETTE.orange, 0.08),
 };
 
@@ -203,6 +205,7 @@ export const darkThemeColors: UIThemeColors = {
   mutedTint: withAlpha('#9A9A9A', 0.16),
   white: PALETTE.white,
   black: PALETTE.black,
+  overlay: withAlpha(PALETTE.black, 0.65),
   surfaceHighlight: withAlpha(PALETTE.orange, 0.08),
 };
 

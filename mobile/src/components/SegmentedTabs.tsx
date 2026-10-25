@@ -35,7 +35,12 @@ export function SegmentedTabs<T extends string>({ tabs, value, onChange, style }
             accessibilityState={{ selected: active }}
             style={[styles.tab, active && [{ backgroundColor: colors.surface }, shadow('flat')]]}
           >
-            <Typography variant="button" color={active ? 'accent' : 'textMuted'} numberOfLines={1}>
+            <Typography
+              variant="button"
+              color={active ? 'accent' : 'textMuted'}
+              align="center"
+              numberOfLines={1}
+            >
               {tab.label}
             </Typography>
           </Pressable>
@@ -45,7 +50,11 @@ export function SegmentedTabs<T extends string>({ tabs, value, onChange, style }
   );
 }
 
+/** Alias per mobile-v2-build-split.md Phase 0 contract (`src/components/SegmentedControl.tsx`). */
+export const SegmentedControl = SegmentedTabs;
+export type SegmentedControlProps<T extends string> = SegmentedTabsProps<T>;
+
 const styles = StyleSheet.create({
   container: { flexDirection: 'row', borderRadius: 24, borderWidth: 1, padding: 4 },
-  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 20 },
+  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingHorizontal: 4, paddingVertical: 10, borderRadius: 20 },
 });

@@ -11,8 +11,8 @@ export interface InterestTileProps {
   label: string;
   selected: boolean;
   onToggle: () => void;
-  /** Tile width — the screen passes a third of its content width */
-  width: number;
+  /** Optional explicit tile width; defaults to a responsive 2-column flex tile */
+  width?: number;
 }
 
 /** v2/InterestTile — multi-select tile: tinted with an orange outline and check when selected. */
@@ -29,7 +29,7 @@ export function InterestTile({ label, selected, onToggle, width }: InterestTileP
       accessibilityLabel={label}
       style={[
         styles.tile,
-        { width },
+        width != null ? { width } : styles.flexibleTile,
         selected
           ? { backgroundColor: colors.accentMuted, borderColor: colors.primary, borderWidth: 1.5, padding: 11.5 }
           : { backgroundColor: colors.surface, borderColor: colors.border, borderWidth: 1 },
@@ -44,6 +44,7 @@ export function InterestTile({ label, selected, onToggle, width }: InterestTileP
 }
 
 const styles = StyleSheet.create({
-  tile: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 16 },
+  tile: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, minHeight: 48, borderRadius: 16 },
+  flexibleTile: { flexBasis: '46%', flexGrow: 1, minWidth: 120 },
   label: { flex: 1, fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 13, lineHeight: 21 },
 });

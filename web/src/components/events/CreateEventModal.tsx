@@ -1,47 +1,51 @@
 import React, { useState, useEffect } from 'react'
-import type { ClubEvent, EventCategory, EventDomain } from '../../types/event'
+import type { ClubEvent, EventCategory, EventDomain, EventType } from '../../types/event'
 import { eventService } from '../../services/eventService'
 
 export interface CreateEventModalProps {
-    isOpen: boolean
-    onClose: () => void
-    onEventCreated: (newEvent: ClubEvent) => void
+  isOpen: boolean
+  onClose: () => void
+  onEventCreated: (newEvent: ClubEvent) => void
 }
 
 export const CreateEventModal: React.FC<CreateEventModalProps> = ({
-    isOpen,
-    onClose,
-    onEventCreated,
+  isOpen,
+  onClose,
+  onEventCreated,
 }) => {
-    const today = new Date().toISOString().split('T')[0]
+  const today = new Date().toISOString().split('T')[0]
 
-    const [title, setTitle] = useState('')
-    const [category, setCategory] = useState<EventCategory>('leagues')
-    const [domain, setDomain] = useState<EventDomain>('sports')
-    const [venue, setVenue] = useState('')
-    const [startAt, setStartAt] = useState(today)
-    const [endAt, setEndAt] = useState(today)
-    const [maxParticipants, setMaxParticipants] = useState<number>(32)
-    const [isTeamed, setIsTeamed] = useState(false)
-    const [status, setStatus] = useState<'draft' | 'upcoming'>('upcoming')
-    const [isSubmitting, setIsSubmitting] = useState(false)
-    const [error, setError] = useState<string | null>(null)
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [category, setCategory] = useState<EventCategory>('leagues')
+  const [type, setType] = useState<EventType>('LE')
+  const [domain, setDomain] = useState<EventDomain>('sports')
+  const [venue, setVenue] = useState('')
+  const [startAt, setStartAt] = useState(today)
+  const [endAt, setEndAt] = useState(today)
+  const [maxParticipants, setMaxParticipants] = useState<number>(32)
+  const [isTeamed, setIsTeamed] = useState(false)
+  const [waitlistEnabled, setWaitlistEnabled] = useState(true)
+  const [requiresApproval, setRequiresApproval] = useState(false)
+  const [status, setStatus] = useState<'draft' | 'upcoming'>('draft')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-    useEffect(() => {
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') onClose()
     }
     if (isOpen) {
-        window.addEventListener('keydown', handleKeyDown)
+      window.addEventListener('keydown', handleKeyDown)
     }
     return () => {
-        window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keydown', handleKeyDown)
     }
-    }, [isOpen, onClose])
+  }, [isOpen, onClose])
 
-    if (!isOpen) return null
+  if (!isOpen) return null
 
-    const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim()) return
 
@@ -49,215 +53,256 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
     setError(null)
 
     try {
-        const createdEvent = await eventService.createEvent({
+      const createdEvent = await eventService.createEvent({
         title: title.trim(),
+        description: description.trim(),
         category,
+        type,
         domain,
         venue: venue.trim() || null,
         startAt,
         endAt,
         maxParticipants: maxParticipants > 0 ? maxParticipants : null,
-        isTeamed,
+        isTeamed: type === 'ALL' ? true : isTeamed,
+        waitlistEnabled,
+        requiresApproval,
         status,
-        })
+      })
 
-        onEventCreated(createdEvent)
-        onClose()
+      onEventCreated(createdEvent)
+      onClose()
     } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to create event')
+      setError(err instanceof Error ? err.message : 'Failed to create event')
     } finally {
-        setIsSubmitting(false)
+      setIsSubmitting(false)
     }
-    }
+  }
 
-    return (
+  return (
     <div
-        className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-        onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+      onClick={onClose}
     >
-        <div
-        className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-lg w-full p-6 space-y-4 max-h-
-[90vh] overflow-y-auto"
+      <div
+        className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
-        >
+      >
         <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-            <h2 className="text-sm font-bold uppercase tracking-wider text-black">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-black">
             Create New Tournament
-            </h2>
-            <button
+          </h2>
+          <button
             type="button"
             onClick={onClose}
-            className="px-2 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-
-white"
-            >
+            className="px-2 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-white cursor-pointer"
+          >
             X
-            </button>
+          </button>
         </div>
 
         {error && (
-            <div className="p-2 border border-black text-xs text-black bg-gray-50">
+          <div className="p-2 border border-black text-xs text-black bg-gray-50">
             {error}
-            </div>
+          </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4 text-left">
-            <div>
+          <div>
             <label className="block text-xs font-bold uppercase text-black mb-1">
-                Event Title
+              Event Title
             </label>
             <input
-                type="text"
-                required
-                placeholder="e.g. BGSC Badminton Smash Open"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white
-focus:outline-none focus:border-black"
+              type="text"
+              required
+              placeholder="e.g. BGSC Badminton Smash Open"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
             />
-            </div>
+          </div>
 
-            <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-bold uppercase text-black mb-1">
+              Description
+            </label>
+            <textarea
+              rows={2}
+              placeholder="Brief overview of rules, format, and prizes..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
             <div>
-                <label className="block text-xs font-bold uppercase text-black mb-1">
+              <label className="block text-xs font-bold uppercase text-black mb-1">
                 Category
-                </label>
-                <select
+              </label>
+              <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value as EventCategory)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white
-focus:outline-none focus:border-black"
-                >
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              >
                 <option value="leagues">Leagues</option>
                 <option value="bgec">BGEC</option>
                 <option value="fitsoc">FitSoc</option>
                 <option value="general">General</option>
-                </select>
+              </select>
             </div>
             <div>
-                <label className="block text-xs font-bold uppercase text-black mb-1">
+              <label className="block text-xs font-bold uppercase text-black mb-1">
+                Format Type
+              </label>
+              <select
+                value={type}
+                onChange={(e) => setType(e.target.value as EventType)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              >
+                <option value="LE">LE (Standard)</option>
+                <option value="DE">DE (Double Elim)</option>
+                <option value="ALL">ALL (Auction League)</option>
+                <option value="DLL">DLL (Dual League)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase text-black mb-1">
                 Domain
-                </label>
-                <select
+              </label>
+              <select
                 value={domain}
                 onChange={(e) => setDomain(e.target.value as EventDomain)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white
-focus:outline-none focus:border-black"
-                >
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              >
                 <option value="sports">Sports</option>
                 <option value="esports">Esports</option>
                 <option value="fitness">Fitness</option>
                 <option value="general">General</option>
-                </select>
+              </select>
             </div>
-            </div>
+          </div>
 
-            <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-                <label className="block text-xs font-bold uppercase text-black mb-1">
+              <label className="block text-xs font-bold uppercase text-black mb-1">
                 Start Date
-                </label>
-                <input
+              </label>
+              <input
                 type="date"
                 required
                 value={startAt}
                 onChange={(e) => setStartAt(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white
-focus:outline-none focus:border-black"
-                />
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              />
             </div>
             <div>
-                <label className="block text-xs font-bold uppercase text-black mb-1">
+              <label className="block text-xs font-bold uppercase text-black mb-1">
                 End Date
-                </label>
-                <input
+              </label>
+              <input
                 type="date"
                 required
                 value={endAt}
                 onChange={(e) => setEndAt(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white
-focus:outline-none focus:border-black"
-                />
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              />
             </div>
-            </div>
+          </div>
 
-            <div>
+          <div>
             <label className="block text-xs font-bold uppercase text-black mb-1">
-                Venue / Location
+              Venue / Location
             </label>
             <input
-                type="text"
-                placeholder="e.g. Indoor Badminton Arena, Courts 1-4"
-                value={venue}
-                onChange={(e) => setVenue(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white
-focus:outline-none focus:border-black"
+              type="text"
+              placeholder="e.g. Indoor Badminton Arena, Courts 1-4"
+              value={venue}
+              onChange={(e) => setVenue(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
             />
-            </div>
+          </div>
 
-            <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-                <label className="block text-xs font-bold uppercase text-black mb-1">
+              <label className="block text-xs font-bold uppercase text-black mb-1">
                 Max Capacity
-                </label>
-                <input
+              </label>
+              <input
                 type="number"
                 min={1}
                 value={maxParticipants}
                 onChange={(e) => setMaxParticipants(Number(e.target.value))}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white
-focus:outline-none focus:border-black"
-                />
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              />
             </div>
             <div>
-                <label className="block text-xs font-bold uppercase text-black mb-1">
+              <label className="block text-xs font-bold uppercase text-black mb-1">
                 Initial Status
-                </label>
-                <select
+              </label>
+              <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as 'draft' | 'upcoming')}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white
-focus:outline-none focus:border-black"
-                >
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              >
                 <option value="upcoming">Upcoming</option>
                 <option value="draft">Draft</option>
-                </select>
+              </select>
             </div>
-            </div>
+          </div>
 
-            <div className="pt-1">
+          <div className="space-y-2 pt-1">
             <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-black">
-                <input
+              <input
                 type="checkbox"
-                checked={isTeamed}
+                checked={type === 'ALL' ? true : isTeamed}
+                disabled={type === 'ALL'}
                 onChange={(e) => setIsTeamed(e.target.checked)}
                 className="rounded border-gray-300 text-black focus:ring-black"
-                />
-                <span>Team Tournament (Check if Team vs. Solo)</span>
+              />
+              <span>Team Tournament (Check if Team vs. Solo)</span>
             </label>
-            </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-black">
+              <input
+                type="checkbox"
+                checked={waitlistEnabled}
+                onChange={(e) => setWaitlistEnabled(e.target.checked)}
+                className="rounded border-gray-300 text-black focus:ring-black"
+              />
+              <span>Enable Waitlist when capacity is reached</span>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-black">
+              <input
+                type="checkbox"
+                checked={requiresApproval}
+                onChange={(e) => setRequiresApproval(e.target.checked)}
+                className="rounded border-gray-300 text-black focus:ring-black"
+              />
+              <span>Require Admin Approval for Registrations</span>
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
             <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-xs border border-gray-300 text-black hover:bg-gray-100 rounded
-transition-colors"
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-xs border border-gray-300 text-black hover:bg-gray-100 rounded transition-colors cursor-pointer"
             >
-                Cancel
+              Cancel
             </button>
             <button
-                type="submit"
-                disabled={isSubmitting}
-                className="px-4 py-2 text-xs border border-black bg-black text-white hover:bg-gray-800 rounded
-font-bold transition-colors disabled:opacity-50"
+              type="submit"
+              disabled={isSubmitting}
+              className="px-4 py-2 text-xs border border-black bg-black text-white hover:bg-gray-800 rounded font-bold transition-colors disabled:opacity-50 cursor-pointer"
             >
-                {isSubmitting ? 'Creating...' : 'Create Tournament'}
+              {isSubmitting ? 'Creating...' : 'Create Tournament'}
             </button>
-            </div>
+          </div>
         </form>
-        </div>
+      </div>
     </div>
-    )
+  )
 }
 
 export default CreateEventModal

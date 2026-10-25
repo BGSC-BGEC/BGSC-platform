@@ -4,5 +4,6 @@
     "expo-image",
     "expo-video",
     "expo-font"
-  ]
+  ],
+  "scheme": "bgsc"
 }

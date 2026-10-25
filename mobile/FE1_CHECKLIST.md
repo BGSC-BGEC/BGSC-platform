@@ -1,27 +1,27 @@
-# FE-Mobile-1 — MVP Checklist
+# FE-Mobile (BE-1 & BE-2 v2 Rebuild) — MVP Checklist
 
-**Last updated:** 18 Oct 2026  
-**Scope:** every FE-Mobile-1 task in `docs/MVP_Timeline_Plan_Updated.md`, up to the 18 Oct deadline.  
-**Legend:** ✅ done · 🟡 done but not yet tested against a running backend · ⛔ blocked · ⬜ not started
+**Last updated:** 25 Oct 2026  
+**Scope:** Mobile v2 build (`docs/mobile-v2-build-split.md`) and full backend integration (`docs/frontend-api-and-design-registry.md`).  
+**Legend:** ✅ done & verified against running backend + Android emulator · 🟡 external provider config needed in prod (SMTP/SMS/Google/Strava keys)
 
-> **Testing status:** all features below are wired to the real backend routes. The app typechecks and the Android bundle builds (`npx expo export --platform android`). The backend has **not** yet been run alongside the app, so nothing has been tested end to end. Every 🟡 item needs a pass once the backend is up.
+> **Testing status (25 Oct 2026):** All BE-2 (Slices A, B, C, G) and BE-1 (Slices D, E, F, H) v2 screens and Phase 0 components are implemented, responsive across `360dp`–`430dp+` phones (`useResponsive`), typechecked (`npx tsc --noEmit` = 0 errors), self-checked (`mobile/scripts/*.selfcheck.cjs`), and verified end-to-end on the Android emulator against the live 12-microservice backend stack on `:3000`.
 
 ---
 
 ## 1. Summary
 
-| Timeline task (date) | Status |
+| Timeline / v2 Slice | Status |
 |---|---|
-| Project architecture setup (5 Sep) | ✅ |
-| Authentication UI & integration (6 Sep) | 🟡 (Google sign-in ⛔) |
-| Events list & filters (12 Sep) | 🟡 |
-| Event details & registration (13 Sep) | 🟡 |
-| Auction interface (19 Sep) | 🟡 |
-| Leaderboard page (20 Sep) | 🟡 |
-| Media page (26 Sep) | 🟡 |
-| Hall of Fame page (27 Sep) | 🟡 |
-| All popups (17 Oct) | ✅ |
-| Bug fixes, polish, production APK/IPA (18 Oct) | ⬜ (needs backend running + `app.json` config) |
+| Project architecture & responsive phone scaling (`useResponsive`) | ✅ |
+| Phase 0 Shared Foundation (Shell, Sheets, Fields, Controls, Rows, StatTiles) | ✅ |
+| Slice G — Authentication & Onboarding (`Landing`, `Login`, `Register`, `VerifyEmail`, `GetStarted`, `RestoreAccount`) | ✅ (SMTP/Google OAuth keys 🟡) |
+| Slice A — Home, Announcements & Social (`HomeTab`, `AnnouncementsTab`, `AnnouncementDetail`, `SocialTab`, `Drawer`) | ✅ |
+| Slice B — Events & Registration (`Events`, `EventDetails`, `EventRegistration`, `TeamJoin`) | ✅ |
+| Slice C — Live Auction (`Auction`, `AuctionLots`, `MyBids`) | ✅ |
+| Slice D — Leaderboards & Brackets (`Leaderboard`, `EventStandings`, `InvestmentSheet`, `Match`) | ✅ |
+| Slice E — Points, Challenges & Strava (`Points`, `Challenges`, `ChallengeDetail`, `StravaConnect`) | ✅ |
+| Slice F — Profile, Settings & Notifications (`Profile`, `EditProfile`, `ProfilePhoto`, `Settings`, `DeleteAccount`, `Notifications`, `PhoneOtp`) | ✅ |
+| Slice H — Hall of Fame, Media & Feedback (`HallOfFame`, `HallOfFameDetail`, `Media`, `MediaViewer`, `Feedback`, `FeedbackSuccess`, `MyTickets`, `ContactFaq`) | ✅ |
 
 ---
 

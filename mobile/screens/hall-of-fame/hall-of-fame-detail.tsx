@@ -1,4 +1,4 @@
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -21,8 +21,8 @@ export default function HallOfFameDetail() {
   const { colors } = useTheme();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
-  const ref: string = route.params?.ref;
-  const { data: entry, loading, error, reload } = useAsyncResource(() => hallOfFameRepository.get(ref), [ref]);
+  const ref: string = route.params?.slugOrId ?? route.params?.ref;
+  const { data: entry, loading, error, reload, refreshing } = useAsyncResource(() => hallOfFameRepository.get(ref), [ref]);
 
   if (loading || error || !entry) {
     return (
@@ -41,13 +41,13 @@ export default function HallOfFameDetail() {
   }
 
   const cover = resolveMediaUrl(entry.cover_url ?? entry.media_url);
-  const members = entry.members.filter((m) => !m.deleted);
+  const members = (entry.members ?? []).filter((m) => !m.deleted);
   const { achievement } = entry;
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
       <AppHeader title="Hall of Fame" showBackButton showMenuButton={false} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void reload()} tintColor={colors.accent} />}>
         <View style={[styles.hero, { backgroundColor: colors.accentMuted }]}>
           {cover ? <Image source={{ uri: cover }} style={styles.cover} contentFit="cover" transition={200} /> : null}
           <View style={styles.badges}>
@@ -88,7 +88,7 @@ export default function HallOfFameDetail() {
             {achievement.domain ? <Badge label={achievement.domain} variant="muted" /> : null}
             {achievement.difficulty ? <Badge label={achievement.difficulty} variant="warning" icon="flame-outline" /> : null}
             {achievement.award_points ? <Badge label={`+${achievement.award_points} points`} variant="success" icon="star" /> : null}
-            {entry.tags.map((tag) => (
+            {(entry.tags ?? []).map((tag) => (
               <Badge key={tag} label={tag} variant="muted" />
             ))}
           </View>
@@ -111,7 +111,14 @@ export default function HallOfFameDetail() {
             label={`View ${entry.source.title ?? 'event'}`}
             variant="outline"
             fullWidth
-            onPress={() => navigation.navigate('EventDetails', { eventId: entry.source.id })}
+            onPress={() => navigation.navigate('EventStandings', { ref: entry.source.id })}
+          />
+        ) : entry.source.type === 'challenge' && entry.source.id ? (
+          <Button
+            label={`View ${entry.source.title ?? 'challenge'}`}
+            variant="outline"
+            fullWidth
+            onPress={() => navigation.navigate('ChallengeDetail', { key: entry.source.id })}
           />
         ) : null}
         <Button label="Share" leftIcon="share" fullWidth onPress={() => shareHallOfFame(entry)} />
@@ -122,7 +129,7 @@ export default function HallOfFameDetail() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { padding: 20, gap: 16, paddingBottom: 40 },
+  content: { width: '100%', maxWidth: 720, alignSelf: 'center', padding: 20, gap: 16, paddingBottom: 40 },
   hero: { padding: 20, borderRadius: 24, gap: 12, overflow: 'hidden' },
   cover: { height: 170, borderRadius: 16 },
   badges: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },

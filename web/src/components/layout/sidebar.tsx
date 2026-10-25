@@ -12,6 +12,8 @@ import {
     Megaphone,
     Image,
     MessageSquare,
+    Target,
+    Crown,
 } from 'lucide-react'
 
 import type { LucideIcon } from 'lucide-react'
@@ -32,6 +34,8 @@ const NAV_ITEMS: NavItem[] = [
     { path: '/auction', label: 'Auctions', icon: Gavel },
     { path: '/media', label: 'Media Library', icon: Image },
     { path: '/leaderboard', label: 'Leaderboards', icon: Award },
+    { path: '/challenges', label: 'Challenges', icon: Target },
+    { path: '/hall-of-fame', label: 'Hall of Fame', icon: Crown },
     { path: '/feedback', label: 'Feedback & Support', icon: MessageSquare },
 ]
 

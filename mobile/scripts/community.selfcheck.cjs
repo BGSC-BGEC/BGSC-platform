@@ -1,0 +1,17 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const ts = require('typescript');
+const path = require('node:path');
+const output = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/utils/community.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText;
+const target = { exports: {} };
+new Function('module', 'exports', output)(target, target.exports);
+const { attachmentUrls, mediaUploadError } = target.exports;
+assert.deepEqual(attachmentUrls(' https://example.test/proof\n\nhttp://example.test/file '), ['https://example.test/proof', 'http://example.test/file']);
+for (const text of ['javascript:alert(1)', 'file:///private/photo.jpg', 'data:image/png;base64,a', Array(6).fill('https://example.test').join('\n')]) assert.throws(() => attachmentUrls(text));
+assert.equal(mediaUploadError('image/jpeg', 10 * 1024 * 1024), null);
+assert.equal(mediaUploadError('video/mp4', 50 * 1024 * 1024), null);
+assert.match(mediaUploadError('image/png', 10 * 1024 * 1024 + 1), /10 MB/);
+assert.match(mediaUploadError('video/mp4', 50 * 1024 * 1024 + 1), /50 MB/);
+assert.match(mediaUploadError('image/heic', 10), /HEIC/);
+assert.match(mediaUploadError('video/quicktime', 10), /MOV/);
+console.log('Community checks passed: attachment URL safety and media upload limits.');

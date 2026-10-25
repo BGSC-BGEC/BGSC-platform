@@ -215,8 +215,6 @@ export function Button({
             <Typography
               variant="button"
               numberOfLines={1}
-              adjustsFontSizeToFit
-              minimumFontScale={0.8}
               style={[
                 styles.label,
                 styles.shrink,

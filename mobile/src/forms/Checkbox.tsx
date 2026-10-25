@@ -97,7 +97,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    paddingVertical: 4,
+    paddingVertical: 10,
+    minHeight: 44,
   },
   box: {
     width: 22,

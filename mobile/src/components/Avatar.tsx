@@ -11,13 +11,14 @@ export interface AvatarProps {
   name?: string | null;
   uri?: string | null;
   size?: number;
+  ring?: boolean;
   /** Fallback background (defaults to solid primary) */
   color?: string;
   style?: StyleProp<ViewStyle>;
 }
 
 /** Circular avatar with an orange initials fallback (same as the profile header). */
-export function Avatar({ name, uri, size = 40, color, style }: AvatarProps) {
+export function Avatar({ name, uri, size = 40, ring = false, color, style }: AvatarProps) {
   const { colors } = useTheme();
   const source = resolveMediaUrl(uri);
   const radius = size / 2;
@@ -27,6 +28,7 @@ export function Avatar({ name, uri, size = 40, color, style }: AvatarProps) {
       style={[
         styles.base,
         { width: size, height: size, borderRadius: radius, backgroundColor: color ?? colors.primarySolid },
+        ring && { borderWidth: 3, borderColor: colors.text },
         style,
       ]}
     >

@@ -57,6 +57,7 @@ export function Switch({
 
   return (
     <Pressable
+      hitSlop={10}
       onPress={handleToggle}
       disabled={disabled}
       accessibilityRole="switch"
@@ -77,6 +78,7 @@ export function Switch({
           styles.thumb,
           {
             backgroundColor: colors.primaryText,
+            shadowColor: colors.shadowDark,
             transform: [{ translateX }],
           },
         ]}
@@ -98,7 +100,6 @@ const styles = StyleSheet.create({
     width: THUMB_SIZE,
     height: THUMB_SIZE,
     borderRadius: THUMB_SIZE / 2,
-    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3,

@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { Animated, Pressable, StyleSheet, View } from 'react-native';
+import React from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useTheme } from '../theme/ThemeProvider';
+import { useResponsive } from '../responsive/useResponsive';
 import { Typography } from '../typography/Typography';
-import type { UIThemeColors } from '../theme/colors';
 import { Avatar } from './Avatar';
 import { formatNumber } from '../utils/format';
 
@@ -18,57 +18,61 @@ export interface RankedRow {
   isMe?: boolean;
 }
 
-const MEDAL: Record<1 | 2 | 3, keyof UIThemeColors> = { 1: 'primary', 2: 'textMuted', 3: 'warning' };
-
 /** Top-three podium laid out 2 · 1 · 3 with the winner raised. */
 export function Podium({ rows, unit = 'pts' }: { rows: RankedRow[]; unit?: string }) {
-  const { colors, shadow } = useTheme();
-  const [anims] = useState(() => [0, 1, 2].map(() => new Animated.Value(0)));
-
-  useEffect(() => {
-    Animated.stagger(
-      60,
-      anims.map((a) => Animated.spring(a, { toValue: 1, tension: 90, friction: 14, useNativeDriver: true })),
-    ).start();
-  }, [anims]);
-
+  const { colors } = useTheme();
+  const { isCompactPhone } = useResponsive();
   if (rows.length === 0) return null;
-  const order = [rows[1], rows[0], rows[2]];
-
   return (
-    <View style={styles.podium}>
-      {order.map((row, column) => {
+    <View style={[styles.podium, isCompactPhone && styles.podiumCompact]}>
+      {[rows[1], rows[0], rows[2]].map((row, column) => {
         if (!row) return <View key={`empty-${column}`} style={styles.podiumTile} />;
-        const place = (column === 1 ? 1 : column === 0 ? 2 : 3) as 1 | 2 | 3;
-        const anim = anims[place - 1];
+        const place = column === 1 ? 1 : column === 0 ? 2 : 3;
+        const avatarSize = place === 1 ? (isCompactPhone ? 52 : 60) : isCompactPhone ? 42 : 48;
         return (
-          <Animated.View
-            key={row.key}
-            style={[
-              styles.podiumTile,
-              { marginTop: place === 1 ? 0 : 16 },
-              { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] },
-            ]}
-          >
+          <View key={row.key} style={styles.podiumTile}>
+            <Avatar
+              name={row.name}
+              uri={row.avatarUrl}
+              size={avatarSize}
+              ring
+              style={{ borderColor: place === 1 ? colors.warning : colors.border }}
+            />
+            <Typography
+              variant="caption"
+              align="center"
+              numberOfLines={1}
+              style={styles.podiumName}
+            >
+              {row.name}
+            </Typography>
             <View
               style={[
                 styles.podiumCard,
-                { backgroundColor: colors.surface, borderColor: row.isMe ? colors.accent : colors.border },
-                shadow('flat'),
+                {
+                  minHeight: place === 1 ? (isCompactPhone ? 124 : 144) : place === 2 ? (isCompactPhone ? 98 : 112) : isCompactPhone ? 84 : 96,
+                  backgroundColor: place === 1 ? colors.warningMuted : colors.surface,
+                  borderColor: place === 1 ? colors.warning : row.isMe ? colors.accent : colors.border,
+                },
               ]}
             >
-              <View style={[styles.medal, { backgroundColor: colors[MEDAL[place]] }]}>
-                <Typography variant="labelSmall" color="primaryText">{place}</Typography>
-              </View>
-              <Avatar name={row.name} uri={row.avatarUrl} size={place === 1 ? 52 : 44} />
-              <Typography variant="h4" align="center" numberOfLines={1} style={styles.podiumName}>
-                {row.name}
+              <Typography
+                variant={isCompactPhone ? 'h1' : 'displayTitle'}
+                color={place === 1 ? 'warning' : 'text'}
+                numberOfLines={1}
+              >
+                {place}
               </Typography>
-              <Typography variant="mono" color="accent">
+              <Typography
+                variant="caption"
+                align="center"
+                color="textMuted"
+                numberOfLines={1}
+              >
                 {formatNumber(row.score)} {unit}
               </Typography>
             </View>
-          </Animated.View>
+          </View>
         );
       })}
     </View>
@@ -112,7 +116,7 @@ export function StandingRow({ row, onPress, unit = 'pts' }: { row: RankedRow; on
           {delta > 0 ? `▲${delta}` : delta < 0 ? `▼${-delta}` : '—'}
         </Typography>
       ) : null}
-      <Typography variant="mono" style={styles.score}>
+      <Typography variant="mono" numberOfLines={1} style={styles.score}>
         {formatNumber(row.score)}
       </Typography>
     </Pressable>
@@ -120,23 +124,23 @@ export function StandingRow({ row, onPress, unit = 'pts' }: { row: RankedRow; on
 }
 
 const styles = StyleSheet.create({
-  podium: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
-  podiumTile: { flex: 1 },
-  podiumCard: { borderWidth: 1, borderRadius: 20, padding: 12, alignItems: 'center', gap: 6 },
-  medal: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  podium: { flexDirection: 'row', gap: 12, alignItems: 'flex-end' },
+  podiumCompact: { gap: 8 },
+  podiumTile: { flex: 1, minWidth: 0, alignItems: 'center', gap: 8 },
+  podiumCard: { width: '100%', borderWidth: 1, borderRadius: 16, padding: 8, alignItems: 'center', justifyContent: 'center', gap: 4 },
   podiumName: { maxWidth: '100%' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
     paddingVertical: 12,
     paddingHorizontal: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderRadius: 8,
   },
   pressed: { opacity: 0.7 },
-  rank: { width: 32 },
-  identity: { flex: 1, gap: 2 },
-  delta: { width: 36, textAlign: 'right' },
-  score: { minWidth: 56, textAlign: 'right' },
+  rank: { minWidth: 24 },
+  identity: { flex: 1, minWidth: 0, gap: 2 },
+  delta: { minWidth: 24, textAlign: 'right' },
+  score: { minWidth: 40, maxWidth: 84, textAlign: 'right' },
 });

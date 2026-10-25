@@ -342,6 +342,17 @@ async function main(): Promise<void> {
     assert.ok(events.some((e) => e.type === 'UserEnabled'), 'lifting a suspension is announced, like imposing one');
     assert.ok(await AuditLog.exists({ target_id: bo._id, action: 'user.reactivated' }), 'and audited as a reactivation');
 
+    // Removing a photo clears the profile and emits the same snapshot update as an upload.
+    const toRemove = await call('POST', '/users/me/avatar', { as: anaT, raw: png });
+    const removeEventStart = events.length;
+    assert.strictEqual((await call('DELETE', '/users/me/avatar', { as: anaT })).status, 204);
+    assert.strictEqual((await call('GET', '/users/me', { as: anaT })).body.profile.avatar_url, null);
+    assert.ok(events.slice(removeEventStart).some(e => e.type === 'UserProfileUpdated'));
+    assert.strictEqual((await call('DELETE', '/users/me/avatar', { as: anaT })).status, 204, 'removal is idempotent');
+    assert.strictEqual((await call('DELETE', '/users/me/avatar')).status, 401, 'photo removal needs auth');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    await assert.rejects(() => fs.access(path.join(UPLOAD_DIR, toRemove.body.avatar_url.replace('/uploads/', ''))));
+
     // ---- replacing an avatar removes the old file -------------------------
     const first = await call('POST', '/users/me/avatar', { as: anaT, raw: png });
     const firstPath = path.join(UPLOAD_DIR, first.body.avatar_url.replace('/uploads/', ''));

@@ -297,7 +297,11 @@ export class MediaService {
         if (query.media_type) filter.media_type = query.media_type;
         if (query.tag) filter.tags = query.tag;
 
-        if (core) {
+        if (query.mine) {
+            if (!viewer) throw new ServiceError(401, 'unauthorized');
+            filter['uploader.user_id'] = viewer.id;
+            if (query.status) filter.status = query.status;
+        } else if (core) {
             if (query.status) filter.status = query.status;
         } else {
             filter.status = 'approved';
@@ -328,8 +332,11 @@ export class MediaService {
             Media.countDocuments(filter),
         ]);
 
+        const likedIds = viewer ? new Set(await MediaLike.distinct('media_id', {
+            user_id: viewer.id, media_id: { $in: items.map((item) => item._id) },
+        })) : new Set<string>();
         return {
-            items,
+            items: items.map((item) => ({ ...item, liked_by_me: likedIds.has(item._id) })),
             total,
             page: query.page,
             limit: query.limit,
@@ -337,7 +344,7 @@ export class MediaService {
         };
     }
 
-    async getMediaById(id: string, viewer?: Viewer | null): Promise<IMedia> {
+    async getMediaById(id: string, viewer?: Viewer | null): Promise<IMedia & { liked_by_me: boolean }> {
         const media = await Media.findById(id).lean<IMedia>();
         if (!media) {
             throw new ServiceError(404, 'media_not_found');
@@ -349,7 +356,8 @@ export class MediaService {
             Media.updateOne({ _id: id }, { $inc: { views_count: 1 } }).exec().catch(() => {});
         }
 
-        return media;
+        const liked_by_me = !!viewer && !!(await MediaLike.exists({ media_id: id, user_id: viewer.id }));
+        return Object.assign(media, { liked_by_me });
     }
 
     /** Where the item's file is right now, for whoever may see the item. The path is the row's, never the request's. */

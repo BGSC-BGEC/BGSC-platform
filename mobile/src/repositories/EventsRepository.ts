@@ -18,6 +18,10 @@ export interface EventListQuery {
   cursor?: string | null;
 }
 
+export type InvestmentEvent = ApiEvent & {
+  points_pool?: { investment_enabled: boolean; investment_cap: number | null };
+};
+
 export class EventsRepository {
   /** GET /events — cursor pagination (pass `next_cursor` back as `cursor`). */
   list(query: EventListQuery = {}): Promise<EventListResponse> {
@@ -27,8 +31,13 @@ export class EventsRepository {
   }
 
   /** GET /events/:ref — ref is the event id or its slug. */
-  get(ref: string): Promise<ApiEvent> {
-    return api.get<ApiEvent>(`/events/${encodeURIComponent(ref)}`);
+  get(ref: string): Promise<InvestmentEvent> {
+    return api.get<InvestmentEvent>(`/events/${encodeURIComponent(ref)}`);
+  }
+
+  /** Alias for `get(ref)` used by standings/leaderboard screens. */
+  getById(ref: string): Promise<InvestmentEvent> {
+    return this.get(ref);
   }
 
   /** GET /events/:ref/eligibility — can the signed-in member register right now? */

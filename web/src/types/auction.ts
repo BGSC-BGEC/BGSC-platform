@@ -1,5 +1,5 @@
 export type LotStatus = 'queued' | 'on_block' | 'settling' | 'sold' | 'unsold'
-export type AuctionStatus = 'draft' | 'live' | 'paused' | 'finished'
+export type AuctionStatus = 'draft' | 'not_started' | 'live' | 'paused' | 'finished'
 
 export interface AuctionPlayer {
   user_id: string

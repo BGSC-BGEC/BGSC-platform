@@ -221,6 +221,13 @@ async function main(): Promise<void> {
     await expectError(() => mediaService.getMediaById(memberUpload._id, asViewer(other)), 'media_not_found', 'and to another member');
     assert.strictEqual((await mediaService.getMediaById(memberUpload._id, asViewer(member)))._id, memberUpload._id, 'its uploader sees it');
 
+    const mine = await mediaService.listMedia({ page: 1, limit: 10, mine: true, status: 'pending' }, asViewer(member));
+    assert.deepStrictEqual(mine.items.map((item) => item._id), [memberUpload._id], 'mine shows only the uploader’s pending items');
+    assert.strictEqual((await mediaService.listMedia({ page: 1, limit: 10, mine: true, status: 'pending' }, asViewer(other))).total, 0, 'mine cannot expose another member’s pending uploads');
+    await expectError(() => mediaService.listMedia({ page: 1, limit: 10, mine: true }, null), 'unauthorized', 'mine requires a session');
+    assert.strictEqual(ListMediaQuerySchema.parse({ mine: 'false' }).mine, false, 'false must not coerce to true');
+    assert.strictEqual(ListMediaQuerySchema.safeParse({ mine: 'anything' }).success, false, 'invalid mine rejected');
+
     const pendingList = await mediaService.listPendingModeration({ page: 1, limit: 10 }, asViewer(core));
     assert.deepStrictEqual(pendingList.items.map((i) => i._id), [memberUpload._id]);
     assert.strictEqual(pendingList.items[0].preview_url, `/media/${memberUpload._id}/file`, 'each queue item says where to look at it');
@@ -363,6 +370,10 @@ async function main(): Promise<void> {
     /* ---------------- 6. Likes ---------------- */
     const liked = await mediaService.toggleLike(albumUpload._id, asViewer(member));
     assert.deepStrictEqual([liked.liked, liked.likes_count], [true, 1], 'a like');
+    assert.strictEqual((await mediaService.getMediaById(albumUpload._id, asViewer(member))).liked_by_me, true, 'detail restores the current viewer’s like');
+    assert.strictEqual((await mediaService.getMediaById(albumUpload._id, asViewer(other))).liked_by_me, false, 'another viewer gets their own like state');
+    assert.strictEqual((await mediaService.listMedia({ page: 1, limit: 50 }, asViewer(member))).items.find((item) => item._id === albumUpload._id)?.liked_by_me, true, 'gallery carries like state');
+
     const unliked = await mediaService.toggleLike(albumUpload._id, asViewer(member));
     assert.deepStrictEqual([unliked.liked, unliked.likes_count], [false, 0], 'the same user again is an unlike, not a second like');
     await mediaService.toggleLike(albumUpload._id, asViewer(member));

@@ -162,6 +162,24 @@ export const uploadAvatar = wrap(async (req, res) => {
     res.status(201).json({ avatar_url: stored.url, bytes: stored.bytes, mime: stored.mime });
 });
 
+export const removeAvatar = wrap(async (req, res) => {
+    await svc.findActiveSelf(req.user!.id);
+    const previous = await User.findOneAndUpdate(
+        { _id: req.user!.id, deleted_at: null },
+        { $set: { 'profile.avatar_url': null } },
+        { returnDocument: 'before' }
+    );
+    if (!previous) return void res.status(404).json({ error: 'not_found' });
+    const old = previous.profile?.avatar_url;
+    if (old?.startsWith('/uploads/')) {
+        deleteObject(old.replace(/^\/uploads\//, '')).catch((err) =>
+            console.error('Failed to remove avatar file:', err)
+        );
+    }
+    if (old) publish('UserProfileUpdated', 'user-service', { user_id: previous._id, changed_fields: ['avatar_url'] });
+    res.status(204).send();
+});
+
 export const getUser = wrap(async (req, res) => {
     const user = await svc.findByRef((req.params as Record<string, string>).ref);
     if (!user) return void res.status(404).json({ error: 'not_found' });

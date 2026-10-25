@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { FlatList, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Button } from '../../src/components/Button';
 import { Badge } from '../../src/components/Badge';
 import { Card } from '../../src/components/Card';
 import { AppHeader } from '../../src/components/AppHeader';
@@ -16,6 +17,7 @@ import { Skeleton } from '../../src/feedback/Skeleton';
 import { IconButton } from '../../src/icons/IconButton';
 import { Typography } from '../../src/typography/Typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
+import { useResponsive } from '../../src/responsive/useResponsive';
 import { useAsyncResource } from '../../src/hooks/useAsyncResource';
 import { hallOfFameRepository } from '../../src/repositories/HallOfFameRepository';
 import type { HallOfFameCategory, HallOfFameEntry } from '../../src/api/types';
@@ -40,7 +42,10 @@ function subtitleFor(entry: HallOfFameEntry) {
 
 export default function HallOfFame() {
   const { colors } = useTheme();
+  const { width, gutter } = useResponsive();
+  const featuredWidth = Math.min(width - gutter * 2 - 24, 320);
   const navigation = useNavigation<any>();
+  const [page, setPage] = useState(1);
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [search, setSearch] = useState('');
   const [mode, setMode] = useState<View_>('list');
@@ -51,10 +56,13 @@ export default function HallOfFame() {
       hallOfFameRepository.list({
         category: category === 'all' ? undefined : category,
         search: search || undefined,
-        limit: 100,
+        limit: 50,
+        page,
       }),
-    [category, search],
+    [category, search, page],
   );
+
+  const totalPages = entries.data ? Math.ceil(entries.data.total / entries.data.limit) : 1;
 
   const byYear = useMemo(() => {
     const groups = new Map<number, HallOfFameEntry[]>();
@@ -65,7 +73,7 @@ export default function HallOfFame() {
     return [...groups.entries()].sort((a, b) => b[0] - a[0]);
   }, [entries.data]);
 
-  const open = (entry: HallOfFameEntry) => navigation.navigate('HallOfFameDetail', { ref: entry.slug || entry._id });
+  const open = (entry: HallOfFameEntry) => navigation.navigate('HallOfFameDetail', { slugOrId: entry.slug || entry._id });
 
   const renderEntry = (entry: HallOfFameEntry) => (
     <Card key={entry._id} variant="solid" onPress={() => open(entry)} accessibilityLabel={`${entry.title}, ${entry.honoree.display_name}`}>
@@ -94,7 +102,7 @@ export default function HallOfFame() {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
       <AppHeader title="Hall of Fame" />
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingHorizontal: gutter, paddingTop: gutter }]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
@@ -107,7 +115,9 @@ export default function HallOfFame() {
           />
         }
       >
+        <Typography variant="displayTitle">Legends of BGSC.</Typography>
         <Typography variant="body" color="textMuted">Celebrating the people who define BGSC.</Typography>
+        {featured.error ? <ErrorState title="Featured honours unavailable" message={featured.error} onRetry={() => void featured.reload()} /> : null}
 
         {featured.loading ? (
           <Skeleton height={170} borderRadius={24} />
@@ -119,11 +129,11 @@ export default function HallOfFame() {
               data={featured.data}
               keyExtractor={(item) => item._id}
               showsHorizontalScrollIndicator={false}
-              snapToInterval={292}
+              snapToInterval={featuredWidth + 12}
               decelerationRate="fast"
               contentContainerStyle={styles.carousel}
               renderItem={({ item }) => (
-                <Card variant="accent" style={styles.featuredCard} onPress={() => open(item)}>
+                <Card variant="accent" style={{ width: featuredWidth }} onPress={() => open(item)}>
                   <Card.Header title={item.title} rightAction={<Badge label={String(item.achievement.year)} variant="primary" />} />
                   <Card.Body>
                     <View style={styles.honoree}>
@@ -142,8 +152,8 @@ export default function HallOfFame() {
           </>
         ) : null}
 
-        <SearchInput value={search} onSearch={(text) => setSearch(text.trim())} placeholder="Search by name or title" />
-        <FilterChips options={CATEGORIES} value={category} onChange={setCategory} />
+        <SearchInput value={search} onSearch={(text) => { setSearch(text.trim()); setPage(1); }} placeholder="Search by name or title" />
+        <FilterChips options={CATEGORIES} value={category} onChange={(value) => { setCategory(value); setPage(1); }} />
         <SegmentedTabs
           tabs={[
             { label: 'List', value: 'list' },
@@ -198,6 +208,11 @@ export default function HallOfFame() {
             </View>
           ))
         )}
+        {!entries.loading && !entries.error && totalPages > 1 ? <View style={styles.pagination}>
+          <Button label="Previous" variant="outline" disabled={page === 1} onPress={() => setPage(page - 1)} />
+          <Typography variant="caption" color="textMuted">Page {page} of {totalPages}</Typography>
+          <Button label="Next" variant="outline" disabled={page >= totalPages} onPress={() => setPage(page + 1)} />
+        </View> : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -205,10 +220,10 @@ export default function HallOfFame() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { padding: 20, gap: 16, paddingBottom: 40 },
+  content: { width: '100%', maxWidth: 720, alignSelf: 'center', padding: 20, gap: 16, paddingBottom: 40 },
   flex: { flex: 1 },
   carousel: { gap: 12, paddingVertical: 4, paddingRight: 4 },
-  featuredCard: { width: 280 },
+  pagination: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   honoree: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   quote: { fontStyle: 'italic' },
   yearBlock: { gap: 8 },

@@ -33,6 +33,7 @@ export const UploadMediaQuerySchema = z.object({
 export type UploadMediaQuery = z.infer<typeof UploadMediaQuerySchema>;
 
 export const ListMediaQuerySchema = z.object({
+    mine: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
     category: z.enum(MEDIA_CATEGORIES).optional(),
     event_id: Uuid.optional(),
     tag: Tag.optional(),

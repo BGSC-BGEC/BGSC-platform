@@ -10,6 +10,9 @@ Link format: `https://www.figma.com/design/oLGMtiAnxLElj27lRQciuq/?node-id=<node
 — e.g. Home = `node-id=34-563`. Play the prototype from the flow **"v2 · Full app (splash)"** to see how screens connect.
 
 Feature spec: `docs/SystemDesignDocs/` (never `Legacy/`). API: gateway on `:3000`, no `/api` prefix.
+Full API & design decisions registry: [`docs/frontend-api-and-design-registry.md`](./frontend-api-and-design-registry.md).
+
+> **Build Status (Oct 25, 2026):** Both **BE-2** (Slices A, B, C, G + Shell) and **BE-1** (Slices D, E, F, H + Form/Row components + Responsive phone scaling `useResponsive`) are **complete**, typechecked (`tsc --noEmit` = 0 errors), self-checked, and wired to the live backend gateway (`:3000`).
 
 ---
 
@@ -53,15 +56,16 @@ Both start here at the same time. Nothing below depends on the other person's ha
 | `EventCard`, `AnnouncementCard` | `v2/EventCard`, `v2/AnnouncementCard` | Used by Home, Events, Announcements (all BE-2). |
 | State views | `v2-events-states` | Skeleton card, `EmptyState`, `ErrorState` banner — restyle existing `src/feedback/*`. |
 
-### BE-1 — form controls + rows
-| Item | Figma | Notes |
-|---|---|---|
-| `Field` | `v2/Field` (Default/Focused/Error) | Label, helper/counter, error text. Restyle `forms/TextInput`, `TextArea`, `Select`. |
-| `Switch`, `Checkbox` | `v2/Switch`, `v2/Checkbox` | Restyle existing `forms/Switch`, `forms/Checkbox`. |
-| `SegmentedControl` | `v2/Segment` | Restyle `components/SegmentedTabs`. Used by ~15 screens in both slices. |
-| `OptionTile`, `SeverityPill`, `InterestTile` | `v2/OptionTile`, `v2/SeverityPill`, `v2/InterestTile` | Single-select tiles (feedback), multi-select tiles (get-started). |
-| `ListRow` / settings row | Settings, Account actions | Icon + title + subtitle + trailing (chevron / switch / value / pill). Grouped card container. |
-| `StatTile`, `Avatar` v2 | Profile, leaderboard, points | Small stat block (value + caption); avatar with initials fallback + ring. |
+### BE-1 — form controls + rows + responsive scaling
+| Item | Figma | Code | Notes |
+|---|---|---|---|
+| `Field` | `v2/Field` (Default/Focused/Error) | `src/forms/TextInput.tsx` (`Field` alias), `TextArea.tsx`, `Select.tsx` | Label, helper/counter (`showCharCount`), error text, unified `colors.surface` background, `colors.overlay` backdrop. |
+| `Switch`, `Checkbox` | `v2/Switch`, `v2/Checkbox` | `src/forms/Switch.tsx`, `src/forms/Checkbox.tsx` | Spring animations, haptics, accessibility state. |
+| `SegmentedControl` | `v2/Segment` | `src/components/SegmentedTabs.tsx` (`SegmentedControl` alias) | Single-line auto-fitting labels (`numberOfLines={1}`, `adjustsFontSizeToFit`). |
+| `OptionTile`, `SeverityPill`, `InterestTile` | `v2/OptionTile`, `v2/SeverityPill`, `v2/InterestTile` | `src/components/OptionTile.tsx`, `SeverityPill.tsx`, `InterestTile.tsx` | Single-select tiles (feedback), single-row severity pills on 360dp phones, multi-select tiles (`GetStarted` & `EditProfile`). |
+| `ListRow` / settings row | Settings, Account actions | `src/components/ListRow.tsx` | Icon + title + subtitle + trailing (chevron / switch / value / pill). |
+| `StatTile`, `Avatar` v2 | Profile, leaderboard, points | `src/components/StatTile.tsx`, `Avatar.tsx` | `colors.surfaceInner` stat block with auto-fitting value/caption; avatar with initials fallback + ring. |
+| `useResponsive` | All screens (360dp–430dp+) | `src/responsive/useResponsive.ts`, `breakpoints.ts`, `scaling.ts` | Reactive `useWindowDimensions()` phone tiers (`isCompactPhone < 375`, `isStandardPhone`, `isLargePhone`), dynamic `gutter`/`cardPadding`, clamped `moderateScale`, and `gridColumns()`. |
 
 > Until a component lands, use the existing `mobile/src` version — swap later. Don't block.
 
@@ -146,52 +150,52 @@ Existing route names (`EventDetails`, `EventRegistration`, `Auction`, `MediaView
 
 ---
 
-## 5. BE-1 screens
+## 5. BE-1 screens (Completed)
 
 ### D · Leaderboards & brackets
 | # | Screen | Figma | Code | API | Notes |
 |---|---|---|---|---|---|
-| D1 | Leaderboard · global | 44:1290 | `screens/drawer/leaderboard.tsx` (real) | `GET /leaderboards/global` (period/domain, `?source=challenge`) | Global/Events/Challenges segments, podium, my-rank card. Audit: domain filter leaks into Challenges tab; deleted users show "@undefined". |
-| D2 | Event standings | 44:1459 | `screens/events/event-leaderboard.tsx` → `EventStandings` | `GET /leaderboards/events/:ref`, `/me`, `GET /brackets/:event_id/standings` | Table view; "Back a team" card. Fix dead event search (audit). |
-| D3 | Invest points sheet | 45:1359 (overlay 103:3337) | sheet | `GET /leaderboards/events/:ref/project?amount=`, `POST /leaderboards/events/:ref/invest`, `GET /points/me` | Slider 10–cap, projected rank. |
-| D4 | Tournament bracket | 45:1541 | `EventStandings view=bracket` | `GET /brackets/:event_id` | Horizontal scroll, live match highlight. |
-| D5 | Match details | 45:1668 | new | `GET /matches/:id` | Timeline; "Winner meets…" → bracket. |
+| D1 | Leaderboard · global | 44:1290 | `screens/drawer/leaderboard.tsx` | `GET /leaderboards/global` (period/domain, `?source=challenge`), `GET /events` | Global/Events/Challenges segments, podium, my-rank card, user row tap → `Profile`. Fixed domain filter leak & deleted-user `@undefined`. |
+| D2 | Event standings | 44:1459 | `screens/events/event-leaderboard.tsx` (`EventStandings`) | `GET /events/:ref`, `GET /leaderboards/events/:ref`, `/me`, `GET /brackets/:event_id/standings` | Table view; "Back your team/entry" card → D3; working debounced participant search. |
+| D3 | Invest points sheet | 45:1359 (overlay 103:3337) | `screens/events/investment-sheet.tsx` | `GET /leaderboards/events/:ref/project?amount=`, `POST /leaderboards/events/:ref/invest`, `GET /points/me` | Interactive range/stepper (`10`–`cap`), preset chips, live projected rank, durable `SecureStore` idempotency key. |
+| D4 | Tournament bracket | 45:1541 | `screens/events/event-leaderboard.tsx` (`view=bracket`) | `GET /brackets/:event_id`, `GET /brackets/:event_id/standings` | Responsive horizontal round columns, champion banner, live match highlight → `Match`. |
+| D5 | Match details | 45:1668 | `screens/events/match.tsx` | `GET /matches/:id` | Non-wrapping 3-col scoreboard, games/sets timeline, "Winner meets…" → next match & bracket. |
 
 ### E · Points, challenges & Strava
 | # | Screen | Figma | Code | API | Notes |
 |---|---|---|---|---|---|
-| E1 | Points · wallet & history | 46:1425 | `screens/profile/history.tsx` → `Points` (**mock**) | `GET /points/me`, `/me/breakdown`, `/me/transactions`, `GET /points/opportunities` | Donut breakdown, ways to earn, filtered history. |
-| E2 | Challenges | 46:1573 | new | `GET /challenges`, `GET /challenges/me/participations` | Active/Available/Completed segments, category chips. |
-| E3 | Challenge detail | 47:1506 | new | `GET /challenges/:key`, `POST /challenges/:id/accept` | Brief unlocks on accept; resources (external URLs). |
-| E4 | Challenge · progress & proof | 47:1615 | same route, accepted state | `PATCH /challenges/participations/:id/progress`, `POST /challenges/participations/:id/submit` (check the submit payload for image/link/text proof) | Proof types Strava / Image / Link / Text. |
-| E5 | Challenge · reviewed | 49:1564 | same route, reviewed state | `GET /challenges/participations/:id` | Approved / under review / rejected / expired / legend outcomes. |
-| E6 | Strava · connect | 49:1638 | new | `GET /strava/connect` → OAuth → `POST /strava/link` | |
-| E7 | Strava · connected | 49:1701 | same route | `GET /strava/status`, `GET /strava/activities`, `POST /strava/sync`, `DELETE /strava/disconnect` | |
+| E1 | Points · wallet & history | 46:1425 | `screens/profile/history.tsx` (`Points`) | `GET /points/me`, `/me/breakdown`, `/me/transactions`, `GET /points/opportunities` | SVG donut breakdown, expiring-soon alert, ways to earn, filtered cursor-paginated ledger. |
+| E2 | Challenges | 46:1573 | `screens/challenges/challenges.tsx` | `GET /challenges`, `GET /challenges/me/participations` | Active/Available/Completed segments, domain category chips, progress bars. |
+| E3 | Challenge detail | 47:1506 | `screens/challenges/challenge-detail.tsx` | `GET /challenges/:key`, `POST /challenges/:id/accept`, `GET /teams`, `POST /teams`, `POST /teams/:id/join` | Brief unlocks on accept; solo & team challenge support; external resource links. |
+| E4 | Challenge · progress & proof | 47:1615 | `screens/challenges/challenge-detail.tsx` (accepted state) | `PATCH /challenges/participations/:id/progress`, `POST /challenges/participations/:id/submit`, `GET /strava/activities` | Progress ring, milestone checklist, Strava activity quick-picker + Link (`url`) / Text (`text`) proof submission. |
+| E5 | Challenge · reviewed | 49:1564 | `screens/challenges/challenge-detail.tsx` (reviewed state) | `GET /challenges/:key`, `GET /challenges/participations/:id` | Approved / under review / rejected / expired / withdrawn outcomes + `HallOfFameDetail` honour link. |
+| E6 | Strava · connect | 49:1638 | `screens/strava/strava-connect.tsx` | `GET /strava/connect` → OAuth (`bgsc://settings/integrations`) → `POST /strava/link` | Deep-link callback parsing (`parseStravaRedirect`) + state verification. |
+| E7 | Strava · connected | 49:1701 | `screens/strava/strava-connect.tsx` | `GET /strava/status`, `GET /strava/activities`, `POST /strava/sync`, `DELETE /strava/disconnect` | Athlete summary, 3-up activity stats, cooldown-aware manual sync, disconnect confirm. |
 
 ### F · Profile, settings & notifications
 | # | Screen | Figma | Code | API | Notes |
 |---|---|---|---|---|---|
-| F1 | Profile · player card | 51:1626 | `screens/drawer/profile.tsx` (partly mock) | `GET /users/me`, `GET /users/:ref/player-card`, `GET /points/me`, `GET /registrations/me` | Interests, picked-for-you, achievements, history → `Points`. No longer a tab — pushed from avatar/drawer. |
-| F2 | Account actions sheet | 52:1697 (overlay 103:3504) | sheet | — | Logout via `useConfirmLogout`. "Request my data" → ⚠ no export endpoint yet. |
-| F3 | Settings | 52:1999 | new | `PATCH /users/me/settings` (theme, public profile), `GET/PATCH /notifications/preferences`, `GET /strava/status` | ⚠ Change password: no endpoint yet. Privacy/terms = external URL. |
-| F4 | Edit profile | 53:1822 | `screens/profile/edit-profile.tsx` (**mock**) | `PATCH /users/me`, `POST /users/me/avatar` | Verified/Verify pills → `PhoneOtp`. |
-| F5 | Delete account | 53:1905 | new | `GET /users/me/deletion-preview`, `DELETE /users/me` | Type-DELETE confirm; then sign out to `Landing`. |
-| F6 | Notifications | 54:1872 | new (bell currently only in AppHeader) | `GET /notifications`, `POST /notifications/read-all`, `POST /notifications/:id/read`, `DELETE /notifications/:id` | Deep links into other slices by route (event, points, team invite, settings). |
-| F7 | Profile picture sheet | 54:1985 (overlay 103:3740) | sheet | `POST /users/me/avatar` (expo-image-picker) | Crop/zoom, remove. |
-| F8 | Verify phone · OTP | 56:2104 | new (reuse `src/auth/OtpCells`) | `POST /auth/phone/send-otp`, `POST /auth/phone/verify-otp` | ⚠ SMS is a stub in prod. Lockout state. |
+| F1 | Profile · player card | 51:1626 | `screens/drawer/profile.tsx` | `GET /users/me` (or `/:ref`), `GET /users/:ref/player-card`, `GET /points/me`, `GET /points/me/transactions`, `GET /registrations`, `GET /events` | Player card with responsive stats grid, Achievements, Interests, Picked-for-you, My Registrations, Recent Points → `Points`. |
+| F2 | Account actions sheet | 52:1697 (overlay 103:3504) | `screens/drawer/profile.tsx` (`BottomSheet`) | `POST /auth/logout` (via `useConfirmLogout`) | Edit profile, Settings, Request my data (info dialog), Delete account, Log out. |
+| F3 | Settings | 52:1999 | `screens/profile/settings.tsx` | `PATCH /users/me/settings` (theme, public profile), `GET/PATCH /notifications/preferences`, `GET /strava/status` | Theme (`light`/`dark`/`system`), privacy toggles, notification category toggles, Strava status, Change password → `ForgotPassword`. |
+| F4 | Edit profile | 53:1822 | `screens/profile/edit-profile.tsx` | `GET /users/me`, `PATCH /users/me` | Avatar sheet trigger, bio counter, Email & Phone `Verified`/`Verify` pills → `PhoneOtp`, interactive `InterestTile` picker, social links. |
+| F5 | Delete account | 53:1905 | `screens/profile/delete-account.tsx` | `GET /users/me/deletion-preview`, `DELETE /users/me` | Grace period impact summary, type-`DELETE` confirm, Keep account button, signs out to `Landing`. |
+| F6 | Notifications | 54:1872 | `screens/profile/notifications.tsx` | `GET /notifications`, `POST /notifications/read-all`, `POST /notifications/:id/read`, `DELETE /notifications/:id` | All/Unread segments, category chips, full-card press deep links (`EventDetails`, `TeamJoin`, `Points`, `ChallengeDetail`, `AnnouncementDetail`). |
+| F7 | Profile picture sheet | 54:1985 (overlay 103:3740) | `screens/profile/profile-photo.tsx` | `POST /users/me/avatar`, `DELETE /users/me/avatar` | `expo-image-picker` with `allowsEditing: true` (1:1 crop/zoom), camera/library upload, and avatar removal. |
+| F8 | Verify phone · OTP | 56:2104 | `screens/profile/phone-otp.tsx` (reuses `src/auth/OtpCells.tsx`) | `POST /auth/phone/send-otp`, `POST /auth/phone/verify-otp` | E.164 phone validation, responsive 6-digit OTP cells, resend timer, 429 lockout state. |
 
 ### H · Hall of Fame, media & feedback
 | # | Screen | Figma | Code | API | Notes |
 |---|---|---|---|---|---|
-| H1 | Hall of Fame | 59:2043 | `screens/drawer/hall-of-fame.tsx` (real) | `GET /hall-of-fame/featured`, `GET /hall-of-fame` | Featured carousel, List/Timeline, chips. |
-| H2 | Hall of Fame · honour | 59:2151 | `screens/hall-of-fame/hall-of-fame-detail.tsx` (real) | `GET /hall-of-fame/:slugOrId` | Fix crash on solo entries (`members` undefined). Source event → `EventStandings`. |
-| H3 | Media | 60:2090 | `screens/drawer/media.tsx` (real) | `GET /media?status=approved`, `GET /media/albums` | Albums carousel, masonry grid, pending tile for own uploads. |
-| H4 | Media viewer | 60:2187 | `screens/media/media-viewer.tsx` (real) | `GET /media/:id`, `POST /media/:id/like` | Like state needs `liked_by_me` (backend ask). |
-| H5 | Upload sheet | 60:2231 (overlay 103:3913) | sheet | `POST /media/upload` | iOS `.mov`/HEIC currently 415 (backend ask). |
-| H6 | Feedback & contact | 61:2157 | `screens/drawer/feedback.tsx` (**mock**) | `POST /feedback`, `POST /contact` | Category tiles, severity, attachments, anonymous switch. |
-| H7 | Feedback sent | 61:2255 | new | `GET /feedback/:ticket_no` | Copy ticket no. |
-| H8 | My tickets | 62:2200 | new | `GET /feedback/me` | Open/Closed segments. |
-| H9 | Contact & FAQ | 62:2269 | new | — (static content) | FAQ accordion + coordinator directory (static until an endpoint exists). |
+| H1 | Hall of Fame | 59:2043 | `screens/drawer/hall-of-fame.tsx` | `GET /hall-of-fame/featured`, `GET /hall-of-fame` | Featured carousel, List/Timeline segmented toggle, category chips, search, horizontal pagination. |
+| H2 | Hall of Fame · honour | 59:2151 | `screens/hall-of-fame/hall-of-fame-detail.tsx` | `GET /hall-of-fame/:slugOrId` | Safe on solo entries (`members` optional); links source event → `EventStandings` or challenge → `ChallengeDetail`. |
+| H3 | Media | 60:2090 | `screens/drawer/media.tsx` | `GET /media?status=approved`, `GET /media/albums`, `GET /media?mine=true&status=pending` | Albums carousel, 2-column grid, pending own-uploads preview tiles (`/media/:id/file`). |
+| H4 | Media viewer | 60:2187 | `screens/media/media-viewer.tsx` | `GET /media/:id`, `POST /media/:id/like` | Restores viewer `liked_by_me` state from backend, video playback, share, report link. |
+| H5 | Upload sheet | 60:2231 (overlay 103:3913) | `screens/drawer/media.tsx` (`BottomSheet`) | `POST /media/upload` | Client-side MIME/size validation (`mediaUploadError`) + `preferredAssetRepresentationMode: Compatible` for iOS. |
+| H6 | Feedback & contact | 61:2157 | `screens/drawer/feedback.tsx` | `POST /feedback`, `POST /contact`, `GET /events?search=` | Feedback/Contact segments, category `OptionTile`s, `SeverityPill`s, event link, attachments, anonymous switch. |
+| H7 | Feedback sent | 61:2255 | `screens/feedback/feedback-success.tsx` | `GET /feedback/:ticket_no` | Ticket receipt, one-tap copy/share ticket number, status & response display. |
+| H8 | My tickets | 62:2200 | `screens/feedback/my-tickets.tsx` | `GET /feedback/me`, `GET /feedback/:ticket_no` | Open/Closed `SegmentedTabs` + status refinement chips + ticket number lookup. |
+| H9 | Contact & FAQ | 62:2269 | `screens/feedback/contact-faq.tsx` | — (static content) | Searchable FAQ accordion + static Coordinator Directory with direct email/contact actions. |
 
 ---
 
@@ -220,18 +224,19 @@ Points balance shown in drawer/home (BE-2) and points/invest (BE-1) — both cal
 3. **Second half** — BE-2: C (auction) → A2–A4. BE-1: E (points/challenges/Strava) → F rest → H6–H9.
 4. **Pass together**: play the Figma prototype side by side with the app; fix gaps; colour-scheme swap.
 
-## 8. Backend gaps hit by these screens
+## 8. Backend gaps hit by these screens (Status Update)
 
-| Gap | Screens | Owner to decide |
+| Gap | Screens | Status / Resolution |
 |---|---|---|
-| No real email provider (verify / reset mails only logged) | G5, ForgotPassword, H7 receipts | backend |
-| No SMS provider (phone OTP only logged) | F8 | backend |
-| No change-password endpoint | F3 | backend |
-| No data-export endpoint | F2 | backend |
-| No push notifications (in-app only) | F3 notification toggles, F6 | post-MVP |
-| `liked_by_me` missing on media | H4 | backend |
-| QuickTime/HEIC uploads rejected | H5 | backend |
-| Auction polling hits the 100/min IP limit on campus Wi-Fi | C1 | backend |
+| No real email provider (verify / reset mails only logged) | G5, ForgotPassword, H7 receipts | Dev logger active (`auth-service.log` / `feedback-service.log`); external SMTP provider is a production deployment config item. |
+| No SMS provider (phone OTP only logged) | F8 | Dev logger active (`auth-service.log`); external SMS provider is a production deployment config item. |
+| No change-password endpoint | F3 | Handled in UI: "Change password" in `Settings` routes to `ForgotPassword` (`POST /auth/forgot-password`). |
+| No data-export endpoint | F2, F3 | Handled in UI: shows informative modal directing immediate export requests to Feedback/Support until post-MVP endpoint lands. |
+| No push notifications (in-app only) | F3 notification toggles, F6 | Post-MVP; in-app inbox (`GET /notifications`) and preferences (`PATCH /notifications/preferences`) are live. |
+| `liked_by_me` missing on media | H3, H4 | ✅ **Resolved in Backend & Mobile**: `media-service` (`GET /media`, `GET /media/:id`) now returns `liked_by_me: boolean`, plus `GET /media?mine=true&status=pending` for uploader's pending tiles. |
+| Avatar removal endpoint missing | F7 | ✅ **Resolved in Backend & Mobile**: `user-service` now serves `DELETE /users/me/avatar`. |
+| QuickTime/HEIC uploads rejected | H5 | ✅ **Mitigated in Mobile**: `expo-image-picker` requests `preferredAssetRepresentationMode: Compatible` (transcodes to JPEG/MP4 before upload) and validates MIME/size client-side. |
+| Auction polling hits the 100/min IP limit on campus Wi-Fi | C1 | Handled via 1.5–2 s poll interval + 429 exponential backoff and proactive token refresh. |
 
 ## 9. Done means
 

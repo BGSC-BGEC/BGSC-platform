@@ -47,6 +47,8 @@ userRoutes.post(
     c.uploadAvatar
 );
 
+userRoutes.delete('/me/avatar', requireAuth, c.removeAvatar);
+
 // ---- literal paths, before /:ref -------------------------------------------
 // requireActiveUser on every route that resolves PII scope: the scope and the serializer's
 // elevation rank the LIVE role, not a token claim that outlives a demotion.

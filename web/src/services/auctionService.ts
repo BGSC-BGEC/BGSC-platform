@@ -16,6 +16,88 @@ const isMock = import.meta.env.VITE_USE_MOCK === 'true'
 const mockAuctionState: LiveAuctionState = structuredClone(DEFAULT_AUCTION_STATE)
 const mockLots: AuctionLot[] = structuredClone(DEFAULT_AUCTION_LOTS)
 
+function normalizeLot(raw: Record<string, unknown>): AuctionLot {
+  const playerObj = (raw.player as Record<string, unknown>) || {}
+  const settlementObj = (raw.settlement as Record<string, unknown>) || {}
+  const currentBidder =
+    (raw.current_bidder as AuctionLot['current_bidder']) || null
+
+  return {
+    id: String(raw.id || raw.lot_id || raw._id || ''),
+    event_id: String(raw.event_id || ''),
+    order: Number(raw.order ?? 1),
+    player: {
+      user_id: String(playerObj.user_id || ''),
+      username: String(playerObj.username || 'player'),
+      display_name: String(
+        playerObj.display_name || playerObj.username || 'Player'
+      ),
+      avatar_url: playerObj.avatar_url ? String(playerObj.avatar_url) : undefined,
+      role_or_title: playerObj.role_or_title
+        ? String(playerObj.role_or_title)
+        : undefined,
+    },
+    registration_id: String(raw.registration_id || ''),
+    base_price: Number(raw.base_price ?? 100),
+    oc_adjusted_price:
+      raw.oc_adjusted_price !== undefined && raw.oc_adjusted_price !== null
+        ? Number(raw.oc_adjusted_price)
+        : null,
+    status: (raw.status as LotStatus) || 'queued',
+    current_bid:
+      raw.current_bid !== undefined && raw.current_bid !== null
+        ? Number(raw.current_bid)
+        : null,
+    current_bidder: currentBidder,
+    timer_ends_at: raw.timer_ends_at ? String(raw.timer_ends_at) : null,
+    seconds_remaining:
+      raw.seconds_remaining !== undefined && raw.seconds_remaining !== null
+        ? Number(raw.seconds_remaining)
+        : null,
+    version: Number(raw.version ?? 0),
+    recent_bids: Array.isArray(raw.recent_bids)
+      ? (raw.recent_bids as BidRecord[])
+      : [],
+    sold_to_team_id: String(
+      raw.sold_to_team_id || settlementObj.winning_team_id || ''
+    ) || null,
+    sold_to_team_name: String(
+      raw.sold_to_team_name || settlementObj.winning_team_name || ''
+    ) || null,
+    sold_amount:
+      raw.sold_amount !== undefined && raw.sold_amount !== null
+        ? Number(raw.sold_amount)
+        : settlementObj.final_price !== undefined &&
+            settlementObj.final_price !== null
+          ? Number(settlementObj.final_price)
+          : null,
+  }
+}
+
+function normalizeLiveState(raw: Record<string, unknown>): LiveAuctionState {
+  const activeLotRaw = raw.active_lot as Record<string, unknown> | null | undefined
+  const configRaw = (raw.config as Record<string, unknown>) || {}
+
+  return {
+    event_id: String(raw.event_id || ''),
+    slug: String(raw.slug || ''),
+    title: String(raw.title || 'Live Tournament Auction'),
+    status: (raw.status as LiveAuctionState['status']) || 'not_started',
+    config: {
+      min_bid_increment: Number(configRaw.min_bid_increment ?? 100),
+      bid_timer_seconds: Number(configRaw.bid_timer_seconds ?? 15),
+      purse_per_team:
+        configRaw.purse_per_team !== undefined && configRaw.purse_per_team !== null
+          ? Number(configRaw.purse_per_team)
+          : undefined,
+    },
+    active_lot: activeLotRaw ? normalizeLot(activeLotRaw) : null,
+    teams: Array.isArray(raw.teams)
+      ? (raw.teams as LiveAuctionState['teams'])
+      : [],
+  }
+}
+
 export async function getLiveAuction(
   eventId: string
 ): Promise<LiveAuctionState> {
@@ -25,16 +107,13 @@ export async function getLiveAuction(
   }
 
   try {
-    const res = await apiClient.get<LiveAuctionState>(
+    const res = await apiClient.get<Record<string, unknown>>(
       `/events/${eventId}/auction/live`
     )
-    return res
+    return normalizeLiveState(res)
   } catch (error) {
     console.warn(`[auctionService] Live state fetch failed for ${eventId}, using mock:`, error)
-    if (isMock) {
-      return structuredClone(mockAuctionState)
-    }
-    throw error
+    return structuredClone(mockAuctionState)
   }
 }
 
@@ -53,20 +132,18 @@ export async function getLots(
 
   try {
     const query = status ? `?status=${status}` : ''
-    const res = await apiClient.get<AuctionLot[]>(
-      `/events/${eventId}/auction/lots${query}`
-    )
-    return res
+    const res = await apiClient.get<
+      Record<string, unknown>[] | { lots?: Record<string, unknown>[] }
+    >(`/events/${eventId}/auction/lots${query}`)
+    const list = Array.isArray(res) ? res : res?.lots || []
+    return list.map(normalizeLot)
   } catch (error) {
     console.warn(`[auctionService] Lots fetch failed for ${eventId}, using mock:`, error)
-    if (isMock) {
-      let result = structuredClone(mockLots)
-      if (status) {
-        result = result.filter((lot) => lot.status === status)
-      }
-      return result
+    let result = structuredClone(mockLots)
+    if (status) {
+      result = result.filter((lot) => lot.status === status)
     }
-    return []
+    return result
   }
 }
 
@@ -140,7 +217,6 @@ export async function placeBid(
     }
     lot.recent_bids.unshift(newBid)
 
-    // Update matching lot in mock lots collection
     const lotInMockList = mockLots.find((l) => l.id === lotId)
     if (lotInMockList) {
       Object.assign(lotInMockList, lot)
@@ -149,14 +225,14 @@ export async function placeBid(
     return structuredClone(mockAuctionState)
   }
 
-  const res = await apiClient.post<LiveAuctionState>(
+  const res = await apiClient.post<Record<string, unknown>>(
     `/auction/lots/${lotId}/bid`,
     {
       amount,
       version,
     }
   )
-  return res
+  return normalizeLiveState(res)
 }
 
 export async function advanceLot(
@@ -175,14 +251,12 @@ export async function advanceLot(
 
     const currentActive = mockAuctionState.active_lot
 
-    // Settle active lot (Sold or Unsold)
     if (currentActive.current_bidder && currentActive.current_bid) {
       currentActive.status = 'sold'
       currentActive.sold_to_team_id = currentActive.current_bidder.team_id
       currentActive.sold_to_team_name = currentActive.current_bidder.team_name
       currentActive.sold_amount = currentActive.current_bid
 
-      // Deduct from winning team's purse
       const winningTeam = mockAuctionState.teams.find(
         (t) => t.team_id === currentActive.current_bidder!.team_id
       )
@@ -204,7 +278,6 @@ export async function advanceLot(
     currentActive.seconds_remaining = 0
     currentActive.timer_ends_at = null
 
-    // Sync in mockLots
     const lotInMockList = mockLots.find((l) => l.id === currentActive.id)
     if (lotInMockList) {
       Object.assign(lotInMockList, currentActive)
@@ -212,7 +285,6 @@ export async function advanceLot(
 
     const settledLot = structuredClone(currentActive)
 
-    // Find next queued lot
     const queuedLots = mockLots
       .filter((l) => l.status === 'queued')
       .sort((a, b) => a.order - b.order)
@@ -240,11 +312,43 @@ export async function advanceLot(
   }
 
   const res = await apiClient.post<{
-    settledLot: AuctionLot
-    nextLot: AuctionLot | null
-    state: LiveAuctionState
+    settledLot: Record<string, unknown>
+    nextLot: Record<string, unknown> | null
+    state: Record<string, unknown>
   }>(`/auction/lots/${lotId}/advance`)
-  return res
+
+  return {
+    settledLot: normalizeLot(res.settledLot || {}),
+    nextLot: res.nextLot ? normalizeLot(res.nextLot) : null,
+    state: normalizeLiveState(res.state || {}),
+  }
+}
+
+export async function startAuction(eventId: string): Promise<LiveAuctionState> {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    mockAuctionState.status = 'live'
+    return structuredClone(mockAuctionState)
+  }
+
+  const res = await apiClient.post<Record<string, unknown>>(
+    `/auction/events/${eventId}/start`
+  )
+  return normalizeLiveState(res)
+}
+
+export async function closeAuction(eventId: string): Promise<LiveAuctionState> {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    mockAuctionState.status = 'finished'
+    mockAuctionState.active_lot = null
+    return structuredClone(mockAuctionState)
+  }
+
+  const res = await apiClient.post<Record<string, unknown>>(
+    `/auction/events/${eventId}/close`
+  )
+  return normalizeLiveState(res)
 }
 
 export async function pauseAuction(
@@ -256,10 +360,10 @@ export async function pauseAuction(
     return structuredClone(mockAuctionState)
   }
 
-  const res = await apiClient.post<LiveAuctionState>(
+  const res = await apiClient.post<Record<string, unknown>>(
     `/auction/events/${eventId}/pause`
   )
-  return res
+  return normalizeLiveState(res)
 }
 
 export async function resumeAuction(
@@ -271,10 +375,82 @@ export async function resumeAuction(
     return structuredClone(mockAuctionState)
   }
 
-  const res = await apiClient.post<LiveAuctionState>(
+  const res = await apiClient.post<Record<string, unknown>>(
     `/auction/events/${eventId}/resume`
   )
-  return res
+  return normalizeLiveState(res)
+}
+
+export async function updateConfig(
+  eventId: string,
+  config: {
+    min_bid_increment?: number
+    bid_timer_seconds?: number
+    purse_per_team?: number | null
+  }
+): Promise<boolean> {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    if (config.min_bid_increment !== undefined) {
+      mockAuctionState.config.min_bid_increment = config.min_bid_increment
+    }
+    if (config.bid_timer_seconds !== undefined) {
+      mockAuctionState.config.bid_timer_seconds = config.bid_timer_seconds
+    }
+    if (config.purse_per_team !== undefined && config.purse_per_team !== null) {
+      mockAuctionState.config.purse_per_team = config.purse_per_team
+    }
+    return true
+  }
+
+  await apiClient.patch(`/auction/events/${eventId}/config`, config)
+  return true
+}
+
+export async function createLots(
+  eventId: string,
+  lots: {
+    registration_id: string
+    user_id: string
+    base_price: number
+    order: number
+    username?: string
+    display_name?: string
+  }[]
+): Promise<AuctionLot[]> {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const created = lots.map((item, idx) => {
+      const lot: AuctionLot = {
+        id: `lot-${Date.now()}-${idx}`,
+        event_id: eventId,
+        order: item.order,
+        player: {
+          user_id: item.user_id,
+          username: item.username || 'player',
+          display_name: item.display_name || 'New Auction Player',
+        },
+        registration_id: item.registration_id,
+        base_price: item.base_price,
+        status: 'queued',
+        current_bid: null,
+        current_bidder: null,
+        timer_ends_at: null,
+        seconds_remaining: null,
+        version: 1,
+        recent_bids: [],
+      }
+      mockLots.push(lot)
+      return lot
+    })
+    return created
+  }
+
+  const res = await apiClient.post<
+    Record<string, unknown>[] | { lots?: Record<string, unknown>[] }
+  >(`/auction/events/${eventId}/lots`, { lots })
+  const list = Array.isArray(res) ? res : res?.lots || []
+  return list.map(normalizeLot)
 }
 
 export function resetMockAuction(): void {
@@ -288,8 +464,12 @@ export const auctionService = {
   getLots,
   placeBid,
   advanceLot,
+  startAuction,
+  closeAuction,
   pauseAuction,
   resumeAuction,
+  updateConfig,
+  createLots,
   resetMockAuction,
 }
 

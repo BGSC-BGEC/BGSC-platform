@@ -17,7 +17,7 @@ export interface NotificationsResponse {
   total: number;
 }
 
-interface ApiNotification {
+export interface ApiNotification {
   _id: string;
   category: 'announcement' | 'event' | 'challenge' | 'system';
   type: string;
@@ -71,31 +71,29 @@ export class NotificationsRepository {
     return res.count;
   }
 
-  /** POST /notifications/:id/read */
+  inbox(query: { cursor?: string; unread?: boolean; category?: string } = {}) {
+    return api.get<{ notifications: ApiNotification[]; next_cursor: string | null }>('/notifications', { params: { limit: 20, ...query } });
+  }
+
+  preferences() {
+    return api.get<{ in_app: Record<'announcement' | 'event' | 'challenge' | 'system', boolean> }>('/notifications/preferences');
+  }
+
+  updatePreferences(body: { in_app: Partial<Record<'announcement' | 'event' | 'challenge' | 'system', boolean>> }) {
+    return api.patch<{ in_app: Record<'announcement' | 'event' | 'challenge' | 'system', boolean> }>('/notifications/preferences', body);
+  }
+
+  /** These errors must reach the screen so failed writes are never shown as successful. */
   async markAsRead(notificationId: string): Promise<void> {
-    try {
-      await api.post(`/notifications/${notificationId}/read`);
-    } catch (error) {
-      console.log('Error marking notification as read:', error);
-    }
+    await api.post(`/notifications/${encodeURIComponent(notificationId)}/read`);
   }
 
-  /** POST /notifications/read-all */
   async markAllAsRead(): Promise<void> {
-    try {
-      await api.post('/notifications/read-all');
-    } catch (error) {
-      console.log('Error marking all notifications as read:', error);
-    }
+    await api.post('/notifications/read-all');
   }
 
-  /** DELETE /notifications/:id — dismisses the notification */
   async deleteNotification(notificationId: string): Promise<void> {
-    try {
-      await api.delete(`/notifications/${notificationId}`);
-    } catch (error) {
-      console.log('Error deleting notification:', error);
-    }
+    await api.delete(`/notifications/${encodeURIComponent(notificationId)}`);
   }
 }
 

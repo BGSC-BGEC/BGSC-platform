@@ -1,189 +1,146 @@
-import React from 'react';
-import { ScrollView, StyleSheet, View, Pressable } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
-
-import { Typography } from '../../src/typography/Typography';
-import { Card } from '../../src/components/Card';
-import { Badge } from '../../src/components/Badge';
-import { Button } from '../../src/components/Button';
-import { AppHeader } from '../../src/components/AppHeader';
-import { useTheme } from '../../src/theme/ThemeProvider';
+import { useCallback, useState } from 'react';
+import { Share, View } from 'react-native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import { ProfileLayout } from '../profile/profile-layout';
+import { usersRepository } from '../../src/repositories/UsersRepository';
+import { pointsRepository } from '../../src/repositories/PointsRepository';
+import { eventsRepository } from '../../src/repositories/EventsRepository';
+import { registrationRepository } from '../../src/repositories/RegistrationRepository';
+import { useAsyncResource } from '../../src/hooks/useAsyncResource';
 import { useAuth } from '../../store/auth';
 import { useConfirmLogout } from '../../src/hooks/useConfirmLogout';
+import { useResponsive } from '../../src/responsive/useResponsive';
+import { Avatar } from '../../src/components/Avatar';
+import { Badge } from '../../src/components/Badge';
+import { Button } from '../../src/components/Button';
+import { BottomSheet } from '../../src/components/BottomSheet';
+import { Card } from '../../src/components/Card';
+import { ListRow } from '../../src/components/ListRow';
+import { StatTile } from '../../src/components/StatTile';
+import { SectionHeader } from '../../src/components/SectionHeader';
+import { Typography } from '../../src/typography/Typography';
+import { Skeleton } from '../../src/feedback/Skeleton';
+import { ErrorState } from '../../src/feedback/ErrorState';
+import { formatNumber, humanizeReason, formatDate, REGISTRATION_STATUS } from '../../src/utils/format';
+import { usePopup } from '../../src/popups/PopupProvider';
+import { getErrorMessage } from '../../src/api/client';
 
 export default function Profile() {
-  const { colors } = useTheme();
   const { user } = useAuth();
-  const navigation = useNavigation();
-  const handleLogout = useConfirmLogout();
-
-  return (
-    <SafeAreaView edges={['left', 'right', 'bottom']} style={[styles.safeArea, { backgroundColor: colors.background }]}>
-      {/* Pushed route in v2 (no longer a tab) — header gives it a way back. */}
-      <AppHeader title="Profile" showBackButton showMenuButton={false} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Profile Header */}
-        <View style={styles.profileHeader}>
-          <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-            <Typography variant="displayHero" style={{ color: '#FFF' }}>
-              {user?.username?.charAt(0).toUpperCase() || 'U'}
-            </Typography>
+  const { isCompactPhone } = useResponsive();
+  const route = useRoute<any>();
+  const navigation = useNavigation<any>();
+  const popup = usePopup();
+  const confirmLogout = useConfirmLogout();
+  const [actions, setActions] = useState(false);
+  const ref = route.params?.ref ?? user?.id;
+  const isSelf = !route.params?.ref || ref === user?.id || ref === user?.username;
+  const profile = useAsyncResource(async () => {
+    if (!ref) throw new Error('Sign in to see your player card.');
+    const [person, card, summary] = await Promise.all([
+      isSelf ? usersRepository.me() : usersRepository.get(ref),
+      usersRepository.card(ref),
+      isSelf ? pointsRepository.me().catch(() => null) : Promise.resolve(null),
+    ]);
+    return { person, card, summary };
+  }, [ref, isSelf]);
+  const activity = useAsyncResource(() => pointsRepository.transactions({ limit: 3 }), [ref], { enabled: isSelf && !!user });
+  const registrations = useAsyncResource(() => registrationRepository.mine({ limit: 10 }), [ref], { enabled: isSelf && !!user });
+  const picks = useAsyncResource(() => eventsRepository.list({ status: ['upcoming'], limit: 3 }), [], { enabled: isSelf });
+  useFocusEffect(useCallback(() => {
+    void profile.reload({ silent: true });
+    if (isSelf) {
+      void activity.reload({ silent: true });
+      void registrations.reload({ silent: true });
+    }
+  }, [ref, isSelf]));
+  const refresh = () => {
+    void profile.reload();
+    if (isSelf) {
+      void activity.reload();
+      void registrations.reload();
+      void picks.reload();
+    }
+  };
+  const person = profile.data?.person;
+  const card = profile.data?.card;
+  const summary = profile.data?.summary;
+  const inputs = card?.stats.inputs;
+  const statTileStyle = isCompactPhone ? { flexBasis: '46%' as const } : undefined;
+  const go = (name: string) => navigation.navigate(name);
+  return <ProfileLayout title="Profile" refreshing={profile.refreshing} onRefresh={refresh}>
+    {profile.loading && !card && <Skeleton.Card />}
+    {profile.error && <ErrorState message={profile.error} onRetry={() => void profile.reload()} />}
+    {person && card && <>
+      <Card variant="accent">
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}><Badge label={card.card_tier} variant="primary" /><Typography variant="caption" color="textMuted">Rating {card.rating}</Typography></View>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}><Avatar name={person.profile.full_name || person.username} uri={card.avatar_url} size={76} ring /><View style={{ flex: 1, minWidth: 0 }}><Typography variant="h2" numberOfLines={1}>{person.profile.full_name || person.username}</Typography><Typography variant="caption" color="textMuted" numberOfLines={1}>@{person.username} · {person.role}</Typography></View></View>
+        {!!card.bio && <Typography>{card.bio}</Typography>}
+        {inputs && (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <StatTile value={inputs.participations} caption="events" style={statTileStyle} />
+            <StatTile value={inputs.podiums} caption="podiums" style={statTileStyle} />
+            <StatTile value={formatNumber(summary?.balance ?? inputs.points_balance)} caption="points" style={statTileStyle} />
+            <StatTile value={inputs.challenges} caption="challenges" style={statTileStyle} />
           </View>
-          <Typography variant="displayTitle" style={styles.username}>
-            {user?.username || 'User'}
-          </Typography>
-          <Typography variant="body" color="textMuted">
-            {user?.email || 'user@example.com'}
-          </Typography>
-          <Badge label={user?.role || 'Member'} variant="primary" style={styles.roleBadge} />
-        </View>
-
-        {/* Player Card */}
-        <Card variant="accent">
-          <Card.Header
-            title="Player Stats"
-            rightAction={<Ionicons name="trophy" size={24} color={colors.primary} />}
+        )}
+        <Button label="Share card" variant="secondary" leftIcon="share" onPress={() => { void Share.share({ message: `${person.profile.full_name || person.username} (@${person.username}) · ${card.card_tier} · BGSC rating ${card.rating}` }).catch(err => popup.error('Could not share', getErrorMessage(err))); }} />
+      </Card>
+      <SectionHeader title="Achievements" actionLabel="Hall of Fame" onAction={() => go('HallOfFame')} />
+      <Card>
+        <ListRow
+          icon="trophy"
+          title={`${card.card_tier} tier · Rating ${card.rating}`}
+          subtitle={inputs?.podiums ? `${inputs.podiums} podium finish${inputs.podiums === 1 ? '' : 'es'} & ${inputs.challenges} completed challenge${inputs.challenges === 1 ? '' : 's'}` : 'Compete in events and challenges to earn badges and climb tiers.'}
+          trailing={<Badge label={card.card_tier} variant="primary" />}
+        />
+      </Card>
+      <SectionHeader title="Interests" actionLabel={isSelf ? 'Edit' : undefined} onAction={() => go('EditProfile')} />
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{card.interests.length ? card.interests.map(interest => <Badge key={interest} label={interest} variant="muted" />) : <Typography color="textMuted">No public interests yet.</Typography>}</View>
+      {isSelf && <>
+        <SectionHeader title="My registrations" actionLabel="Browse events" onAction={() => go('Events')} />
+        {registrations.loading && <Skeleton.Card />}{registrations.error && <ErrorState message={registrations.error} onRetry={() => void registrations.reload()} />}
+        {registrations.data && (
+          <Card>
+            {registrations.data.length ? registrations.data.slice(0, 5).map(reg => {
+              const statusPill = REGISTRATION_STATUS[reg.status] ?? { label: reg.status, variant: 'muted' as const };
+              return (
+                <ListRow
+                  key={reg._id}
+                  icon="calendar"
+                  title={`Event registration · ${reg.context?.event?.role ?? 'participant'}`}
+                  subtitle={formatDate(reg.submitted_at || reg.created_at)}
+                  trailing={<Badge label={statusPill.label} variant={statusPill.variant} />}
+                  onPress={() => navigation.navigate('EventDetails', { ref: reg.owner.id })}
+                />
+              );
+            }) : <Typography color="textMuted">You haven’t registered for any events yet.</Typography>}
+          </Card>
+        )}
+        <SectionHeader title="Picked for you" actionLabel="More" onAction={() => go('Events')} />
+        {picks.loading && <Skeleton.Card />}{picks.error && <ErrorState message={picks.error} onRetry={() => void picks.reload()} />}
+        {picks.data?.events.map(event => <Card key={event._id} onPress={() => navigation.navigate('EventDetails', { ref: event.slug || event._id })}><Typography variant="h3">{event.title}</Typography><Typography variant="caption" color="textMuted">{event.domain} · {formatDate(event.start_at)}</Typography></Card>)}
+        {picks.data?.events.length === 0 && <Typography color="textMuted">New events will appear here when announced.</Typography>}
+        <SectionHeader title="History" actionLabel="View all" onAction={() => go('Points')} />
+        {activity.loading && <Skeleton.Card />}{activity.error && <ErrorState message={activity.error} onRetry={() => void activity.reload()} />}
+        <Card>{activity.data?.transactions.length ? activity.data.transactions.map(tx => <ListRow key={tx.id} title={humanizeReason(tx.reason)} subtitle={formatDate(tx.created_at)} trailing={<Typography color={tx.amount >= 0 ? 'success' : 'danger'}>{tx.amount > 0 ? '+' : ''}{formatNumber(tx.amount)}</Typography>} />) : <Typography color="textMuted">No points activity yet.</Typography>}</Card>
+        <Card><ListRow title="Account & security" subtitle="Profile, phone and account actions" icon="user" onPress={() => setActions(true)} /><ListRow title="Settings" subtitle="Theme, notifications and privacy" icon="settings" onPress={() => go('Settings')} /><ListRow title="Help & feedback" subtitle="FAQ, contact and your tickets" icon="message" onPress={() => go('Feedback')} /></Card>
+        <BottomSheet visible={actions} onClose={() => setActions(false)}>
+          <Typography variant="h2">Account & security</Typography>
+          <ListRow title="Edit profile" icon="edit" onPress={() => { setActions(false); go('EditProfile'); }} />
+          <ListRow
+            title="Request my data"
+            subtitle="Request a copy of your account data"
+            icon="download"
+            onPress={() => {
+              setActions(false);
+              void popup.info('Data export', 'Self-service data export will be enabled in the next release. Contact support via Feedback for an immediate copy.');
+            }}
           />
-          <Card.Body>
-            <View style={styles.statsRow}>
-              <View style={styles.statItem}>
-                <Typography variant="displayTitle">1,250</Typography>
-                <Typography variant="caption" color="textMuted">Total Points</Typography>
-              </View>
-              <View style={styles.statItem}>
-                <Typography variant="displayTitle">12</Typography>
-                <Typography variant="caption" color="textMuted">Events Joined</Typography>
-              </View>
-              <View style={styles.statItem}>
-                <Typography variant="displayTitle">#8</Typography>
-                <Typography variant="caption" color="textMuted">Rank</Typography>
-              </View>
-            </View>
-          </Card.Body>
-        </Card>
-
-        {/* Events History */}
-        <Card variant="solid">
-          <Card.Header title="Recent Events" />
-          <Card.Body>
-            <View style={styles.eventItem}>
-              <Typography variant="body">Football Championship</Typography>
-              <Typography variant="caption" color="textMuted">Completed • +150 pts</Typography>
-            </View>
-            <View style={styles.eventItem}>
-              <Typography variant="body">Coding Workshop</Typography>
-              <Typography variant="caption" color="textMuted">Completed • +100 pts</Typography>
-            </View>
-            <View style={styles.eventItem}>
-              <Typography variant="body">Cricket League</Typography>
-              <Typography variant="caption" color="textMuted">Registered</Typography>
-            </View>
-          </Card.Body>
-          <Card.Footer>
-            <Button label="View all history" variant="outline" size="sm" onPress={() => navigation.navigate('History' as never)} />
-          </Card.Footer>
-        </Card>
-
-        {/* Settings/Actions */}
-        <View style={styles.actions}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionButton,
-              { backgroundColor: colors.surface },
-              pressed && styles.actionPressed
-            ]}
-            onPress={() => navigation.navigate('EditProfile' as never)}
-          >
-            <Ionicons name="settings-outline" size={20} color={colors.text} />
-            <Typography variant="body">Account Settings</Typography>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionButton,
-              { backgroundColor: colors.surface },
-              pressed && styles.actionPressed
-            ]}
-            onPress={() => navigation.navigate('EditProfile' as never)}
-          >
-            <Ionicons name="help-circle-outline" size={20} color={colors.text} />
-            <Typography variant="body">Help & Support</Typography>
-          </Pressable>
-
-          <Pressable
-            style={({ pressed }) => [
-              styles.actionButton,
-              styles.logoutButton,
-              pressed && styles.actionPressed
-            ]}
-            onPress={handleLogout}
-          >
-            <Ionicons name="log-out-outline" size={20} color="#D32F2F" />
-            <Typography variant="body" style={{ color: '#D32F2F' }}>Logout</Typography>
-          </Pressable>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
-  );
+          <ListRow title="Delete account" icon="delete" danger onPress={() => { setActions(false); go('DeleteAccount'); }} />
+          <Button label="Log out" variant="destructive" onPress={() => { setActions(false); setTimeout(() => void confirmLogout(), 320); }} />
+        </BottomSheet>
+      </>}
+    </>}
+  </ProfileLayout>;
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1
-  },
-  content: {
-    padding: 20,
-    gap: 20,
-    paddingBottom: 40,
-  },
-  profileHeader: {
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 12,
-  },
-  avatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  username: {
-    marginTop: 4,
-  },
-  roleBadge: {
-    marginTop: 8,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 8,
-  },
-  statItem: {
-    alignItems: 'center',
-    gap: 4,
-  },
-  eventItem: {
-    paddingVertical: 8,
-    gap: 4,
-  },
-  actions: {
-    gap: 12,
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
-    borderRadius: 12,
-  },
-  actionPressed: {
-    opacity: 0.7,
-  },
-  logoutButton: {
-    backgroundColor: '#FFEBEE',
-  },
-});

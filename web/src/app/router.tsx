@@ -11,6 +11,8 @@ import { Leaderboard } from '../pages/Leaderboard'
 import { Auction } from '../pages/Auction'
 import { Feedback } from '../pages/Feedback'
 import { Media } from '../pages/Media'
+import { Challenges } from '../pages/Challenges'
+import { HallOfFame } from '../pages/HallOfFame'
 
 export const router = createBrowserRouter([
     { path: '/login', element: <Login /> },
@@ -56,6 +58,8 @@ export const router = createBrowserRouter([
             path: 'feedback',
             element: <Feedback />,
         },
+        { path: 'challenges', element: <Challenges /> },
+        { path: 'hall-of-fame', element: <HallOfFame /> },
     ],
     },
     { path: '*', element: <Navigate to="/dashboard" replace /> },

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
 import { Card } from '../../src/components/Card';
@@ -16,6 +16,7 @@ import { Skeleton } from '../../src/feedback/Skeleton';
 import { Spinner } from '../../src/feedback/Spinner';
 import { Typography } from '../../src/typography/Typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
+import { useResponsive } from '../../src/responsive/useResponsive';
 import { usePopup } from '../../src/popups/PopupProvider';
 import { useAuth } from '../../store/auth';
 import { useAsyncResource } from '../../src/hooks/useAsyncResource';
@@ -47,8 +48,8 @@ function toRow(s: GlobalStanding, myId?: string): RankedRow {
   return {
     key: s.user_id,
     rank: s.rank,
-    name: s.display_name || s.username,
-    subtitle: `@${s.username}`,
+    name: s.display_name || s.username || 'Deleted member',
+    subtitle: s.username ? `@${s.username}` : undefined,
     avatarUrl: s.avatar_url,
     score: s.points,
     isMe: s.user_id === myId,
@@ -57,6 +58,8 @@ function toRow(s: GlobalStanding, myId?: string): RankedRow {
 
 export default function Leaderboard() {
   const { colors } = useTheme();
+  const { gutter, isCompactPhone } = useResponsive();
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const popup = usePopup();
   const { user } = useAuth();
@@ -65,6 +68,7 @@ export default function Leaderboard() {
   const [tab, setTab] = useState<Tab>('global');
   const [period, setPeriod] = useState<LeaderboardPeriod>('all');
   const [domain, setDomain] = useState<LeaderboardDomain>('all');
+  const [eventCursor, setEventCursor] = useState<string | null>(null);
 
   const [standings, setStandings] = useState<GlobalStanding[]>([]);
   const [page, setPage] = useState(1);
@@ -74,10 +78,11 @@ export default function Leaderboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [me, setMe] = useState<GlobalStanding | null | undefined>(undefined);
+  const [me, setMe] = useState<GlobalStanding | null | undefined>(null);
   const requestId = useRef(0);
 
   const source = tab === 'challenges' ? 'challenge' : 'all';
+  const activeDomain = tab === 'challenges' ? 'all' : domain;
 
   const load = useCallback(
     async (mode: 'initial' | 'refresh' | 'more', nextPage = 1) => {
@@ -87,20 +92,20 @@ export default function Leaderboard() {
       if (mode === 'refresh') setRefreshing(true);
       if (mode === 'more') setLoadingMore(true);
       try {
-        const res = await leaderboardRepository.global({ period, domain, source, page: nextPage, limit: 50 });
+        const res = await leaderboardRepository.global({ period, domain: activeDomain, source, page: nextPage, limit: 50 });
         if (id !== requestId.current) return;
         setStandings((prev) => (mode === 'more' ? [...prev, ...res.standings] : res.standings));
         setPage(res.page);
         setTotalPages(res.total_pages);
         setTotal(res.total);
         setError(null);
-        if (mode !== 'more' && user) {
+        if (user) {
           const found = res.standings.find((s) => s.user_id === user.id);
           if (found) setMe(found);
-          else {
-            setMe(undefined);
+          else if (mode !== 'more') {
+            setMe(null);
             leaderboardRepository
-              .findMyGlobalRank(user.id, { period, domain, source })
+              .findMyGlobalRank(user.id, { period, domain: activeDomain, source })
               .then((r) => id === requestId.current && setMe(r))
               .catch(() => id === requestId.current && setMe(null));
           }
@@ -116,12 +121,12 @@ export default function Leaderboard() {
         }
       }
     },
-    [tab, period, domain, source, user],
+    [tab, period, activeDomain, source, user],
   );
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     void load('initial');
-  }, [load]);
+  }, [load]));
 
   const rows = useMemo(() => standings.map((s) => toRow(s, user?.id)), [standings, user?.id]);
   const podium = rows.slice(0, 3);
@@ -136,16 +141,15 @@ export default function Leaderboard() {
     } else if (me) {
       void popup.info(`You are #${me.rank}`, `You have ${formatNumber(me.points)} points. Keep scrolling to load more of the board.`);
     } else {
-      void popup.info('Not ranked yet', 'Earn points from events and challenges to appear on this leaderboard.');
+      void popup.info('Position not loaded', 'Keep scrolling to load more rankings. Earn points from events and challenges to climb the board.');
     }
   };
 
   const events = useAsyncResource(
     async () => {
-      const res = await eventsRepository.list({ status: ['ongoing', 'past'], sort: 'date_desc', limit: 50 });
-      return res.events.filter((e) => e.leaderboard);
+      return eventsRepository.list({ status: ['ongoing', 'past'], sort: 'date_desc', limit: 50, cursor: eventCursor });
     },
-    [],
+    [eventCursor],
     { enabled: tab === 'events' },
   );
 
@@ -161,12 +165,21 @@ export default function Leaderboard() {
     />
   );
 
+  const contentStyle = [
+    styles.content,
+    {
+      paddingHorizontal: gutter,
+      paddingTop: gutter,
+      paddingBottom: Math.max(32, insets.bottom + 24),
+    },
+  ];
+
   if (tab === 'events') {
     return (
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
         <AppHeader title="Leaderboard" />
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={contentStyle}
           refreshControl={<RefreshControl refreshing={events.refreshing} onRefresh={() => void events.reload()} tintColor={colors.accent} />}
         >
           {tabs}
@@ -178,18 +191,18 @@ export default function Leaderboard() {
             </>
           ) : events.error ? (
             <ErrorState message={events.error} onRetry={() => void events.reload()} />
-          ) : !events.data?.length ? (
+          ) : !events.data?.events.some(event => event.leaderboard) ? (
             <Card variant="inner">
               <EmptyState icon="trophy" title="No event leaderboards yet" description="Standings appear once an event goes live." />
             </Card>
           ) : (
-            events.data.map((event) => {
+            events.data.events.filter(event => event.leaderboard).map((event) => {
               const pill = eventStatusPill(event);
               return (
                 <Card
                   key={event._id}
                   variant="solid"
-                  onPress={() => navigation.navigate('EventLeaderboard', { eventRef: event.slug || event._id, title: event.title })}
+                  onPress={() => navigation.navigate('EventStandings', { ref: event.slug || event._id })}
                   accessibilityLabel={`${event.title} standings`}
                 >
                   <Card.Header
@@ -201,12 +214,14 @@ export default function Leaderboard() {
                     <Typography variant="caption" color="textMuted">
                       {event.counts?.registrations_confirmed ?? 0} participants
                     </Typography>
-                    <Button label="View standings" size="sm" variant="outline" onPress={() => navigation.navigate('EventLeaderboard', { eventRef: event.slug || event._id, title: event.title })} />
+                    <Button label="View standings" size="sm" variant="outline" onPress={() => navigation.navigate('EventStandings', { ref: event.slug || event._id })} />
                   </Card.Footer>
                 </Card>
               );
             })
           )}
+          {events.data?.next_cursor && <Button label="More events" variant="outline" onPress={() => setEventCursor(events.data!.next_cursor)} />}
+          {eventCursor && <Button label="Back to latest events" variant="ghost" onPress={() => setEventCursor(null)} />}
         </ScrollView>
       </SafeAreaView>
     );
@@ -235,9 +250,11 @@ export default function Leaderboard() {
             <Spinner />
           ) : (
             <>
-              <Typography variant="displayHero">{me ? `#${me.rank}` : '—'}</Typography>
+              <Typography variant={isCompactPhone ? 'displayTitle' : 'displayHero'} numberOfLines={1}>
+                {me ? `#${me.rank}` : '—'}
+              </Typography>
               <Typography variant="caption" color="textMuted">
-                {me ? `${formatNumber(me.points)} total points` : 'Not ranked yet — earn points to join the board'}
+                {me ? `${formatNumber(me.points)} total points` : 'Your rank is not loaded yet. Explore the board or earn points to climb it.'}
               </Typography>
             </>
           )}
@@ -274,13 +291,13 @@ export default function Leaderboard() {
         ref={listRef}
         data={loading || error ? [] : rest}
         keyExtractor={(item) => item.key}
-        renderItem={({ item }) => <StandingRow row={item} />}
+        renderItem={({ item }) => <StandingRow row={item} onPress={() => navigation.navigate('Profile', { ref: item.key })} />}
         ListHeaderComponent={header}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={contentStyle}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} tintColor={colors.accent} />}
         onEndReachedThreshold={0.4}
         onEndReached={() => {
-          if (!loadingMore && !loading && page < totalPages) void load('more', page + 1);
+          if (!loadingMore && !loading && !refreshing && !error && page < totalPages) void load('more', page + 1);
         }}
         onScrollToIndexFailed={(info) => {
           listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
@@ -293,7 +310,7 @@ export default function Leaderboard() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { padding: 20, gap: 16, paddingBottom: 32 },
+  content: { padding: 20, gap: 16, paddingBottom: 32, width: '100%', maxWidth: 720, alignSelf: 'center' },
   header: { gap: 16, marginBottom: 8 },
   footer: { paddingVertical: 16 },
 });

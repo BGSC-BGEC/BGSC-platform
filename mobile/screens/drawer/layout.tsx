@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { createDrawerNavigator } from '@react-navigation/drawer';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, getStateFromPath } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import BottomTabsLayout from './bottom-tabs-layout';
@@ -13,7 +13,6 @@ import Profile from './profile';
 import { useAuth } from '../../store/auth';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { DrawerContent } from '../../src/navigation/DrawerContent';
-import { placeholder } from '../placeholder';
 
 import SplashScreen from '../login/splash';
 import LandingScreen from '../login/landing';
@@ -36,22 +35,27 @@ import TeamJoin from '../events/team-join';
 import AuctionLots from '../events/auction-lots';
 import MyBids from '../events/my-bids';
 
-// Route names and params are the contract in docs/mobile-v2-build-split.md §3.
-// Placeholders keep every route navigable until its v2 screen lands — swap them for the real component.
+import Challenges from '../challenges/challenges';
+import ChallengeDetail from '../challenges/challenge-detail';
+import StravaConnect from '../strava/strava-connect';
+import Match from '../events/match';
+import Settings from '../profile/settings';
+import DeleteAccount from '../profile/delete-account';
+import Notifications from '../profile/notifications';
+import PhoneOtp from '../profile/phone-otp';
+import FeedbackSuccess from '../feedback/feedback-success';
+import MyTickets from '../feedback/my-tickets';
+import ContactFaq from '../feedback/contact-faq';
 
-const Stub = {
-  Challenges: placeholder('Challenges', { drawerRoot: true }),
-  Match: placeholder('Match'),
-  Points: placeholder('Points'),
-  Challenge: placeholder('Challenge'),
-  Strava: placeholder('Strava'),
-  Settings: placeholder('Settings'),
-  DeleteAccount: placeholder('Delete account'),
-  Notifications: placeholder('Notifications'),
-  VerifyPhone: placeholder('Verify phone'),
-  FeedbackSent: placeholder('Feedback sent'),
-  MyTickets: placeholder('My tickets'),
-  Help: placeholder('Help'),
+const linking = {
+  prefixes: ['bgsc://app', 'bgsc://'],
+  config: { screens: { StravaConnect: 'settings/integrations' } },
+  getStateFromPath(path: string, options: any) {
+    if (path.split(/[?#]/)[0].replace(/^\//, '') === 'settings/integrations') {
+      return { routes: [{ name: 'App' }, { name: 'StravaConnect', params: { callbackUrl: path } }] };
+    }
+    return getStateFromPath(path, options);
+  },
 };
 
 const Stack = createNativeStackNavigator();
@@ -79,7 +83,7 @@ function AppDrawer() {
       <Drawer.Screen name="MainTabs" component={BottomTabsLayout} />
       <Drawer.Screen name="Events" component={Events} />
       <Drawer.Screen name="Leaderboard" component={Leaderboard} />
-      <Drawer.Screen name="Challenges" component={Stub.Challenges} />
+      <Drawer.Screen name="Challenges" component={Challenges} />
       <Drawer.Screen name="HallOfFame" component={HallOfFame} />
       <Drawer.Screen name="Media" component={Media} />
       <Drawer.Screen name="Feedback" component={Feedback} />
@@ -107,22 +111,23 @@ function LoggedInStack() {
       <Stack.Screen name="MyBids" component={MyBids} />
 
       {/* D · leaderboards & brackets */}
+      <Stack.Screen name="EventStandings" component={EventLeaderboard} />
       <Stack.Screen name="EventLeaderboard" component={EventLeaderboard} />
-      <Stack.Screen name="Match" component={Stub.Match} />
+      <Stack.Screen name="Match" component={Match} />
 
       {/* E · points, challenges & Strava */}
-      <Stack.Screen name="Points" component={Stub.Points} />
+      <Stack.Screen name="Points" component={History} />
       <Stack.Screen name="History" component={History} />
-      <Stack.Screen name="ChallengeDetail" component={Stub.Challenge} />
-      <Stack.Screen name="StravaConnect" component={Stub.Strava} />
+      <Stack.Screen name="ChallengeDetail" component={ChallengeDetail} />
+      <Stack.Screen name="StravaConnect" component={StravaConnect} />
 
       {/* F · profile, settings & notifications */}
       <Stack.Screen name="Profile" component={Profile} />
       <Stack.Screen name="EditProfile" component={EditProfile} />
-      <Stack.Screen name="Settings" component={Stub.Settings} />
-      <Stack.Screen name="DeleteAccount" component={Stub.DeleteAccount} />
-      <Stack.Screen name="Notifications" component={Stub.Notifications} />
-      <Stack.Screen name="PhoneOtp" component={Stub.VerifyPhone} />
+      <Stack.Screen name="Settings" component={Settings} />
+      <Stack.Screen name="DeleteAccount" component={DeleteAccount} />
+      <Stack.Screen name="Notifications" component={Notifications} />
+      <Stack.Screen name="PhoneOtp" component={PhoneOtp} />
 
       {/* H · hall of fame, media & feedback */}
       <Stack.Screen name="HallOfFameDetail" component={HallOfFameDetail} />
@@ -131,9 +136,9 @@ function LoggedInStack() {
         component={MediaViewer}
         options={{ animation: 'fade', presentation: 'fullScreenModal' }}
       />
-      <Stack.Screen name="FeedbackSuccess" component={Stub.FeedbackSent} />
-      <Stack.Screen name="MyTickets" component={Stub.MyTickets} />
-      <Stack.Screen name="ContactFaq" component={Stub.Help} />
+      <Stack.Screen name="FeedbackSuccess" component={FeedbackSuccess} />
+      <Stack.Screen name="MyTickets" component={MyTickets} />
+      <Stack.Screen name="ContactFaq" component={ContactFaq} />
     </Stack.Navigator>
   );
 }
@@ -166,7 +171,7 @@ function DrawerLayout() {
   if (isBootstrapping) return <SplashScreen />;
 
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={linking}>
       {!isLoggedIn ? (
         <AuthStack />
       ) : onboarding ? (

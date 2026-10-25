@@ -35,6 +35,21 @@ export function formatDateTime(iso?: string | null): string {
   }
 }
 
+export function formatShortDate(iso?: string | null): string {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString('en-IN', {
+      day: 'numeric',
+      month: 'short',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: TZ,
+    });
+  } catch {
+    return formatDate(iso, { day: 'numeric', month: 'short' });
+  }
+}
+
 export function formatRelative(iso?: string | null): string {
   if (!iso) return '';
   const diff = Date.now() - new Date(iso).getTime();
