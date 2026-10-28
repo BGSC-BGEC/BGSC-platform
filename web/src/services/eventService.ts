@@ -94,12 +94,25 @@ export async function getEvents(): Promise<ClubEvent[]> {
 export async function createEvent(
   payload: Partial<ClubEvent> & Record<string, unknown>
 ): Promise<ClubEvent> {
-  const startIso = new Date(
-    String(payload.startAt || payload.start_at || new Date())
-  ).toISOString()
-  const endIso = new Date(
-    String(payload.endAt || payload.end_at || new Date())
-  ).toISOString()
+  // The form sends date-only values (YYYY-MM-DD). Read them as local times: the start is the
+  // beginning of its day and the end is the end of its day, so a one-day event (start date ==
+  // end date) still satisfies the backend rule start_at < end_at.
+  const toIso = (value: unknown, endOfDay: boolean): string => {
+    const raw = String(value || '')
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      return new Date(`${raw}T${endOfDay ? '23:59:59' : '00:00:00'}`).toISOString()
+    }
+    return new Date(raw || Date.now()).toISOString()
+  }
+  const startIso = toIso(payload.startAt || payload.start_at, false)
+  const endIso = toIso(payload.endAt || payload.end_at, true)
+  // Backend rule: registration must close at or before the event starts. A closing date on the
+  // start date itself means "when the event starts"; an earlier date means the end of that day.
+  const closesDate = String(payload.registrationClosesAt || payload.startAt || payload.start_at || '')
+  const closesIso =
+    closesDate && closesDate !== String(payload.startAt || payload.start_at)
+      ? toIso(closesDate, true)
+      : startIso
 
   const isTeamed = Boolean(payload.type === 'ALL' || payload.isTeamed)
   const formId = (payload.registrationFormId || (payload.registration as Record<string, unknown> | undefined)?.form_id) as string | undefined
@@ -118,7 +131,7 @@ export async function createEvent(
     end_at: endIso,
     venue: payload.venue || null,
     registration: {
-      closes_at: endIso,
+      closes_at: closesIso,
       form_id: formId || null,
       max_participants: payload.maxParticipants ?? null,
       waitlist_enabled: Boolean(payload.waitlistEnabled),

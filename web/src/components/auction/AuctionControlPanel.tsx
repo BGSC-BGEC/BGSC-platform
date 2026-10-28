@@ -7,6 +7,8 @@ export interface AuctionControlPanelProps {
   teams: TeamPurse[]
   status: AuctionStatus
   isSubmitting: boolean
+  /** Live bid countdown still running: the backend refuses to settle early (409 timer_running). */
+  timerRunning?: boolean
   onAdvance: () => void
   onTogglePause: () => void
   onPlaceBid: (teamId: string, amount: number) => Promise<void>
@@ -18,6 +20,7 @@ export const AuctionControlPanel: React.FC<AuctionControlPanelProps> = ({
   teams,
   status,
   isSubmitting,
+  timerRunning = false,
   onAdvance,
   onTogglePause,
   onPlaceBid,
@@ -72,7 +75,12 @@ export const AuctionControlPanel: React.FC<AuctionControlPanelProps> = ({
           <button
             type="button"
             onClick={onAdvance}
-            disabled={!activeLot || isSubmitting}
+            disabled={!activeLot || isSubmitting || timerRunning}
+            title={
+              timerRunning
+                ? 'The lot settles automatically when the timer reaches zero. Pause the auction to settle it now.'
+                : undefined
+            }
             className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 ${
               hasBid
                 ? 'border border-black bg-black text-white hover:bg-gray-800'
@@ -81,7 +89,11 @@ export const AuctionControlPanel: React.FC<AuctionControlPanelProps> = ({
           >
             <Gavel className="w-4 h-4 flex-shrink-0" />
             <span className="truncate">
-              {hasBid
+              {timerRunning
+                ? hasBid
+                  ? `Sells to ${activeLot!.current_bidder!.team_name} when the timer ends`
+                  : 'Goes unsold if the timer ends with no bids'
+                : hasBid
                 ? `Hammer Down (Sell for ${activeLot!.current_bid!.toLocaleString()} pts to ${activeLot!.current_bidder!.team_name})`
                 : 'Pass Lot (Mark Unsold)'}
             </span>

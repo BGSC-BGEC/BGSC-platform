@@ -148,7 +148,9 @@ export async function adjustPoints(
     request_id: requestId,
   })
 
-  const newBalance = res.balance_after ?? res.new_balance ?? 0
+  // Backend shape: { transaction: { balance_after, ... }, replayed }.
+  const newBalance =
+    res.transaction?.balance_after ?? res.balance_after ?? res.new_balance ?? 0
   const transaction: PointsTransaction = res.transaction
     ? mapBackendTransaction(res.transaction)
     : {
@@ -168,23 +170,25 @@ export async function adjustPoints(
   }
 }
 
-export async function getPointsTransactions(): Promise<PointsTransaction[]> {
+/**
+ * One member's points history (admin endpoint). The backend has no all-members ledger, and
+ * /points/me/transactions would be the signed-in admin's own history, not the member's.
+ */
+export async function getPointsTransactions(
+  userId: string,
+  userName = 'Member'
+): Promise<PointsTransaction[]> {
   if (isMock) {
     await new Promise((resolve) => setTimeout(resolve, 150))
-    return [...DEFAULT_POINTS_TRANSACTIONS]
+    return DEFAULT_POINTS_TRANSACTIONS.filter((tx) => tx.userId === userId)
   }
 
-  try {
-    const res = await apiClient.get<
-      { transactions?: RawBackendTransaction[] } | RawBackendTransaction[]
-    >('/points/me/transactions')
+  const res = await apiClient.get<
+    { transactions?: RawBackendTransaction[] } | RawBackendTransaction[]
+  >(`/points/users/${encodeURIComponent(userId)}/transactions?limit=50`)
 
-    const list = Array.isArray(res) ? res : res?.transactions || []
-    return list.map(mapBackendTransaction)
-  } catch (error) {
-    console.warn('[leaderboardService] Failed to fetch points transactions:', error)
-    return isMock ? DEFAULT_POINTS_TRANSACTIONS : []
-  }
+  const list = Array.isArray(res) ? res : res?.transactions || []
+  return list.map((raw) => ({ ...mapBackendTransaction(raw), userName }))
 }
 
 export const leaderboardService = {
