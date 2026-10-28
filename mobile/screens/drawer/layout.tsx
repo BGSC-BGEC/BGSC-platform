@@ -50,6 +50,8 @@ import ContactFaq from '../feedback/contact-faq';
 const linking = {
   prefixes: ['bgsc://app', 'bgsc://'],
   config: { screens: { StravaConnect: 'settings/integrations' } },
+  // Google sign-in's redirect is read by the auth browser session, not routed.
+  filter: (url: string) => !/^bgsc:\/\/auth\/callback/.test(url),
   getStateFromPath(path: string, options: any) {
     if (path.split(/[?#]/)[0].replace(/^\//, '') === 'settings/integrations') {
       return { routes: [{ name: 'App' }, { name: 'StravaConnect', params: { callbackUrl: path } }] };

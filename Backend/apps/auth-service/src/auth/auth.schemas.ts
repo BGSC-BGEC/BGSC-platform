@@ -39,8 +39,14 @@ export const RefreshTokenSchema = z.object({
 /** Logout by refresh token too: once the access token has expired, it is all the client holds. */
 export const LogoutSchema = z.object({ refresh_token: z.string().min(1).optional() }).optional();
 
+const mailCode = z
+  .string()
+  .trim()
+  .regex(/^\d{6}$/, { message: 'otp must be exactly 6 digits' });
+
 export const VerifyEmailSchema = z.object({
-  token: z.string().min(1),
+  email: z.string().trim().toLowerCase().email(),
+  otp: mailCode,
 });
 
 export const ResendVerificationSchema = z.object({
@@ -52,7 +58,8 @@ export const ForgotPasswordSchema = z.object({
 });
 
 export const ResetPasswordSchema = z.object({
-  token: z.string().min(1),
+  email: z.string().trim().toLowerCase().email(),
+  otp: mailCode,
   new_password: password('new_password'),
 });
 
@@ -67,14 +74,13 @@ export const SendPhoneOtpSchema = z.object({
 
 export const VerifyPhoneOtpSchema = z.object({
   phone_number: phoneNumberSchema,
-  otp: z
-    .string()
-    .trim()
-    .regex(/^\d{6}$/, { message: 'otp must be exactly 6 digits' }),
+  otp: mailCode,
 });
 
 export const GoogleExchangeSchema = z.object({
   login_code: z.string().regex(/^[0-9a-f]{64}$/),
+  // RFC 7636 §4.1. Present exactly when the sign-in was started by the app with a code_challenge.
+  code_verifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/).optional(),
 });
 
 export type RegisterInput = z.infer<typeof RegisterSchema>;

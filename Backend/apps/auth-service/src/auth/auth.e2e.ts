@@ -15,7 +15,7 @@ import jwt from 'jsonwebtoken';
 import { randomUUID as uuid } from 'crypto';
 import { Server } from 'http';
 import { app } from '../index';
-import { AuthService, OTP_MAX_ATTEMPTS, REFRESH_REUSE_GRACE_MS, sha256 } from './auth.service';
+import { AuthService, MAIL_CODE_MAX_ATTEMPTS, OTP_MAX_ATTEMPTS, REFRESH_REUSE_GRACE_MS, pkceChallenge, sha256 } from './auth.service';
 
 /**
  * Auth Service e2e: the account lifecycle this service owns.
@@ -198,13 +198,16 @@ async function main() {
     const verifyId = await seedDeletedUser(1);
     await User.updateOne(
         { _id: verifyId },
-        { $set: { email_verification_token: sha256('tok-e2e'), email_verification_expires: new Date(Date.now() + 60_000) } }
+        { $set: { email_verification_token: await bcrypt.hash('123456', 10), email_verification_expires: new Date(Date.now() + 60_000) } }
     );
-    const verified: any = await AuthService.verifyEmail('tok-e2e');
-    assert.strictEqual(verified.tokens, undefined, 'a verification link mints no tokens');
+    const verifyEmail = `${verifyId}@authe2e.local`;
+    await assert.rejects(() => AuthService.verifyEmail(`nobody-${verifyId}@authe2e.local`, '123456'),
+        (err: any) => err.status === 400 && err.code === 'invalid_or_expired_code', 'another address cannot use the code');
+    const verified: any = await AuthService.verifyEmail(verifyEmail, '123456');
+    assert.strictEqual(verified.tokens, undefined, 'a verification code mints no tokens');
     assert.strictEqual((await User.findById(verifyId))!.status, UserStatus.DELETED, 'and restores nothing');
-    await assert.rejects(() => AuthService.verifyEmail('tok-e2e'), (err: any) => err.status === 400,
-        'a verification token works once');
+    await assert.rejects(() => AuthService.verifyEmail(verifyEmail, '123456'), (err: any) => err.status === 400,
+        'a verification code works once');
 
     // ---- one account per verified phone number -----------------------------
     const phone = `+9199${Date.now().toString().slice(-8)}`;
@@ -357,18 +360,38 @@ async function main() {
     assert.strictEqual((await User.findById(noAuditId))!.status, UserStatus.DELETED,
         'a restore whose audit row cannot be written is rolled back');
 
-    // ---- reset tokens: stored hashed, consumed once --------------------------
+    // ---- reset codes: stored hashed, consumed once, guesses capped -----------
     const resetId = await activeUser();
     const resetEmail = `${resetId}@authe2e.local`;
     const realLog = console.log;
     let mailed = '';
-    console.log = (...a: unknown[]) => { const m = String(a[0]).match(/^Token: ([0-9a-f]{64})$/); if (m) mailed = m[1]; };
-    await AuthService.forgotPassword(resetEmail);
-    console.log = realLog;
-    const stored = (await User.findById(resetId).select('+password_reset_token'))!.password_reset_token;
-    assert.ok(mailed && stored === sha256(mailed), 'the reset token is stored as a digest, never raw');
-    const resets = await Promise.all([0, 1].map(() => outcome(AuthService.resetPassword({ token: mailed, new_password: 'N3w!Passw0rd' }))));
-    assert.deepStrictEqual(resets.sort(), ['400:invalid_or_expired_token', 'ok'], 'one reset token resets once');
+    const mailedCode = async (send: () => Promise<void>) => {
+        mailed = '';
+        console.log = (...a: unknown[]) => { const m = String(a[0]).match(/^Code: (\d{6})$/); if (m) mailed = m[1]; };
+        try { await send(); } finally { console.log = realLog; }
+        return mailed;
+    };
+    await mailedCode(() => AuthService.forgotPassword(resetEmail));
+    const stored = (await User.findById(resetId).select('+password_reset_token'))!.password_reset_token!;
+    assert.ok(mailed && stored !== mailed && (await bcrypt.compare(mailed, stored)), 'the reset code is stored as a digest, never raw');
+    const resets = await Promise.all([0, 1].map(() => outcome(AuthService.resetPassword({ email: resetEmail, otp: mailed, new_password: 'N3w!Passw0rd' }))));
+    assert.deepStrictEqual(resets.sort(), ['400:invalid_or_expired_code', 'ok'], 'one reset code resets once');
+
+    const wrong = (c: string) => (c === '000000' ? '111111' : '000000');
+    const capped = await mailedCode(() => AuthService.forgotPassword(resetEmail));
+    const resetGuesses = await Promise.all(
+        Array.from({ length: MAIL_CODE_MAX_ATTEMPTS + 2 }, () => outcome(AuthService.resetPassword({ email: resetEmail, otp: wrong(capped), new_password: 'N3w!Passw0rd' })))
+    );
+    assert.ok(resetGuesses.every((g) => g === '400:invalid_or_expired_code'), 'wrong guesses all refused alike');
+    assert.strictEqual((await User.findById(resetId).select('+password_reset_attempts'))!.password_reset_attempts, MAIL_CODE_MAX_ATTEMPTS,
+        'parallel guesses never exceed the cap');
+    assert.strictEqual(await outcome(AuthService.resetPassword({ email: resetEmail, otp: capped, new_password: 'N3w!Passw0rd' })),
+        '400:invalid_or_expired_code', 'the right code is dead once its guesses are spent');
+    assert.strictEqual(await mailedCode(() => AuthService.forgotPassword(resetEmail)), '', 'and a resend buys no new code inside the window');
+    await User.updateOne({ _id: resetId }, { $set: { password_reset_expires: new Date(Date.now() - 1) } });
+    const reopened = await mailedCode(() => AuthService.forgotPassword(resetEmail));
+    assert.ok(reopened, 'an expired window reopens with a fresh code');
+    assert.strictEqual(await outcome(AuthService.resetPassword({ email: resetEmail, otp: reopened, new_password: 'N3w!Passw0rd' })), 'ok');
 
     // ---- register race is a 409, not a 500 -----------------------------------
     const regName = `reg_${Date.now()}`;
@@ -458,6 +481,22 @@ async function main() {
     assert.ok(exchanged.tokens.refresh_token && exchanged.user.role === UserRole.USER, 'a login code swaps for a session');
     await assert.rejects(() => AuthService.exchangeLoginCode('c'.repeat(64)), (e: any) => e.status === 401,
         'and only once');
+    // An app's code is bound to its PKCE challenge: no verifier, or the wrong one, finds nothing and burns nothing.
+    const verifier = 'v'.repeat(43);
+    await User.updateOne({ _id: gId }, { $set: {
+        oauth_login_code_hash: sha256('e'.repeat(64)), oauth_login_code_expires: new Date(Date.now() + 60_000),
+        oauth_login_code_challenge: pkceChallenge(verifier) } });
+    for (const v of [undefined, 'w'.repeat(43)]) {
+        await assert.rejects(() => AuthService.exchangeLoginCode('e'.repeat(64), v), (e: any) => e.status === 401,
+            'an app login code needs its own verifier');
+    }
+    assert.ok((await AuthService.exchangeLoginCode('e'.repeat(64), verifier)).tokens.access_token, 'and exchanges with it');
+    assert.throws(() => AuthService.signState('n'.repeat(64), undefined, { redirect: 'https://evil.example/cb', challenge: pkceChallenge(verifier) }),
+        (e: any) => e.status === 400, 'an app redirect must be the app scheme');
+    const appState = AuthService.signState('n'.repeat(64), undefined, { redirect: 'bgsc://auth/callback', challenge: pkceChallenge(verifier) });
+    assert.strictEqual(AuthService.appTargetOf(appState)?.redirect, 'bgsc://auth/callback', 'the app target rides in the signed state');
+    assert.strictEqual(AuthService.appTargetOf(appState.slice(0, -2) + 'xx'), null, 'and only a signed one counts');
+
     await User.updateOne({ _id: gId }, { $set: { status: UserStatus.SUSPENDED,
         oauth_login_code_hash: sha256('d'.repeat(64)), oauth_login_code_expires: new Date(Date.now() + 60_000) } });
     await assert.rejects(() => AuthService.exchangeLoginCode('d'.repeat(64)), (e: any) => e.status === 403,

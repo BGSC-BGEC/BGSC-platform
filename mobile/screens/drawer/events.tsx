@@ -213,7 +213,7 @@ export default function Events() {
               <SkeletonEventCard />
               <SkeletonEventCard />
             </View>
-          ) : error ? null : (
+          ) : error ? undefined : (
             <EmptyState
               icon="calendar"
               title={
@@ -248,7 +248,7 @@ export default function Events() {
             <Typography variant="bodySmall" color="textMuted" align="center">
               That’s everything for now.
             </Typography>
-          ) : null
+          ) : undefined
         }
         onEndReachedThreshold={0.4}
         onEndReached={() => {

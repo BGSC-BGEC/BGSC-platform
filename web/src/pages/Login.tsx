@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { AlertCircle } from 'lucide-react'
 import { useAuthStore } from '../stores/authStore'
 import type { UserRole } from '../types/admin'
@@ -12,6 +12,9 @@ interface LoginProps {
 
 const DEFAULT_ROLES: UserRole[] = ['coordinator', 'founder', 'core']
 const isMock = import.meta.env.VITE_USE_MOCK === 'true'
+const API_URL = (
+  (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:3000'
+).replace(/\/+$/, '')
 
 export const Login: React.FC<LoginProps> = ({
   title = 'BGSC Admin Console',
@@ -22,10 +25,24 @@ export const Login: React.FC<LoginProps> = ({
   const [password, setPassword] = useState('')
   const [role, setRole] = useState<UserRole>(availableRoles[0] || 'coordinator')
   const [loading, setLoading] = useState(false)
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const location = useLocation()
+  const routeState = location.state as
+    | { from?: { pathname: string; search?: string }; oauthError?: string }
+    | null
+  const [errorMessage, setErrorMessage] = useState<string | null>(
+    routeState?.oauthError ?? null
+  )
 
   const { login } = useAuthStore()
   const navigate = useNavigate()
+
+  const handleGoogle = () => {
+    const from = routeState?.from
+    const returnPath = from ? from.pathname + (from.search ?? '') : '/dashboard'
+    window.location.assign(
+      `${API_URL}/auth/google?state=${encodeURIComponent(returnPath)}`
+    )
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -122,6 +139,16 @@ export const Login: React.FC<LoginProps> = ({
             {loading ? 'Authenticating...' : 'Sign In'}
           </button>
         </form>
+
+        {!isMock && (
+          <button
+            type="button"
+            onClick={handleGoogle}
+            className="w-full py-2 mt-3 bg-white border border-gray-300 text-black font-bold text-sm rounded hover:bg-gray-100 transition-colors cursor-pointer"
+          >
+            Continue with Google
+          </button>
+        )}
       </div>
     </div>
   )

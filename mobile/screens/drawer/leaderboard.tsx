@@ -302,7 +302,7 @@ export default function Leaderboard() {
         onScrollToIndexFailed={(info) => {
           listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
         }}
-        ListFooterComponent={loadingMore ? <Spinner style={styles.footer} /> : null}
+        ListFooterComponent={loadingMore ? <Spinner style={styles.footer} /> : undefined}
       />
     </SafeAreaView>
   );

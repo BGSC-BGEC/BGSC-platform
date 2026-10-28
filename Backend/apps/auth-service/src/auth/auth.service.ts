@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { AuditLog, IUser, RESERVED_USERNAMES, ServiceError, TOKEN_ALGORITHMS, User, UserRole, UserStatus, config, publish, recordAudit, restorableUntil } from '@bgsc/shared';
-import { MailerService } from './mailer.service';
+import { MAIL_CODE_TTL_MIN, MailerService } from './mailer.service';
 import {
   RegisterInput,
   LoginInput,
@@ -31,6 +31,9 @@ export interface AuthResult {
 /** Wrong guesses allowed per OTP window. A resend does not buy more (see sendPhoneOtp). */
 export const OTP_MAX_ATTEMPTS = 3;
 const OTP_TTL_MS = 5 * 60 * 1000;
+const MAIL_CODE_TTL_MS = MAIL_CODE_TTL_MIN * 60 * 1000;
+/** Wrong guesses per mailed code. Same rule as the phone OTP: a resend does not buy more. */
+export const MAIL_CODE_MAX_ATTEMPTS = 5;
 /** The Google callback's one-time login code: long enough for one redirect, no longer. */
 const LOGIN_CODE_TTL_MS = 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -53,6 +56,28 @@ const RESTORE_REPLAY_PAGE = 500;
  * browsers strip tab/CR/LF while parsing, so `/\t/evil.example` would otherwise become `//evil.example`.
  */
 export const isSafeReturnPath = (p: string): boolean => p.length <= 200 && /^\/(?![/\\])[^\x00-\x1f\x7f\\]*$/.test(p);
+
+/**
+ * Where an app sign-in may send its login code: the app's own scheme, and Expo Go's outside
+ * production. Not an open redirect even if another app claims the scheme: the code is bound to
+ * the PKCE challenge, so it is worthless without the verifier only the real app holds.
+ */
+export const isAppRedirect = (uri: string): boolean =>
+  uri.length <= 300 &&
+  /^[a-z][a-z0-9+.-]*:\/\/[^\x00-\x20\x7f\\]*$/.test(uri) &&
+  (uri.startsWith('bgsc://') || (config.nodeEnv !== 'production' && /^exps?:\/\//.test(uri)));
+
+/** RFC 7636 S256: base64url(sha256(verifier)), no padding. */
+export const pkceChallenge = (verifier: string): string => crypto.createHash('sha256').update(verifier).digest('base64url');
+
+/** The two mailed codes and the fields each lives in. The `*_token` fields hold a bcrypt digest of the code. */
+const MAIL_CODES = {
+  verify: { hash: 'email_verification_token', expires: 'email_verification_expires', attempts: 'email_verification_attempts' },
+  reset: { hash: 'password_reset_token', expires: 'password_reset_expires', attempts: 'password_reset_attempts' },
+} as const;
+type MailCodeKind = keyof typeof MAIL_CODES;
+
+const sixDigits = (): string => crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
 
 /**
  * One-time secrets are stored as sha256 digests. sha256, not bcrypt: every one of these is 256
@@ -155,8 +180,7 @@ export class AuthService {
     for (const u of existing) await this.releaseKeys(u);
 
     const passwordHash = await bcrypt.hash(input.password, 10);
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-    const verificationExpires = new Date(Date.now() + DAY_MS);
+    const verificationCode = sixDigits();
 
     let user: IUser;
     try {
@@ -167,8 +191,9 @@ export class AuthService {
         role: UserRole.USER,
         status: UserStatus.ACTIVE,
         is_email_verified: false,
-        email_verification_token: sha256(verificationToken),
-        email_verification_expires: verificationExpires,
+        email_verification_token: await bcrypt.hash(verificationCode, 10),
+        email_verification_expires: new Date(Date.now() + MAIL_CODE_TTL_MS),
+        email_verification_attempts: 0,
         profile: {
           full_name: input.full_name,
           avatar_url: null,
@@ -202,7 +227,10 @@ export class AuthService {
     const tokens = this.generateTokenPair(user);
     await User.updateOne({ _id: user._id }, { $set: this.sessionSet(tokens) });
 
-    await MailerService.sendVerificationEmail(user._id, user.email, verificationToken);
+    // Not awaited: an SMTP hiccup must not turn a created account into a 500. The user resends.
+    MailerService.sendVerificationEmail(user._id, user.email, verificationCode).catch((err) =>
+      console.error(`[auth-service] verification mail for ${user._id} failed:`, err)
+    );
 
     // Id only: no consumer needs the address, and the bus is not a place for PII.
     publish('UserRegistered', 'auth-service', { user_id: user._id });
@@ -420,25 +448,68 @@ export class AuthService {
   }
 
   /**
-   * Verifies user email via one-time verification token.
-   *
-   * Marks the address verified and nothing else. It used to mint a token pair, which made a
-   * 24-hour link sitting in an inbox (or a Referer header) a password-free login.
+   * Puts a fresh code on the account and returns it, or null while the current code's guesses are
+   * spent. A resend inside a live window replaces the code but keeps the attempt count — resetting
+   * it made "resend" a way to buy fresh guesses on demand. Conditional updates, never
+   * read-then-save, so a racing guess's $inc is not overwritten.
    */
-  static async verifyEmail(token: string): Promise<{ is_email_verified: true }> {
-    // Consumed atomically: the same link clicked twice verifies once.
+  private static async issueMailCode(userId: string, kind: MailCodeKind): Promise<string | null> {
+    const f = MAIL_CODES[kind];
+    const code = sixDigits();
+    const now = new Date();
+    const fresh = { [f.hash]: await bcrypt.hash(code, 10), [f.expires]: new Date(now.getTime() + MAIL_CODE_TTL_MS) };
+
+    const kept = await User.updateOne(
+      { _id: userId, [f.expires]: { $gt: now }, [f.attempts]: { $lt: MAIL_CODE_MAX_ATTEMPTS } },
+      { $set: fresh }
+    );
+    if (kept.matchedCount > 0) return code;
+    const reopened = await User.updateOne(
+      { _id: userId, $or: [{ [f.expires]: null }, { [f.expires]: { $lte: now } }] },
+      { $set: { ...fresh, [f.attempts]: 0 } }
+    );
+    return reopened.matchedCount > 0 ? code : null;
+  }
+
+  /**
+   * Spends one guess on `email`'s code (atomic $inc before the compare, so parallel guesses cannot
+   * share an attempt) and, when it matches, consumes the code and applies `onMatch` in the same
+   * conditional write. Every failure — no account, no code, expired, spent, wrong — is the same 400
+   * after the same bcrypt round: which one it was would tell a stranger the address has an account.
+   */
+  private static async consumeMailCode(email: string, kind: MailCodeKind, code: string, onMatch: Record<string, unknown>): Promise<IUser> {
+    const f = MAIL_CODES[kind];
+    const now = new Date();
     const user = await User.findOneAndUpdate(
-      {
-        email_verification_token: sha256(token),
-        email_verification_expires: { $gt: new Date() },
-      },
-      { $set: { is_email_verified: true, email_verification_token: null, email_verification_expires: null } },
+      { email: email.toLowerCase(), [f.hash]: { $type: 'string' }, [f.expires]: { $gt: now }, [f.attempts]: { $lt: MAIL_CODE_MAX_ATTEMPTS } },
+      { $inc: { [f.attempts]: 1 } },
+      { returnDocument: 'after' }
+    ).select(`+${f.hash}`);
+
+    const digest = (user?.get(f.hash) as string | undefined) ?? null;
+    const isMatch = await bcrypt.compare(code, digest ?? TIMING_DUMMY_HASH);
+    if (!user || !digest || !isMatch) {
+      throw new ServiceError(400, 'invalid_or_expired_code');
+    }
+
+    // Conditional on the digest just checked: a resend in between voids this success.
+    const done = await User.findOneAndUpdate(
+      { _id: user._id, [f.hash]: digest },
+      { $set: { [f.hash]: null, [f.expires]: null, [f.attempts]: 0, ...onMatch } },
       { returnDocument: 'after' }
     );
+    if (!done) throw new ServiceError(400, 'invalid_or_expired_code');
+    return done;
+  }
 
-    if (!user) {
-      throw new ServiceError(400, 'invalid_or_expired_token');
-    }
+  /**
+   * Verifies the account's email with the 6-digit code mailed to it.
+   *
+   * Marks the address verified and nothing else — no tokens: a code sitting in an inbox must not
+   * be a password-free login.
+   */
+  static async verifyEmail(email: string, code: string): Promise<{ is_email_verified: true }> {
+    const user = await this.consumeMailCode(email, 'verify', code, { is_email_verified: true });
 
     publish('UserEmailVerified', 'auth-service', {
       user_id: user._id,
@@ -448,7 +519,7 @@ export class AuthService {
   }
 
   /**
-   * Resends verification email.
+   * Mails a new verification code.
    */
   static async resendVerification(email: string): Promise<void> {
     const user = await User.findOne({ email: email.toLowerCase() });
@@ -456,17 +527,12 @@ export class AuthService {
       return; // Generic success to prevent email enumeration
     }
 
-    const token = crypto.randomBytes(32).toString('hex');
-    await User.updateOne(
-      { _id: user._id },
-      { $set: { email_verification_token: sha256(token), email_verification_expires: new Date(Date.now() + DAY_MS) } }
-    );
-
-    await MailerService.sendVerificationEmail(user._id, user.email, token);
+    const code = await this.issueMailCode(user._id, 'verify');
+    if (code) await MailerService.sendVerificationEmail(user._id, user.email, code);
   }
 
   /**
-   * Generates password reset token and sends email.
+   * Mails a password reset code.
    */
   static async forgotPassword(email: string): Promise<void> {
     const user = await User.findOne({ email: email.toLowerCase() });
@@ -474,39 +540,20 @@ export class AuthService {
       return; // Generic success to prevent email enumeration
     }
 
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    await User.updateOne(
-      { _id: user._id },
-      { $set: { password_reset_token: sha256(resetToken), password_reset_expires: new Date(Date.now() + 60 * 60 * 1000) } }
-    );
-
-    await MailerService.sendPasswordResetEmail(user._id, user.email, resetToken);
+    const code = await this.issueMailCode(user._id, 'reset');
+    if (code) await MailerService.sendPasswordResetEmail(user._id, user.email, code);
   }
 
   /**
-   * Resets password using valid token. Consumed atomically, so one token resets once.
+   * Resets the password with the mailed code, and ends every session. One code resets once.
    */
   static async resetPassword(input: ResetPasswordInput): Promise<void> {
     const passwordHash = await bcrypt.hash(input.new_password, 10);
-    const user = await User.findOneAndUpdate(
-      {
-        password_reset_token: sha256(input.token),
-        password_reset_expires: { $gt: new Date() },
-      },
-      {
-        $set: {
-          password_hash: passwordHash,
-          password_reset_token: null,
-          password_reset_expires: null,
-          refresh_token_hash: null, // Revoke active sessions
-          refresh_session_id: null,
-        },
-      }
-    );
-
-    if (!user) {
-      throw new ServiceError(400, 'invalid_or_expired_token');
-    }
+    await this.consumeMailCode(input.email, 'reset', input.otp, {
+      password_hash: passwordHash,
+      refresh_token_hash: null, // Revoke active sessions
+      refresh_session_id: null,
+    });
   }
 
   /**
@@ -650,7 +697,7 @@ export class AuthService {
    * `nonce` is the value the controller also puts in an HttpOnly cookie. The callback accepts the
    * state only when the two agree, which ties the flow to the browser that started it.
    */
-  static getGoogleAuthUrl(nonce: string, state?: string): string {
+  static getGoogleAuthUrl(nonce: string, state?: string, app?: AppTarget): string {
     if (!config.google.clientId || !config.google.clientSecret) {
       throw new ServiceError(503, 'google_oauth_not_configured');
     }
@@ -661,7 +708,7 @@ export class AuthService {
       redirect_uri: config.google.callbackUrl,
       response_type: 'code',
       scope: 'openid email profile',
-      state: this.signState(nonce, state),
+      state: this.signState(nonce, state, app),
     });
 
     return `${rootUrl}?${params.toString()}`;
@@ -677,11 +724,14 @@ export class AuthService {
    *
    * The caller's own `state` (a return path, typically) rides along and comes back out.
    */
-  static signState(nonce: string, caller?: string): string {
+  static signState(nonce: string, caller?: string, app?: AppTarget): string {
     if (caller !== undefined && !isSafeReturnPath(caller)) {
       throw new ServiceError(400, 'invalid_return_path');
     }
-    return jwt.sign({ typ: 'oauth_state', nonce, s: caller ?? null }, config.jwt.accessSecret, {
+    if (app && (!isAppRedirect(app.redirect) || !/^[A-Za-z0-9_-]{43}$/.test(app.challenge))) {
+      throw new ServiceError(400, 'invalid_app_redirect');
+    }
+    return jwt.sign({ typ: 'oauth_state', nonce, s: caller ?? null, app: app ?? null }, config.jwt.accessSecret, {
       algorithm: 'HS256',
       expiresIn: '10m',
     });
@@ -705,6 +755,22 @@ export class AuthService {
     }
     // Re-checked on the way out, so a state signed before the rule existed cannot smuggle one through.
     return typeof payload.s === 'string' && isSafeReturnPath(payload.s) ? payload.s : null;
+  }
+
+  /**
+   * The app a state was signed for, if any. Expiry ignored, signature not: a failed or late sign-in
+   * still goes back to the app that started it, carrying only an error.
+   */
+  static appTargetOf(state: string | undefined): AppTarget | null {
+    if (!state) return null;
+    try {
+      const { app } = jwt.verify(state, config.jwt.accessSecret, { algorithms: TOKEN_ALGORITHMS, ignoreExpiration: true }) as {
+        app?: AppTarget | null;
+      };
+      return app && isAppRedirect(app.redirect) ? app : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -870,6 +936,7 @@ export class AuthService {
           email_verification_expires: null,
           oauth_login_code_hash: null,
           oauth_login_code_expires: null,
+          oauth_login_code_challenge: null,
         },
       }
     );
@@ -951,21 +1018,35 @@ export class AuthService {
    * in browser history, proxy and access logs; this code is single-use, lives 60 seconds, and is
    * worthless once the frontend has swapped it at POST /auth/google/exchange.
    */
-  static async googleLoginCode(code: string): Promise<string> {
+  static async googleLoginCode(code: string, challenge: string | null = null): Promise<string> {
     const user = await this.resolveGoogleUser(code);
     const loginCode = crypto.randomBytes(32).toString('hex');
     await User.updateOne(
       { _id: user._id },
-      { $set: { oauth_login_code_hash: sha256(loginCode), oauth_login_code_expires: new Date(Date.now() + LOGIN_CODE_TTL_MS) } }
+      {
+        $set: {
+          oauth_login_code_hash: sha256(loginCode),
+          oauth_login_code_expires: new Date(Date.now() + LOGIN_CODE_TTL_MS),
+          oauth_login_code_challenge: challenge,
+        },
+      }
     );
     return loginCode;
   }
 
-  static async exchangeLoginCode(loginCode: string): Promise<AuthResult> {
+  /**
+   * An app's code only exchanges with the PKCE verifier behind its challenge; a browser's code (no
+   * challenge) only without one. Matched in the query, so a wrong verifier does not burn the code.
+   */
+  static async exchangeLoginCode(loginCode: string, codeVerifier?: string): Promise<AuthResult> {
     // Consumed atomically: a replayed code finds nothing.
     const user = await User.findOneAndUpdate(
-      { oauth_login_code_hash: sha256(loginCode), oauth_login_code_expires: { $gt: new Date() } },
-      { $set: { oauth_login_code_hash: null, oauth_login_code_expires: null } },
+      {
+        oauth_login_code_hash: sha256(loginCode),
+        oauth_login_code_expires: { $gt: new Date() },
+        oauth_login_code_challenge: codeVerifier ? pkceChallenge(codeVerifier) : null,
+      },
+      { $set: { oauth_login_code_hash: null, oauth_login_code_expires: null, oauth_login_code_challenge: null } },
       { returnDocument: 'after' }
     );
     if (!user) throw new ServiceError(401, 'unauthorized');
@@ -1119,6 +1200,12 @@ export class AuthService {
       is_phone_verified: true,
     };
   }
+}
+
+/** An app sign-in: where its login code goes, and the PKCE challenge the code is bound to. */
+export interface AppTarget {
+  redirect: string;
+  challenge: string;
 }
 
 /** The fields of Google's v2 userinfo response this service reads. */

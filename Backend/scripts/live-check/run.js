@@ -318,7 +318,7 @@ async function mailToken(email, word, since = 0) {
         for (let i = lines.length - 1; i >= since; i--) {
             if (lines[i].includes(`To: ${email}`) && (lines[i + 1] || '').includes(word)) {
                 for (let k = i; k < i + 6 && k < lines.length; k++) {
-                    const m = /Token: ([0-9a-f]{16,})/.exec(lines[k]);
+                    const m = /Code: (\d{6})/.exec(lines[k]);
                     if (m) return m[1];
                 }
             }
@@ -405,13 +405,13 @@ async function bootstrap() {
         S.u[key] = u;
         const tok = await mailToken(u.email, 'Verify');
         need(tok, `verification token for ${key} in auth-service log`);
-        const v = await api('POST', '/auth/verify-email', { body: { token: tok }, expect: 200 });
+        const v = await api('POST', '/auth/verify-email', { body: { email: u.email, otp: tok }, expect: 200 });
         check(v.data && v.data.is_email_verified === true, `verify-email ${key}`, v.data);
     }
     // duplicate registration
     await api('POST', '/auth/register', { body: { email: S.u.userA.email, username: `dup_${RUN}`, password: PW, full_name: 'Dup' }, expect: 409 });
-    // verifying twice: token consumed
-    await api('POST', '/auth/verify-email', { body: { token: 'f'.repeat(64) }, expect: 400 });
+    // verifying twice: code consumed
+    await api('POST', '/auth/verify-email', { body: { email: S.u.userA.email, otp: '000000' }, expect: 400 });
 
     // founder bootstrap, the documented way
     try {
@@ -1355,9 +1355,10 @@ async function authJourney() {
     await api('POST', '/auth/forgot-password', { body: { email: S.u.member.email } });
     const tok = await mailToken(S.u.member.email, 'Reset', since);
     if (check(!!tok, 'reset token printed to the auth-service log')) {
-        await api('POST', '/auth/reset-password', { body: { token: tok, new_password: 'short' }, expect: 422 });
-        await api('POST', '/auth/reset-password', { body: { token: tok, new_password: 'NewLivePass#2026' } });
-        await api('POST', '/auth/reset-password', { body: { token: tok, new_password: 'NewLivePass#2026' }, expect: 400, why: 'token consumed' });
+        const em = S.u.member.email;
+        await api('POST', '/auth/reset-password', { body: { email: em, otp: tok, new_password: 'short' }, expect: 422 });
+        await api('POST', '/auth/reset-password', { body: { email: em, otp: tok, new_password: 'NewLivePass#2026' } });
+        await api('POST', '/auth/reset-password', { body: { email: em, otp: tok, new_password: 'NewLivePass#2026' }, expect: 400, why: 'code consumed' });
         await api('POST', '/auth/login', { body: { login: S.u.member.email, password: PW }, expect: 401 });
         S.u.member.password = 'NewLivePass#2026';
         await login('member');

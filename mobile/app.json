@@ -3,7 +3,8 @@
     "expo-secure-store",
     "expo-image",
     "expo-video",
-    "expo-font"
+    "expo-font",
+    "expo-web-browser"
   ],
   "scheme": "bgsc"
 }

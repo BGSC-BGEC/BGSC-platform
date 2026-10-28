@@ -22,6 +22,7 @@ interface AuthState {
     password?: string,
     role?: UserRole
   ) => Promise<void>
+  loginWithGoogleCode: (loginCode: string) => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -35,6 +36,31 @@ const getInitialUser = (): AdminUser | null => {
 }
 
 const initialUser = getInitialUser()
+
+// Shared by password and Google login: both endpoints return { user, tokens }.
+const applySession = (
+  result: LoginResponse | null,
+  set: (state: Partial<AuthState>) => void
+) => {
+  if (result && result.tokens) {
+    localStorage.setItem('auth_token', result.tokens.access_token)
+    localStorage.setItem('refresh_token', result.tokens.refresh_token)
+  }
+
+  if (result && result.user) {
+    const mappedUser: AdminUser = {
+      id: result.user.id,
+      username: result.user.username,
+      email: result.user.email,
+      role: result.user.role,
+      pointsBalance:
+        result.user.points_balance ?? result.user.pointsBalance ?? 0,
+    }
+
+    localStorage.setItem('auth_user', JSON.stringify(mappedUser))
+    set({ status: 'authenticated', user: mappedUser })
+  }
+}
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: initialUser,
@@ -68,24 +94,20 @@ export const useAuthStore = create<AuthState>((set) => ({
         password,
       })
 
-      if (result && result.tokens) {
-        localStorage.setItem('auth_token', result.tokens.access_token)
-        localStorage.setItem('refresh_token', result.tokens.refresh_token)
-      }
+      applySession(result, set)
+    } catch (err) {
+      set({ status: 'unauthenticated', user: null })
+      throw err
+    }
+  },
 
-      if (result && result.user) {
-        const mappedUser: AdminUser = {
-          id: result.user.id,
-          username: result.user.username,
-          email: result.user.email,
-          role: result.user.role,
-          pointsBalance:
-            result.user.points_balance ?? result.user.pointsBalance ?? 0,
-        }
-
-        localStorage.setItem('auth_user', JSON.stringify(mappedUser))
-        set({ status: 'authenticated', user: mappedUser })
-      }
+  loginWithGoogleCode: async (loginCode: string) => {
+    set({ status: 'loading' })
+    try {
+      const result = await apiClient.post<LoginResponse>('/auth/google/exchange', {
+        login_code: loginCode,
+      })
+      applySession(result, set)
     } catch (err) {
       set({ status: 'unauthenticated', user: null })
       throw err

@@ -158,7 +158,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const googleSignIn = async () => {
     const ok = await run(async () => {
-      await authRepository.googleSignIn();
+      const res = await authRepository.googleSignIn();
+      // Browser closed: not an error.
+      if (!res) return;
+      setAuthToken(res.token);
+      setUser(res.user);
+      setIsLoggedIn(true);
+      void refreshUser();
     });
     return { success: ok, requiresProfileCompletion: false };
   };
