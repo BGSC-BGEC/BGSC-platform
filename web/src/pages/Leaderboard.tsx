@@ -4,7 +4,6 @@ import type {
   LeaderboardDomain,
   LeaderboardEntry,
   LeaderboardPeriod,
-  PointsTransaction,
 } from '../types/leaderboard'
 import { leaderboardService } from '../services/leaderboardService'
 import { PodiumCards } from '../components/leaderboard/PodiumCards'
@@ -14,9 +13,11 @@ import { PointsLedgerModal } from '../components/leaderboard/PointsLedgerModal'
 
 export const Leaderboard: React.FC = () => {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([])
-  const [transactions, setTransactions] = useState<PointsTransaction[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Shown after an adjustment: the leaderboard itself does not move (see handlePointsAdjusted).
+  const [notice, setNotice] = useState<string | null>(null)
+  const [ledgerUserId, setLedgerUserId] = useState<string | null>(null)
 
   const [period, setPeriod] = useState<LeaderboardPeriod>('all')
   const [domain, setDomain] = useState<LeaderboardDomain>('all')
@@ -30,14 +31,11 @@ export const Leaderboard: React.FC = () => {
   useEffect(() => {
     let ignore = false
 
-    Promise.all([
-      leaderboardService.getGlobalLeaderboard(period, domain),
-      leaderboardService.getPointsTransactions(),
-    ])
-      .then(([boardData, txData]) => {
+    leaderboardService
+      .getGlobalLeaderboard(period, domain)
+      .then((boardData) => {
         if (!ignore) {
           setEntries(boardData)
-          setTransactions(txData)
           setError(null)
           setIsLoading(false)
         }
@@ -71,13 +69,10 @@ export const Leaderboard: React.FC = () => {
   const handleRetry = () => {
     setIsLoading(true)
     setError(null)
-    Promise.all([
-      leaderboardService.getGlobalLeaderboard(period, domain),
-      leaderboardService.getPointsTransactions(),
-    ])
-      .then(([boardData, txData]) => {
+    leaderboardService
+      .getGlobalLeaderboard(period, domain)
+      .then((boardData) => {
         setEntries(boardData)
-        setTransactions(txData)
         setIsLoading(false)
       })
       .catch((err) => {
@@ -93,15 +88,19 @@ export const Leaderboard: React.FC = () => {
     setIsAdjustmentModalOpen(true)
   }
 
-  const handlePointsAdjusted = () => {
-    // Re-fetch both leaderboard and ledger history
-    Promise.all([
-      leaderboardService.getGlobalLeaderboard(period, domain),
-      leaderboardService.getPointsTransactions(),
-    ]).then(([boardData, txData]) => {
-      setEntries(boardData)
-      setTransactions(txData)
-    })
+  const handlePointsAdjusted = (result: { userId: string; newBalance: number }) => {
+    // The global leaderboard only counts earned points (backend design), so an admin
+    // adjustment changes the member's balance but not their rank. Say so explicitly.
+    const member = entries.find((e) => e.userId === result.userId)
+    setNotice(
+      `Saved. ${member?.name ?? 'The member'}'s points balance is now ${result.newBalance.toLocaleString()}. ` +
+        'Admin adjustments change the balance, not the leaderboard ranking.'
+    )
+    setLedgerUserId(result.userId)
+    leaderboardService
+      .getGlobalLeaderboard(period, domain)
+      .then(setEntries)
+      .catch(() => undefined)
   }
 
   const handleReset = () => {
@@ -162,6 +161,20 @@ export const Leaderboard: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {notice && (
+        <div className="flex items-start justify-between gap-3 p-3 rounded border border-green-200 bg-green-50 text-xs text-green-800">
+          <span>{notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="font-bold text-green-900 cursor-pointer"
+            aria-label="Dismiss"
+          >
+            X
+          </button>
+        </div>
+      )}
 
       {/* Toolbar / Filters */}
       <div className="flex flex-wrap items-center gap-3">
@@ -286,7 +299,8 @@ export const Leaderboard: React.FC = () => {
       <PointsLedgerModal
         isOpen={isLedgerModalOpen}
         onClose={() => setIsLedgerModalOpen(false)}
-        transactions={transactions}
+        members={entries}
+        initialUserId={ledgerUserId}
       />
     </div>
   )

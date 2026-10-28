@@ -106,15 +106,12 @@ export async function getLiveAuction(
     return structuredClone(mockAuctionState)
   }
 
-  try {
-    const res = await apiClient.get<Record<string, unknown>>(
-      `/events/${eventId}/auction/live`
-    )
-    return normalizeLiveState(res)
-  } catch (error) {
-    console.warn(`[auctionService] Live state fetch failed for ${eventId}, using mock:`, error)
-    return structuredClone(mockAuctionState)
-  }
+  // No mock fallback outside mock mode: a silent fallback showed fake lots whose ids the
+  // backend then rejected (lot_not_found). Let the page show the real error instead.
+  const res = await apiClient.get<Record<string, unknown>>(
+    `/events/${eventId}/auction/live`
+  )
+  return normalizeLiveState(res)
 }
 
 export async function getLots(
@@ -130,21 +127,13 @@ export async function getLots(
     return result
   }
 
-  try {
-    const query = status ? `?status=${status}` : ''
-    const res = await apiClient.get<
-      Record<string, unknown>[] | { lots?: Record<string, unknown>[] }
-    >(`/events/${eventId}/auction/lots${query}`)
-    const list = Array.isArray(res) ? res : res?.lots || []
-    return list.map(normalizeLot)
-  } catch (error) {
-    console.warn(`[auctionService] Lots fetch failed for ${eventId}, using mock:`, error)
-    let result = structuredClone(mockLots)
-    if (status) {
-      result = result.filter((lot) => lot.status === status)
-    }
-    return result
-  }
+  // No mock fallback outside mock mode (see getLiveAuction).
+  const query = status ? `?status=${status}` : ''
+  const res = await apiClient.get<
+    Record<string, unknown>[] | { lots?: Record<string, unknown>[] }
+  >(`/events/${eventId}/auction/lots${query}`)
+  const list = Array.isArray(res) ? res : res?.lots || []
+  return list.map(normalizeLot)
 }
 
 export async function placeBid(
@@ -225,14 +214,15 @@ export async function placeBid(
     return structuredClone(mockAuctionState)
   }
 
-  const res = await apiClient.post<Record<string, unknown>>(
+  // The backend answers with the updated lot, not the live state, so reload the live state.
+  const lot = await apiClient.post<Record<string, unknown>>(
     `/auction/lots/${lotId}/bid`,
     {
       amount,
       version,
     }
   )
-  return normalizeLiveState(res)
+  return getLiveAuction(String(lot.event_id))
 }
 
 export async function advanceLot(
@@ -311,16 +301,17 @@ export async function advanceLot(
     }
   }
 
+  // Backend shape: { settled_lot, next_lot } (snake_case, no live state).
   const res = await apiClient.post<{
-    settledLot: Record<string, unknown>
-    nextLot: Record<string, unknown> | null
-    state: Record<string, unknown>
+    settled_lot?: Record<string, unknown>
+    next_lot?: Record<string, unknown> | null
   }>(`/auction/lots/${lotId}/advance`)
 
+  const settledLot = normalizeLot(res.settled_lot || {})
   return {
-    settledLot: normalizeLot(res.settledLot || {}),
-    nextLot: res.nextLot ? normalizeLot(res.nextLot) : null,
-    state: normalizeLiveState(res.state || {}),
+    settledLot,
+    nextLot: res.next_lot ? normalizeLot(res.next_lot) : null,
+    state: await getLiveAuction(settledLot.event_id),
   }
 }
 

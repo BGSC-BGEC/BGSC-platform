@@ -23,6 +23,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
   const [venue, setVenue] = useState('')
   const [startAt, setStartAt] = useState(today)
   const [endAt, setEndAt] = useState(today)
+  const [registrationClosesAt, setRegistrationClosesAt] = useState(today)
   const [maxParticipants, setMaxParticipants] = useState<number>(32)
   const [isTeamed, setIsTeamed] = useState(false)
   const [waitlistEnabled, setWaitlistEnabled] = useState(true)
@@ -49,6 +50,16 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
     e.preventDefault()
     if (!title.trim()) return
 
+    // Same rules the backend enforces, checked here so the message is readable.
+    if (endAt < startAt) {
+      setError('The end date cannot be before the start date.')
+      return
+    }
+    if (registrationClosesAt > startAt) {
+      setError('Registration must close on or before the start date.')
+      return
+    }
+
     setIsSubmitting(true)
     setError(null)
 
@@ -62,6 +73,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
         venue: venue.trim() || null,
         startAt,
         endAt,
+        registrationClosesAt,
         maxParticipants: maxParticipants > 0 ? maxParticipants : null,
         isTeamed: type === 'ALL' ? true : isTeamed,
         waitlistEnabled,
@@ -191,7 +203,13 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                 type="date"
                 required
                 value={startAt}
-                onChange={(e) => setStartAt(e.target.value)}
+                onChange={(e) => {
+                  const next = e.target.value
+                  setStartAt(next)
+                  // Keep the other dates consistent with the new start.
+                  if (endAt < next) setEndAt(next)
+                  if (registrationClosesAt > next) setRegistrationClosesAt(next)
+                }}
                 className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
               />
             </div>
@@ -202,11 +220,29 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
               <input
                 type="date"
                 required
+                min={startAt}
                 value={endAt}
                 onChange={(e) => setEndAt(e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold uppercase text-black mb-1">
+              Registration Closes
+            </label>
+            <input
+              type="date"
+              required
+              max={startAt}
+              value={registrationClosesAt}
+              onChange={(e) => setRegistrationClosesAt(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Closes at the end of this day. If it is the start date, registration closes when the event starts.
+            </p>
           </div>
 
           <div>
