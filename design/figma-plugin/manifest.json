@@ -1,0 +1,12 @@
+{
+  "name": "BGSC Admin Builder",
+  "id": "bgsc-admin-builder",
+  "api": "1.0.0",
+  "main": "code.js",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": { "allowedDomains": ["none"] },
+  "menu": [
+    { "name": "1 · Foundations + Components", "command": "foundations" }
+  ]
+}

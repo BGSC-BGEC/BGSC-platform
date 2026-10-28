@@ -259,7 +259,7 @@ function TeamCard({ team, canJoin, busy, locked, onJoin }: { team: Team; canJoin
 /** Eight boxes over one hidden input — letters and digits, auto-uppercased. */
 function CodeCells({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { colors } = useTheme();
-  const input = useRef<RNTextInput>(null);
+  const input = useRef<React.ComponentRef<typeof RNTextInput>>(null);
   const [focused, setFocused] = useState(false);
   return (
     <Pressable onPress={() => input.current?.focus()} accessibilityLabel="Invite code">

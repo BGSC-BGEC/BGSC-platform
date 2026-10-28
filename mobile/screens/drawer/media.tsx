@@ -261,7 +261,7 @@ export default function Media() {
             </Card>
           )
         }
-        ListFooterComponent={loadingMore ? <Spinner style={styles.footer} /> : error && items.length ? <ErrorState title="Could not refresh media" message={error} onRetry={() => void load('refresh')} /> : null}
+        ListFooterComponent={loadingMore ? <Spinner style={styles.footer} /> : error && items.length ? <ErrorState title="Could not refresh media" message={error} onRetry={() => void load('refresh')} /> : undefined}
       />
       <Fab label="Share" onPress={() => setSheet(true)} />
       <BottomSheet visible={sheet} onClose={() => { if (!uploading) setSheet(false); }} dismissOnBackdrop={!uploading} style={{ maxHeight: '90%' }}>

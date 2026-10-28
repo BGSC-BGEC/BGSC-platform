@@ -203,13 +203,13 @@ export default function AnnouncementsScreen() {
               actionLabel={filter === 'all' ? undefined : 'Show all'}
               onAction={filter === 'all' ? undefined : () => setFilter('all')}
             />
-          ) : null
+          ) : undefined
         }
         onEndReachedThreshold={0.4}
         onEndReached={() => {
           if (cursor && state === 'ready') void load('more');
         }}
-        ListFooterComponent={state === 'more' ? <Skeleton height={150} borderRadius={20} /> : null}
+        ListFooterComponent={state === 'more' ? <Skeleton height={150} borderRadius={20} /> : undefined}
         refreshControl={
           <RefreshControl refreshing={state === 'refreshing'} onRefresh={() => load('refresh')} tintColor={colors.primary} />
         }

@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { Linking, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { StackActions, useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 
 import { useAuth } from '../../store/auth';
 import { authRepository } from '../../src/repositories/AuthRepository';
 import { AuthScaffold } from '../../src/auth/AuthScaffold';
+import { AuthBanner } from '../../src/auth/AuthBanner';
+import { OtpCells } from '../../src/auth/OtpCells';
+import { getErrorMessage } from '../../src/api/client';
 import { Button } from '../../src/components/Button';
 import { Icon } from '../../src/icons/Icon';
 import { Typography } from '../../src/typography/Typography';
@@ -12,8 +15,6 @@ import { FONT_FAMILIES } from '../../src/theme/typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 const RESEND_COOLDOWN_S = 60;
-const POLL_MS = 5000;
-const STEPS = ['Open the email from BGSC', 'Tap “Verify my email”', 'Come back — you’ll be signed in'];
 
 /** v2 Verify your email (56:2070). First onboarding step after sign-up. */
 export default function VerifyEmailScreen() {
@@ -22,35 +23,30 @@ export default function VerifyEmailScreen() {
   const { colors } = useTheme();
   const [cooldown, setCooldown] = useState(RESEND_COOLDOWN_S);
   const [resent, setResent] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const next = () => {
     setOnboarding('interests');
-    // Replace, so this screen (and its polling) unmounts.
     navigation.dispatch(StackActions.replace('GetStarted'));
   };
 
-  // The link is opened in a browser, so check the account until it flips to verified.
-  useEffect(() => {
-    // A slow response must not overlap the next tick (or advance twice).
-    let inFlight = false;
-    const timer = setInterval(async () => {
-      if (inFlight) return;
-      inFlight = true;
-      try {
-        const me = await authRepository.me();
-        if (me.isEmailVerified) {
-          clearInterval(timer);
-          await refreshUser();
-          next();
-        }
-      } catch {
-        // offline for a moment — keep polling
-      } finally {
-        inFlight = false;
-      }
-    }, POLL_MS);
-    return () => clearInterval(timer);
-  }, []);
+  const verify = async () => {
+    if (!user?.email || otp.length !== 6 || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await authRepository.verifyEmail(user.email, otp);
+      await refreshUser();
+      next();
+    } catch (err) {
+      setError(getErrorMessage(err));
+      setOtp('');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (cooldown <= 0) return undefined;
@@ -64,6 +60,8 @@ export default function VerifyEmailScreen() {
     try {
       await authRepository.resendVerification(user.email);
       setResent(true);
+      setError(null);
+      setOtp('');
     } catch {
       setCooldown(0);
     }
@@ -84,29 +82,21 @@ export default function VerifyEmailScreen() {
           Check your inbox.
         </Typography>
         <Typography variant="body" color="textMuted" align="center">
-          We sent a verification link to
+          We sent a 6-digit code to
         </Typography>
         <Typography variant="mono" color="text" align="center">
           {user?.email ?? 'your email'}
         </Typography>
       </View>
 
-      <View style={[styles.steps, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-        {STEPS.map((step, i) => (
-          <View key={step} style={styles.step}>
-            <View style={[styles.stepNo, { backgroundColor: colors.accentMuted }]}>
-              <Typography variant="mono" color="text" style={styles.stepNoText}>
-                {i + 1}
-              </Typography>
-            </View>
-            <Typography variant="body" color="text" style={styles.stepText}>
-              {step}
-            </Typography>
-          </View>
-        ))}
-      </View>
+      {error ? <AuthBanner message={error} /> : null}
 
-      <Button label="Open mail app" fullWidth onPress={() => void Linking.openURL('mailto:').catch(() => undefined)} />
+      <OtpCells value={otp} onChange={setOtp} disabled={busy} />
+      <Typography variant="bodySmall" color="textMuted" align="center">
+        The code is valid for 10 minutes.
+      </Typography>
+
+      <Button label="Verify" fullWidth loading={busy} disabled={otp.length !== 6} onPress={() => void verify()} />
 
       <View style={styles.inline}>
         <Typography variant="body" color="textMuted" style={styles.small}>
@@ -151,11 +141,6 @@ const styles = StyleSheet.create({
   ringOuter: { padding: 24, borderRadius: 999 },
   ringInner: { padding: 20, borderRadius: 999 },
   title: { fontSize: 36, lineHeight: 52 },
-  steps: { alignSelf: 'stretch', gap: 12, padding: 16, borderRadius: 20, borderWidth: 1 },
-  step: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  stepNo: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
-  stepNoText: { fontSize: 12 },
-  stepText: { flex: 1 },
   inline: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   small: { fontSize: 13 },
   mono: { fontSize: 12 },

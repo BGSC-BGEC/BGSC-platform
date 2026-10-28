@@ -15,9 +15,9 @@ const ipKey = (req: Request) => ipKeyGenerator(req.ip ?? '', 56);
 /**
  * The body field each strict path actually reads to pick an account. Keying every path on
  * `body.login ?? body.email` let a junk `login` field on an email route rotate the per-account
- * bucket at will. Token paths (verify-email, reset-password) have no account to key on —
- * a fresh guess is a fresh token — so they fall to the IP alone; the phone OTP routes are the
- * signed-in caller.
+ * bucket at will. The mailed-code paths (verify-email, reset-password) name the account by
+ * email; /auth/google/exchange has no account to key on, so it falls to the IP alone; the phone
+ * OTP routes are the signed-in caller.
  */
 const IDENTITY_FIELD: Record<string, 'login' | 'email' | 'user'> = {
     '/auth/login': 'login',
@@ -25,6 +25,8 @@ const IDENTITY_FIELD: Record<string, 'login' | 'email' | 'user'> = {
     '/auth/register': 'email',
     '/auth/resend-verification': 'email',
     '/auth/forgot-password': 'email',
+    '/auth/verify-email': 'email',
+    '/auth/reset-password': 'email',
     '/auth/phone/send-otp': 'user',
     '/auth/phone/verify-otp': 'user',
 };

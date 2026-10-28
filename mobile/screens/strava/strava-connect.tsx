@@ -160,7 +160,7 @@ export default function StravaConnect() {
         </>}
       </View>}
       renderItem={({ item }) => <Card style={styles.activity}><ListRow icon="activity" title={item.name} subtitle={`${item.type} · ${(item.distance_meters / 1000).toFixed(1)} km · ${Math.floor(item.moving_time_seconds / 60)} min`} onPress={() => { void Linking.openURL(`https://www.strava.com/activities/${encodeURIComponent(item._id)}`).catch(err => setError(getErrorMessage(err))); }} /><View style={styles.row}><Typography variant="caption" color="textMuted">{new Date(item.start_date).toLocaleDateString()}</Typography>{item.is_private && <Badge label="Private" variant="muted" />}</View></Card>}
-      ListFooterComponent={!loading && status?.connected ? <View style={styles.footer}>{page.next_cursor && <Button label="Load more activities" variant="outline" loading={more} disabled={busy} onPress={() => void loadMore()} />}<Button label="Disconnect Strava" variant="ghost" labelColor={colors.dangerText} disabled={busy} onPress={() => void disconnect()} /></View> : null}
+      ListFooterComponent={!loading && status?.connected ? <View style={styles.footer}>{page.next_cursor && <Button label="Load more activities" variant="outline" loading={more} disabled={busy} onPress={() => void loadMore()} />}<Button label="Disconnect Strava" variant="ghost" labelColor={colors.dangerText} disabled={busy} onPress={() => void disconnect()} /></View> : undefined}
     />
   </View>;
 }

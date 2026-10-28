@@ -84,8 +84,8 @@ export default function MyTickets() {
         <Typography variant="caption" color="textMuted">{formatDate(item.created_at)}</Typography>
         {item.response ? <Card variant="inner"><Typography variant="label">Team response</Typography><Typography>{item.response.body}</Typography></Card> : null}
       </Card>}
-      ListEmptyComponent={loading ? <><Skeleton.Card /><Skeleton.Card /></> : !error ? <EmptyState icon="message" title="No tickets here" description="Your feedback and the team's responses will appear here." /> : null}
-      ListFooterComponent={cursor ? <Button label="Load more" variant="outline" loading={busy} onPress={() => void load(cursor)} /> : null} />
+      ListEmptyComponent={loading ? <><Skeleton.Card /><Skeleton.Card /></> : !error ? <EmptyState icon="message" title="No tickets here" description="Your feedback and the team's responses will appear here." /> : undefined}
+      ListFooterComponent={cursor ? <Button label="Load more" variant="outline" loading={busy} onPress={() => void load(cursor)} /> : undefined} />
   </SafeAreaView>;
 }
 const styles = StyleSheet.create({ root: { flex: 1 }, content: { padding: 20, paddingBottom: 40, gap: 16, width: '100%', maxWidth: 720, alignSelf: 'center' }, header: { gap: 12 }, row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }, flex: { flex: 1 } });

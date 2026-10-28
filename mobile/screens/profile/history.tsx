@@ -121,7 +121,7 @@ export default function Points() {
         <SectionHeader title="History" />
         <FilterChips options={filters} value={type} onChange={setType} />
       </View>}
-      ListEmptyComponent={!loading && !error ? <EmptyState icon="coins" title="No transactions yet" description="Your points activity will appear here as you participate." /> : null}
+      ListEmptyComponent={!loading && !error ? <EmptyState icon="coins" title="No transactions yet" description="Your points activity will appear here as you participate." /> : undefined}
       renderItem={({ item, index }) => {
         const day = new Date(item.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
         const previousDay = index ? new Date(page.transactions[index - 1].created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : null;
@@ -131,7 +131,7 @@ export default function Points() {
           <View style={styles.amount}><Typography variant="mono" color={item.amount >= 0 ? 'success' : 'danger'}>{item.amount > 0 ? '+' : ''}{formatNumber(item.amount)}</Typography><Typography variant="caption" color="textMuted">bal {formatNumber(item.balance_after)}</Typography></View>
         </View></View>;
       }}
-      ListFooterComponent={page.next_cursor && !loading ? <Button label="Load more history" variant="outline" loading={more} onPress={() => void loadMore()} containerStyle={{ marginTop: 20 }} /> : null}
+      ListFooterComponent={page.next_cursor && !loading ? <Button label="Load more history" variant="outline" loading={more} onPress={() => void loadMore()} containerStyle={{ marginTop: 20 }} /> : undefined}
     />
   </View>;
 }

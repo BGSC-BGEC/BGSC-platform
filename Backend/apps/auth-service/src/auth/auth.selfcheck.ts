@@ -14,7 +14,8 @@ import {
   VerifyPhoneOtpSchema,
 } from './auth.schemas';
 import { AuthService, digestsMatch, isSafeReturnPath, sha256 } from './auth.service';
-import { MailerService } from './mailer.service';
+import nodemailer from 'nodemailer';
+import { MailerService, assertMailConfigured, useTransport } from './mailer.service';
 import { IUser, UserRole, config } from '@bgsc/shared';
 
 /* ------------------------------- schemas ------------------------------- */
@@ -66,8 +67,11 @@ for (const reserved of ['me', 'search', 'ME']) {
 assert.strictEqual(reg({ password: 'a'.repeat(72) }).success, true, '72 bytes is the most bcrypt reads');
 assert.strictEqual(reg({ password: 'a'.repeat(73) }).success, false, '73 bytes is refused');
 assert.strictEqual(reg({ password: 'é'.repeat(37) }).success, false, 'bytes, not characters: 37 × é is 74 bytes');
-assert.strictEqual(ResetPasswordSchema.safeParse({ token: 't', new_password: 'a'.repeat(73) }).success, false,
+const resetBody = { email: 'a@b.co', otp: '012345', new_password: 'a'.repeat(72) };
+assert.strictEqual(ResetPasswordSchema.safeParse(resetBody).success, true, 'a reset takes email + 6-digit code');
+assert.strictEqual(ResetPasswordSchema.safeParse({ ...resetBody, new_password: 'a'.repeat(73) }).success, false,
   'a reset password has the same cap');
+assert.strictEqual(ResetPasswordSchema.safeParse({ ...resetBody, otp: '12345' }).success, false, 'a code is exactly 6 digits');
 assert.strictEqual(LoginSchema.safeParse({ login: '   ', password: 'x' }).success, false, 'a blank login is refused');
 assert.strictEqual(LogoutSchema.safeParse(undefined).success, true, 'logout needs no body');
 
@@ -144,25 +148,42 @@ for (const bad of ['https://evil.example', '//evil.example', '/\\evil.example', 
   assert.ok(!isSafeReturnPath(bad), `not a return path: ${bad.slice(0, 20)}`);
 }
 
-/* ------------------------ production mail log has no PII ------------------- */
+/* ------------------- mail: refused unconfigured in production, no PII logged ------------------- */
 
 void (async () => {
   const cfg = config as unknown as { nodeEnv: string };
   const realEnv = cfg.nodeEnv;
   const realLog = console.log;
   const lines: string[] = [];
-  cfg.nodeEnv = 'production';
-  console.log = (...a: unknown[]) => void lines.push(a.map(String).join(' '));
+  const sent: string[] = [];
   try {
-    await MailerService.sendVerificationEmail('u-1', 'secret@x.example', 'tok-secret');
-    await MailerService.sendPasswordResetEmail('u-1', 'secret@x.example', 'tok-secret');
+    useTransport(null);
+    cfg.nodeEnv = 'production';
+    assert.throws(() => assertMailConfigured(), /SMTP_HOST/, 'production without SMTP refuses to boot');
+    cfg.nodeEnv = 'development';
+    assertMailConfigured();
+
+    const json = nodemailer.createTransport({ jsonTransport: true });
+    const realSend = json.sendMail.bind(json);
+    json.sendMail = (async (m: nodemailer.SendMailOptions) => {
+      const info = await realSend(m);
+      sent.push(String(info.message));
+      return info;
+    }) as typeof json.sendMail;
+    useTransport(json);
+    console.log = (...a: unknown[]) => void lines.push(a.map(String).join(' '));
+    await MailerService.sendVerificationEmail('u-1', 'secret@x.example', '482913');
+    await MailerService.sendPasswordResetEmail('u-1', 'secret@x.example', '482913');
   } finally {
     console.log = realLog;
     cfg.nodeEnv = realEnv;
+    useTransport(null);
   }
+  assert.strictEqual(sent.length, 2, 'both mails go through the transport');
+  assert.ok(sent.every((m) => m.includes('secret@x.example') && m.includes('482913')), 'to the address, carrying the code');
   const out = lines.join('\n');
-  assert.ok(out.includes('u-1'), 'the production stub names the user by id');
-  assert.ok(!out.includes('secret@x.example') && !out.includes('tok-secret'), 'and never logs the address or token');
+  assert.ok(out.includes('u-1'), 'the send is logged by user id');
+  assert.ok(!out.includes('secret@x.example') && !out.includes('482913'), 'and never logs the address or code');
 
   console.log('auth service selfcheck: all assertions passed');
 })().catch((err) => {

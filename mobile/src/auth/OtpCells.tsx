@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { type ComponentRef, useRef, useState } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { Typography } from '../typography/Typography';
 import { useTheme } from '../theme/ThemeProvider';
@@ -7,7 +7,7 @@ import { useResponsive } from '../responsive/useResponsive';
 export function OtpCells({ value, onChange, disabled = false }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
   const { colors } = useTheme();
   const { isCompactPhone } = useResponsive();
-  const input = useRef<TextInput>(null);
+  const input = useRef<ComponentRef<typeof TextInput>>(null);
   const [focused, setFocused] = useState(false);
   return (
     <Pressable onPress={() => input.current?.focus()} accessible={false}>

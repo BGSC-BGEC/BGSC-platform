@@ -16,6 +16,9 @@ export default defineConfig({
           target: 'http://localhost:3000',
           changeOrigin: true,
           secure: false,
+          // Page loads share these prefixes with the API (/auth/callback, a reload on /events):
+          // a browser navigation gets the SPA, only API calls are proxied.
+          bypass: (req) => (req.headers.accept?.includes('text/html') ? '/index.html' : undefined),
         },
       },
     },

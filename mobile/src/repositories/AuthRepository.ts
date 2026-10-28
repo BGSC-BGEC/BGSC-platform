@@ -1,5 +1,9 @@
+import Constants, { ExecutionEnvironment } from 'expo-constants';
+import * as Crypto from 'expo-crypto';
+import * as WebBrowser from 'expo-web-browser';
+
 import { api, ApiError } from '../api/client';
-import { resolveMediaUrl } from '../api/config';
+import { API_BASE_URL, resolveMediaUrl } from '../api/config';
 import { tokenStorage } from '../api/tokenStorage';
 import type { ApiUser, AuthResult } from '../api/types';
 
@@ -65,6 +69,26 @@ function toE164(contact?: string): string | null {
 async function persist(result: AuthResult): Promise<AuthResponse> {
   await tokenStorage.set(result.tokens.access_token, result.tokens.refresh_token);
   return { user: mapUser(result.user), token: result.tokens.access_token };
+}
+
+const GOOGLE_ERRORS: Record<string, string> = {
+  google_oauth_not_configured: 'Google sign-in isn’t set up yet. Please use your email and password.',
+  google_email_unverified: 'Your Google email isn’t verified. Verify it with Google, or use your email and password.',
+  account_deactivated: 'This account is scheduled for deletion. Log in with your password to restore it.',
+  invalid_oauth_state: 'Google sign-in timed out. Please try again.',
+  server_error: 'Google sign-in failed. Please try again.',
+};
+
+/** Shared by the email-verification and password-reset code checks. */
+function codeError(err: unknown): unknown {
+  if (err instanceof ApiError && err.code === 'invalid_or_expired_code') {
+    // The server answers wrong, expired and used-up codes alike (no account enumeration).
+    return new Error('That code is incorrect or has expired. After 5 wrong tries, request a new code.');
+  }
+  if (err instanceof ApiError && err.code === 'too_many_requests') {
+    return new Error('Too many tries. Wait a few minutes, then request a new code.');
+  }
+  return err;
 }
 
 export class AuthRepository {
@@ -135,12 +159,18 @@ export class AuthRepository {
     return mapUser(await api.get<ApiUser>('/users/me'));
   }
 
-  /**
-   * Email verification is link based (no OTP); this re-sends the link.
-   * POST /auth/resend-verification always answers 200.
-   */
+  /** POST /auth/resend-verification — emails a fresh 6-digit code (valid 10 min); always 200. */
   async resendVerification(email: string): Promise<void> {
     await api.post('/auth/resend-verification', { email });
+  }
+
+  /** POST /auth/verify-email — checks the 6-digit code from the verification email. */
+  async verifyEmail(email: string, otp: string): Promise<void> {
+    try {
+      await api.post('/auth/verify-email', { email, otp });
+    } catch (err) {
+      throw codeError(err);
+    }
   }
 
   /** POST /account/reactivate — restores a soft-deleted account and signs it in. */
@@ -168,17 +198,65 @@ export class AuthRepository {
   }
 
   /**
-   * The backend only supports Google sign-in through a browser redirect to the
-   * web app, and it is disabled until GOOGLE_CLIENT_ID/SECRET are configured.
+   * Google sign-in via the browser (PKCE). The backend redirects back to the app
+   * with a one-time `login_code`, which is exchanged together with the verifier.
+   * Resolves null when the member closes the browser.
    */
-  async googleSignIn(): Promise<AuthResponse> {
-    throw new Error('Google sign-in is not available in the mobile app yet. Please use your email and password.');
+  async googleSignIn(): Promise<AuthResponse | null> {
+    // Hex keeps the verifier inside the PKCE charset; 32 bytes → 64 chars.
+    const verifier = Array.from(Crypto.getRandomBytes(32), (b) => b.toString(16).padStart(2, '0')).join('');
+    const challenge = (
+      await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, verifier, { encoding: Crypto.CryptoEncoding.BASE64 })
+    )
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    // ponytail: expo-linking isn't installed; this mirrors its createURL for Expo Go vs dev/prod builds.
+    const redirectUri =
+      Constants.executionEnvironment === ExecutionEnvironment.StoreClient
+        ? `${Constants.linkingUri.replace(/\/+$/, '')}/auth/callback`
+        : 'bgsc://auth/callback';
+    const result = await WebBrowser.openAuthSessionAsync(
+      `${API_BASE_URL}/auth/google?redirect_uri=${encodeURIComponent(redirectUri)}&code_challenge=${challenge}`,
+      redirectUri,
+    );
+    if (result.type !== 'success') return null;
+
+    const param = (key: string) => {
+      const match = result.url.match(new RegExp(`[?&#]${key}=([^&#]*)`));
+      return match ? decodeURIComponent(match[1]) : null;
+    };
+    const failure = param('error');
+    if (failure) throw new Error(GOOGLE_ERRORS[failure] ?? GOOGLE_ERRORS.server_error);
+    const loginCode = param('login_code');
+    if (!loginCode) throw new Error(GOOGLE_ERRORS.server_error);
+
+    try {
+      return await persist(
+        await api.post<AuthResult>('/auth/google/exchange', { login_code: loginCode, code_verifier: verifier }),
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.code in GOOGLE_ERRORS) throw new Error(GOOGLE_ERRORS[err.code]);
+      throw err;
+    }
   }
 
-  /** POST /auth/forgot-password — always 200 so accounts cannot be enumerated. */
+  /** POST /auth/forgot-password — emails a 6-digit code; always 200 so accounts cannot be enumerated. */
   async forgotPassword(email: string): Promise<{ success: boolean }> {
     await api.post('/auth/forgot-password', { email });
     return { success: true };
+  }
+
+  /** POST /auth/reset-password — the server revokes every session, so the member logs in again. */
+  async resetPassword(email: string, otp: string, newPassword: string): Promise<void> {
+    try {
+      await api.post('/auth/reset-password', { email, otp, new_password: newPassword });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'validation_failed' && err.fields?.[0]?.key === 'new_password') {
+        throw new Error('Passwords must be 8–72 characters.');
+      }
+      throw codeError(err);
+    }
   }
 
   /** POST /auth/logout — best effort, tokens are always cleared locally. */

@@ -1,6 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { StackActions, useFocusEffect, useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
+import {
+  StackActions,
+  useFocusEffect,
+  useNavigation,
+  useRoute,
+  type NavigationProp,
+  type ParamListBase,
+} from '@react-navigation/native';
 
 import { useAuth } from '../../store/auth';
 import { AuthScaffold } from '../../src/auth/AuthScaffold';
@@ -21,6 +28,8 @@ type FieldErrors = { login?: string; password?: string };
 export default function LoginScreen() {
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { login, googleSignIn, isLoading, error, clearError, restoreCandidate } = useAuth();
+  // Set by flows that end on Login, e.g. a finished password reset.
+  const notice = (useRoute().params as { notice?: string } | undefined)?.notice;
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -60,7 +69,7 @@ export default function LoginScreen() {
 
       <AuthTabs mode="login" onChange={() => navigation.dispatch(StackActions.replace('Register'))} />
 
-      {error ? <AuthBanner message={error} /> : null}
+      {error ? <AuthBanner message={error} /> : notice ? <AuthBanner message={notice} tone="success" /> : null}
 
       <TextInput
         label="EMAIL OR USERNAME"

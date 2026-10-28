@@ -40,6 +40,7 @@ export interface IUser extends Document<string> {
     is_email_verified: boolean;
     email_verification_token?: string | null;
     email_verification_expires?: Date | null;
+    email_verification_attempts?: number;
     is_phone_verified: boolean;
     pending_phone_number?: string | null;
     phone_verification_otp_hash?: string | null;
@@ -54,8 +55,11 @@ export interface IUser extends Document<string> {
     last_login_at?: Date | null;
     password_reset_token?: string | null;
     password_reset_expires?: Date | null;
+    password_reset_attempts?: number;
     oauth_login_code_hash?: string | null;
     oauth_login_code_expires?: Date | null;
+    /** PKCE challenge an app sign-in bound its login code to; null for browser sign-ins. */
+    oauth_login_code_challenge?: string | null;
 
     profile: {
         full_name: string;
@@ -141,6 +145,7 @@ const UserSchema = new Schema<IUser>(
         // issued matched the stored hash.
         email_verification_token: { type: String, default: null, select: false },
         email_verification_expires: { type: Date, default: null, select: false },
+        email_verification_attempts: { type: Number, default: 0, select: false },
         is_phone_verified: { type: Boolean, default: false },
         pending_phone_number: { type: String, default: null, select: false },
         phone_verification_otp_hash: { type: String, default: null, select: false },
@@ -153,9 +158,11 @@ const UserSchema = new Schema<IUser>(
         last_login_at: { type: Date, default: null },
         password_reset_token: { type: String, default: null, select: false },
         password_reset_expires: { type: Date, default: null, select: false },
+        password_reset_attempts: { type: Number, default: 0, select: false },
         // One-time code the Google callback hands the browser instead of the tokens themselves.
         oauth_login_code_hash: { type: String, default: null, select: false },
         oauth_login_code_expires: { type: Date, default: null, select: false },
+        oauth_login_code_challenge: { type: String, default: null, select: false },
 
         // Profile
         profile: {
@@ -233,10 +240,9 @@ UserSchema.index({ restored_at: 1 }, { partialFilterExpression: { restored_at: {
 UserSchema.index({ deleted_at: 1 }); // UserDeleted replay sweep: 'who deleted recently'
 UserSchema.index({ username: 'text', 'profile.full_name': 'text' }); // user search (Spec §13.1)
 
-// One-time token lookups. Partial so the null default on every other row costs nothing.
-for (const field of ['email_verification_token', 'password_reset_token', 'oauth_login_code_hash']) {
-    UserSchema.index({ [field]: 1 }, { partialFilterExpression: { [field]: { $type: 'string' } } });
-}
+// One-time token lookup. Partial so the null default on every other row costs nothing. The email
+// verification and reset codes are found by email, not by value: six digits are not a lookup key.
+UserSchema.index({ oauth_login_code_hash: 1 }, { partialFilterExpression: { oauth_login_code_hash: { $type: 'string' } } });
 
 /**
  * One account per verified phone number.

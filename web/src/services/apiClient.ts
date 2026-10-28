@@ -83,6 +83,7 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     response.status === 401 &&
     !_retry &&
     !normalizedEndpoint.startsWith('/auth/login') &&
+    !normalizedEndpoint.startsWith('/auth/google') &&
     !normalizedEndpoint.startsWith('/auth/refresh')
   ) {
     const newAccessToken = await tryRefreshToken()

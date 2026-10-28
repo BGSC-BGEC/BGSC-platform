@@ -90,7 +90,7 @@ export default function Challenges() {
         {loading && <><SkeletonCard /><SkeletonCard /><SkeletonCard /></>}
       </View>}
       ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
-      ListEmptyComponent={!loading && !error ? <EmptyState icon="target" title={tab === 'available' ? 'No challenges here yet' : tab === 'active' ? 'A fresh start awaits' : 'Your journey is just beginning'} description={tab === 'available' ? 'Try another category or check back for new challenges.' : 'Accept a challenge to start building your record.'} /> : null}
+      ListEmptyComponent={!loading && !error ? <EmptyState icon="target" title={tab === 'available' ? 'No challenges here yet' : tab === 'active' ? 'A fresh start awaits' : 'Your journey is just beginning'} description={tab === 'available' ? 'Try another category or check back for new challenges.' : 'Accept a challenge to start building your record.'} /> : undefined}
       renderItem={({ item }) => {
         const c = 'challenge' in item ? item.challenge : null;
         const p = 'participation' in item ? item.participation : null;

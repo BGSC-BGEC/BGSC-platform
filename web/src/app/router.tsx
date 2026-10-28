@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { RequireAuth } from '../components/RequireAuth'
 import { AdminLayout } from '../components/layout/adminLayout'
 import { Login } from '../pages/Login'
+import { AuthCallback } from '../pages/AuthCallback'
 import { Dashboard } from '../pages/Dashboard'
 import { Users } from '../pages/Users'
 import { Events } from '../pages/Events'
@@ -16,6 +17,7 @@ import { HallOfFame } from '../pages/HallOfFame'
 
 export const router = createBrowserRouter([
     { path: '/login', element: <Login /> },
+    { path: '/auth/callback', element: <AuthCallback /> },
     {
     path: '/',
     element: (

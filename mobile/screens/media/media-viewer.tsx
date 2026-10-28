@@ -44,7 +44,7 @@ export default function MediaViewer() {
   const [items, setItems] = useState<MediaItem[]>(initialItems);
   const [index, setIndex] = useState<number>(route.params?.id ? Math.max(0, ids.indexOf(route.params.id)) : route.params?.index ?? 0);
   const [liked, setLiked] = useState<Record<string, boolean>>({});
-  const viewable = useRef(({ viewableItems }: { viewableItems: Array<{ index: number | null }> }) => {
+  const viewable = useRef(({ viewableItems }: { viewableItems: ReadonlyArray<{ index?: number | null }> }) => {
     const first = viewableItems[0]?.index;
     if (first != null) setIndex(first);
   }).current;

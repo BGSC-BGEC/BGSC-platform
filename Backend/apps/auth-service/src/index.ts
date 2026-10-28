@@ -2,6 +2,7 @@ import express from 'express';
 import { createServiceApp, startService } from '@bgsc/shared';
 import { authRoutes, accountRoutes } from './auth/auth.routes';
 import { AuthService } from './auth/auth.service';
+import { assertMailConfigured } from './auth/mailer.service';
 
 /** UserRestored replay cadence. */
 export const REPLAY_INTERVAL_MS = 5 * 60 * 1000;
@@ -44,7 +45,10 @@ const options = {
 };
 
 export const app = createServiceApp(options);
-export const start = () => startService(app, options);
+export const start = () => {
+    assertMailConfigured();
+    return startService(app, options);
+};
 
 if (require.main === module) {
     start().catch((err) => {

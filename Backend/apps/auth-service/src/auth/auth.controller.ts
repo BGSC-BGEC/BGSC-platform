@@ -69,8 +69,8 @@ export class AuthController {
   });
 
   static verifyEmail = wrap(async (req: Request, res: Response): Promise<void> => {
-    // No tokens: a verification link is not a sign-in link.
-    const result = await AuthService.verifyEmail(req.body.token);
+    // No tokens: a verification code is not a sign-in code.
+    const result = await AuthService.verifyEmail(req.body.email, req.body.otp);
     res.status(200).json({ message: 'email_verified', ...result });
   });
 
@@ -96,53 +96,69 @@ export class AuthController {
     res.status(200).json({ message: 'account_reactivated', ...result });
   });
 
+  /**
+   * Browser: `?state=<return path>`, and the callback lands on the web app. App: `?redirect_uri=
+   * bgsc://...&code_challenge=<S256>`, and the callback lands back in the app with a login code only
+   * the holder of the PKCE verifier can exchange.
+   */
   static googleAuth = (req: Request, res: Response): void => {
-    const state = typeof req.query.state === 'string' ? req.query.state : undefined;
+    const q = (k: string) => (typeof req.query[k] === 'string' ? (req.query[k] as string) : undefined);
+    const state = q('state');
+    const redirect = q('redirect_uri');
+    const challenge = q('code_challenge');
+    const app = redirect || challenge ? { redirect: redirect ?? '', challenge: challenge ?? '' } : undefined;
     const nonce = crypto.randomBytes(32).toString('hex');
-    const url = AuthService.getGoogleAuthUrl(nonce, state);
+    const url = AuthService.getGoogleAuthUrl(nonce, state, app);
     res.cookie(OAUTH_NONCE_COOKIE, nonce, { ...OAUTH_COOKIE_OPTS, maxAge: 10 * 60 * 1000 });
     res.redirect(url);
   };
 
   static googleCallback = wrap(async (req: Request, res: Response): Promise<void> => {
     const isBrowser = req.headers.accept?.includes('text/html');
+    const rawState = typeof req.query.state === 'string' ? req.query.state : undefined;
+    // An app sign-in returns to the app, success or failure; everything else to the web app.
+    const app = AuthService.appTargetOf(rawState);
+    const landing = (params: URLSearchParams) =>
+      app
+        ? `${app.redirect}${app.redirect.includes('?') ? '&' : '?'}${params.toString()}`
+        : `${config.frontendUrl}/auth/callback?${params.toString()}`;
     try {
       const code = typeof req.query.code === 'string' ? req.query.code : '';
       if (!code) throw new ServiceError(400, 'missing_authorization_code');
 
       // Throws unless this callback belongs to a consent screen THIS browser was sent to. Returns
       // whatever the caller stashed on the way in — a return path, typically — to hand back.
-      const callerState = AuthService.verifyState(
-        typeof req.query.state === 'string' ? req.query.state : undefined,
-        readCookie(req, OAUTH_NONCE_COOKIE)
-      );
+      const callerState = AuthService.verifyState(rawState, readCookie(req, OAUTH_NONCE_COOKIE));
       res.clearCookie(OAUTH_NONCE_COOKIE, OAUTH_COOKIE_OPTS);
 
-      if (isBrowser) {
+      if (isBrowser || app) {
         // A one-time code, never the tokens: a URL is kept by history, logs and proxies.
-        const params = new URLSearchParams({ login_code: await AuthService.googleLoginCode(code) });
+        const params = new URLSearchParams({ login_code: await AuthService.googleLoginCode(code, app?.challenge ?? null) });
         if (callerState) params.append('state', callerState);
-        res.redirect(`${config.frontendUrl}/auth/callback?${params.toString()}`);
+        console.log(`[auth-service] Google callback ok (${app ? 'app' : 'web'})`);
+        res.redirect(landing(params));
         return;
       }
 
       res.status(200).json(await AuthService.handleGoogleCallback(code));
     } catch (err) {
-      if (!isBrowser) throw err;
+      if (!isBrowser && !app) throw err;
       // A person mid-sign-in lands back in the app with a reason, not on a page of raw JSON.
       if (!(err instanceof ServiceError)) console.error('Google callback failed:', err);
       const error = err instanceof ServiceError ? err.code : 'server_error';
+      // The code only: the browser shows the user nothing else, so this is the one place to see it.
+      console.warn(`[auth-service] Google callback refused (${app ? 'app' : 'web'}): ${error}`);
       const params = new URLSearchParams({ error });
       // A deactivated account's way back (reset-then-reactivate for a Google-only one) rides along.
       const restoreWith = err instanceof ServiceError ? (err.details as { restore_with?: unknown } | undefined)?.restore_with : undefined;
       if (typeof restoreWith === 'string') params.set('restore_with', restoreWith);
-      res.redirect(`${config.frontendUrl}/auth/callback?${params.toString()}`);
+      res.redirect(landing(params));
     }
   });
 
   /** The frontend swaps the callback's one-time login code for the token pair. */
   static googleExchange = wrap(async (req: Request, res: Response): Promise<void> => {
-    res.status(200).json(await AuthService.exchangeLoginCode(req.body.login_code));
+    res.status(200).json(await AuthService.exchangeLoginCode(req.body.login_code, req.body.code_verifier));
   });
 
   static sendPhoneOtp = wrap(async (req: Request, res: Response): Promise<void> => {

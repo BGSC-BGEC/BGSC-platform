@@ -92,6 +92,18 @@ export const config = {
       `${process.env.API_BASE_URL || `http://localhost:${process.env.GATEWAY_PORT || '3000'}`}/auth/google/callback`,
   },
   /**
+   * Outgoing mail over SMTP: any provider (Gmail app password, Brevo, Resend, SES) is a change of
+   * these values only. Blank host = codes are printed to the auth-service log instead, which is
+   * the development setup; auth-service refuses to boot in production without a host.
+   */
+  smtp: {
+    host: process.env.SMTP_HOST || '',
+    port: positiveIntOr(process.env.SMTP_PORT, 587),
+    user: process.env.SMTP_USER || '',
+    pass: process.env.SMTP_PASS || '',
+    from: process.env.MAIL_FROM || 'BGSC <no-reply@localhost>',
+  },
+  /**
    * Strava account linking (Spec §9.1, §12.4). A CONNECTION, never a login method: `clientId` and
    * `clientSecret` blank means every /strava route answers 503 strava_not_configured, exactly like
    * the Google block above when OAuth is unconfigured.
