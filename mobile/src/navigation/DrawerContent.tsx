@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View, Platform } from 'react-native';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -8,6 +8,7 @@ import { Icon, type IconName } from '../icons/Icon';
 import { Typography } from '../typography/Typography';
 import { FONT_FAMILIES } from '../theme/typography';
 import { useTheme } from '../theme/ThemeProvider';
+import { withAlpha } from '../theme/colors';
 import { useAuth } from '../../store/auth';
 import { useConfirmLogout } from '../hooks/useConfirmLogout';
 import { useAsyncResource } from '../hooks/useAsyncResource';
@@ -84,7 +85,22 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
         onPress={() => go(item.route)}
         accessibilityRole="button"
         accessibilityState={{ selected: active }}
-        style={({ pressed }) => [styles.item, active && { backgroundColor: colors.accentMuted }, pressed && styles.pressed]}
+        style={({ pressed }) => [
+          styles.item,
+          active && [
+            {
+              backgroundColor: withAlpha(colors.primary, 0.16),
+              borderColor: withAlpha(colors.primary, 0.38),
+              borderWidth: 1,
+            },
+            Platform.OS === 'web' && ({
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              boxShadow: `0 4px 14px -2px ${withAlpha(colors.primary, 0.25)}, inset 0 1px 1px rgba(255, 255, 255, 0.25)`,
+            } as any),
+          ],
+          pressed && styles.pressed,
+        ]}
       >
         <Icon name={item.icon} size={20} color={active ? 'primary' : 'textMuted'} />
         <Typography variant="body" color={tint} style={styles.itemLabel}>
@@ -112,7 +128,16 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
         accessibilityLabel="View profile"
         style={({ pressed }) => [
           styles.profile,
-          { backgroundColor: colors.surfaceInner, borderColor: colors.border },
+          {
+            backgroundColor: withAlpha(colors.surfaceInner, 0.85),
+            borderColor: withAlpha(colors.border, 0.75),
+            borderTopColor: withAlpha('#FFFFFF', 0.2),
+          },
+          Platform.OS === 'web' && ({
+            backdropFilter: 'blur(14px)',
+            WebkitBackdropFilter: 'blur(14px)',
+            boxShadow: '0 4px 16px -2px rgba(0, 0, 0, 0.2), inset 0 1px 1.5px rgba(255, 255, 255, 0.15)',
+          } as any),
           pressed && styles.pressed,
         ]}
       >

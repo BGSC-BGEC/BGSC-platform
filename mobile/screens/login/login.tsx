@@ -1,5 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import {
   StackActions,
   useFocusEffect,
@@ -8,9 +15,9 @@ import {
   type NavigationProp,
   type ParamListBase,
 } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../store/auth';
-import { AuthScaffold } from '../../src/auth/AuthScaffold';
 import { AuthTabs } from '../../src/auth/AuthTabs';
 import { AuthBanner } from '../../src/auth/AuthBanner';
 import { BrandMark } from '../../src/auth/BrandMark';
@@ -21,14 +28,15 @@ import { Button } from '../../src/components/Button';
 import { Typography } from '../../src/typography/Typography';
 import { FONT_FAMILIES } from '../../src/theme/typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
+import { CosmicSpaceBackground, GlassCard } from '../../src/auth/CosmicSpaceView';
 
 type FieldErrors = { login?: string; password?: string };
 
-/** v2 Login (55:2048) — email or username + password; deleted accounts continue to Restore. */
+/** v2 Cosmic Space Login — email or username + password; deleted accounts continue to Restore. */
 export default function LoginScreen() {
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
+  const insets = useSafeAreaInsets();
   const { login, googleSignIn, isLoading, error, clearError, restoreCandidate } = useAuth();
-  // Set by flows that end on Login, e.g. a finished password reset.
   const notice = (useRoute().params as { notice?: string } | undefined)?.notice;
 
   const [identifier, setIdentifier] = useState('');
@@ -36,11 +44,10 @@ export default function LoginScreen() {
   const [keepLoggedIn, setKeepLoggedIn] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
-  // The auth error is shared across Login/Register/Restore: drop it when leaving this screen.
+  // Auth error drop when leaving screen
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useFocusEffect(useCallback(() => clearError, []));
 
-  // Right password on a soft-deleted account: offer the restore instead of an error.
   useEffect(() => {
     if (restoreCandidate) navigation.navigate('RestoreAccount');
   }, [restoreCandidate, navigation]);
@@ -56,82 +63,124 @@ export default function LoginScreen() {
   };
 
   return (
-    <AuthScaffold onBack={navigation.canGoBack() ? () => navigation.goBack() : undefined}>
-      <BrandMark />
-      <View style={styles.heading}>
-        <Typography variant="displayHero" color="text" style={styles.title}>
-          Welcome back.
-        </Typography>
-        <Typography variant="body" color="textMuted">
-          Log in with your BITS email or username.
-        </Typography>
-      </View>
+    <View style={styles.screen}>
+      {/* Cosmic Canvas / Starfield Background */}
+      <CosmicSpaceBackground showAstronaut astronautTop={insets.top + 20} astronautRight={16} />
 
-      <AuthTabs mode="login" onChange={() => navigation.dispatch(StackActions.replace('Register'))} />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.keyboardView}
+      >
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 },
+          ]}
+        >
+          {/* Header Row */}
+          <View style={styles.headerRow}>
+            <BrandMark />
+          </View>
 
-      {error ? <AuthBanner message={error} /> : notice ? <AuthBanner message={notice} tone="success" /> : null}
+          {/* Heading */}
+          <View style={styles.heading}>
+            <Typography variant="displayHero" color="text" style={styles.title}>
+              Welcome back.
+            </Typography>
+            <Typography variant="body" color="textMuted">
+              Log in with your BITS email or campus username.
+            </Typography>
+          </View>
 
-      <TextInput
-        label="EMAIL OR USERNAME"
-        value={identifier}
-        onChangeText={(t) => {
-          setIdentifier(t);
-          if (fieldErrors.login) setFieldErrors((p) => ({ ...p, login: undefined }));
-        }}
-        placeholder="f2025xxxx@goa.bits-pilani.ac.in"
-        autoCapitalize="none"
-        autoCorrect={false}
-        autoComplete="username"
-        textContentType="username"
-        returnKeyType="next"
-        error={fieldErrors.login}
-      />
-      <TextInput
-        label="PASSWORD"
-        value={password}
-        onChangeText={(t) => {
-          setPassword(t);
-          if (fieldErrors.password) setFieldErrors((p) => ({ ...p, password: undefined }));
-        }}
-        placeholder="••••••••"
-        secureTextEntry
-        autoComplete="password"
-        textContentType="password"
-        returnKeyType="go"
-        onSubmitEditing={submit}
-        error={fieldErrors.password}
-      />
+          {/* Mode Tabs */}
+          <AuthTabs mode="login" onChange={() => navigation.dispatch(StackActions.replace('Register'))} />
 
-      <View style={styles.row}>
-        {/* Sessions always persist in SecureStore; the switch mirrors the v2 design. */}
-        <Switch value={keepLoggedIn} onValueChange={setKeepLoggedIn} accessibilityLabel="Keep me logged in" />
-        <Typography variant="body" color="text" style={styles.rowLabel}>
-          Keep me logged in
-        </Typography>
-        <Pressable onPress={() => navigation.navigate('ForgotPassword')} hitSlop={8} accessibilityRole="link">
-          <Typography color="text" style={styles.link}>
-            Forgot password?
+          {/* Error / Notice Banners */}
+          {error ? <AuthBanner message={error} /> : notice ? <AuthBanner message={notice} tone="success" /> : null}
+
+          {/* Glass Form Container */}
+          <GlassCard style={styles.formCard}>
+            <View style={styles.formFields}>
+              <TextInput
+                label="EMAIL OR USERNAME"
+                value={identifier}
+                onChangeText={(t) => {
+                  setIdentifier(t);
+                  if (fieldErrors.login) setFieldErrors((p) => ({ ...p, login: undefined }));
+                }}
+                placeholder="f2025xxxx@goa.bits-pilani.ac.in"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="username"
+                textContentType="username"
+                returnKeyType="next"
+                error={fieldErrors.login}
+              />
+
+              <TextInput
+                label="PASSWORD"
+                value={password}
+                onChangeText={(t) => {
+                  setPassword(t);
+                  if (fieldErrors.password) setFieldErrors((p) => ({ ...p, password: undefined }));
+                }}
+                placeholder="••••••••"
+                secureTextEntry
+                autoComplete="password"
+                textContentType="password"
+                returnKeyType="go"
+                onSubmitEditing={submit}
+                error={fieldErrors.password}
+              />
+
+              {/* Keep Logged in & Forgot Password */}
+              <View style={styles.optionsRow}>
+                <Switch
+                  value={keepLoggedIn}
+                  onValueChange={setKeepLoggedIn}
+                  accessibilityLabel="Keep me logged in"
+                />
+                <Typography variant="body" color="text" style={styles.rowLabel}>
+                  Keep me logged in
+                </Typography>
+                <Pressable
+                  onPress={() => navigation.navigate('ForgotPassword')}
+                  hitSlop={8}
+                  accessibilityRole="link"
+                >
+                  <Typography color="primary" style={styles.forgotLink}>
+                    Forgot password?
+                  </Typography>
+                </Pressable>
+              </View>
+
+              {/* Submit Button */}
+              <Button label="Sign In" onPress={submit} loading={isLoading} fullWidth />
+
+              {/* Or Divider */}
+              <OrDivider />
+
+              {/* Google Button */}
+              <GoogleButton
+                label="Continue with Campus Google"
+                disabled={isLoading}
+                onPress={async () => {
+                  clearError();
+                  await googleSignIn();
+                }}
+              />
+            </View>
+          </GlassCard>
+
+          {/* Terms Footer */}
+          <Typography variant="bodySmall" color="textMuted" align="center" style={styles.footerNotice}>
+            BGSC Platform &bull; BITS Goa Sports & Esports Community
           </Typography>
-        </Pressable>
-      </View>
-
-      <Button label="Log in" onPress={submit} loading={isLoading} fullWidth />
-
-      <OrDivider />
-
-      <GoogleButton
-        label="Continue with Google"
-        disabled={isLoading}
-        onPress={async () => {
-          clearError();
-          await googleSignIn();
-        }}
-      />
-
-      <Typography variant="bodySmall" color="textMuted" align="center">
-        By continuing you agree to the Terms and Privacy Policy.
-      </Typography>
-    </AuthScaffold>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -149,11 +198,63 @@ function OrDivider() {
 }
 
 const styles = StyleSheet.create({
-  heading: { gap: 4 },
-  title: { fontSize: 38, lineHeight: 52 },
-  row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  rowLabel: { flex: 1, fontSize: 13 },
-  link: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 13, lineHeight: 20, textDecorationLine: 'underline' },
-  divider: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  line: { flex: 1, height: 1 },
+  screen: {
+    flex: 1,
+    backgroundColor: '#03060f',
+  },
+  keyboardView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 24,
+    gap: 18,
+    flexGrow: 1,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  heading: {
+    gap: 4,
+  },
+  title: {
+    fontSize: 36,
+    lineHeight: 46,
+  },
+  formCard: {
+    marginTop: 4,
+  },
+  formFields: {
+    gap: 16,
+  },
+  optionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  rowLabel: {
+    flex: 1,
+    fontSize: 13,
+  },
+  forgotLink: {
+    fontFamily: FONT_FAMILIES.bodySemiBold,
+    fontSize: 13,
+    lineHeight: 20,
+    textDecorationLine: 'underline',
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginVertical: 2,
+  },
+  line: {
+    flex: 1,
+    height: 1,
+  },
+  footerNotice: {
+    marginTop: 8,
+    opacity: 0.7,
+  },
 });

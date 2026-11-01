@@ -163,7 +163,8 @@ export function isPinned(a: { pinned_until: string | null }, now = Date.now()): 
 }
 
 /** "event.participation" → "Event participation" (the API only sends machine keys). */
-export function humanizeReason(reason: string): string {
+export function humanizeReason(reason?: string | null): string {
+  if (!reason) return 'Activity';
   const words = reason.replace(/[._]+/g, ' ').trim();
   return words.charAt(0).toUpperCase() + words.slice(1);
 }

@@ -1,8 +1,10 @@
 import React, { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { AlertCircle } from 'lucide-react'
-import { useAuthStore } from '../stores/authStore'
-import type { UserRole } from '../types/admin'
+import { motion, AnimatePresence } from 'framer-motion'
+import { ShieldCheck, Mail, X } from 'lucide-react'
+import { SpaceLogin } from '@/components/ui/space-login'
+import { useAuthStore } from '@/stores/authStore'
+import type { UserRole } from '@/types/admin'
 
 interface LoginProps {
   title?: string
@@ -18,13 +20,11 @@ const API_URL = (
 
 export const Login: React.FC<LoginProps> = ({
   title = 'BGSC Admin Console',
-  subtitle = 'Coordinators & Founders Access',
+  subtitle = 'Coordinators, Core Organizers & Founders Access',
   availableRoles = DEFAULT_ROLES,
 }) => {
-  const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
   const [role, setRole] = useState<UserRole>(availableRoles[0] || 'coordinator')
-  const [loading, setLoading] = useState(false)
+  const [showAccessModal, setShowAccessModal] = useState(false)
   const location = useLocation()
   const routeState = location.state as
     | { from?: { pathname: string; search?: string }; oauthError?: string }
@@ -44,113 +44,111 @@ export const Login: React.FC<LoginProps> = ({
     )
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!username.trim() || !password) return
-
+  const handleSubmit = async (data: {
+    email: string
+    password: string
+    rememberMe: boolean
+    role?: UserRole
+  }) => {
     setErrorMessage(null)
-    setLoading(true)
+    const effectiveRole = data.role || role
 
     try {
-      await login(username, password, role)
-      navigate('/dashboard', { replace: true })
+      await login(data.email, data.password, effectiveRole)
+      // Slight delay for celebratory feedback before navigation
+      await new Promise((resolve) => setTimeout(resolve, 600))
+      const from = routeState?.from
+      const returnPath = from ? from.pathname + (from.search ?? '') : '/dashboard'
+      navigate(returnPath, { replace: true })
     } catch (err) {
-      setErrorMessage(
+      const msg =
         err instanceof Error
           ? err.message
           : 'Invalid credentials or backend unreachable'
-      )
-    } finally {
-      setLoading(false)
+      setErrorMessage(msg)
+      throw err
     }
   }
 
   return (
-    <div className="min-h-screen grid place-items-center bg-gray-50 px-4 text-black">
-      <div className="w-full max-w-sm rounded-lg border border-gray-300 bg-white p-8 shadow-xs">
-        <h1 className="text-center text-xl font-bold text-black">{title}</h1>
-        <p className="text-center text-xs text-gray-500 mt-1 mb-6">
-          {subtitle}
-        </p>
+    <>
+      <SpaceLogin
+        title={title}
+        subtitle={subtitle}
+        onSubmit={handleSubmit}
+        errorMessage={errorMessage}
+        onClearError={() => setErrorMessage(null)}
+        onGoogleLogin={handleGoogle}
+        onBackToLanding={() => navigate('/')}
+        onSignUp={() => setShowAccessModal(true)}
+        availableRoles={availableRoles}
+        selectedRole={role}
+        onRoleChange={setRole}
+        isMockMode={isMock}
+        showSocialButtons={true}
+        glassVariant="default"
+      />
 
-        {errorMessage && (
-          <div className="mb-4 p-3 rounded bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 flex-shrink-0 text-red-600" />
-            <span>{errorMessage}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">
-              Username or Email
-            </label>
-            <input
-              type="text"
-              placeholder="Enter username or email"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              className="w-full px-3 py-2 bg-white border border-gray-300 rounded text-sm text-black focus:outline-none focus:border-black placeholder:text-gray-400"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">
-              Password
-            </label>
-            <input
-              type="password"
-              placeholder="Enter password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full px-3 py-2 bg-white border border-gray-300 rounded text-sm text-black focus:outline-none focus:border-black placeholder:text-gray-400"
-            />
-          </div>
-
-          {isMock && (
-            <div>
-              <label className="block text-xs font-bold text-gray-700 mb-1">
-                Mock Role Mode
-              </label>
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value as UserRole)}
-                className="w-full px-3 py-2 bg-white border border-gray-300 rounded text-sm text-black focus:outline-none focus:border-black"
+      {/* Request Access Info Modal */}
+      <AnimatePresence>
+        {showAccessModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.92, opacity: 0 }}
+              className="relative w-full max-w-md p-6 sm:p-7 rounded-2xl bg-[#0a0f1d] border border-amber-500/30 text-white shadow-[0_0_50px_rgba(245,158,11,0.2)]"
+            >
+              <button
+                type="button"
+                onClick={() => setShowAccessModal(false)}
+                className="absolute top-4 right-4 p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors"
               >
-                {availableRoles.map((r) => (
-                  <option key={r} value={r}>
-                    {r.charAt(0).toUpperCase() + r.slice(1)}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[10px] text-gray-400 mt-1">
-                Active in mock mode. Live logins use backend database roles.
-              </p>
-            </div>
-          )}
+                <X className="w-4 h-4" />
+              </button>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2 bg-black text-white font-bold text-sm rounded hover:bg-gray-800 transition-colors cursor-pointer mt-2 disabled:opacity-50"
-          >
-            {loading ? 'Authenticating...' : 'Sign In'}
-          </button>
-        </form>
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Privileged Campus Access</h3>
+                  <p className="text-xs text-amber-300/80">Coordinators & Staff Only</p>
+                </div>
+              </div>
 
-        {!isMock && (
-          <button
-            type="button"
-            onClick={handleGoogle}
-            className="w-full py-2 mt-3 bg-white border border-gray-300 text-black font-bold text-sm rounded hover:bg-gray-100 transition-colors cursor-pointer"
-          >
-            Continue with Google
-          </button>
+              <div className="space-y-3 text-xs sm:text-[13px] text-neutral-300 leading-relaxed mb-6">
+                <p>
+                  The <strong className="text-white">BGSC Admin Console</strong> is restricted to verified event coordinators, founding team members, and tournament managers.
+                </p>
+                <p>
+                  If you are leading an upcoming collegiate esports tournament, sports cup, or live player auction, contact the campus founders committee with your department details to receive your access credentials.
+                </p>
+                <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-center gap-2.5 text-xs text-neutral-200">
+                  <Mail className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                  <span>founders@bgsc.in &bull; Student Council Block #4</span>
+                </div>
+              </div>
+
+              <div className="flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowAccessModal(false)}
+                  className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs uppercase tracking-wider transition-colors cursor-pointer"
+                >
+                  Understood
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
-      </div>
-    </div>
+      </AnimatePresence>
+    </>
   )
 }
 

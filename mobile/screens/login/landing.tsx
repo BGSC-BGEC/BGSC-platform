@@ -17,10 +17,12 @@ import { Button } from '../../src/components/Button';
 import { Typography } from '../../src/typography/Typography';
 import { FONT_FAMILIES } from '../../src/theme/typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
+import { useAuth } from '../../store/auth';
+import { CosmicSpaceBackground, GlassCard } from '../../src/auth/CosmicSpaceView';
 
 const SLIDES = [
   {
-    title: 'Every game on campus, in one place.',
+    title: 'Every game on campus, in one universe.',
     body: 'Register for events, bid in live auctions, climb the leaderboard and get your name in the Hall of Fame.',
   },
   {
@@ -34,12 +36,13 @@ const SLIDES = [
 ];
 const PADDING = 24;
 
-/** v2 Landing · tour (55:1999) — first screen for signed-out members. */
+/** v2 Cosmic Landing · tour — first screen for signed-out members. */
 export default function LandingScreen() {
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
+  const { devLogin } = useAuth();
   const [page, setPage] = useState(0);
   const slideWidth = width - PADDING * 2;
 
@@ -47,72 +50,111 @@ export default function LandingScreen() {
     setPage(Math.round(e.nativeEvent.contentOffset.x / slideWidth));
 
   return (
-    <ScrollView
-      style={{ backgroundColor: colors.background }}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 40 }]}
-      showsVerticalScrollIndicator={false}
-    >
-      <BrandMark size="sm" />
-      <HeroCollage />
+    <View style={styles.screen}>
+      {/* Cosmic Canvas / SVG Starfield & Horizon Glow */}
+      <CosmicSpaceBackground showAstronaut astronautTop={insets.top + 16} astronautRight={12} />
 
       <ScrollView
-        horizontal
-        pagingEnabled
-        showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={onScroll}
-        style={{ width: slideWidth }}
+        style={styles.scrollView}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 },
+        ]}
+        showsVerticalScrollIndicator={false}
       >
-        {SLIDES.map((s) => (
-          <View key={s.title} style={[styles.slide, { width: slideWidth }]}>
-            <Typography variant="displayHero" color="text" style={styles.title}>
-              {s.title}
-            </Typography>
-            <Typography variant="body" color="textMuted">
-              {s.body}
-            </Typography>
-          </View>
-        ))}
-      </ScrollView>
+        {/* Brand Header */}
+        <View style={styles.brandRow}>
+          <BrandMark size="sm" />
+        </View>
 
-      <View style={styles.dots} accessibilityLabel={`Slide ${page + 1} of ${SLIDES.length}`}>
-        {SLIDES.map((s, i) => (
-          <View
-            key={s.title}
-            style={[styles.dot, i === page ? { width: 24, backgroundColor: colors.primary } : { backgroundColor: colors.surfaceInner }]}
+        {/* Floating Tilted Glass Cards Preview */}
+        <HeroCollage />
+
+        {/* Slide Carousel */}
+        <ScrollView
+          horizontal
+          pagingEnabled
+          showsHorizontalScrollIndicator={false}
+          onMomentumScrollEnd={onScroll}
+          style={{ width: slideWidth }}
+        >
+          {SLIDES.map((s) => (
+            <View key={s.title} style={[styles.slide, { width: slideWidth }]}>
+              <Typography variant="displayHero" color="text" style={styles.title}>
+                {s.title}
+              </Typography>
+              <Typography variant="body" color="textMuted" style={styles.subtitle}>
+                {s.body}
+              </Typography>
+            </View>
+          ))}
+        </ScrollView>
+
+        {/* Carousel Dots */}
+        <View style={styles.dots} accessibilityLabel={`Slide ${page + 1} of ${SLIDES.length}`}>
+          {SLIDES.map((s, i) => (
+            <View
+              key={s.title}
+              style={[
+                styles.dot,
+                i === page
+                  ? { width: 26, backgroundColor: colors.primary }
+                  : { backgroundColor: 'rgba(255, 255, 255, 0.2)' },
+              ]}
+            />
+          ))}
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actions}>
+          <Button label="Get started" fullWidth onPress={() => navigation.navigate('Register')} />
+          <Button
+            label="I have an account"
+            variant="outline"
+            fullWidth
+            onPress={() => navigation.navigate('Login')}
           />
-        ))}
-      </View>
-
-      <View style={styles.actions}>
-        <Button label="Get started" fullWidth onPress={() => navigation.navigate('Register')} />
-        <Button label="I have an account" variant="outline" fullWidth onPress={() => navigation.navigate('Login')} />
-      </View>
-    </ScrollView>
+          <Button
+            label="⚡ Dev: Skip to Main App"
+            variant="ghost"
+            fullWidth
+            onPress={devLogin}
+          />
+        </View>
+      </ScrollView>
+    </View>
   );
 }
 
-/** Three tilted preview cards: an event, season points and the leaderboard. */
+/** Three tilted preview glass cards: an event, season points and the leaderboard. */
 function HeroCollage() {
   const { colors } = useTheme();
-  const card = (style: ViewStyle) => [styles.card, { backgroundColor: colors.surface, borderColor: colors.border }, style];
+
   return (
     <View style={styles.collage} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-      <View style={card({ left: 29, top: 30, width: 190, height: 150, transform: [{ rotate: '-6deg' }] })}>
-        <Badge label="Open" variant="success" />
+      {/* Card 1: Valorant Tournament */}
+      <GlassCard style={cardStyle({ left: 16, top: 24, width: 200, height: 154, transform: [{ rotate: '-6deg' }] })}>
+        <View style={styles.cardHeader}>
+          <Badge label="Open" variant="success" />
+          <Typography variant="bodySmall" color="textMuted" style={styles.monoSmall}>
+            ESPORTS
+          </Typography>
+        </View>
         <Typography variant="body" color="text" style={styles.semibold}>
           Valorant Cup
         </Typography>
         <Typography variant="bodySmall" color="textMuted">
-          Sat · LT-1
+          Sat · LT-1 Campus Arena
         </Typography>
         <View style={[styles.miniCta, { backgroundColor: colors.primarySolid }]}>
           <Typography color="primaryText" style={styles.miniCtaText}>
-            Register
+            Register Lot
           </Typography>
         </View>
-      </View>
+      </GlassCard>
 
-      <View style={card({ left: 156, top: 7, width: 180, height: 120, transform: [{ rotate: '5deg' }] })}>
+      {/* Card 2: Season Points */}
+      <GlassCard style={cardStyle({ left: 154, top: 8, width: 180, height: 124, transform: [{ rotate: '5deg' }] })}>
         <Typography color="textMuted" style={styles.kicker}>
           SEASON POINTS
         </Typography>
@@ -122,11 +164,12 @@ function HeroCollage() {
         <Typography variant="mono" color="success" style={styles.monoSmall}>
           +120 this week
         </Typography>
-      </View>
+      </GlassCard>
 
-      <View style={card({ left: 150, top: 153, width: 190, height: 130, transform: [{ rotate: '2deg' }] })}>
+      {/* Card 3: Live Standings */}
+      <GlassCard style={cardStyle({ left: 140, top: 152, width: 200, height: 136, transform: [{ rotate: '2deg' }] })}>
         <Typography color="textMuted" style={styles.kicker}>
-          LEADERBOARD
+          LEADERBOARD · TOP 3
         </Typography>
         {[
           ['1', 'Aarav S.', '2,480'],
@@ -148,37 +191,102 @@ function HeroCollage() {
             </View>
           );
         })}
-      </View>
+      </GlassCard>
     </View>
   );
 }
 
+const cardStyle = (custom: ViewStyle): ViewStyle => ({
+  position: 'absolute',
+  ...custom,
+});
+
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: PADDING, gap: 24 },
-  collage: { height: 300 },
-  card: {
-    position: 'absolute',
-    gap: 8,
-    padding: 16,
-    borderRadius: 20,
-    borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.35,
-    shadowRadius: 14,
-    elevation: 10,
+  screen: {
+    flex: 1,
+    backgroundColor: '#03060f',
   },
-  semibold: { fontFamily: FONT_FAMILIES.bodySemiBold },
-  miniCta: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
-  miniCtaText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, lineHeight: 15 },
-  kicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 9, lineHeight: 15, letterSpacing: 1 },
-  points: { fontSize: 34, lineHeight: 52 },
-  monoSmall: { fontSize: 11 },
-  lbRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  flex: { flex: 1 },
-  slide: { gap: 12 },
-  title: { fontSize: 40, lineHeight: 52 },
-  dots: { flexDirection: 'row', gap: 8 },
-  dot: { width: 8, height: 8, borderRadius: 999 },
-  actions: { gap: 12 },
+  scrollView: {
+    flex: 1,
+  },
+  content: {
+    paddingHorizontal: PADDING,
+    gap: 22,
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  collage: {
+    height: 300,
+    position: 'relative',
+    marginTop: 8,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  semibold: {
+    fontFamily: FONT_FAMILIES.bodySemiBold,
+    fontSize: 15,
+  },
+  miniCta: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    marginTop: 2,
+  },
+  miniCtaText: {
+    fontFamily: FONT_FAMILIES.bodySemiBold,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  kicker: {
+    fontFamily: FONT_FAMILIES.bodySemiBold,
+    fontSize: 9,
+    lineHeight: 14,
+    letterSpacing: 1,
+  },
+  points: {
+    fontSize: 32,
+    lineHeight: 44,
+  },
+  monoSmall: {
+    fontSize: 11,
+  },
+  lbRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginVertical: 1,
+  },
+  flex: {
+    flex: 1,
+  },
+  slide: {
+    gap: 10,
+  },
+  title: {
+    fontSize: 36,
+    lineHeight: 46,
+  },
+  subtitle: {
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  dots: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+  },
+  actions: {
+    gap: 12,
+    marginTop: 6,
+  },
 });

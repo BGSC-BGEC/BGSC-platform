@@ -31,6 +31,7 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
+  devLogin: () => void;
 }
 
 export type OnboardingStep = 'verify' | 'interests';
@@ -69,7 +70,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        if (!(await authRepository.hasStoredSession())) return;
+        if (!(await authRepository.hasStoredSession())) {
+          if (__DEV__) {
+            await tokenStorage.set('mock-jwt-access-token', 'mock-jwt-refresh-token');
+          } else {
+            return;
+          }
+        }
         // /users/me transparently refreshes an expired access token.
         const me = await authRepository.me();
         const { accessToken } = await tokenStorage.get();
@@ -190,6 +197,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     dropSession();
   };
 
+  
+  const devLogin = () => {
+    setUser({
+      id: 'dev-user-001',
+      username: 'zenodev',
+      email: 'zeno@goa.bits-pilani.ac.in',
+      fullName: 'Zeno Developer',
+      role: 'member',
+      isEmailVerified: true,
+      pointsBalance: 1250,
+    });
+    setAuthToken('dev-mock-token');
+    setOnboarding(null);
+    setIsLoggedIn(true);
+  };
+
   const clearError = () => setError(null);
 
   return (
@@ -213,6 +236,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         refreshUser,
         logout,
         clearError,
+        devLogin,
       }}
     >
       {children}
