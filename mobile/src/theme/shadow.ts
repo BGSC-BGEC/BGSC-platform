@@ -1,4 +1,4 @@
-import { Platform, type ViewStyle } from 'react-native';
+import type { ViewStyle } from 'react-native';
 
 export const NEU_SHADOWS = {
   raised: {

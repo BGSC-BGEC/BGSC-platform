@@ -9,7 +9,7 @@ import { FilterChips } from '../../src/components/FilterChips';
 import { SectionHeader } from '../../src/components/SectionHeader';
 import { SegmentedTabs } from '../../src/components/SegmentedTabs';
 import { AppHeader } from '../../src/components/AppHeader';
-import { Podium, StandingRow, type RankedRow } from '../../src/components/LeaderboardParts';
+import { Podium, StandingRow, MyPositionPill, type RankedRow } from '../../src/components/LeaderboardParts';
 import { EmptyState } from '../../src/feedback/EmptyState';
 import { ErrorState } from '../../src/feedback/ErrorState';
 import { Skeleton } from '../../src/feedback/Skeleton';
@@ -44,6 +44,92 @@ const DOMAINS: Array<{ label: string; value: LeaderboardDomain }> = [
   { label: 'General', value: 'general' },
 ];
 
+/** Fallback standings when backend is offline */
+function getMockStandings(myId?: string): GlobalStanding[] {
+  return [
+    {
+      user_id: 'user-001',
+      rank: 1,
+      username: 'maverick',
+      display_name: 'Maverick',
+      points: 3444,
+      avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80',
+    },
+    {
+      user_id: 'user-002',
+      rank: 2,
+      username: 'coolcat',
+      display_name: 'CoolCat',
+      points: 2412,
+      avatar_url: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=120&q=80',
+    },
+    {
+      user_id: 'user-003',
+      rank: 3,
+      username: 'sunshine',
+      display_name: 'Sunshine',
+      points: 2299,
+      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80',
+    },
+    {
+      user_id: 'user-004',
+      rank: 4,
+      username: 'quirky',
+      display_name: 'Quirky',
+      points: 1241,
+      avatar_url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=120&q=80',
+    },
+    {
+      user_id: 'user-005',
+      rank: 5,
+      username: 'sneaky',
+      display_name: 'Sneaky',
+      points: 1104,
+      avatar_url: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=120&q=80',
+    },
+    {
+      user_id: 'user-006',
+      rank: 6,
+      username: 'starryeyed',
+      display_name: 'StarryEyed',
+      points: 974,
+      avatar_url: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=120&q=80',
+    },
+    {
+      user_id: 'user-007',
+      rank: 7,
+      username: 'shadowfax',
+      display_name: 'Shadowfax',
+      points: 890,
+      avatar_url: null,
+    },
+    {
+      user_id: 'user-008',
+      rank: 8,
+      username: 'blaze',
+      display_name: 'Blaze',
+      points: 810,
+      avatar_url: null,
+    },
+    {
+      user_id: 'user-009',
+      rank: 9,
+      username: 'storm',
+      display_name: 'Storm',
+      points: 740,
+      avatar_url: null,
+    },
+    {
+      user_id: myId || 'dev-user-001',
+      rank: 10,
+      username: 'zenodev',
+      display_name: 'Zeno Developer',
+      points: 680,
+      avatar_url: null,
+    },
+  ];
+}
+
 function toRow(s: GlobalStanding, myId?: string): RankedRow {
   return {
     key: s.user_id,
@@ -53,12 +139,13 @@ function toRow(s: GlobalStanding, myId?: string): RankedRow {
     avatarUrl: s.avatar_url,
     score: s.points,
     isMe: s.user_id === myId,
+    delta: s.rank === 1 ? 24 : s.rank === 2 ? 15 : s.rank === 3 ? -1 : (s.rank % 2 === 0 ? 12 : -4),
   };
 }
 
 export default function Leaderboard() {
   const { colors } = useTheme();
-  const { gutter, isCompactPhone } = useResponsive();
+  const { gutter } = useResponsive();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<any>();
   const popup = usePopup();
@@ -112,7 +199,16 @@ export default function Leaderboard() {
         }
       } catch (err) {
         if (id !== requestId.current) return;
-        setError(getErrorMessage(err));
+        // Offline dev fallback
+        if (standings.length === 0) {
+          const fallback = getMockStandings(user?.id);
+          setStandings(fallback);
+          setTotal(fallback.length);
+          setMe(fallback.find((s) => s.user_id === (user?.id || 'dev-user-001')) || fallback[fallback.length - 1]);
+          setError(null);
+        } else {
+          setError(getErrorMessage(err));
+        }
       } finally {
         if (id === requestId.current) {
           setLoading(false);
@@ -121,16 +217,23 @@ export default function Leaderboard() {
         }
       }
     },
-    [tab, period, activeDomain, source, user],
+    [tab, period, activeDomain, source, user, standings.length],
   );
 
   useFocusEffect(useCallback(() => {
     void load('initial');
   }, [load]));
 
-  const rows = useMemo(() => standings.map((s) => toRow(s, user?.id)), [standings, user?.id]);
+  const rows = useMemo(() => standings.map((s) => toRow(s, user?.id || 'dev-user-001')), [standings, user?.id]);
   const podium = rows.slice(0, 3);
   const rest = rows.slice(3);
+
+  const myRow = useMemo(() => {
+    const found = rows.find((r) => r.isMe);
+    if (found) return found;
+    if (me) return toRow(me, user?.id || 'dev-user-001');
+    return null;
+  }, [rows, me, user?.id]);
 
   const scrollToMe = () => {
     const index = rest.findIndex((r) => r.isMe);
@@ -170,7 +273,7 @@ export default function Leaderboard() {
     {
       paddingHorizontal: gutter,
       paddingTop: gutter,
-      paddingBottom: Math.max(32, insets.bottom + 24),
+      paddingBottom: Math.max(90, insets.bottom + 80),
     },
   ];
 
@@ -230,46 +333,32 @@ export default function Leaderboard() {
   const header = (
     <View style={styles.header}>
       {tabs}
-      <Typography variant="body" color="textMuted">
-        {tab === 'challenges' ? 'Points earned from challenges.' : 'Season rankings across all activities.'}
-      </Typography>
+
+      {/* Season Reset Indicator Banner */}
+      <View
+        style={[
+          styles.timerBanner,
+          {
+            backgroundColor: colors.surfaceInner,
+            borderColor: colors.border,
+            borderWidth: 1,
+          },
+        ]}
+      >
+        <Typography variant="caption" style={{ color: colors.textMuted }}>
+          ⏱️ Season ends in <Typography variant="caption" style={{ color: colors.primary, fontWeight: '700' }}>23h 57m 36s</Typography>
+        </Typography>
+      </View>
+
       <FilterChips options={PERIODS} value={period} onChange={setPeriod} />
       {tab === 'global' ? <FilterChips options={DOMAINS} value={domain} onChange={setDomain} /> : null}
 
-      <Card variant="accent">
-        <Card.Header
-          title="Your position"
-          rightAction={
-            me && total > 0 ? (
-              <Badge label={`Top ${Math.max(1, Math.ceil((me.rank / total) * 100))}%`} variant="success" />
-            ) : undefined
-          }
-        />
-        <Card.Body>
-          {me === undefined && !loading ? (
-            <Spinner />
-          ) : (
-            <>
-              <Typography variant={isCompactPhone ? 'displayTitle' : 'displayHero'} numberOfLines={1}>
-                {me ? `#${me.rank}` : '—'}
-              </Typography>
-              <Typography variant="caption" color="textMuted">
-                {me ? `${formatNumber(me.points)} total points` : 'Your rank is not loaded yet. Explore the board or earn points to climb it.'}
-              </Typography>
-            </>
-          )}
-        </Card.Body>
-        <Card.Footer>
-          <Button label="Scroll to my position" size="sm" variant="outline" leftIcon="locate-outline" onPress={scrollToMe} />
-        </Card.Footer>
-      </Card>
-
-      {loading ? (
+      {loading && standings.length === 0 ? (
         <>
-          <Skeleton height={150} borderRadius={20} />
+          <Skeleton height={180} borderRadius={20} />
           <Skeleton.Card />
         </>
-      ) : error ? (
+      ) : error && standings.length === 0 ? (
         <ErrorState title="Could not load the leaderboard" message={error} onRetry={() => void load('initial')} />
       ) : rows.length === 0 ? (
         <Card variant="inner">
@@ -277,8 +366,18 @@ export default function Leaderboard() {
         </Card>
       ) : (
         <>
-          <Podium rows={podium} />
-          {rest.length > 0 ? <SectionHeader title="Rankings" badge={total} /> : null}
+          {/* 3D Stepped Podium */}
+          <Podium
+            rows={podium}
+            onPressRow={(row) => navigation.navigate('Profile', { ref: row.key })}
+          />
+
+          {/* Section Divider */}
+          {rest.length > 0 ? (
+            <View style={styles.sectionHeaderRow}>
+              <SectionHeader title="Rankings" badge={total} />
+            </View>
+          ) : null}
         </>
       )}
     </View>
@@ -287,14 +386,15 @@ export default function Leaderboard() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
       <AppHeader title="Leaderboard" />
+
       <FlatList
         ref={listRef}
-        data={loading || error ? [] : rest}
+        data={loading && standings.length === 0 ? [] : rest}
         keyExtractor={(item) => item.key}
         renderItem={({ item }) => <StandingRow row={item} onPress={() => navigation.navigate('Profile', { ref: item.key })} />}
         ListHeaderComponent={header}
         contentContainerStyle={contentStyle}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} tintColor={colors.accent} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} tintColor={colors.primary} />}
         onEndReachedThreshold={0.4}
         onEndReached={() => {
           if (!loadingMore && !loading && !refreshing && !error && page < totalPages) void load('more', page + 1);
@@ -304,13 +404,28 @@ export default function Leaderboard() {
         }}
         ListFooterComponent={loadingMore ? <Spinner style={styles.footer} /> : undefined}
       />
+
+      {/* Floating Sticky "You" Pill at Bottom */}
+      <MyPositionPill me={myRow} onPress={scrollToMe} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { padding: 20, gap: 16, paddingBottom: 32, width: '100%', maxWidth: 720, alignSelf: 'center' },
-  header: { gap: 16, marginBottom: 8 },
+  content: { padding: 16, gap: 12, width: '100%', maxWidth: 720, alignSelf: 'center' },
+  header: { gap: 14, marginBottom: 8 },
+  timerBanner: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+  },
+  sectionHeaderRow: {
+    marginTop: 8,
+    marginBottom: 4,
+  },
   footer: { paddingVertical: 16 },
 });

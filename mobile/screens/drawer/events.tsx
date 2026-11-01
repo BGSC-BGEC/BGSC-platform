@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 
 import { AppHeader } from '../../src/components/AppHeader';
@@ -43,14 +43,18 @@ type Row =
   | { kind: 'card'; event: ApiEvent }
   | { kind: 'rows'; events: ApiEvent[] };
 
-/** v2 Events (37:768) — "What's on". */
+/**
+ * Date carousel switcher, search filter bar, boarding-pass cards,
+ * and flight-schedule style compact list rows.
+ */
 export default function Events() {
-  const { colors } = useTheme();
+  const { colors, shadow } = useTheme();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<CategoryFilter>('all');
   const [time, setTime] = useState<TimeFilter>('upcoming');
+  const [selectedDayOffset, setSelectedDayOffset] = useState<number | null>(null);
 
   const [events, setEvents] = useState<ApiEvent[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -107,18 +111,41 @@ export default function Events() {
 
   const openCount = events.filter((e) => eventStatusPill(e).registrationOpen).length;
 
+  // Generate 7 upcoming date options
+  const datePills = useMemo(() => {
+    const list = [];
+    const base = new Date();
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(base.getTime() + i * 24 * 3600 * 1000);
+      list.push({
+        offset: i,
+        dayNum: d.getDate(),
+        dayName: i === 0 ? 'Today' : d.toLocaleDateString('en-US', { weekday: 'short' }),
+        dateStr: d.toISOString().split('T')[0],
+      });
+    }
+    return list;
+  }, []);
+
+  const filteredEvents = useMemo(() => {
+    if (selectedDayOffset == null) return events;
+    const targetDate = datePills[selectedDayOffset]?.dateStr;
+    if (!targetDate) return events;
+    return events.filter((e) => e.start_at.startsWith(targetDate));
+  }, [events, selectedDayOffset, datePills]);
+
   const rows = useMemo<Row[]>(() => {
-    if (time === 'ongoing') return events.map((event) => ({ kind: 'card', event }));
-    if (time === 'past') return events.length ? [{ kind: 'rows', events }] : [];
+    if (time === 'ongoing') return filteredEvents.map((event) => ({ kind: 'card', event }));
+    if (time === 'past') return filteredEvents.length ? [{ kind: 'rows', events: filteredEvents }] : [];
     // Upcoming: this week as full cards, everything after as compact rows.
     const cutoff = Date.now() + WEEK_MS;
-    const soon = events.filter((e) => Date.parse(e.start_at) < cutoff);
-    const later = events.filter((e) => Date.parse(e.start_at) >= cutoff);
+    const soon = filteredEvents.filter((e) => Date.parse(e.start_at) < cutoff);
+    const later = filteredEvents.filter((e) => Date.parse(e.start_at) >= cutoff);
     return [
       ...(soon.length ? [{ kind: 'section', title: 'This week' } as Row, ...soon.map((event) => ({ kind: 'card', event }) as Row)] : []),
       ...(later.length ? [{ kind: 'section', title: 'Later this month' } as Row, { kind: 'rows', events: later } as Row] : []),
     ];
-  }, [events, time]);
+  }, [filteredEvents, time]);
 
   const header = (
     <View style={styles.header}>
@@ -128,12 +155,63 @@ export default function Events() {
         </Typography>
         {state !== 'loading' && !error ? (
           <Typography variant="bodySmall" color="textMuted">
-            {events.length} {time === 'past' ? 'past' : time} {events.length === 1 ? 'event' : 'events'}
-            {time !== 'past' ? ` · ${openCount} open for you` : ''}
+            {filteredEvents.length} {time === 'past' ? 'past' : time} {filteredEvents.length === 1 ? 'tournament' : 'tournaments'}
+            {time !== 'past' ? ` · ${openCount} open for entry` : ''}
           </Typography>
         ) : null}
       </View>
-      <SearchInput value={search} onChangeText={setSearch} onSearch={(t) => setQuery(t.trim())} placeholder="Search events or tags" />
+
+      <SearchInput value={search} onChangeText={setSearch} onSearch={(t) => setQuery(t.trim())} placeholder="Search tournaments, games or venues" />
+
+      <View style={styles.dateCarouselWrap}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateCarousel}>
+          <Pressable
+            onPress={() => setSelectedDayOffset(null)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: selectedDayOffset == null }}
+            style={[
+              styles.datePill,
+              { backgroundColor: selectedDayOffset == null ? colors.primary : colors.surface, borderColor: colors.border },
+              shadow('flat'),
+            ]}
+          >
+            <Typography variant="caption" style={{ color: selectedDayOffset == null ? colors.background : colors.textMuted, fontWeight: '700' }}>
+              All
+            </Typography>
+            <Typography variant="bodySmall" style={{ color: selectedDayOffset == null ? colors.background : colors.text, fontWeight: '700' }}>
+              Dates
+            </Typography>
+          </Pressable>
+
+          {datePills.map((p) => {
+            const active = selectedDayOffset === p.offset;
+            return (
+              <Pressable
+                key={p.offset}
+                onPress={() => setSelectedDayOffset(active ? null : p.offset)}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
+                style={[
+                  styles.datePill,
+                  {
+                    backgroundColor: active ? colors.primary : colors.surface,
+                    borderColor: active ? colors.primary : colors.border,
+                  },
+                  shadow('flat'),
+                ]}
+              >
+                <Typography variant="caption" style={{ color: active ? colors.background : colors.textMuted, fontSize: 10, fontWeight: '600' }}>
+                  {p.dayName}
+                </Typography>
+                <Typography variant="body" style={{ color: active ? colors.background : colors.text, fontWeight: '700' }}>
+                  {p.dayNum}
+                </Typography>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+
       <SegmentedTabs tabs={TIME_TABS} value={time} onChange={setTime} />
       <FilterChips options={CATEGORIES} value={category} onChange={setCategory} />
 
@@ -202,7 +280,7 @@ export default function Events() {
                   ? { label: 'Join waitlist', variant: 'outline', onPress: () => navigation.navigate('EventRegistration', { eventId: ref }) }
                   : card.registrationOpen
                     ? { label: 'Register', onPress: () => navigation.navigate('EventRegistration', { eventId: ref }) }
-                    : { label: 'View', variant: 'outline', onPress: () => openEvent(row.event) }
+                    : { label: 'View Pass', variant: 'outline', onPress: () => openEvent(row.event) }
               }
             />
           );
@@ -218,12 +296,12 @@ export default function Events() {
               icon="calendar"
               title={
                 query
-                  ? `No events match “${query}”`
+                  ? `No tournaments match “${query}”`
                   : category !== 'all'
-                    ? `No ${time === 'past' ? 'past ' : ''}${EVENT_CATEGORY_LABELS[category]} events`
+                    ? `No ${time === 'past' ? 'past ' : ''}${EVENT_CATEGORY_LABELS[category]} tournaments`
                     : time === 'ongoing'
                       ? 'Nothing happening right now'
-                      : 'No events yet'
+                      : 'No tournaments yet'
               }
               description={
                 query || category !== 'all' ? 'Try another category or clear the filters.' : 'New events show up here as soon as they’re announced.'
@@ -235,6 +313,7 @@ export default function Events() {
                       setCategory('all');
                       setSearch('');
                       setQuery('');
+                      setSelectedDayOffset(null);
                     }
                   : undefined
               }
@@ -244,7 +323,7 @@ export default function Events() {
         ListFooterComponent={
           state === 'more' ? (
             <SkeletonEventCard />
-          ) : state === 'ready' && !cursor && events.length > 0 ? (
+          ) : state === 'ready' && !cursor && filteredEvents.length > 0 ? (
             <Typography variant="bodySmall" color="textMuted" align="center">
               That’s everything for now.
             </Typography>
@@ -269,11 +348,11 @@ export default function Events() {
   );
 }
 
-/** "Later this month" list: date tile, title + venue, status pill. */
+/** Event list item row. */
 function CompactList({ events, onOpen }: { events: ApiEvent[]; onOpen: (e: ApiEvent) => void }) {
-  const { colors } = useTheme();
+  const { colors, shadow } = useTheme();
   return (
-    <View style={[styles.list, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View style={[styles.list, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('flat')]}>
       {events.map((e, i) => {
         const d = new Date(e.start_at);
         const pill = eventStatusPill(e);
@@ -289,23 +368,34 @@ function CompactList({ events, onOpen }: { events: ApiEvent[]; onOpen: (e: ApiEv
               pressed && styles.pressed,
             ]}
           >
-            <View style={[styles.dateTile, { backgroundColor: colors.surfaceInner }]}>
+            {/* Date Tile */}
+            <View style={[styles.dateTile, { backgroundColor: colors.surfaceInner, borderColor: colors.border }]}>
               <Typography variant="mono" color="text" style={styles.day}>
                 {String(d.getDate()).padStart(2, '0')}
               </Typography>
-              <Typography color="textMuted" style={styles.month}>
+              <Typography color="primary" style={styles.month}>
                 {d.toLocaleDateString('en-IN', { month: 'short', timeZone: 'Asia/Kolkata' }).toUpperCase()}
               </Typography>
             </View>
+
+            {/* Title & Route Meta */}
             <View style={styles.flex}>
-              <Typography variant="body" color="text" style={styles.semibold} numberOfLines={1}>
-                {e.title}
-              </Typography>
-              <Typography variant="bodySmall" color="textMuted" numberOfLines={1}>
-                {[e.venue, EVENT_CATEGORY_LABELS[e.category]].filter(Boolean).join(' · ')}
-              </Typography>
+              <View style={styles.rowRoute}>
+                <Typography variant="body" color="text" style={styles.semibold} numberOfLines={1}>
+                  {e.title}
+                </Typography>
+              </View>
+              <View style={styles.flightSubRow}>
+                <Typography variant="caption" color="textMuted" numberOfLines={1}>
+                  {[e.venue || 'BGSC Arena', EVENT_CATEGORY_LABELS[e.category]].join(' · ')}
+                </Typography>
+              </View>
             </View>
-            <Badge label={pill.label} variant={pill.variant} />
+
+            {/* Status */}
+            <View style={styles.rowEnd}>
+              <Badge label={pill.label} variant={pill.variant} />
+            </View>
           </Pressable>
         );
       })}
@@ -317,20 +407,39 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   flex: { flex: 1 },
   gap: { gap: 16 },
-  pressed: { opacity: 0.85 },
+  pressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
   semibold: { fontFamily: FONT_FAMILIES.bodySemiBold },
-  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 32, gap: 16 },
-  header: { gap: 20, marginBottom: 4 },
-  title: { fontSize: 34, lineHeight: 48 },
+  content: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 32, gap: 16 },
+  header: { gap: 16, marginBottom: 4 },
+  title: { fontSize: 32, lineHeight: 40 },
+  dateCarouselWrap: {
+    marginHorizontal: -16,
+  },
+  dateCarousel: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  datePill: {
+    width: 52,
+    height: 56,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
   live: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 20, borderWidth: 1 },
   liveIcon: { padding: 12, borderRadius: 12 },
   liveKicker: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   dot: { width: 7, height: 7, borderRadius: 4 },
   liveLabel: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
   mono: { fontSize: 11 },
-  list: { borderRadius: 20, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 4 },
-  listRow: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingVertical: 16 },
-  dateTile: { width: 52, alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
-  day: { fontSize: 18 },
-  month: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 9, lineHeight: 15, letterSpacing: 0.8 },
+  list: { borderRadius: 22, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 4 },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
+  dateTile: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1 },
+  day: { fontSize: 17, fontWeight: '700' },
+  month: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 9, letterSpacing: 0.8 },
+  rowRoute: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  flightSubRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  rowEnd: { alignItems: 'flex-end', gap: 4 },
 });

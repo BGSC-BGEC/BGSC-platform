@@ -1,8 +1,9 @@
 import React from 'react';
-import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, View, Platform, type ViewStyle } from 'react-native';
 import * as Haptics from 'expo-haptics';
 
 import { useTheme } from '../theme/ThemeProvider';
+import { withAlpha } from '../theme/colors';
 import { Typography } from '../typography/Typography';
 
 export interface SegmentedTabsProps<T extends string> {
@@ -13,14 +14,27 @@ export interface SegmentedTabsProps<T extends string> {
 }
 
 /**
- * Full-width segmented control (e.g. Global / Events / Challenges).
- * Active segment is a raised surface pill with orange label.
+ * Full-width segmented tab control for switching between categories or views.
  */
 export function SegmentedTabs<T extends string>({ tabs, value, onChange, style }: SegmentedTabsProps<T>) {
   const { colors, shadow } = useTheme();
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.surfaceMuted, borderColor: colors.border }, style]}>
+    <View
+      style={[
+        styles.container,
+        {
+          backgroundColor: withAlpha(colors.surfaceMuted, 0.72),
+          borderColor: withAlpha('#FFFFFF', 0.16),
+        },
+        Platform.OS === 'web' && ({
+          backdropFilter: 'blur(14px)',
+          WebkitBackdropFilter: 'blur(14px)',
+          boxShadow: 'inset 0 1px 1.5px rgba(255, 255, 255, 0.12)',
+        } as any),
+        style,
+      ]}
+    >
       {tabs.map((tab) => {
         const active = tab.value === value;
         return (
@@ -33,7 +47,20 @@ export function SegmentedTabs<T extends string>({ tabs, value, onChange, style }
             }}
             accessibilityRole="tab"
             accessibilityState={{ selected: active }}
-            style={[styles.tab, active && [{ backgroundColor: colors.surface }, shadow('flat')]]}
+            style={[
+              styles.tab,
+              active && [
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: withAlpha('#FFFFFF', 0.25),
+                  borderWidth: 1,
+                },
+                Platform.OS === 'web' && ({
+                  boxShadow: '0 3px 12px rgba(0, 0, 0, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.3)',
+                } as any),
+                shadow('flat'),
+              ],
+            ]}
           >
             <Typography
               variant="button"

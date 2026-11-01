@@ -103,7 +103,7 @@ export default function EventDetails() {
         .then((res) => res.items)
         .catch(() => []),
       // Team slots count teams, not players; null when unavailable.
-      event.teaming.is_teamed ? registrationRepository.teamsForEvent(event._id, 'all').catch(() => null) : Promise.resolve(null),
+      event.teaming?.is_teamed ? registrationRepository.teamsForEvent(event._id, 'all').catch(() => null) : Promise.resolve(null),
     ]);
     return { event, eligibility, registration, gallery, teams };
   }, [eventRef]);
@@ -160,8 +160,8 @@ export default function EventDetails() {
     .filter(Boolean);
 
   const activeTeams = data.teams?.filter((t) => t.status !== 'disbanded') ?? null;
-  const teamSlots = !!(event.teaming.is_teamed && event.teaming.max_teams && activeTeams);
-  const max = teamSlots ? event.teaming.max_teams : event.registration.max_participants;
+  const teamSlots = !!(event.teaming?.is_teamed && event.teaming.max_teams && activeTeams);
+  const max = teamSlots ? event.teaming?.max_teams : event.registration.max_participants;
   const unit = teamSlots ? 'team slots' : 'player slots';
   const filled = teamSlots ? activeTeams!.length : event.counts.registrations_confirmed;
   const myTeam =
@@ -247,9 +247,9 @@ export default function EventDetails() {
             <Fact icon="map-pin" label="VENUE" value={event.venue ?? 'TBA'} />
             <Fact
               icon="users"
-              label={event.teaming.is_teamed ? 'TEAM SIZE' : 'ENTRY'}
+              label={event.teaming?.is_teamed ? 'TEAM SIZE' : 'ENTRY'}
               value={
-                event.teaming.is_teamed
+                event.teaming?.is_teamed
                   ? `${event.teaming.team_size_min ?? 1} – ${event.teaming.team_size_max ?? '?'} players`
                   : 'Individual'
               }
@@ -688,7 +688,7 @@ function RegistrationCard({
           ))}
         </View>
       ) : null}
-      {event.teaming.is_teamed && registration.status === 'confirmed' ? (
+      {event.teaming?.is_teamed && registration.status === 'confirmed' ? (
         <TeamRow
           auction={!!event.auction}
           team={team}

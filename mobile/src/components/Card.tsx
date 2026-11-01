@@ -30,7 +30,7 @@ export function Card({
   accessibilityLabel,
   style,
 }: CardProps) {
-  const { colors, shadow, mode } = useTheme();
+  const { colors, shadow } = useTheme();
   const [scale] = useState(() => new Animated.Value(1));
   const [opacity] = useState(() => new Animated.Value(1));
 
