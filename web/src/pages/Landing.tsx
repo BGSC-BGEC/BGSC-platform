@@ -18,7 +18,6 @@ import {
   Glass,
   SparkleStar,
 } from '@/components/ui/space-login'
-import { LiquidNavbar, NimbusIcons } from '@/components/ui/liquid-navbar'
 import { DEFAULT_ASTRONAUT_IMAGE } from '@/assets/astronaut'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -26,16 +25,6 @@ export const Landing: React.FC = () => {
   const navigate = useNavigate()
   const { user, status } = useAuthStore()
   const isAuthenticated = status === 'authenticated' && !!user
-
-  // Bottom navbar state
-  const [activeNav, setActiveNav] = useState(0)
-
-  const landingNavItems = [
-    { label: 'Home', icon: NimbusIcons.home, fx: 'glow' as const },
-    { label: 'Flights', icon: NimbusIcons.flights, fx: 'plane' as const },
-    { label: 'Status', icon: NimbusIcons.status, fx: 'drop' as const },
-    { label: 'Profile', icon: NimbusIcons.profile, fx: 'wave' as const },
-  ]
 
   // Parallax tracking
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
@@ -212,17 +201,6 @@ export const Landing: React.FC = () => {
               <SparkleStar className="w-6 h-6 text-[#ff4bb8] drop-shadow-[0_0_12px_#ff4bb8]" />
             </motion.div>
           </motion.div>
-        </motion.div>
-
-        {/* Top Cosmic Pill Badge */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gradient-to-r from-amber-500/15 via-orange-500/15 to-transparent border border-amber-500/30 text-amber-300 text-xs font-semibold mb-6 shadow-[0_0_20px_rgba(245,158,11,0.15)]"
-        >
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <span>The Official BGSC Campus Gaming & Sports Network</span>
         </motion.div>
 
         {/* Main Title */}
@@ -687,23 +665,6 @@ export const Landing: React.FC = () => {
           </div>
         </div>
       </footer>
-
-      {/* 10. Waterline Liquid Bottom Navbar (Compact with Orange Accent) */}
-      <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
-        <LiquidNavbar
-          tone="dark"
-          items={landingNavItems}
-          active={activeNav}
-          sound={true}
-          onChange={(index) => {
-            setActiveNav(index)
-            if (index === 0) window.scrollTo({ top: 0, behavior: 'smooth' })
-            else if (index === 1) scrollToSection('features')
-            else if (index === 2) scrollToSection('showcase')
-            else if (index === 3) navigate('/login')
-          }}
-        />
-      </div>
     </div>
   )
 }

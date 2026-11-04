@@ -1,5 +1,17 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Plus, Trash2, CheckCircle, AlertCircle } from 'lucide-react'
+import {
+  X,
+  Plus,
+  Trash2,
+  CheckCircle,
+  AlertCircle,
+  Calendar,
+  Users,
+  Trophy,
+  FileText,
+  MapPin,
+  Loader2,
+} from 'lucide-react'
 import type { ClubEvent, EventStatus } from '../../types/event'
 import { eventService } from '../../services/eventService'
 import {
@@ -9,6 +21,10 @@ import {
   type RegistrationForm,
   type EventRegistration,
 } from '../../services/registrationService'
+import { Modal } from '../ui/modal'
+import { Button } from '../ui/button'
+import { Badge } from '../ui/badge'
+import { cn } from '../../lib/utils'
 
 export interface EventDetailModalProps {
   event: ClubEvent | null
@@ -58,55 +74,69 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
   const [regStatusFilter, setRegStatusFilter] = useState('all')
   const [isLoadingRegs, setIsLoadingRegs] = useState(false)
 
+  // Reset tab and load initial event state
   useEffect(() => {
     if (event) {
       setStatus(event.status)
       setVenue(event.venue || '')
-      setFormTitle(`${event.title} Registration`)
       setFeedbackMsg(null)
       setErrorMsg(null)
+      setActiveTab('overview')
     }
   }, [event])
 
-  const loadForms = useCallback(async (eventId: string, fallbackTitle: string) => {
-    const forms = await registrationService.getEventForms(eventId)
-    if (forms.length > 0) {
-      const f = forms[0]
-      setCurrentForm(f)
-      setFormTitle(f.title)
-      setFields(f.fields || [])
-    } else {
-      setCurrentForm(null)
-      setFormTitle(`${fallbackTitle} Registration`)
-      setFields([
-        { key: 'discord_tag', label: 'Discord / IGN', type: 'short_text', required: true },
-      ])
-    }
-  }, [])
+  // Fetch linked registration form
+  useEffect(() => {
+    if (!isOpen || !event) return
+    let ignore = false
 
-  const loadRegistrations = useCallback(async (eventId: string, filter: string) => {
+    const loadForm = async () => {
+      try {
+        const forms = await registrationService.getEventForms(event.id)
+        const form = forms.find((f) => f.id === event.registrationFormId) || forms[0] || null
+
+        if (!ignore && form) {
+          setCurrentForm(form)
+          setFormTitle(form.title)
+          setFields(form.fields || [])
+        }
+      } catch (err) {
+        if (!ignore) {
+          console.warn('No custom registration form found for event, using fallback.', err)
+        }
+      }
+    }
+
+    loadForm()
+    return () => {
+      ignore = true
+    }
+  }, [isOpen, event])
+
+  // Fetch registrations
+  const fetchRegistrations = useCallback(async () => {
+    if (!event) return
     setIsLoadingRegs(true)
     try {
-      const list = await registrationService.getEventRegistrations(
-        eventId,
-        filter === 'all' ? undefined : filter
+      const data = await registrationService.getEventRegistrations(
+        event.id,
+        regStatusFilter === 'all' ? undefined : regStatusFilter
       )
-      setRegistrations(list)
+      setRegistrations(data)
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to load registrations')
     } finally {
       setIsLoadingRegs(false)
     }
-  }, [])
+  }, [event, regStatusFilter])
 
   useEffect(() => {
-    if (!isOpen || !event) return
-    if (activeTab === 'form') {
-      loadForms(event.id, event.title)
-    } else if (activeTab === 'registrations') {
-      loadRegistrations(event.id, regStatusFilter)
+    if (isOpen && activeTab === 'registrations') {
+      fetchRegistrations()
     }
-  }, [isOpen, event, activeTab, regStatusFilter, loadForms, loadRegistrations])
+  }, [isOpen, activeTab, fetchRegistrations])
 
-  if (!isOpen || !event) return null
+  if (!event) return null
 
   const handleUpdateLifecycle = async () => {
     setIsSaving(true)
@@ -115,18 +145,19 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
     try {
       const updated = await eventService.updateEvent(event.id, {
         status,
-        venue: venue.trim() || null,
+        venue,
       })
       onEventUpdated(updated)
-      setFeedbackMsg('Event lifecycle and metadata updated.')
+      setFeedbackMsg('Event details updated successfully.')
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to update event')
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to update event.')
     } finally {
       setIsSaving(false)
     }
   }
 
   const handleDeleteEvent = async () => {
+    if (!window.confirm(`Are you sure you want to delete "${event.title}"?`)) return
     setIsSaving(true)
     setErrorMsg(null)
     try {
@@ -134,70 +165,63 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
       onEventDeleted(event.id)
       onClose()
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to delete event (only draft events can be deleted)')
-    } finally {
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to delete event.')
       setIsSaving(false)
     }
   }
 
   const handleAddField = () => {
     if (!newFieldLabel.trim()) return
-    const key = newFieldLabel
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-
-    const options =
+    const key = newFieldLabel.toLowerCase().replace(/[^a-z0-9]/g, '_')
+    const parsedOptions =
       newFieldType === 'select'
         ? newFieldOptions
             .split(',')
-            .map((s) => s.trim())
+            .map((opt) => opt.trim())
             .filter(Boolean)
         : undefined
 
-    setFields((prev) => [
-      ...prev,
-      {
-        key: key || `field_${prev.length + 1}`,
-        label: newFieldLabel.trim(),
-        type: newFieldType,
-        required: newFieldRequired,
-        options,
-      },
-    ])
+    const field: FormFieldDef = {
+      key: `${key}_${Date.now().toString().slice(-4)}`,
+      label: newFieldLabel.trim(),
+      type: newFieldType,
+      required: newFieldRequired,
+      options: parsedOptions,
+    }
+
+    setFields((prev) => [...prev, field])
     setNewFieldLabel('')
     setNewFieldOptions('')
+    setNewFieldType('short_text')
+    setNewFieldRequired(true)
   }
 
-  const handleRemoveField = (index: number) => {
-    setFields((prev) => prev.filter((_, idx) => idx !== index))
+  const handleRemoveField = (idx: number) => {
+    setFields((prev) => prev.filter((_, i) => i !== idx))
   }
 
-  const handleSaveFormDraft = async (): Promise<RegistrationForm | null> => {
+  const handleSaveFormDraft = async () => {
     setIsSaving(true)
     setErrorMsg(null)
     setFeedbackMsg(null)
     try {
-      let saved: RegistrationForm
-      if (currentForm?.id && currentForm.status === 'draft') {
-        saved = await registrationService.updateForm(currentForm.id, {
-          title: formTitle.trim() || `${event.title} Registration`,
+      if (currentForm) {
+        const updated = await registrationService.updateForm(currentForm.id, {
+          title: formTitle,
           fields,
         })
+        setCurrentForm(updated)
       } else {
-        saved = await registrationService.createForm({
+        const created = await registrationService.createForm({
           owner: { type: 'event', id: event.id },
-          title: formTitle.trim() || `${event.title} Registration`,
+          title: formTitle || `${event.title} Registration Form`,
           fields,
         })
+        setCurrentForm(created)
       }
-      setCurrentForm(saved)
       setFeedbackMsg('Registration form draft saved.')
-      return saved
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to save form')
-      return null
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to save form draft')
     } finally {
       setIsSaving(false)
     }
@@ -208,27 +232,28 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
     setErrorMsg(null)
     setFeedbackMsg(null)
     try {
-      let formToPublish = currentForm
-      if (!formToPublish || formToPublish.status === 'draft') {
-        formToPublish = await handleSaveFormDraft()
+      let published: RegistrationForm
+      if (currentForm) {
+        await registrationService.updateForm(currentForm.id, {
+          title: formTitle,
+          fields,
+        })
+        published = await registrationService.publishForm(currentForm.id)
+      } else {
+        const created = await registrationService.createForm({
+          owner: { type: 'event', id: event.id },
+          title: formTitle || `${event.title} Registration Form`,
+          fields,
+        })
+        published = await registrationService.publishForm(created.id)
       }
-      if (!formToPublish) return
-
-      const published = await registrationService.publishForm(formToPublish.id)
       setCurrentForm(published)
 
-      // Only attach the form. The registration closing time was set when the event was
-      // created; overwriting it with the end date broke the backend rule closes_at <= start_at.
-      const updatedEvent = await eventService.updateEvent(event.id, {
-        registration: {
-          form_id: published.id,
-          max_participants: event.maxParticipants,
-          waitlist_enabled: event.waitlistEnabled ?? true,
-          requires_approval: event.requiresApproval ?? false,
-        },
+      const updatedEvt = await eventService.updateEvent(event.id, {
+        registrationFormId: published.id,
       })
-      onEventUpdated(updatedEvent)
-      setFeedbackMsg('Form published and linked to event registrations.')
+      onEventUpdated(updatedEvt)
+      setFeedbackMsg('Registration form published and linked to tournament.')
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Failed to publish form')
     } finally {
@@ -238,14 +263,21 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
 
   const handleRegStatusChange = async (
     regId: string,
-    newStatus: 'confirmed' | 'waitlisted' | 'rejected'
+    nextStatus: 'confirmed' | 'rejected' | 'waitlisted'
   ) => {
     setErrorMsg(null)
     try {
-      await registrationService.updateRegistrationStatus(regId, newStatus)
-      await loadRegistrations(event.id, regStatusFilter)
+      const updated = await registrationService.updateRegistrationStatus(
+        regId,
+        nextStatus
+      )
+      if (updated) {
+        setRegistrations((prev) =>
+          prev.map((item) => (item.id === regId ? updated : item))
+        )
+      }
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to update registration status')
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to update status')
     }
   }
 
@@ -253,10 +285,13 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
     setErrorMsg(null)
     try {
       await eventService.promoteWaitlist(event.id, regId)
-      await loadRegistrations(event.id, regStatusFilter)
-      setFeedbackMsg('Waitlisted participant promoted to confirmed.')
+      await registrationService.updateRegistrationStatus(regId, 'confirmed')
+      setRegistrations((prev) =>
+        prev.map((item) => (item.id === regId ? { ...item, status: 'confirmed' } : item))
+      )
+      setFeedbackMsg('Participant promoted to confirmed registration.')
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to promote from waitlist')
+      setErrorMsg(err instanceof Error ? err.message : 'Failed to promote participant')
     }
   }
 
@@ -278,84 +313,83 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-3xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-start justify-between border-b border-gray-200 pb-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold uppercase tracking-wider text-black">
-                {event.title}
-              </h2>
-              <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-black rounded">
-                {event.type || 'LE'}
-              </span>
-            </div>
-            <p className="text-xs text-gray-500 mt-0.5">
-              ID: {event.id} &bull; {event.category.toUpperCase()} &bull; {event.domain.toUpperCase()}
-            </p>
+    <Modal isOpen={isOpen} onClose={onClose} className="max-w-3xl">
+      {/* Header */}
+      <div className="flex items-start justify-between px-6 py-4 border-b border-border bg-muted/30 shrink-0">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-base font-bold uppercase tracking-wider text-foreground truncate max-w-md">
+              {event.title}
+            </h2>
+            <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary text-[10px] font-bold uppercase">
+              {event.type || 'LE'}
+            </Badge>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-2.5 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-white cursor-pointer"
-          >
-            X
-          </button>
+          <p className="text-xs text-muted-foreground mt-0.5 font-mono">
+            ID: {event.id} &bull; <span className="uppercase text-foreground">{event.category}</span> &bull; <span className="uppercase text-foreground">{event.domain}</span>
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close modal"
+          className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        >
+          <X className="w-5 h-5" />
+        </button>
+      </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-gray-200 gap-2">
-          <button
-            type="button"
-            onClick={() => setActiveTab('overview')}
-            className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors cursor-pointer ${
-              activeTab === 'overview'
-                ? 'border-black text-black'
-                : 'border-transparent text-gray-500 hover:text-black'
-            }`}
-          >
-            1. Overview & Lifecycle
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('form')}
-            className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors cursor-pointer ${
-              activeTab === 'form'
-                ? 'border-black text-black'
-                : 'border-transparent text-gray-500 hover:text-black'
-            }`}
-          >
-            2. Registration Form
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('registrations')}
-            className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors cursor-pointer ${
-              activeTab === 'registrations'
-                ? 'border-black text-black'
-                : 'border-transparent text-gray-500 hover:text-black'
-            }`}
-          >
-            3. Registrations & Attendance
-          </button>
-        </div>
+      {/* Tabs */}
+      <div className="flex border-b border-border px-6 bg-muted/10 gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={() => setActiveTab('overview')}
+          className={cn(
+            'px-3 py-2.5 text-xs font-bold uppercase border-b-2 transition-colors cursor-pointer',
+            activeTab === 'overview'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          )}
+        >
+          1. Overview & Lifecycle
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('form')}
+          className={cn(
+            'px-3 py-2.5 text-xs font-bold uppercase border-b-2 transition-colors cursor-pointer',
+            activeTab === 'form'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          )}
+        >
+          2. Registration Form
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('registrations')}
+          className={cn(
+            'px-3 py-2.5 text-xs font-bold uppercase border-b-2 transition-colors cursor-pointer',
+            activeTab === 'registrations'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          )}
+        >
+          3. Registrations & Attendance
+        </button>
+      </div>
 
+      {/* Main Body */}
+      <div className="p-6 space-y-5 overflow-y-auto flex-1">
         {feedbackMsg && (
-          <div className="p-3 border border-black bg-gray-50 text-xs text-black flex items-center gap-2 rounded">
+          <div className="p-3 border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-2 rounded-xl animate-in fade-in">
             <CheckCircle className="w-4 h-4 shrink-0" />
             <span>{feedbackMsg}</span>
           </div>
         )}
 
         {errorMsg && (
-          <div className="p-3 border border-red-300 bg-red-50 text-xs text-red-700 flex items-center gap-2 rounded">
+          <div className="p-3 border border-destructive/30 bg-destructive/10 text-xs text-destructive flex items-center gap-2 rounded-xl animate-in fade-in">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{errorMsg}</span>
           </div>
@@ -364,48 +398,56 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
         {/* TAB 1: Overview & Lifecycle */}
         {activeTab === 'overview' && (
           <div className="space-y-4 text-left">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-gray-50 p-3 rounded border border-gray-200 text-xs">
-              <div>
-                <span className="text-gray-500 block uppercase font-bold text-[10px]">Dates</span>
-                <span className="font-semibold text-black">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-muted/20 p-4 rounded-xl border border-border text-xs">
+              <div className="space-y-1">
+                <span className="text-muted-foreground flex items-center gap-1 font-bold text-[10px] uppercase">
+                  <Calendar className="w-3 h-3" /> Dates
+                </span>
+                <span className="font-semibold text-foreground block">
                   {event.startAt} &rarr; {event.endAt}
                 </span>
               </div>
-              <div>
-                <span className="text-gray-500 block uppercase font-bold text-[10px]">Capacity</span>
-                <span className="font-semibold text-black">
+              <div className="space-y-1">
+                <span className="text-muted-foreground flex items-center gap-1 font-bold text-[10px] uppercase">
+                  <Users className="w-3 h-3" /> Capacity
+                </span>
+                <span className="font-semibold text-foreground block font-mono">
                   {event.currentParticipants} / {event.maxParticipants ?? 'Unlimited'}
                 </span>
               </div>
-              <div>
-                <span className="text-gray-500 block uppercase font-bold text-[10px]">Format</span>
-                <span className="font-semibold text-black">
+              <div className="space-y-1">
+                <span className="text-muted-foreground flex items-center gap-1 font-bold text-[10px] uppercase">
+                  <Trophy className="w-3 h-3" /> Format
+                </span>
+                <span className="font-semibold text-foreground block">
                   {event.isTeamed ? 'Team Tournament' : 'Solo Entry'}
                 </span>
               </div>
-              <div>
-                <span className="text-gray-500 block uppercase font-bold text-[10px]">Linked Form</span>
-                <span className="font-semibold text-black">
+              <div className="space-y-1">
+                <span className="text-muted-foreground flex items-center gap-1 font-bold text-[10px] uppercase">
+                  <FileText className="w-3 h-3" /> Linked Form
+                </span>
+                <span className="font-semibold text-foreground block truncate">
                   {event.registrationFormId || currentForm?.id || 'Default'}
                 </span>
               </div>
             </div>
 
             {event.description && (
-              <div className="text-xs text-gray-700 p-3 border border-gray-200 rounded">
+              <div className="text-xs text-muted-foreground p-3.5 border border-border rounded-xl bg-muted/10 leading-relaxed">
                 {event.description}
               </div>
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold uppercase text-black mb-1">
+                <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
                   Lifecycle Status
                 </label>
                 <select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as EventStatus)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+                  className="w-full px-3.5 py-2.5 text-sm border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
                 >
                   <option value="draft">Draft</option>
                   <option value="upcoming">Upcoming (Registration Open)</option>
@@ -415,43 +457,57 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-bold uppercase text-black mb-1">
+                <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
                   Venue
                 </label>
-                <input
-                  type="text"
-                  value={venue}
-                  onChange={(e) => setVenue(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
-                />
+                <div className="relative">
+                  <MapPin className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={venue}
+                    onChange={(e) => setVenue(e.target.value)}
+                    placeholder="e.g. Campus Football Ground"
+                    className="w-full pl-9 pr-3.5 py-2.5 text-sm border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+                  />
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center justify-between pt-4 border-t border-gray-200">
+            <div className="flex items-center justify-between pt-4 border-t border-border">
               {event.status === 'draft' ? (
-                <button
+                <Button
                   type="button"
+                  variant="outline"
+                  size="sm"
                   onClick={handleDeleteEvent}
                   disabled={isSaving}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-bold border border-red-600 text-red-600 hover:bg-red-600 hover:text-white rounded transition-colors cursor-pointer"
+                  className="text-xs font-semibold text-destructive border-destructive/30 hover:bg-destructive hover:text-destructive-foreground hover:border-destructive transition-all gap-1.5"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   Delete Draft
-                </button>
+                </Button>
               ) : (
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-muted-foreground">
                   Only draft tournaments can be permanently deleted.
                 </span>
               )}
 
-              <button
+              <Button
                 type="button"
                 onClick={handleUpdateLifecycle}
                 disabled={isSaving}
-                className="px-4 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer disabled:opacity-50"
+                size="sm"
+                className="text-xs font-semibold gap-1.5"
               >
-                {isSaving ? 'Saving...' : 'Save Changes'}
-              </button>
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  'Save Changes'
+                )}
+              </Button>
             </div>
           </div>
         )}
@@ -459,45 +515,45 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
         {/* TAB 2: Dynamic Registration Form Builder */}
         {activeTab === 'form' && (
           <div className="space-y-4 text-left">
-            <div className="flex items-center justify-between">
-              <div className="flex-1 mr-4">
-                <label className="block text-xs font-bold uppercase text-black mb-1">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex-1">
+                <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
                   Form Title
                 </label>
                 <input
                   type="text"
                   value={formTitle}
                   onChange={(e) => setFormTitle(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white"
+                  className="w-full px-3.5 py-2 text-sm border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
               <div className="text-right">
-                <span className="text-[10px] font-bold uppercase text-gray-500 block">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground block">
                   Form Status
                 </span>
-                <span className="inline-block mt-1 px-2.5 py-1 text-xs font-bold uppercase border border-black rounded">
+                <Badge variant="outline" className="mt-1 uppercase text-xs">
                   {currentForm?.status || 'uncreated'}
-                </span>
+                </Badge>
               </div>
             </div>
 
             {/* Existing Fields */}
-            <div className="border border-gray-200 rounded divide-y divide-gray-200">
+            <div className="border border-border rounded-xl divide-y divide-border overflow-hidden bg-card shadow-xs">
               {fields.length === 0 ? (
-                <div className="p-4 text-center text-xs text-gray-500">
+                <div className="p-6 text-center text-xs text-muted-foreground">
                   No custom fields added yet. Add fields below.
                 </div>
               ) : (
                 fields.map((f, idx) => (
                   <div
                     key={`${f.key}-${idx}`}
-                    className="p-3 flex items-center justify-between text-xs bg-white"
+                    className="p-3.5 flex items-center justify-between text-xs hover:bg-muted/30 transition-colors"
                   >
                     <div>
-                      <span className="font-bold text-black">{f.label}</span>{' '}
-                      <span className="text-gray-400 font-mono">({f.key})</span>
-                      <div className="text-[11px] text-gray-500 mt-0.5">
-                        Type: <span className="font-semibold">{f.type}</span> &bull;{' '}
+                      <span className="font-bold text-foreground">{f.label}</span>{' '}
+                      <span className="text-muted-foreground font-mono">({f.key})</span>
+                      <div className="text-[11px] text-muted-foreground mt-0.5">
+                        Type: <span className="font-semibold text-foreground">{f.type}</span> &bull;{' '}
                         {f.required ? 'Required' : 'Optional'}
                         {f.options && f.options.length > 0
                           ? ` • Options: ${f.options.join(', ')}`
@@ -507,7 +563,7 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                     <button
                       type="button"
                       onClick={() => handleRemoveField(idx)}
-                      className="p-1.5 text-gray-500 hover:text-black border border-gray-200 rounded cursor-pointer"
+                      className="p-1.5 text-muted-foreground hover:text-destructive border border-border rounded-lg hover:border-destructive transition-colors cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -517,22 +573,22 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
             </div>
 
             {/* Add New Field Box */}
-            <div className="p-3 bg-gray-50 border border-gray-200 rounded space-y-3">
-              <div className="text-xs font-bold uppercase text-black">
+            <div className="p-4 bg-muted/20 border border-border rounded-xl space-y-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-foreground">
                 Add Custom Form Field
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <input
                   type="text"
                   placeholder="Field Label (e.g. In-Game Role)"
                   value={newFieldLabel}
                   onChange={(e) => setNewFieldLabel(e.target.value)}
-                  className="px-3 py-1.5 text-xs border border-gray-300 rounded bg-white text-black"
+                  className="px-3 py-2 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 />
                 <select
                   value={newFieldType}
                   onChange={(e) => setNewFieldType(e.target.value as FormFieldType)}
-                  className="px-3 py-1.5 text-xs border border-gray-300 rounded bg-white text-black"
+                  className="px-3 py-2 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 >
                   {FIELD_TYPES.map((t) => (
                     <option key={t.value} value={t.value}>
@@ -541,22 +597,25 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                   ))}
                 </select>
                 <div className="flex items-center justify-between gap-2">
-                  <label className="flex items-center gap-1.5 text-xs text-black cursor-pointer">
+                  <label className="flex items-center gap-1.5 text-xs text-foreground cursor-pointer select-none">
                     <input
                       type="checkbox"
                       checked={newFieldRequired}
                       onChange={(e) => setNewFieldRequired(e.target.checked)}
+                      className="rounded border-border"
                     />
                     <span>Required</span>
                   </label>
-                  <button
+                  <Button
                     type="button"
+                    variant="outline"
+                    size="sm"
                     onClick={handleAddField}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold border border-black bg-white text-black hover:bg-black hover:text-white rounded cursor-pointer"
+                    className="text-xs font-semibold gap-1 h-8"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     Add
-                  </button>
+                  </Button>
                 </div>
               </div>
               {newFieldType === 'select' && (
@@ -565,28 +624,31 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
                   placeholder="Comma-separated options (e.g. Duelist, Controller, Sentinel)"
                   value={newFieldOptions}
                   onChange={(e) => setNewFieldOptions(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded bg-white text-black"
+                  className="w-full px-3 py-2 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               )}
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
-              <button
+            <div className="flex justify-end gap-2.5 pt-3 border-t border-border">
+              <Button
                 type="button"
+                variant="outline"
+                size="sm"
                 onClick={handleSaveFormDraft}
                 disabled={isSaving}
-                className="px-4 py-2 text-xs font-bold border border-black text-black bg-white hover:bg-gray-100 rounded cursor-pointer"
+                className="text-xs font-semibold"
               >
                 Save Draft
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={handlePublishForm}
                 disabled={isSaving}
-                className="px-4 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded cursor-pointer"
+                size="sm"
+                className="text-xs font-semibold"
               >
                 Publish & Link to Event
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -595,13 +657,13 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
         {activeTab === 'registrations' && (
           <div className="space-y-4 text-left">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold uppercase text-black">
+              <span className="text-xs font-bold uppercase tracking-wider text-foreground">
                 Participant Roster ({registrations.length})
               </span>
               <select
                 value={regStatusFilter}
                 onChange={(e) => setRegStatusFilter(e.target.value)}
-                className="px-3 py-1.5 text-xs border border-gray-300 rounded bg-white text-black"
+                className="px-3 py-1.5 text-xs border border-border rounded-lg bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 <option value="all">All Statuses</option>
                 <option value="confirmed">Confirmed</option>
@@ -612,85 +674,102 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
             </div>
 
             {isLoadingRegs ? (
-              <div className="p-6 text-center text-xs text-gray-500 border border-gray-200 rounded">
-                Loading registrations...
+              <div className="p-8 text-center text-xs text-muted-foreground border border-border rounded-xl flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span>Loading registrations...</span>
               </div>
             ) : registrations.length === 0 ? (
-              <div className="p-6 text-center text-xs text-gray-500 border border-gray-200 rounded">
+              <div className="p-8 text-center text-xs text-muted-foreground border border-dashed border-border rounded-xl bg-muted/10">
                 No registrations found for this filter.
               </div>
             ) : (
-              <div className="border border-gray-200 rounded overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50 text-[10px] font-bold uppercase text-gray-600">
-                      <th className="py-2.5 px-3">Participant</th>
-                      <th className="py-2.5 px-3">Status</th>
-                      <th className="py-2.5 px-3">Attendance</th>
-                      <th className="py-2.5 px-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {registrations.map((reg) => (
-                      <tr key={reg.id} className="hover:bg-gray-50">
-                        <td className="py-2.5 px-3">
-                          <div className="font-bold text-black">{reg.displayName}</div>
-                          <div className="text-[11px] text-gray-500">@{reg.username}</div>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-gray-300 rounded">
-                            {reg.status}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(reg.attended)}
-                              onChange={() => handleToggleAttendance(reg)}
-                            />
-                            <span>{reg.attended ? 'Checked In' : 'Absent'}</span>
-                          </label>
-                        </td>
-                        <td className="py-2.5 px-3 text-right space-x-1">
-                          {reg.status === 'waitlisted' && (
-                            <button
-                              type="button"
-                              onClick={() => handlePromoteWaitlist(reg.id)}
-                              className="px-2 py-1 text-[10px] font-bold border border-black bg-black text-white rounded cursor-pointer"
-                            >
-                              Promote
-                            </button>
-                          )}
-                          {reg.status !== 'confirmed' && (
-                            <button
-                              type="button"
-                              onClick={() => handleRegStatusChange(reg.id, 'confirmed')}
-                              className="px-2 py-1 text-[10px] font-bold border border-gray-300 hover:border-black rounded cursor-pointer"
-                            >
-                              Confirm
-                            </button>
-                          )}
-                          {reg.status !== 'rejected' && (
-                            <button
-                              type="button"
-                              onClick={() => handleRegStatusChange(reg.id, 'rejected')}
-                              className="px-2 py-1 text-[10px] font-bold border border-gray-300 text-red-600 hover:border-red-600 rounded cursor-pointer"
-                            >
-                              Reject
-                            </button>
-                          )}
-                        </td>
+              <div className="border border-border rounded-xl overflow-hidden bg-card shadow-xs">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/40 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        <th className="py-2.5 px-3">Participant</th>
+                        <th className="py-2.5 px-3">Status</th>
+                        <th className="py-2.5 px-3">Attendance</th>
+                        <th className="py-2.5 px-3 text-right">Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {registrations.map((reg) => (
+                        <tr key={reg.id} className="hover:bg-muted/30 transition-colors">
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-foreground">{reg.displayName}</div>
+                            <div className="text-[11px] text-muted-foreground font-mono">@{reg.username}</div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <Badge variant="outline" className="text-[10px] uppercase font-bold">
+                              {reg.status}
+                            </Badge>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <label className="inline-flex items-center gap-1.5 cursor-pointer text-foreground select-none">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(reg.attended)}
+                                onChange={() => handleToggleAttendance(reg)}
+                                className="rounded border-border"
+                              />
+                              <span className="text-[11px]">{reg.attended ? 'Checked In' : 'Absent'}</span>
+                            </label>
+                          </td>
+                          <td className="py-2.5 px-3 text-right space-x-1">
+                            {reg.status === 'waitlisted' && (
+                              <button
+                                type="button"
+                                onClick={() => handlePromoteWaitlist(reg.id)}
+                                className="px-2 py-1 text-[10px] font-bold rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors cursor-pointer"
+                              >
+                                Promote
+                              </button>
+                            )}
+                            {reg.status !== 'confirmed' && (
+                              <button
+                                type="button"
+                                onClick={() => handleRegStatusChange(reg.id, 'confirmed')}
+                                className="px-2 py-1 text-[10px] font-bold border border-border text-foreground hover:border-foreground rounded transition-colors cursor-pointer"
+                              >
+                                Confirm
+                              </button>
+                            )}
+                            {reg.status !== 'rejected' && (
+                              <button
+                                type="button"
+                                onClick={() => handleRegStatusChange(reg.id, 'rejected')}
+                                className="px-2 py-1 text-[10px] font-bold border border-destructive/40 text-destructive hover:bg-destructive/10 rounded transition-colors cursor-pointer"
+                              >
+                                Reject
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
           </div>
         )}
       </div>
-    </div>
+
+      {/* Footer */}
+      <div className="flex justify-end px-6 py-4 border-t border-border bg-muted/20 shrink-0">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onClose}
+          className="text-xs px-4"
+        >
+          Close
+        </Button>
+      </div>
+    </Modal>
   )
 }
 

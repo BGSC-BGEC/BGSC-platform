@@ -4,18 +4,19 @@ import type {
   LeaderboardDomain,
   LeaderboardEntry,
   LeaderboardPeriod,
+  PointsTransaction,
 } from '../types/leaderboard'
 import { leaderboardService } from '../services/leaderboardService'
 import { PodiumCards } from '../components/leaderboard/PodiumCards'
 import { LeaderboardTable } from '../components/leaderboard/LeaderboardTable'
 import { PointsAdjustmentModal } from '../components/leaderboard/PointsAdjustmentModal'
 import { PointsLedgerModal } from '../components/leaderboard/PointsLedgerModal'
+import { Button } from '../components/ui/button'
 
 export const Leaderboard: React.FC = () => {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  // Shown after an adjustment: the leaderboard itself does not move (see handlePointsAdjusted).
   const [notice, setNotice] = useState<string | null>(null)
   const [ledgerUserId, setLedgerUserId] = useState<string | null>(null)
 
@@ -71,16 +72,13 @@ export const Leaderboard: React.FC = () => {
     setError(null)
     leaderboardService
       .getGlobalLeaderboard(period, domain)
-      .then((boardData) => {
-        setEntries(boardData)
-        setIsLoading(false)
-      })
-      .catch((err) => {
+      .then((data) => setEntries(data))
+      .catch((err) =>
         setError(
           err instanceof Error ? err.message : 'Failed to load leaderboard'
         )
-        setIsLoading(false)
-      })
+      )
+      .finally(() => setIsLoading(false))
   }
 
   const handleOpenAdjustment = (entry?: LeaderboardEntry) => {
@@ -88,33 +86,31 @@ export const Leaderboard: React.FC = () => {
     setIsAdjustmentModalOpen(true)
   }
 
-  const handlePointsAdjusted = (result: { userId: string; newBalance: number }) => {
-    // The global leaderboard only counts earned points (backend design), so an admin
-    // adjustment changes the member's balance but not their rank. Say so explicitly.
-    const member = entries.find((e) => e.userId === result.userId)
+  const handlePointsAdjusted = (result: {
+    userId: string
+    newBalance: number
+    transaction: PointsTransaction
+  }) => {
+    const entry = entries.find((e) => e.userId === result.userId)
+    const name = entry ? entry.name : result.userId
+    const delta = result.transaction.amount
+    const sign = delta > 0 ? `+${delta}` : `${delta}`
     setNotice(
-      `Saved. ${member?.name ?? 'The member'}'s points balance is now ${result.newBalance.toLocaleString()}. ` +
-        'Admin adjustments change the balance, not the leaderboard ranking.'
+      `Points adjusted for ${name}: ${sign} points for "${result.transaction.note}". Note: the global standings reflect the official database record.`
     )
     setLedgerUserId(result.userId)
-    leaderboardService
-      .getGlobalLeaderboard(period, domain)
-      .then(setEntries)
-      .catch(() => undefined)
   }
 
   const handleReset = () => {
     setSearchTerm('')
-    setIsLoading(true)
-    setError(null)
-    setPeriod('all')
     setDomain('all')
+    setPeriod('all')
   }
 
   const filteredEntries = useMemo(() => {
-    const term = searchTerm.toLowerCase().trim()
     return entries.filter((entry) => {
-      if (!term) return true
+      const term = searchTerm.toLowerCase().trim()
+      if (term === '') return true
       return (
         entry.name.toLowerCase().includes(term) ||
         entry.username.toLowerCase().includes(term)
@@ -131,44 +127,53 @@ export const Leaderboard: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-gray-200">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-border">
         <div>
-          <h1 className="text-xl font-bold uppercase tracking-wider text-black">
+          <h1 className="text-xl font-bold uppercase tracking-wider text-foreground">
             Leaderboards & Activity Points
           </h1>
-          <p className="text-sm text-gray-600 mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Track club athlete standings, view category rankings, and adjust member activity points.
           </p>
         </div>
 
         {/* Header Action Buttons */}
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          <button
-            type="button"
-            onClick={() => setIsLedgerModalOpen(true)}
-            className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold border border-gray-300 text-black bg-white hover:bg-gray-100 rounded transition-colors cursor-pointer"
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setIsLedgerModalOpen(true)
+            }}
+            className="text-xs font-semibold gap-1.5"
           >
-            <FileText className="w-4 h-4 text-gray-600" />
+            <FileText className="w-3.5 h-3.5 text-muted-foreground" />
             <span>View Points Ledger</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleOpenAdjustment()}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer"
+          </Button>
+          <Button
+            size="sm"
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              handleOpenAdjustment()
+            }}
+            className="text-xs font-semibold gap-1.5"
           >
-            <PlusCircle className="w-4 h-4" />
+            <PlusCircle className="w-3.5 h-3.5" />
             <span>Adjust Points</span>
-          </button>
+          </Button>
         </div>
       </div>
 
       {notice && (
-        <div className="flex items-start justify-between gap-3 p-3 rounded border border-green-200 bg-green-50 text-xs text-green-800">
+        <div className="flex items-start justify-between gap-3 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-xs text-emerald-600 dark:text-emerald-400">
           <span>{notice}</span>
           <button
             type="button"
             onClick={() => setNotice(null)}
-            className="font-bold text-green-900 cursor-pointer"
+            className="font-bold cursor-pointer"
             aria-label="Dismiss"
           >
             X
@@ -179,20 +184,20 @@ export const Leaderboard: React.FC = () => {
       {/* Toolbar / Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-55">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
             placeholder="Search name or @username..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-border rounded-lg text-foreground bg-background focus:outline-none focus:ring-1 focus:ring-orange-500 transition-colors"
           />
         </div>
 
         <select
           value={domain}
           onChange={(e) => handleDomainChange(e.target.value as LeaderboardDomain)}
-          className="px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+          className="px-3 py-2 text-sm border border-border rounded-lg text-foreground bg-background focus:outline-none focus:ring-1 focus:ring-orange-500 cursor-pointer"
         >
           <option value="all">All Domains</option>
           <option value="sports">Sports</option>
@@ -204,7 +209,7 @@ export const Leaderboard: React.FC = () => {
         <select
           value={period}
           onChange={(e) => handlePeriodChange(e.target.value as LeaderboardPeriod)}
-          className="px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+          className="px-3 py-2 text-sm border border-border rounded-lg text-foreground bg-background focus:outline-none focus:ring-1 focus:ring-orange-500 cursor-pointer"
         >
           <option value="all">All Time</option>
           <option value="semester">This Semester</option>
@@ -215,7 +220,7 @@ export const Leaderboard: React.FC = () => {
         <button
           type="button"
           onClick={handleReset}
-          className="px-4 py-2 text-sm border border-black text-black bg-white hover:bg-black hover:text-white rounded transition-colors cursor-pointer"
+          className="px-4 py-2 text-sm border border-border text-muted-foreground hover:text-foreground bg-muted/30 hover:bg-muted/50 rounded-lg transition-colors cursor-pointer"
         >
           Reset
         </button>
@@ -223,21 +228,21 @@ export const Leaderboard: React.FC = () => {
 
       {/* Main Content Area */}
       {isLoading && (
-        <div className="p-12 text-center text-sm text-gray-500 border border-gray-200 rounded bg-gray-50">
+        <div className="p-12 text-center text-sm text-muted-foreground border border-border rounded-xl bg-card dark:bg-transparent">
           Loading leaderboard standings & activity points...
         </div>
       )}
 
       {!isLoading && error && (
-        <div className="p-4 border border-black text-black bg-white rounded flex items-center justify-between">
+        <div className="p-4 border border-rose-500/30 text-foreground bg-rose-500/5 rounded-xl flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-red-600" />
+            <AlertCircle className="w-4 h-4 text-rose-500" />
             <span className="text-sm">{error}</span>
           </div>
           <button
             type="button"
             onClick={handleRetry}
-            className="px-3 py-1 text-xs border border-black hover:bg-black hover:text-white transition-colors cursor-pointer"
+            className="px-3 py-1 text-xs border border-border hover:border-foreground rounded-lg transition-colors cursor-pointer"
           >
             Retry
           </button>
@@ -245,12 +250,12 @@ export const Leaderboard: React.FC = () => {
       )}
 
       {!isLoading && !error && filteredEntries.length === 0 && (
-        <div className="p-12 text-center border border-gray-200 rounded-lg bg-white space-y-2">
-          <Trophy className="w-10 h-10 text-gray-400 mx-auto" />
-          <h3 className="text-base font-bold text-black">
+        <div className="p-12 text-center border border-dashed border-border rounded-xl bg-card dark:bg-transparent space-y-2">
+          <Trophy className="w-10 h-10 text-muted-foreground/60 mx-auto" />
+          <h3 className="text-base font-semibold text-foreground">
             No athlete rankings found matching your criteria
           </h3>
-          <p className="text-sm text-gray-500 max-w-sm mx-auto">
+          <p className="text-sm text-muted-foreground max-w-sm mx-auto">
             Try adjusting your search query, domain filter, or period selection.
           </p>
         </div>
@@ -261,7 +266,7 @@ export const Leaderboard: React.FC = () => {
           {/* Visual Podium Section */}
           {showPodium && (
             <div className="space-y-2">
-              <div className="text-xs font-bold uppercase tracking-wider text-black">
+              <div className="text-xs font-mono font-semibold uppercase tracking-wider text-muted-foreground">
                 Top Performers Podium
               </div>
               <PodiumCards
@@ -274,7 +279,7 @@ export const Leaderboard: React.FC = () => {
           {/* Full Division Standings */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <div className="text-xs font-bold uppercase tracking-wider text-black">
+              <div className="text-xs font-mono font-semibold uppercase tracking-wider text-muted-foreground">
                 Full Division Standings ({filteredEntries.length} Participants)
               </div>
             </div>

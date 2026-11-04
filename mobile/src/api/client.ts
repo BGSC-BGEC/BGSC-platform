@@ -2,6 +2,7 @@ import axios, { AxiosError, type AxiosRequestConfig, type InternalAxiosRequestCo
 
 import { API_BASE_URL } from './config';
 import { tokenStorage } from './tokenStorage';
+import { handleMockRequest, isMockModeActive } from '../mock';
 
 /**
  * Error thrown by every repository call. Mirrors the backend error body:
@@ -143,6 +144,20 @@ http.interceptors.request.use(async (config) => {
   if (accessToken && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${accessToken}`;
   }
+
+  // Fast-path: When mock mode is active (e.g. testing with Expo tunnel or EXPO_PUBLIC_USE_MOCK=true)
+  if (isMockModeActive()) {
+    try {
+      const mockRes = await handleMockRequest(config);
+      if (mockRes) {
+        config.adapter = () => Promise.resolve(mockRes);
+        return config;
+      }
+    } catch {
+      // Fall through to network
+    }
+  }
+
   return config;
 });
 
@@ -203,6 +218,21 @@ http.interceptors.response.use(
     }
 
     if (!error.response) {
+      if (config) {
+        try {
+          const fallback = await handleMockRequest(config);
+          if (fallback) {
+            console.log(`[Mock Fallback] Auto-served mock response for ${config.method?.toUpperCase()} ${config.url}`);
+            const body = fallback.data;
+            if (body && typeof body === 'object' && body.success === true && 'data' in body) {
+              fallback.data = body.data;
+            }
+            return fallback;
+          }
+        } catch {
+          // Continue to network error
+        }
+      }
       const code = error.code === 'ECONNABORTED' ? 'timeout' : 'network_error';
       return Promise.reject(new ApiError(0, code));
     }

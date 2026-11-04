@@ -59,16 +59,14 @@ export const Feedback: React.FC = () => {
           setTickets(filteredData)
           setError(null)
           setIsLoading(false)
+          setIsRefreshing(false)
         }
       })
       .catch((err) => {
         if (!ignore) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : 'Failed to fetch feedback tickets.'
-          )
+          setError(err instanceof Error ? err.message : 'Failed to fetch tickets')
           setIsLoading(false)
+          setIsRefreshing(false)
         }
       })
 
@@ -77,11 +75,9 @@ export const Feedback: React.FC = () => {
     }
   }, [statusFilter, categoryFilter, severityFilter, kindFilter, searchTerm])
 
-  // Explicit refresh handler
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true)
     setError(null)
-
     try {
       const [allData, filteredData] = await Promise.all([
         feedbackService.getInbox(),
@@ -96,15 +92,13 @@ export const Feedback: React.FC = () => {
       setAllTickets(allData)
       setTickets(filteredData)
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to refresh feedback inbox.'
-      )
+      setError(err instanceof Error ? err.message : 'Failed to refresh inbox')
     } finally {
       setIsRefreshing(false)
     }
   }, [statusFilter, categoryFilter, severityFilter, kindFilter, searchTerm])
 
-  // Computed global metrics
+  // Metric computations from allTickets
   const metrics = useMemo(() => {
     const total = allTickets.length
     const pending = allTickets.filter(
@@ -119,7 +113,23 @@ export const Feedback: React.FC = () => {
     return { total, pending, escalated, resolved, resolvedRate }
   }, [allTickets])
 
-  // Ticket detail actions
+  // Reset all filters to default
+  const handleResetFilters = () => {
+    setStatusFilter('all')
+    setCategoryFilter('all')
+    setSeverityFilter('all')
+    setKindFilter('all')
+    setSearchTerm('')
+  }
+
+  const isFiltered =
+    statusFilter !== 'all' ||
+    categoryFilter !== 'all' ||
+    severityFilter !== 'all' ||
+    kindFilter !== 'all' ||
+    searchTerm.trim() !== ''
+
+  // Open modal for ticket
   const handleSelectTicket = (ticket: FeedbackTicket) => {
     setSelectedTicket(ticket)
     setIsModalOpen(true)
@@ -130,6 +140,7 @@ export const Feedback: React.FC = () => {
     setSelectedTicket(null)
   }
 
+  // Handle status update from modal
   const handleUpdateStatus = async (
     ticketNo: string,
     newStatus: FeedbackStatus,
@@ -171,18 +182,18 @@ export const Feedback: React.FC = () => {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* 1. Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 pb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
         <div className="space-y-1">
           <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-black uppercase tracking-tight text-black flex items-center gap-2">
-              <MessageSquare className="w-5 h-5 text-black" />
+            <h1 className="text-xl font-black uppercase tracking-tight text-foreground flex items-center gap-2">
+              <MessageSquare className="w-5 h-5 text-primary" />
               Feedback & Support Inbox
             </h1>
-            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-black text-white">
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-primary/15 border border-primary/30 text-primary">
               Triage Desk
             </span>
           </div>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-muted-foreground">
             Triage member grievances, bug reports, feature suggestions, and campus partner inquiries.
           </p>
         </div>
@@ -192,10 +203,10 @@ export const Feedback: React.FC = () => {
             type="button"
             onClick={handleRefresh}
             disabled={isRefreshing || isLoading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-card text-foreground hover:bg-muted transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
           >
             <RefreshCw
-              className={`w-3.5 h-3.5 text-gray-600 ${
+              className={`w-3.5 h-3.5 text-muted-foreground ${
                 isRefreshing ? 'animate-spin' : ''
               }`}
             />
@@ -206,9 +217,9 @@ export const Feedback: React.FC = () => {
             type="button"
             onClick={handleResetDemo}
             disabled={isLoading || isRefreshing}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:text-black hover:border-gray-400 transition-colors disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-card text-foreground hover:bg-muted transition-colors disabled:opacity-50 cursor-pointer shadow-xs"
           >
-            <RotateCcw className="w-3.5 h-3.5 text-gray-600" />
+            <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
             <span>Reset Demo</span>
           </button>
         </div>
@@ -216,15 +227,15 @@ export const Feedback: React.FC = () => {
 
       {/* 2. Error Banner */}
       {error && (
-        <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-start justify-between gap-3">
+        <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 text-xs text-foreground flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+            <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
             <span>{error}</span>
           </div>
           <button
             type="button"
             onClick={handleRefresh}
-            className="font-bold underline hover:no-underline text-red-800 cursor-pointer flex-shrink-0"
+            className="font-bold underline hover:no-underline text-destructive cursor-pointer flex-shrink-0"
           >
             Retry
           </button>
@@ -234,82 +245,82 @@ export const Feedback: React.FC = () => {
       {/* 3. Metric Cards Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total Tickets */}
-        <div className="bg-white p-4 rounded-lg border border-gray-200 space-y-1">
-          <div className="flex items-center justify-between text-gray-500">
+        <div className="bg-card p-4 rounded-2xl border border-border space-y-1 shadow-xs">
+          <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[10px] font-bold uppercase tracking-wider">
               Total Inbound
             </span>
-            <Inbox className="w-4 h-4 text-gray-400" />
+            <Inbox className="w-4 h-4 text-muted-foreground" />
           </div>
-          <div className="text-2xl font-black text-black">
+          <div className="text-2xl font-black text-foreground">
             {metrics.total}
           </div>
-          <p className="text-[11px] text-gray-500">All registered tickets</p>
+          <p className="text-[11px] text-muted-foreground">All registered tickets</p>
         </div>
 
         {/* Pending Action */}
-        <div className="bg-white p-4 rounded-lg border-2 border-black space-y-1 shadow-xs">
-          <div className="flex items-center justify-between text-black">
+        <div className="bg-card p-4 rounded-2xl border border-primary/40 space-y-1 shadow-xs ring-1 ring-primary/20">
+          <div className="flex items-center justify-between text-primary">
             <span className="text-[10px] font-bold uppercase tracking-wider">
               Pending Action
             </span>
-            <Clock className="w-4 h-4 text-black" />
+            <Clock className="w-4 h-4 text-primary" />
           </div>
-          <div className="text-2xl font-black text-black">
+          <div className="text-2xl font-black text-foreground">
             {metrics.pending}
           </div>
-          <p className="text-[11px] text-gray-600">Requires triage or reply</p>
+          <p className="text-[11px] text-muted-foreground">Requires triage or reply</p>
         </div>
 
         {/* Escalated Issues */}
-        <div className="bg-white p-4 rounded-lg border border-red-200 bg-red-50/20 space-y-1">
-          <div className="flex items-center justify-between text-red-700">
+        <div className="bg-card p-4 rounded-2xl border border-destructive/30 bg-destructive/5 space-y-1 shadow-xs">
+          <div className="flex items-center justify-between text-destructive">
             <span className="text-[10px] font-bold uppercase tracking-wider">
               Escalated / High
             </span>
-            <AlertTriangle className="w-4 h-4 text-red-600" />
+            <AlertTriangle className="w-4 h-4 text-destructive" />
           </div>
-          <div className="text-2xl font-black text-red-700">
+          <div className="text-2xl font-black text-destructive">
             {metrics.escalated}
           </div>
-          <p className="text-[11px] text-red-600/80">Critical & high severity</p>
+          <p className="text-[11px] text-destructive/80">Critical & high severity</p>
         </div>
 
         {/* Resolved Rate */}
-        <div className="bg-white p-4 rounded-lg border border-gray-200 space-y-1">
-          <div className="flex items-center justify-between text-gray-500">
+        <div className="bg-card p-4 rounded-2xl border border-border space-y-1 shadow-xs">
+          <div className="flex items-center justify-between text-muted-foreground">
             <span className="text-[10px] font-bold uppercase tracking-wider">
               Resolved Rate
             </span>
-            <CheckCircle2 className="w-4 h-4 text-green-600" />
+            <CheckCircle2 className="w-4 h-4 text-emerald-500" />
           </div>
-          <div className="text-2xl font-black text-black">
+          <div className="text-2xl font-black text-foreground">
             {metrics.resolvedRate}%
           </div>
-          <p className="text-[11px] text-gray-500">
+          <p className="text-[11px] text-muted-foreground">
             {metrics.resolved} of {metrics.total} resolved
           </p>
         </div>
       </div>
 
       {/* 4. Filter & Search Toolbar */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3 shadow-xs">
+      <div className="bg-card rounded-2xl border border-border p-4 space-y-3 shadow-xs">
         <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
           {/* Search Input */}
           <div className="relative flex-1">
-            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search by subject, description, ticket #, reporter email..."
-              className="w-full pl-9 pr-8 py-2 text-xs border border-gray-300 rounded text-black placeholder-gray-400 focus:outline-none focus:border-black"
+              className="w-full pl-9 pr-8 py-2 text-xs border border-border rounded-lg text-foreground bg-card placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
             />
             {searchTerm && (
               <button
                 type="button"
                 onClick={() => setSearchTerm('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-black cursor-pointer"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -317,14 +328,14 @@ export const Feedback: React.FC = () => {
           </div>
 
           {/* Kind Selector Pills */}
-          <div className="inline-flex rounded-md border border-gray-200 p-0.5 bg-gray-50 text-xs self-start lg:self-auto">
+          <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/40 text-xs self-start lg:self-auto">
             <button
               type="button"
               onClick={() => setKindFilter('all')}
-              className={`px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer ${
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
                 kindFilter === 'all'
-                  ? 'bg-black text-white'
-                  : 'text-gray-600 hover:text-black hover:bg-gray-100'
+                  ? 'bg-primary text-primary-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
               }`}
             >
               All Types
@@ -332,10 +343,10 @@ export const Feedback: React.FC = () => {
             <button
               type="button"
               onClick={() => setKindFilter('feedback')}
-              className={`px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer ${
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
                 kindFilter === 'feedback'
-                  ? 'bg-black text-white'
-                  : 'text-gray-600 hover:text-black hover:bg-gray-100'
+                  ? 'bg-primary text-primary-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
               }`}
             >
               Feedback
@@ -343,10 +354,10 @@ export const Feedback: React.FC = () => {
             <button
               type="button"
               onClick={() => setKindFilter('contact')}
-              className={`px-3 py-1 rounded text-xs font-semibold transition-colors cursor-pointer ${
+              className={`px-3 py-1 rounded-md text-xs font-semibold transition-colors cursor-pointer ${
                 kindFilter === 'contact'
-                  ? 'bg-black text-white'
-                  : 'text-gray-600 hover:text-black hover:bg-gray-100'
+                  ? 'bg-primary text-primary-foreground shadow-xs'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-muted'
               }`}
             >
               Contact Us
@@ -355,22 +366,18 @@ export const Feedback: React.FC = () => {
         </div>
 
         {/* Dropdown Selectors Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-gray-100 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-border/60 text-xs">
           {/* Status Filter */}
           <div className="flex items-center gap-2">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500 whitespace-nowrap">
-              Status:
-            </label>
+            <label className="text-muted-foreground font-semibold whitespace-nowrap">Status:</label>
             <select
               value={statusFilter}
-              onChange={(e) =>
-                setStatusFilter(e.target.value as FeedbackStatus | 'all')
-              }
-              className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              onChange={(e) => setStatusFilter(e.target.value as FeedbackStatus | 'all')}
+              className="w-full py-1.5 px-2 text-xs border border-border rounded-lg text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
             >
               <option value="all">All Statuses</option>
-              <option value="submitted">Submitted</option>
-              <option value="under_review">Under Review</option>
+              <option value="submitted">Submitted (In Queue)</option>
+              <option value="under_review">Under Review (Investigating)</option>
               <option value="resolved">Resolved</option>
               <option value="closed">Closed</option>
             </select>
@@ -378,35 +385,31 @@ export const Feedback: React.FC = () => {
 
           {/* Category Filter */}
           <div className="flex items-center gap-2">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500 whitespace-nowrap">
-              Category:
-            </label>
+            <label className="text-muted-foreground font-semibold whitespace-nowrap">Category:</label>
             <select
               value={categoryFilter}
               onChange={(e) =>
                 setCategoryFilter(e.target.value as FeedbackCategory | 'all')
               }
-              className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              className="w-full py-1.5 px-2 text-xs border border-border rounded-lg text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
             >
               <option value="all">All Categories</option>
               <option value="bug">Bug Reports</option>
-              <option value="feature">Feature Suggestions</option>
-              <option value="complaint">Grievances</option>
-              <option value="general">General</option>
+              <option value="feature">Feature Requests</option>
+              <option value="complaint">Complaints / Moderation</option>
+              <option value="general">General Inquiries</option>
             </select>
           </div>
 
           {/* Severity Filter */}
           <div className="flex items-center gap-2">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500 whitespace-nowrap">
-              Severity:
-            </label>
+            <label className="text-muted-foreground font-semibold whitespace-nowrap">Severity:</label>
             <select
               value={severityFilter}
               onChange={(e) =>
                 setSeverityFilter(e.target.value as FeedbackSeverity | 'all')
               }
-              className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              className="w-full py-1.5 px-2 text-xs border border-border rounded-lg text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
             >
               <option value="all">All Severities</option>
               <option value="critical">Critical</option>
@@ -416,15 +419,28 @@ export const Feedback: React.FC = () => {
             </select>
           </div>
         </div>
+
+        {/* Reset Filters Quick Pill */}
+        {isFiltered && (
+          <div className="flex items-center justify-between pt-1 border-t border-border/60 text-xs">
+            <span className="text-muted-foreground text-[11px]">
+              Filtered results: <strong className="text-foreground">{tickets.length}</strong> of {allTickets.length} tickets
+            </span>
+            <button
+              type="button"
+              onClick={handleResetFilters}
+              className="text-[11px] text-primary hover:underline font-semibold cursor-pointer"
+            >
+              Clear all filters
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 5. Tickets Table View */}
       {isLoading ? (
-        <div className="py-20 text-center space-y-3">
-          <RefreshCw className="w-8 h-8 text-black animate-spin mx-auto" />
-          <p className="text-xs uppercase font-bold tracking-wider text-gray-500">
-            Loading Support Inbox...
-          </p>
+        <div className="p-12 text-center text-sm text-muted-foreground border border-border rounded-2xl bg-card">
+          Loading support inbox...
         </div>
       ) : (
         <FeedbackTable
@@ -434,7 +450,7 @@ export const Feedback: React.FC = () => {
         />
       )}
 
-      {/* 6. Triage & Detail Modal */}
+      {/* 6. Ticket Detail & Triage Modal */}
       <TicketDetailModal
         ticket={selectedTicket}
         isOpen={isModalOpen}

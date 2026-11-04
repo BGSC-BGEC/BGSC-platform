@@ -4,6 +4,7 @@ import Svg, { Circle, Path, Rect, Defs, LinearGradient, Stop } from 'react-nativ
 
 import { useTheme } from '../theme/ThemeProvider';
 import { useResponsive } from '../responsive/useResponsive';
+import { FONT_FAMILIES } from '../theme/typography';
 import { Typography } from '../typography/Typography';
 import { Avatar } from './Avatar';
 import { formatNumber } from '../utils/format';
@@ -123,12 +124,12 @@ export function Podium({
           if (!row) return <View key={`empty-${column}`} style={styles.podiumTile} />;
           const place = column === 1 ? 1 : column === 0 ? 2 : 3;
           const isChampion = place === 1;
-          const avatarSize = isChampion ? (isCompactPhone ? 58 : 66) : isCompactPhone ? 46 : 52;
+          const avatarSize = isChampion ? (isCompactPhone ? 48 : 54) : isCompactPhone ? 38 : 42;
           const pedestalHeight = isChampion
-            ? isCompactPhone ? 142 : 162
+            ? isCompactPhone ? 108 : 120
             : place === 2
-            ? isCompactPhone ? 106 : 120
-            : isCompactPhone ? 90 : 102;
+            ? isCompactPhone ? 80 : 90
+            : isCompactPhone ? 68 : 76;
 
           const pedestalBg = isChampion
             ? championGold
@@ -171,7 +172,7 @@ export function Podium({
               <View style={styles.avatarWrapper}>
                 {isChampion && (
                   <View style={styles.crownContainer}>
-                    <CrownIcon size={isCompactPhone ? 24 : 28} />
+                    <CrownIcon size={isCompactPhone ? 20 : 23} />
                   </View>
                 )}
                 <Avatar
@@ -257,7 +258,7 @@ export function Podium({
                         : isDark
                         ? 'rgba(255, 255, 255, 0.2)'
                         : 'rgba(0, 0, 0, 0.15)',
-                      fontSize: isChampion ? (isCompactPhone ? 58 : 70) : isCompactPhone ? 42 : 50,
+                      fontSize: isChampion ? (isCompactPhone ? 42 : 48) : isCompactPhone ? 30 : 34,
                     },
                   ]}
                 >
@@ -284,14 +285,13 @@ export function StandingRow({
 }) {
   const { colors, isDark } = useTheme();
 
-  // Compute or simulate rank delta
+  // Compute rank delta only if real rank change data exists from backend
   const delta =
-    row.delta ??
-    (row.rank != null && row.previousRank != null
+    row.delta != null
+      ? row.delta
+      : row.rank != null && row.previousRank != null
       ? row.previousRank - row.rank
-      : row.rank && row.rank % 2 === 0
-      ? 12
-      : -4);
+      : null;
 
   const cardBg = row.isMe
     ? isDark
@@ -353,7 +353,7 @@ export function StandingRow({
       <Avatar
         name={row.name}
         uri={row.avatarUrl}
-        size={40}
+        size={34}
         ring
         style={{
           borderColor: row.isMe ? colors.primary : colors.border,
@@ -375,7 +375,7 @@ export function StandingRow({
             {row.subtitle || `@${row.name.toLowerCase().replace(/\s+/g, '')}`}
           </Typography>
 
-          {delta !== 0 && (
+          {delta != null && delta !== 0 && (
             <View
               style={[
                 styles.deltaBadge,
@@ -429,9 +429,11 @@ export function StandingRow({
 export function MyPositionPill({
   me,
   onPress,
+  bottomOffset = 84,
 }: {
   me: RankedRow | null;
   onPress?: () => void;
+  bottomOffset?: number;
 }) {
   const { colors, isDark } = useTheme();
   if (!me) return null;
@@ -440,7 +442,13 @@ export function MyPositionPill({
   const pillBorder = colors.primary;
 
   return (
-    <View style={styles.floatingContainer} pointerEvents="box-none">
+    <View
+      style={[
+        styles.floatingContainer,
+        { bottom: bottomOffset },
+      ]}
+      pointerEvents="box-none"
+    >
       <Pressable
         onPress={onPress}
         style={({ pressed }) => [
@@ -467,7 +475,7 @@ export function MyPositionPill({
 
         <View style={[styles.floatingBadge, { backgroundColor: colors.primary }]}>
           <Typography style={styles.floatingBadgeText}>
-            {`▲ ${me.rank ? `${me.rank}th` : 'Top 10%'}`}
+            {me.rank ? `#${me.rank}` : 'Top 10%'}
           </Typography>
         </View>
 
@@ -495,19 +503,19 @@ const styles = StyleSheet.create({
   },
   ambientHalo: {
     position: 'absolute',
-    top: 40,
-    width: 240,
-    height: 140,
+    top: 20,
+    width: 180,
+    height: 100,
     borderRadius: 120,
     alignSelf: 'center',
   },
   podium: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
     alignItems: 'flex-end',
     justifyContent: 'center',
-    paddingTop: 16,
-    paddingBottom: 4,
+    paddingTop: 6,
+    paddingBottom: 2,
     width: '100%',
   },
   podiumCompact: { gap: 8 },
@@ -516,38 +524,38 @@ const styles = StyleSheet.create({
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 6,
+    marginBottom: 3,
   },
   crownContainer: {
     position: 'absolute',
-    top: -18,
+    top: -15,
     zIndex: 10,
   },
   podiumName: {
     maxWidth: '100%',
-    marginBottom: 6,
-    fontSize: 13,
+    marginBottom: 3,
+    fontSize: 11.5,
   },
   scorePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    gap: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
     borderRadius: 999,
     borderWidth: 1,
-    marginBottom: 8,
-    minWidth: 54,
+    marginBottom: 5,
+    minWidth: 44,
     justifyContent: 'center',
   },
   scorePillText: {
-    fontSize: 12,
+    fontSize: 10.5,
     fontWeight: '700',
   },
   pedestalCard: {
     width: '100%',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -561,31 +569,30 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   embossedNumber: {
-    fontFamily: 'Inter_900Black',
-    fontWeight: '900',
+    fontFamily: FONT_FAMILIES.bodyBlack,
     letterSpacing: -2,
   },
   rowCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    marginBottom: 8,
+    gap: 9,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    marginBottom: 5,
   },
   pressed: { opacity: 0.8 },
   rankBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    minWidth: 34,
+    gap: 2.5,
+    minWidth: 26,
   },
   trophyIcon: {
     fontSize: 12,
   },
   rankNumber: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
   },
   identity: {
@@ -596,35 +603,36 @@ const styles = StyleSheet.create({
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 5,
   },
   nameText: {
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 13,
+    flexShrink: 1,
   },
   deltaBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
+    paddingHorizontal: 4.5,
+    paddingVertical: 1,
+    borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
   },
   deltaText: {
-    fontSize: 11,
+    fontSize: 9.5,
     fontWeight: '700',
   },
   subText: {
-    fontSize: 11,
+    fontSize: 10.5,
     opacity: 0.7,
   },
   scoreContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 3,
     paddingLeft: 4,
   },
   scoreValue: {
-    fontSize: 14,
+    fontSize: 12.5,
     fontWeight: '800',
   },
   floatingContainer: {
@@ -638,38 +646,39 @@ const styles = StyleSheet.create({
   floatingPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-    paddingLeft: 8,
-    paddingRight: 14,
+    maxWidth: '92%',
+    gap: 5,
+    paddingVertical: 5.5,
+    paddingLeft: 5.5,
+    paddingRight: 10,
     borderRadius: 999,
     borderWidth: 1.5,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
     elevation: 8,
   },
   floatingYouText: {
     fontWeight: '800',
-    fontSize: 14,
+    fontSize: 12.5,
   },
   floatingBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
+    paddingHorizontal: 5.5,
+    paddingVertical: 1.5,
+    borderRadius: 7,
   },
   floatingBadgeText: {
     color: '#FFFFFF',
     fontWeight: '700',
-    fontSize: 11,
+    fontSize: 10,
   },
   floatingPoints: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
     marginLeft: 2,
   },
   floatingPointsText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
   floatingChevron: {

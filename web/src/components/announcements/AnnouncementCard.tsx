@@ -1,5 +1,5 @@
 import React from 'react'
-import { Pin, Trash2 } from 'lucide-react'
+import { Pin, Trash2, Send } from 'lucide-react'
 import type { Announcement } from '../../types/announcement'
 
 export interface AnnouncementCardProps {
@@ -41,20 +41,20 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
 
   return (
     <div
-      className={`bg-white rounded-lg border transition-shadow hover:shadow-md p-5 space-y-4 ${
+      className={`rounded-xl border bg-card text-card-foreground shadow-xs p-5 space-y-4 transition-all duration-200 dark:bg-transparent ${
         announcement.isPinned
-          ? 'border-black ring-1 ring-black/10'
-          : 'border-gray-200'
+          ? 'border-orange-500/50 ring-1 ring-orange-500/20'
+          : 'border-border hover:border-border/80'
       }`}
     >
       {/* Card Header */}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 pb-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
         {/* Category Badges */}
         <div className="flex flex-wrap items-center gap-1.5">
           {announcement.categories.map((cat) => (
             <span
               key={cat}
-              className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-800"
+              className="text-[10px] font-mono font-semibold uppercase tracking-wider px-2 py-0.5 rounded border border-border bg-muted/40 text-foreground"
             >
               {CATEGORY_LABELS[cat] || cat.toUpperCase()}
             </span>
@@ -65,39 +65,39 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
         <div className="flex items-center gap-2">
           {/* Priority Indicator */}
           {isUrgent && (
-            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-red-600 text-white">
+            <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/10 text-rose-500 border border-rose-500/25">
               Urgent
             </span>
           )}
           {isImportant && (
-            <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded border border-black bg-black text-white">
+            <span className="text-[10px] font-mono font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-orange-500/10 text-orange-500 border border-orange-500/25">
               Important
             </span>
           )}
           {!isUrgent && !isImportant && (
-            <span className="text-[10px] font-medium uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 text-gray-600 bg-gray-50">
+            <span className="text-[10px] font-mono font-medium uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground bg-muted/20">
               Normal
             </span>
           )}
 
           {/* Pin Indicator */}
           {announcement.isPinned && (
-            <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-black text-white">
-              <Pin className="w-3 h-3 fill-white" />
+            <span className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-muted text-foreground border border-border">
+              <Pin className="w-3 h-3 fill-current text-orange-500" />
               Pinned
             </span>
           )}
 
           {/* Status Pill */}
           <span
-            className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded border ${
+            className={`text-[10px] font-mono font-semibold uppercase tracking-wider px-2 py-0.5 rounded border ${
               announcement.status === 'published'
-                ? 'border-green-600/30 text-green-700 bg-green-50'
+                ? 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10'
                 : announcement.status === 'draft'
-                ? 'border-yellow-600/30 text-yellow-800 bg-yellow-50'
+                ? 'border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/10'
                 : announcement.status === 'scheduled'
-                ? 'border-blue-600/30 text-blue-700 bg-blue-50'
-                : 'border-gray-300 text-gray-600 bg-gray-100'
+                ? 'border-blue-500/30 text-blue-600 dark:text-blue-400 bg-blue-500/10'
+                : 'border-border text-muted-foreground bg-muted/20'
             }`}
           >
             {announcement.status}
@@ -107,18 +107,20 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
 
       {/* Card Body */}
       <div className="space-y-2">
-        <h3 className="text-lg font-bold text-black">{announcement.title}</h3>
-        <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+        <h3 className="text-base font-bold text-foreground leading-snug tracking-tight">
+          {announcement.title}
+        </h3>
+        <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
           {announcement.body}
         </p>
 
         {/* Tags */}
         {announcement.tags && announcement.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 pt-2">
+          <div className="flex flex-wrap gap-1.5 pt-1">
             {announcement.tags.map((tag) => (
               <span
                 key={tag}
-                className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded"
+                className="text-[11px] font-mono text-muted-foreground bg-muted/30 border border-border px-2 py-0.5 rounded"
               >
                 #{tag}
               </span>
@@ -128,8 +130,8 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
       </div>
 
       {/* Card Footer */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t border-gray-100">
-        <div className="text-xs text-gray-500">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t border-border">
+        <div className="text-xs text-muted-foreground">
           {announcement.status === 'published' && announcement.publishedAt && (
             <span>Published on {formatDisplayDate(announcement.publishedAt)}</span>
           )}
@@ -148,7 +150,7 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
             </span>
           )}
           {announcement.authorName && (
-            <span> by {announcement.authorName}</span>
+            <span className="opacity-80"> by {announcement.authorName}</span>
           )}
         </div>
 
@@ -158,16 +160,17 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
             <button
               type="button"
               onClick={() => onPublish(announcement.id)}
-              className="px-3 py-1 text-xs font-semibold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-orange-500 hover:bg-orange-600 text-white transition-colors cursor-pointer"
             >
-              Publish Now
+              <Send className="w-3 h-3" />
+              <span>Publish</span>
             </button>
           )}
           <button
             type="button"
             onClick={() => onDelete(announcement.id)}
             aria-label="Delete announcement"
-            className="p-1.5 text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-300 rounded transition-colors cursor-pointer flex items-center gap-1"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-rose-500 rounded-lg border border-border hover:border-rose-500/30 transition-colors cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Delete</span>

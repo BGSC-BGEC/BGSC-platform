@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { Modal } from '../components/ui/modal'
 import {
   Gavel,
   RotateCcw,
@@ -293,38 +294,38 @@ export const Auction: React.FC = () => {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* 1. Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-200 pb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-5">
         <div className="space-y-1">
           <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-black uppercase tracking-tight text-black flex items-center gap-2">
-              <Gavel className="w-5 h-5 text-black" />
+            <h1 className="text-xl font-black uppercase tracking-tight text-foreground flex items-center gap-2">
+              <Gavel className="w-5 h-5 text-primary" />
               Live Auction Console
             </h1>
 
             {/* Auction Status Pill */}
             {auctionState?.status === 'live' ? (
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-green-300 bg-green-50 text-green-700">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-600 animate-pulse" />
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                 Live Auction
               </span>
             ) : auctionState?.status === 'paused' ? (
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-amber-300 bg-amber-50 text-amber-800">
-                <Clock className="w-3 h-3 text-amber-600" />
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                <Clock className="w-3 h-3 text-amber-500" />
                 Auction Paused
               </span>
             ) : auctionState?.status === 'finished' ? (
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-black text-white">
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-primary text-primary-foreground shadow-xs">
                 <CheckCircle className="w-3 h-3" />
                 Auction Concluded
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-gray-300 bg-gray-100 text-gray-700">
-                <Radio className="w-3 h-3 text-gray-500" />
+              <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border border-border bg-muted/40 text-muted-foreground">
+                <Radio className="w-3 h-3 text-muted-foreground" />
                 Draft / Not Started
               </span>
             )}
           </div>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-muted-foreground">
             {auctionState?.title || 'Valorant Spring Championship 2026'} &bull; Real-time bidding block, franchise purse ledgers, and player allocation.
           </p>
         </div>
@@ -335,7 +336,7 @@ export const Auction: React.FC = () => {
             <select
               value={selectedEventId}
               onChange={(e) => setSelectedEventId(e.target.value)}
-              className="px-3 py-1.5 text-xs font-semibold rounded border border-gray-300 bg-white text-black focus:outline-none focus:border-black"
+              className="px-3 py-1.5 text-xs font-semibold rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all cursor-pointer"
             >
               {events.map((ev) => (
                 <option key={ev.id} value={ev.id}>
@@ -351,7 +352,7 @@ export const Auction: React.FC = () => {
               type="button"
               onClick={handleStartAuction}
               disabled={isSubmitting || isLoading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded border border-black bg-black text-white hover:bg-gray-800 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border border-primary bg-primary text-primary-foreground hover:bg-primary/90 transition-all cursor-pointer shadow-xs disabled:opacity-50"
             >
               <Play className="w-3.5 h-3.5" />
               <span>Start Auction</span>
@@ -364,7 +365,7 @@ export const Auction: React.FC = () => {
               type="button"
               onClick={handleCloseAuction}
               disabled={isSubmitting || isLoading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded border border-red-600 text-red-600 bg-white hover:bg-red-600 hover:text-white transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl border border-destructive/40 text-destructive bg-destructive/10 hover:bg-destructive hover:text-destructive-foreground transition-all cursor-pointer disabled:opacity-50"
             >
               <Square className="w-3.5 h-3.5" />
               <span>Close Auction</span>
@@ -374,9 +375,9 @@ export const Auction: React.FC = () => {
           <button
             type="button"
             onClick={() => setIsConfigOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:border-black hover:text-black transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-border bg-card text-foreground hover:bg-muted transition-colors cursor-pointer"
           >
-            <Settings className="w-3.5 h-3.5" />
+            <Settings className="w-3.5 h-3.5 text-muted-foreground" />
             <span>Configure / Lots</span>
           </button>
 
@@ -384,10 +385,10 @@ export const Auction: React.FC = () => {
             type="button"
             onClick={handleRefresh}
             disabled={isRefreshing || isLoading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 hover:border-gray-300 transition-colors disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-border bg-card text-foreground hover:bg-muted transition-colors disabled:opacity-50 cursor-pointer"
           >
             <RefreshCw
-              className={`w-3.5 h-3.5 text-gray-600 ${isRefreshing ? 'animate-spin' : ''}`}
+              className={`w-3.5 h-3.5 text-muted-foreground ${isRefreshing ? 'animate-spin' : ''}`}
             />
             <span>Refresh</span>
           </button>
@@ -396,9 +397,9 @@ export const Auction: React.FC = () => {
             type="button"
             onClick={handleResetDemo}
             disabled={isSubmitting || isLoading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded border border-gray-200 bg-white text-gray-700 hover:text-black hover:border-gray-400 transition-colors disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 cursor-pointer"
           >
-            <RotateCcw className="w-3.5 h-3.5 text-gray-600" />
+            <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
             <span>Reset Demo</span>
           </button>
         </div>
@@ -406,15 +407,15 @@ export const Auction: React.FC = () => {
 
       {/* 2. Error Banner */}
       {error && (
-        <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-start justify-between gap-3">
+        <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 text-xs text-destructive flex items-start justify-between gap-3 animate-in fade-in">
           <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+            <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
             <span>{error}</span>
           </div>
           <button
             type="button"
             onClick={handleRefresh}
-            className="font-bold underline hover:no-underline text-red-800 cursor-pointer flex-shrink-0"
+            className="font-bold underline hover:no-underline text-destructive cursor-pointer flex-shrink-0"
           >
             Retry
           </button>
@@ -424,8 +425,8 @@ export const Auction: React.FC = () => {
       {/* 3. Loading State */}
       {isLoading ? (
         <div className="py-20 text-center space-y-3">
-          <RefreshCw className="w-8 h-8 text-black animate-spin mx-auto" />
-          <p className="text-xs uppercase font-bold tracking-wider text-gray-500">
+          <RefreshCw className="w-8 h-8 text-primary animate-spin mx-auto" />
+          <p className="text-xs uppercase font-bold tracking-wider text-muted-foreground">
             Connecting to Live Auction Block...
           </p>
         </div>
@@ -472,153 +473,143 @@ export const Auction: React.FC = () => {
           </div>
         </>
       ) : (
-        <div className="p-12 text-center rounded-lg border border-gray-200 bg-white space-y-2">
-          <AlertCircle className="w-8 h-8 text-gray-400 mx-auto" />
-          <h3 className="text-sm font-bold text-black uppercase tracking-wider">
+        <div className="p-12 text-center rounded-2xl border border-border bg-card space-y-2 text-foreground shadow-xs">
+          <AlertCircle className="w-8 h-8 text-muted-foreground mx-auto" />
+          <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">
             No Auction Data Found
           </h3>
-          <p className="text-xs text-gray-500">
+          <p className="text-xs text-muted-foreground">
             Please make sure the tournament event has an auction enabled.
           </p>
         </div>
       )}
 
       {/* Configure / Seed Lots Modal */}
-      {isConfigOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-          onClick={() => setIsConfigOpen(false)}
-        >
-          <div
-            className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-lg w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
+      <Modal isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} className="max-w-lg p-6 space-y-5">
+        <div className="flex items-center justify-between border-b border-border pb-3.5">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
+            Auction Parameters & Lot Seeding
+          </h2>
+          <button
+            type="button"
+            onClick={() => setIsConfigOpen(false)}
+            className="w-7 h-7 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center text-xs font-bold transition-colors cursor-pointer"
           >
-            <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-black">
-                Auction Parameters & Lot Seeding
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsConfigOpen(false)}
-                className="px-2 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-white cursor-pointer"
-              >
-                X
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveConfig} className="space-y-3 text-left">
-              <div className="text-xs font-bold uppercase text-black">
-                1. Update Bidding Rules
-              </div>
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-gray-600 mb-1">
-                    Min Increment
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={minBidIncrement}
-                    onChange={(e) => setMinBidIncrement(Number(e.target.value))}
-                    className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded text-black bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-gray-600 mb-1">
-                    Timer (Sec)
-                  </label>
-                  <input
-                    type="number"
-                    min={5}
-                    value={bidTimerSeconds}
-                    onChange={(e) => setBidTimerSeconds(Number(e.target.value))}
-                    className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded text-black bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-gray-600 mb-1">
-                    Team Purse
-                  </label>
-                  <input
-                    type="number"
-                    min={100}
-                    value={pursePerTeam}
-                    onChange={(e) => setPursePerTeam(Number(e.target.value))}
-                    className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded text-black bg-white"
-                  />
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-3 py-1.5 text-xs font-bold border border-black bg-black text-white rounded cursor-pointer"
-                >
-                  Save Config
-                </button>
-              </div>
-            </form>
-
-            <form
-              onSubmit={handleAddLot}
-              className="space-y-3 pt-4 border-t border-gray-200 text-left"
-            >
-              <div className="text-xs font-bold uppercase text-black">
-                2. Add Player Lot to Queue
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-gray-600 mb-1">
-                    Registration ObjectId
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="24-char hex ID"
-                    value={lotRegId}
-                    onChange={(e) => setLotRegId(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded text-black bg-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold uppercase text-gray-600 mb-1">
-                    Player User UUID
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="User UUID"
-                    value={lotUserId}
-                    onChange={(e) => setLotUserId(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded text-black bg-white font-mono"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold uppercase text-gray-600 mb-1">
-                  Base Price (Pts)
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  value={lotBasePrice}
-                  onChange={(e) => setLotBasePrice(Number(e.target.value))}
-                  className="w-full px-3 py-1.5 text-xs border border-gray-300 rounded text-black bg-white"
-                />
-              </div>
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-3 py-1.5 text-xs font-bold border border-black bg-white text-black hover:bg-black hover:text-white rounded cursor-pointer"
-                >
-                  Seed Player Lot
-                </button>
-              </div>
-            </form>
-          </div>
+            ✕
+          </button>
         </div>
-      )}
+
+        <form onSubmit={handleSaveConfig} className="space-y-3.5 text-left">
+          <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            1. Update Bidding Rules
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                Min Increment
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={minBidIncrement}
+                onChange={(e) => setMinBidIncrement(Number(e.target.value))}
+                className="w-full px-3 py-1.5 text-xs border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                Timer (Sec)
+              </label>
+              <input
+                type="number"
+                min={5}
+                value={bidTimerSeconds}
+                onChange={(e) => setBidTimerSeconds(Number(e.target.value))}
+                className="w-full px-3 py-1.5 text-xs border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                Team Purse
+              </label>
+              <input
+                type="number"
+                min={100}
+                value={pursePerTeam}
+                onChange={(e) => setPursePerTeam(Number(e.target.value))}
+                className="w-full px-3 py-1.5 text-xs border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-4 py-2 text-xs font-bold rounded-xl border border-primary bg-primary text-primary-foreground hover:bg-primary/90 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+            >
+              Save Config
+            </button>
+          </div>
+        </form>
+
+        <form
+          onSubmit={handleAddLot}
+          className="space-y-3.5 pt-4 border-t border-border text-left"
+        >
+          <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+            2. Add Player Lot to Queue
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                Registration ObjectId
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="24-char hex ID"
+                value={lotRegId}
+                onChange={(e) => setLotRegId(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs border border-border rounded-xl text-foreground bg-card font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-muted-foreground mb-1">
+                Player User UUID
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="User UUID"
+                value={lotUserId}
+                onChange={(e) => setLotUserId(e.target.value)}
+                className="w-full px-3 py-1.5 text-xs border border-border rounded-xl text-foreground bg-card font-mono focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase text-muted-foreground mb-1">
+              Base Price (Pts)
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={lotBasePrice}
+              onChange={(e) => setLotBasePrice(Number(e.target.value))}
+              className="w-full px-3 py-1.5 text-xs border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
+            />
+          </div>
+          <div className="flex justify-end">
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-4 py-2 text-xs font-bold rounded-xl border border-border bg-card text-foreground hover:bg-muted transition-all cursor-pointer shadow-xs disabled:opacity-50"
+            >
+              Seed Player Lot
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   )
 }

@@ -70,13 +70,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        if (!(await authRepository.hasStoredSession())) {
-          if (__DEV__) {
-            await tokenStorage.set('mock-jwt-access-token', 'mock-jwt-refresh-token');
-          } else {
-            return;
-          }
-        }
+        if (!(await authRepository.hasStoredSession())) return;
         // /users/me transparently refreshes an expired access token.
         const me = await authRepository.me();
         const { accessToken } = await tokenStorage.get();

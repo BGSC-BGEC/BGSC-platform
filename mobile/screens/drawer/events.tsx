@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppHeader } from '../../src/components/AppHeader';
 import { Badge } from '../../src/components/Badge';
@@ -49,6 +50,7 @@ type Row =
  */
 export default function Events() {
   const { colors, shadow } = useTheme();
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
@@ -259,7 +261,10 @@ export default function Events() {
         data={state === 'loading' ? [] : rows}
         keyExtractor={(row, i) => (row.kind === 'card' ? row.event._id : `${row.kind}-${i}`)}
         ListHeaderComponent={header}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: Math.max(110, insets.bottom + 90) },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         renderItem={({ item: row }) => {
@@ -409,35 +414,35 @@ const styles = StyleSheet.create({
   gap: { gap: 16 },
   pressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
   semibold: { fontFamily: FONT_FAMILIES.bodySemiBold },
-  content: { paddingHorizontal: 16, paddingTop: 6, paddingBottom: 32, gap: 16 },
-  header: { gap: 16, marginBottom: 4 },
+  content: { paddingHorizontal: 13, paddingTop: 4, paddingBottom: 32, gap: 11 },
+  header: { gap: 10, marginBottom: 2 },
   title: { fontSize: 32, lineHeight: 40 },
   dateCarouselWrap: {
-    marginHorizontal: -16,
+    marginHorizontal: -13,
   },
   dateCarousel: {
-    paddingHorizontal: 16,
-    gap: 8,
+    paddingHorizontal: 13,
+    gap: 7,
   },
   datePill: {
-    width: 52,
-    height: 56,
-    borderRadius: 16,
+    width: 48,
+    height: 50,
+    borderRadius: 12,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
   },
-  live: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 20, borderWidth: 1 },
-  liveIcon: { padding: 12, borderRadius: 12 },
+  live: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderRadius: 15, borderWidth: 1 },
+  liveIcon: { padding: 9, borderRadius: 10 },
   liveKicker: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   dot: { width: 7, height: 7, borderRadius: 4 },
   liveLabel: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
   mono: { fontSize: 11 },
-  list: { borderRadius: 22, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 4 },
-  listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
-  dateTile: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 12, borderWidth: 1 },
-  day: { fontSize: 17, fontWeight: '700' },
+  list: { borderRadius: 18, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 2 },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  dateTile: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1 },
+  day: { fontSize: 15, fontWeight: '700' },
   month: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 9, letterSpacing: 0.8 },
   rowRoute: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   flightSubRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },

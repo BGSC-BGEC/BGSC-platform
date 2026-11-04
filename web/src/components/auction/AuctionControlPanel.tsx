@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
-import { Gavel, Pause, Play, RotateCcw, Plus } from 'lucide-react'
+import { Gavel, Pause, Play, RotateCcw, Plus, AlertTriangle, Loader2 } from 'lucide-react'
 import type { AuctionLot, AuctionStatus, TeamPurse } from '../../types/auction'
+import { Button } from '../ui/button'
+import { cn } from '../../lib/utils'
 
 export interface AuctionControlPanelProps {
   activeLot: AuctionLot | null
@@ -63,14 +65,15 @@ export const AuctionControlPanel: React.FC<AuctionControlPanelProps> = ({
   }
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-5 space-y-5">
+    <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 space-y-5 text-foreground shadow-xs">
       {/* 1. Director Primary Action Bar */}
-      <div className="space-y-2">
-        <div className="text-[10px] font-bold uppercase tracking-wider text-black">
-          Auction Director Controls
+      <div className="space-y-2.5">
+        <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+          <Gavel className="w-3.5 h-3.5 text-primary" />
+          <span>Auction Director Controls</span>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-2">
           {/* Hammer / Settle Button */}
           <button
             type="button"
@@ -81,21 +84,22 @@ export const AuctionControlPanel: React.FC<AuctionControlPanelProps> = ({
                 ? 'The lot settles automatically when the timer reaches zero. Pause the auction to settle it now.'
                 : undefined
             }
-            className={`flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 ${
+            className={cn(
+              'w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer disabled:opacity-50 truncate',
               hasBid
-                ? 'border border-black bg-black text-white hover:bg-gray-800'
-                : 'border border-gray-300 text-gray-700 hover:border-red-600 hover:text-red-600'
-            }`}
+                ? 'border border-primary bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs'
+                : 'border border-border bg-card text-foreground hover:border-destructive hover:text-destructive hover:bg-destructive/10'
+            )}
           >
-            <Gavel className="w-4 h-4 flex-shrink-0" />
+            <Gavel className="w-4 h-4 shrink-0" />
             <span className="truncate">
               {timerRunning
                 ? hasBid
-                  ? `Sells to ${activeLot!.current_bidder!.team_name} when the timer ends`
-                  : 'Goes unsold if the timer ends with no bids'
+                  ? `Sells to ${activeLot!.current_bidder!.team_name}`
+                  : 'Pass when timer ends'
                 : hasBid
-                ? `Hammer Down (Sell for ${activeLot!.current_bid!.toLocaleString()} pts to ${activeLot!.current_bidder!.team_name})`
-                : 'Pass Lot (Mark Unsold)'}
+                ? `Hammer (${activeLot!.current_bidder!.team_name})`
+                : 'Pass Lot (Unsold)'}
             </span>
           </button>
 
@@ -104,20 +108,21 @@ export const AuctionControlPanel: React.FC<AuctionControlPanelProps> = ({
             type="button"
             onClick={onTogglePause}
             disabled={isSubmitting || status === 'finished'}
-            className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded text-xs font-bold border transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap ${
+            className={cn(
+              'w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold border transition-all cursor-pointer disabled:opacity-50',
               status === 'paused'
-                ? 'border-green-600 bg-green-50 text-green-700 hover:bg-green-100'
-                : 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
-            }`}
+                ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25'
+                : 'border-amber-500/40 bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25'
+            )}
           >
             {status === 'paused' ? (
               <>
-                <Play className="w-4 h-4" />
-                <span>Resume Auction</span>
+                <Play className="w-4 h-4 shrink-0" />
+                <span>Resume Timer</span>
               </>
             ) : (
               <>
-                <Pause className="w-4 h-4" />
+                <Pause className="w-4 h-4 shrink-0" />
                 <span>Pause Timer</span>
               </>
             )}
@@ -126,81 +131,99 @@ export const AuctionControlPanel: React.FC<AuctionControlPanelProps> = ({
       </div>
 
       {/* 2. Quick Bid Simulator (For Demo & Admin Testing) */}
-      <div className="border-t border-gray-100 pt-4 space-y-3">
+      <div className="border-t border-border pt-4 space-y-3.5">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-black">
+          <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
             Bidding Simulator (Admin Testing)
           </span>
           {activeLot && (
-            <span className="font-mono text-xs text-gray-500">
-              Next Bid: <strong>{nextBidAmount.toLocaleString()} pts</strong>
+            <span className="font-mono text-xs text-muted-foreground">
+              Next Bid: <strong className="text-foreground">{nextBidAmount.toLocaleString()} pts</strong>
             </span>
           )}
         </div>
 
         {biddingError && (
-          <div className="p-2.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded">
-            {biddingError}
+          <div className="p-3 text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-xl flex items-center gap-2 animate-in fade-in">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{biddingError}</span>
           </div>
         )}
 
-        <form
-          onSubmit={handleQuickBid}
-          className="flex flex-col sm:flex-row sm:items-center gap-3"
-        >
-          {/* Team Dropdown */}
-          <select
-            value={selectedTeamId || teams[0]?.team_id || ''}
-            onChange={(e) => setSelectedTeamId(e.target.value)}
-            disabled={!activeLot || isBidding}
-            className="flex-1 px-3 py-2 text-xs border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black truncate"
-          >
-            {teams.map((team) => (
-              <option key={team.team_id} value={team.team_id}>
-                {team.name} (Purse: {team.purse_remaining.toLocaleString()} pts)
-              </option>
-            ))}
-          </select>
-
-          {/* Increment Pills */}
-          <div className="flex items-center gap-1.5 self-start sm:self-auto">
-            {[1000, 2500, 5000].map((inc) => (
-              <button
-                key={inc}
-                type="button"
-                onClick={() => setIncrement(inc)}
-                className={`px-2.5 py-1.5 text-xs font-mono font-bold rounded border transition-colors cursor-pointer ${
-                  increment === inc
-                    ? 'border-black bg-black text-white'
-                    : 'border-gray-200 bg-gray-50 text-gray-700 hover:border-gray-300'
-                }`}
-              >
-                +{inc.toLocaleString()}
-              </button>
-            ))}
+        <form onSubmit={handleQuickBid} className="space-y-3.5">
+          {/* Team Dropdown: Full width row to comfortably fit team name and remaining purse */}
+          <div>
+            <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
+              Select Bidding Franchise
+            </label>
+            <select
+              value={selectedTeamId || teams[0]?.team_id || ''}
+              onChange={(e) => setSelectedTeamId(e.target.value)}
+              disabled={!activeLot || isBidding}
+              className="w-full px-3.5 py-2 text-xs font-medium border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all truncate cursor-pointer"
+            >
+              {teams.map((team) => (
+                <option key={team.team_id} value={team.team_id}>
+                  {team.name} (Purse: {team.purse_remaining.toLocaleString()} pts)
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Submit Bid Button */}
-          <button
+          {/* Increment Pills: Full-width 3-column equal grid */}
+          <div>
+            <label className="block text-[11px] font-semibold text-muted-foreground mb-1.5 uppercase tracking-wider">
+              Bid Increment
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {[1000, 2500, 5000].map((inc) => (
+                <button
+                  key={inc}
+                  type="button"
+                  onClick={() => setIncrement(inc)}
+                  className={cn(
+                    'w-full py-2 text-xs font-mono font-bold rounded-xl border transition-all cursor-pointer text-center',
+                    increment === inc
+                      ? 'border-primary bg-primary text-primary-foreground shadow-xs'
+                      : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted hover:text-foreground'
+                  )}
+                >
+                  +{inc.toLocaleString()}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Submit Bid Button: Full width hero action, 100% contained */}
+          <Button
             type="submit"
             disabled={!activeLot || isBidding || status === 'paused' || status === 'finished'}
-            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer disabled:opacity-50 whitespace-nowrap"
+            className="w-full h-10 text-xs font-bold gap-2 shadow-xs cursor-pointer"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>{isBidding ? 'Placing...' : `Bid ${nextBidAmount.toLocaleString()} pts`}</span>
-          </button>
+            {isBidding ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Placing Bid...</span>
+              </>
+            ) : (
+              <>
+                <Plus className="w-4 h-4" />
+                <span>Place Bid of {nextBidAmount.toLocaleString()} pts</span>
+              </>
+            )}
+          </Button>
         </form>
       </div>
 
       {/* 3. Optional Reset Action */}
       {onReset && (
-        <div className="border-t border-gray-100 pt-3 flex justify-end">
+        <div className="border-t border-border pt-3 flex justify-end">
           <button
             type="button"
             onClick={onReset}
-            className="inline-flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-black transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
-            <RotateCcw className="w-3 h-3" />
+            <RotateCcw className="w-3.5 h-3.5" />
             <span>Reset Demo State</span>
           </button>
         </div>

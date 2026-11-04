@@ -1,0 +1,4 @@
+# Mock Development Data (offline / expo tunnel testing)
+src/mock/
+mock/
+*mock-data*

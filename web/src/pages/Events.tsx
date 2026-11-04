@@ -93,19 +93,19 @@ export const Events: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-gray-200">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-border">
         <div>
-          <h1 className="text-xl font-bold uppercase tracking-wider text-black">
+          <h1 className="text-xl font-bold uppercase tracking-wider text-foreground">
             Events & Tournaments
           </h1>
-          <p className="text-sm text-gray-600 mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Organize and track club leagues, esports brackets, and fitness activities.
           </p>
         </div>
         <button
           type="button"
           onClick={() => setIsCreateModalOpen(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors self-start sm:self-auto cursor-pointer"
+          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-orange-500 hover:bg-orange-600 text-white transition-colors self-start sm:self-auto cursor-pointer shadow-xs"
         >
           <Plus className="w-4 h-4" />
           Create Tournament
@@ -114,20 +114,20 @@ export const Events: React.FC = () => {
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[220px]">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             placeholder="Search tournament name or venue..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-border rounded-lg text-foreground bg-background focus:outline-none focus:ring-1 focus:ring-orange-500 transition-colors"
           />
         </div>
 
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+          className="px-3 py-2 text-sm border border-border rounded-lg text-foreground bg-background focus:outline-none focus:ring-1 focus:ring-orange-500 cursor-pointer"
         >
           <option value="all">All Categories</option>
           <option value="leagues">Leagues</option>
@@ -139,7 +139,7 @@ export const Events: React.FC = () => {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+          className="px-3 py-2 text-sm border border-border rounded-lg text-foreground bg-background focus:outline-none focus:ring-1 focus:ring-orange-500 cursor-pointer"
         >
           <option value="all">All Statuses</option>
           <option value="upcoming">Upcoming</option>
@@ -152,29 +152,29 @@ export const Events: React.FC = () => {
         <button
           type="button"
           onClick={handleReset}
-          className="px-4 py-2 text-sm border border-black text-black bg-white hover:bg-black hover:text-white rounded transition-colors cursor-pointer"
+          className="px-4 py-2 text-sm border border-border text-muted-foreground hover:text-foreground bg-muted/30 hover:bg-muted/50 rounded-lg transition-colors cursor-pointer"
         >
           Reset
         </button>
       </div>
 
       {!isLoading && error && (
-        <div className="p-4 border border-black text-black bg-white rounded flex items-center justify-between">
+        <div className="p-4 border border-rose-500/30 text-foreground bg-rose-500/5 rounded-xl flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm">
-            <AlertCircle className="w-4 h-4 text-black shrink-0" />
+            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
             <span>{error}</span>
           </div>
           <button
             type="button"
             onClick={handleRetry}
-            className="px-3 py-1 text-xs border border-black hover:bg-black hover:text-white transition-colors rounded cursor-pointer"
+            className="px-3 py-1 text-xs border border-border hover:border-foreground rounded-lg transition-colors cursor-pointer"
           >
             Retry
           </button>
         </div>
       )}
       {isLoading && (
-        <div className="p-8 text-center text-sm text-gray-500 border border-gray-200 rounded bg-gray-50">
+        <div className="p-8 text-center text-sm text-muted-foreground border border-border rounded-xl bg-card dark:bg-transparent">
           Loading events & tournaments...
         </div>
       )}

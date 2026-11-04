@@ -1,14 +1,9 @@
 import React, { useState, useEffect, useRef, useId, useMemo, forwardRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Eye, EyeOff, KeyRound, Loader2, Check, AlertCircle, Trophy, X, Shield, Sparkles } from "lucide-react";
-import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { cn } from "@/lib/utils";
 import type { UserRole } from "@/types/admin";
 import { DEFAULT_ASTRONAUT_IMAGE } from "@/assets/astronaut";
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
 
 export const useDarkMode = (): boolean => {
   const [isDark, setIsDark] = useState(() => {
@@ -981,14 +976,6 @@ export function SpaceLogin({
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
-  );
-}
-
-export function SpaceLoginDemo() {
-  return (
-    <div className="w-full min-h-screen bg-[#03060f]">
-      <SpaceLogin />
     </div>
   );
 }

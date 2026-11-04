@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
@@ -42,6 +43,7 @@ type Row = { kind: 'label'; text: string } | { kind: 'item'; item: Announcement 
 /** v2 Announcements (35:646) — broadcasts feed, newest first, four-month window. */
 export default function AnnouncementsScreen() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
 
   const [filter, setFilter] = useState<Filter>('all');
@@ -166,7 +168,10 @@ export default function AnnouncementsScreen() {
         data={state === 'loading' ? [] : rows}
         keyExtractor={(row, i) => (row.kind === 'item' ? row.item._id : `label-${i}`)}
         ListHeaderComponent={header}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: Math.max(110, insets.bottom + 90) },
+        ]}
         renderItem={({ item: row }) =>
           row.kind === 'label' ? (
             <Typography color="textMuted" style={styles.group}>

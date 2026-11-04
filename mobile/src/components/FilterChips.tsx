@@ -60,7 +60,7 @@ export function FilterChips<T extends string>({ options, value, onChange, style 
 }
 
 const styles = StyleSheet.create({
-  row: { gap: 8, paddingVertical: 2 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
-  label: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 12, lineHeight: 15 },
+  row: { gap: 6, paddingVertical: 1 },
+  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4.5 },
+  label: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11.5, lineHeight: 14 },
 });

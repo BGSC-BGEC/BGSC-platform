@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AppHeader } from '../../src/components/AppHeader';
 import { Button } from '../../src/components/Button';
@@ -16,13 +17,20 @@ const COMING: Array<{ icon: IconName; text: string }> = [
 /** v2 Social · coming soon (73:2502). The feed is post-MVP; this tab sets expectations. */
 export default function SocialScreen() {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   // ponytail: in-memory only — swap for a real waitlist call when the feed service exists.
   const [notify, setNotify] = useState(false);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <AppHeader title="Social" />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: Math.max(110, insets.bottom + 90) },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Ghost of a feed post */}
         <View
           style={[styles.ghost, { backgroundColor: colors.surface, borderColor: colors.border }]}

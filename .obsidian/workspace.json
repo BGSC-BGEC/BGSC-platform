@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/ONBOARDING.md",
-                "mode": "source",
+                "file": "docs/STUDENT_HOSTING_SETUP.md",
+                "mode": "preview",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "ONBOARDING"
+              "title": "STUDENT_HOSTING_SETUP"
             }
           }
         ]
@@ -189,5 +189,22 @@
     }
   },
   "active": "b9856369ecd0c5a7",
-  "lastOpenFiles": []
+  "lastOpenFiles": [
+    "docs/PUBLIC_LAUNCH_CHECKLIST.md",
+    "docs/mobile-v2-build-split.md",
+    "docs/local-dev-guide.md",
+    "docs/handoff-to-be1.md",
+    "docs/frontend-api-and-design-registry.md",
+    "docs/fe-mobile-1-commit-audit.md",
+    "mobile/assets/illustrations/trophy-watermark.svg",
+    "mobile/assets/illustrations/megaphone-watermark.svg",
+    "mobile/assets/illustrations/connection-dots.svg",
+    "mobile/assets/illustrations/challenge-target-watermark.svg",
+    "mobile/assets/icons/v2/menu.svg",
+    "mobile/assets/icons/v2/home.svg",
+    "mobile/FE1_CHECKLIST.md",
+    "mobile/NEUMORPHISM_GUIDE.md",
+    "mobile/NEW_DESIGN_SYSTEM.md",
+    "mobile/IMPLEMENTATION_STATUS.md"
+  ]
 }

@@ -58,14 +58,14 @@ export const Tournaments: React.FC = () => {
   // Load bracket whenever selected event changes
   useEffect(() => {
     let ignore = false
-    if (!selectedEventId) return
+    setIsLoading(true)
+    setError(null)
 
     bracketService
       .getBracket(selectedEventId)
       .then((b) => {
         if (!ignore) {
           setBracket(b)
-          setError(null)
           setIsLoading(false)
         }
       })
@@ -83,15 +83,12 @@ export const Tournaments: React.FC = () => {
     }
   }, [selectedEventId])
 
-  const selectedEvent = useMemo(
-    () => events.find((e) => e.id === selectedEventId),
-    [events, selectedEventId]
-  )
+  const selectedEvent = useMemo(() => {
+    return events.find((e) => e.id === selectedEventId) || null
+  }, [events, selectedEventId])
 
-  const handleEventChange = (eventId: string) => {
-    setIsLoading(true)
-    setError(null)
-    setSelectedEventId(eventId)
+  const handleEventChange = (newId: string) => {
+    setSelectedEventId(newId)
   }
 
   const handleSelectMatch = (match: Match) => {
@@ -100,23 +97,21 @@ export const Tournaments: React.FC = () => {
   }
 
   const handleMatchUpdated = (updatedMatch: Match) => {
-    setBracket((prev) => {
-      if (!prev) return null
-      return {
-        ...prev,
-        matches: prev.matches.map((m) =>
-          m.id === updatedMatch.id ? updatedMatch : m
-        ),
-      }
+    if (!bracket) return
+
+    setBracket({
+      ...bracket,
+      matches: bracket.matches.map((m) =>
+        m.id === updatedMatch.id ? updatedMatch : m
+      ),
     })
-    // Re-fetch bracket to reflect score updates and auto-advanced winners
-    bracketService.getBracket(selectedEventId).then((b) => {
-      if (b) setBracket(b)
-    })
+    setIsScoreModalOpen(false)
+    setSelectedMatch(null)
   }
 
   const handleBracketGenerated = (newBracket: Bracket) => {
     setBracket(newBracket)
+    setIsGenerateModalOpen(false)
   }
 
   const handleResetBracket = async () => {
@@ -154,28 +149,28 @@ export const Tournaments: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-gray-200">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-border">
         <div>
-          <h1 className="text-xl font-bold uppercase tracking-wider text-black">
+          <h1 className="text-xl font-bold uppercase tracking-wider text-foreground">
             Tournament Brackets & Fixtures
           </h1>
-          <p className="text-sm text-gray-600 mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Generate elimination draws, track live fixtures, and record official scores.
           </p>
         </div>
       </div>
 
       {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-white p-3 border border-gray-200 rounded-lg">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-card border border-border rounded-xl p-3.5 dark:bg-transparent">
         {/* Event Selector */}
         <div className="flex items-center gap-3">
-          <label className="text-xs font-bold uppercase tracking-wider text-black whitespace-nowrap">
+          <label className="text-xs font-mono font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">
             Tournament:
           </label>
           <select
             value={selectedEventId}
             onChange={(e) => handleEventChange(e.target.value)}
-            className="px-3 py-1.5 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black max-w-xs sm:max-w-md truncate"
+            className="px-3 py-1.5 text-sm border border-border rounded-lg text-foreground bg-background focus:outline-none focus:ring-1 focus:ring-orange-500 max-w-xs sm:max-w-md truncate cursor-pointer"
           >
             {events.map((ev) => (
               <option key={ev.id} value={ev.id}>
@@ -190,15 +185,15 @@ export const Tournaments: React.FC = () => {
           {bracket ? (
             <>
               {/* View Switcher */}
-              <div className="flex items-center border border-gray-300 rounded overflow-hidden">
+              <div className="flex items-center border border-border rounded-lg overflow-hidden bg-muted/30">
                 <button
                   type="button"
                   onClick={() => setViewMode('bracket')}
                   title="Bracket Tree View"
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold cursor-pointer transition-colors ${
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
                     viewMode === 'bracket'
-                      ? 'bg-black text-white'
-                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                      ? 'bg-orange-500 text-white font-semibold'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                   }`}
                 >
                   <GitBranch className="w-3.5 h-3.5" />
@@ -208,10 +203,10 @@ export const Tournaments: React.FC = () => {
                   type="button"
                   onClick={() => setViewMode('table')}
                   title="Matches List View"
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold cursor-pointer transition-colors ${
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium cursor-pointer transition-colors ${
                     viewMode === 'table'
-                      ? 'bg-black text-white'
-                      : 'bg-white text-gray-700 hover:bg-gray-100'
+                      ? 'bg-orange-500 text-white font-semibold'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                   }`}
                 >
                   <List className="w-3.5 h-3.5" />
@@ -223,7 +218,7 @@ export const Tournaments: React.FC = () => {
               <button
                 type="button"
                 onClick={handleResetBracket}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold border border-gray-300 text-red-600 hover:border-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border text-rose-500 hover:border-rose-500/40 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Reset Draw</span>
@@ -233,7 +228,7 @@ export const Tournaments: React.FC = () => {
             <button
               type="button"
               onClick={() => setIsGenerateModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-orange-500 hover:bg-orange-600 text-white transition-colors cursor-pointer shadow-xs"
             >
               <Plus className="w-4 h-4" />
               Generate Bracket
@@ -244,21 +239,21 @@ export const Tournaments: React.FC = () => {
 
       {/* Main Content Area */}
       {isLoading && (
-        <div className="p-12 text-center text-sm text-gray-500 border border-gray-200 rounded bg-gray-50">
+        <div className="p-12 text-center text-sm text-muted-foreground border border-border rounded-xl bg-card dark:bg-transparent">
           Loading tournament bracket fixtures...
         </div>
       )}
 
       {!isLoading && error && (
-        <div className="p-4 border border-black text-black bg-white rounded flex items-center justify-between">
+        <div className="p-4 border border-rose-500/30 text-foreground bg-rose-500/5 rounded-xl flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-red-600" />
+            <AlertCircle className="w-4 h-4 text-rose-500" />
             <span className="text-sm">{error}</span>
           </div>
           <button
             type="button"
             onClick={handleRetry}
-            className="px-3 py-1 text-xs border border-black hover:bg-black hover:text-white transition-colors cursor-pointer"
+            className="px-3 py-1 text-xs border border-border hover:border-foreground rounded-lg transition-colors cursor-pointer"
           >
             Retry
           </button>
@@ -266,19 +261,19 @@ export const Tournaments: React.FC = () => {
       )}
 
       {!isLoading && !error && !bracket && (
-        <div className="p-12 text-center border border-gray-200 rounded-lg bg-white space-y-3">
-          <Trophy className="w-10 h-10 text-gray-400 mx-auto" />
-          <h3 className="text-base font-bold text-black">
+        <div className="p-12 text-center border border-dashed border-border rounded-xl bg-card dark:bg-transparent space-y-3">
+          <Trophy className="w-10 h-10 text-muted-foreground/60 mx-auto" />
+          <h3 className="text-base font-semibold text-foreground">
             No bracket generated yet for this tournament
           </h3>
-          <p className="text-sm text-gray-500 max-w-md mx-auto">
+          <p className="text-sm text-muted-foreground max-w-md mx-auto">
             Generate the official draw to establish fixtures, assign participant seeds, schedule match times, and record live scores.
           </p>
           <div className="pt-2">
             <button
               type="button"
               onClick={() => setIsGenerateModalOpen(true)}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer"
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-orange-500 hover:bg-orange-600 text-white transition-colors cursor-pointer shadow-xs"
             >
               <Plus className="w-4 h-4" />
               Generate Bracket
@@ -290,101 +285,103 @@ export const Tournaments: React.FC = () => {
       {!isLoading && !error && bracket && (
         <div>
           {viewMode === 'bracket' ? (
-            <div className="bg-white rounded-lg border border-gray-200 p-2">
+            <div className="bg-card rounded-xl border border-border p-3 dark:bg-transparent overflow-x-auto">
               <BracketTree
                 bracket={bracket}
                 onSelectMatch={handleSelectMatch}
               />
             </div>
           ) : (
-            <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200 text-[10px] font-bold uppercase tracking-wider text-black">
-                  <tr>
-                    <th className="px-4 py-3">Round / Slot</th>
-                    <th className="px-4 py-3">Side A</th>
-                    <th className="px-4 py-3 text-center">Score</th>
-                    <th className="px-4 py-3">Side B</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Venue / Schedule</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {bracket.matches.map((m) => {
-                    const isWinnerA = m.winner === 'a'
-                    const isWinnerB = m.winner === 'b'
-                    return (
-                      <tr
-                        key={m.id}
-                        onClick={() => handleSelectMatch(m)}
-                        className="hover:bg-gray-50 cursor-pointer transition-colors"
-                      >
-                        <td className="px-4 py-3 font-semibold text-xs text-black">
-                          Round {m.round} • #{m.slot}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`text-xs ${
-                              isWinnerA ? 'font-bold text-black' : 'text-gray-700'
-                            }`}
-                          >
-                            {m.a ? `#${m.a.seed} ${m.a.displayName}` : 'TBD'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-center font-mono text-xs font-semibold">
-                          {m.scoreA !== null && m.scoreA !== undefined
-                            ? m.scoreA
-                            : '-'}{' '}
-                          :{' '}
-                          {m.scoreB !== null && m.scoreB !== undefined
-                            ? m.scoreB
-                            : '-'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`text-xs ${
-                              isWinnerB ? 'font-bold text-black' : 'text-gray-700'
-                            }`}
-                          >
-                            {m.b ? `#${m.b.seed} ${m.b.displayName}` : 'TBD'}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded border ${
-                              m.status === 'completed'
-                                ? 'bg-green-50 text-green-700 border-green-200'
-                                : m.status === 'ongoing'
-                                ? 'bg-black text-white border-black'
-                                : m.status === 'cancelled'
-                                ? 'bg-red-50 text-red-600 border-red-200'
-                                : 'bg-white text-gray-700 border-gray-200'
-                            }`}
-                          >
-                            {m.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-gray-500">
-                          {m.venue || '-'}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleSelectMatch(m)
-                            }}
-                            className="px-2.5 py-1 text-xs border border-black bg-white hover:bg-black hover:text-white rounded transition-colors cursor-pointer"
-                          >
-                            Edit
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+            <div className="bg-card rounded-xl border border-border overflow-hidden dark:bg-transparent">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-muted/20 border-b border-border text-[10px] font-mono font-semibold uppercase tracking-wider text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-3">Round / Slot</th>
+                      <th className="px-4 py-3">Side A</th>
+                      <th className="px-4 py-3 text-center">Score</th>
+                      <th className="px-4 py-3">Side B</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Venue / Schedule</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/60">
+                    {bracket.matches.map((m) => {
+                      const isWinnerA = m.winner === 'a'
+                      const isWinnerB = m.winner === 'b'
+                      return (
+                        <tr
+                          key={m.id}
+                          onClick={() => handleSelectMatch(m)}
+                          className="hover:bg-muted/30 cursor-pointer transition-colors"
+                        >
+                          <td className="px-4 py-3 font-medium text-xs text-foreground font-mono">
+                            Round {m.round} • #{m.slot}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`text-xs ${
+                                isWinnerA ? 'font-bold text-foreground' : 'text-muted-foreground'
+                              }`}
+                            >
+                              {m.a ? `#${m.a.seed} ${m.a.displayName}` : 'TBD'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center font-mono text-xs font-semibold tabular-nums text-foreground">
+                            {m.scoreA !== null && m.scoreA !== undefined
+                              ? m.scoreA
+                              : '-'}{' '}
+                            :{' '}
+                            {m.scoreB !== null && m.scoreB !== undefined
+                              ? m.scoreB
+                              : '-'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`text-xs ${
+                                isWinnerB ? 'font-bold text-foreground' : 'text-muted-foreground'
+                              }`}
+                            >
+                              {m.b ? `#${m.b.seed} ${m.b.displayName}` : 'TBD'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`text-[10px] font-mono font-medium uppercase tracking-wider px-2 py-0.5 rounded border ${
+                                m.status === 'completed'
+                                  ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/25'
+                                  : m.status === 'ongoing'
+                                  ? 'bg-orange-500/10 text-orange-500 border-orange-500/25'
+                                  : m.status === 'cancelled'
+                                  ? 'bg-rose-500/10 text-rose-500 border-rose-500/25'
+                                  : 'bg-muted/20 text-muted-foreground border-border'
+                              }`}
+                            >
+                              {m.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">
+                            {m.venue || '-'}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleSelectMatch(m)
+                              }}
+                              className="px-2.5 py-1 text-xs border border-border text-muted-foreground hover:text-foreground hover:border-foreground/40 rounded transition-colors cursor-pointer"
+                            >
+                              Edit
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

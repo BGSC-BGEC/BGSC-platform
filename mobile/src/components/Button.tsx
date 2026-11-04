@@ -4,6 +4,7 @@ import {
   Platform,
   Pressable,
   StyleSheet,
+  View,
   type ViewStyle,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -126,7 +127,6 @@ export function Button({
   let borderTopColor = 'transparent';
   let textColor: string = colors.text;
   let shadowStyle: object = {};
-  let webExtraStyle: object = {};
 
   switch (variant) {
     case 'primary':
@@ -141,12 +141,6 @@ export function Button({
         shadowRadius: 10,
         elevation: 6,
       };
-      if (Platform.OS === 'web') {
-        webExtraStyle = {
-          backgroundImage: 'linear-gradient(135deg, #fb923c 0%, #ea580c 60%, #c2410c 100%)',
-          boxShadow: '0 4px 18px -2px rgba(234, 88, 12, 0.45), inset 0 1px 1.5px rgba(255, 255, 255, 0.55), inset 0 -2px 5px rgba(194, 65, 12, 0.35)',
-        };
-      }
       break;
 
     case 'secondary':
@@ -154,13 +148,6 @@ export function Button({
       borderColor = withAlpha(colors.border, 0.8);
       borderTopColor = withAlpha('#FFFFFF', 0.22);
       textColor = colors.text;
-      if (Platform.OS === 'web') {
-        webExtraStyle = {
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          boxShadow: '0 2px 10px rgba(0, 0, 0, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.18)',
-        };
-      }
       break;
 
     case 'glass':
@@ -169,13 +156,6 @@ export function Button({
       borderTopColor = withAlpha('#FFFFFF', 0.35);
       textColor = colors.text;
       shadowStyle = shadow('flat');
-      if (Platform.OS === 'web') {
-        webExtraStyle = {
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
-          boxShadow: '0 4px 16px -2px rgba(0, 0, 0, 0.2), inset 0 1px 1.5px rgba(255, 255, 255, 0.28)',
-        };
-      }
       break;
 
     case 'outline':
@@ -184,13 +164,6 @@ export function Button({
       borderTopColor = withAlpha('#FFFFFF', 0.3);
       textColor = colors.text;
       shadowStyle = shadow('flat');
-      if (Platform.OS === 'web') {
-        webExtraStyle = {
-          backdropFilter: 'blur(12px)',
-          WebkitBackdropFilter: 'blur(12px)',
-          boxShadow: '0 2px 10px rgba(0, 0, 0, 0.15), inset 0 1px 1px rgba(255, 255, 255, 0.22)',
-        };
-      }
       break;
 
     case 'ghost':
@@ -245,16 +218,19 @@ export function Button({
             opacity: isDisabled ? 0.5 : 1,
           },
           shadowStyle,
-          webExtraStyle as any,
           style,
         ]}
       >
-        {variant === 'glass' && !isDisabled && Platform.OS !== 'web' && (
+        {variant === 'glass' && !isDisabled && (
           <BlurView
             intensity={35}
             tint={isDark ? 'dark' : 'light'}
             style={StyleSheet.absoluteFill}
           />
+        )}
+
+        {variant === 'primary' && !isDisabled && (
+          <View pointerEvents="none" style={styles.primaryMeniscus} />
         )}
 
         {loading ? (
@@ -330,5 +306,14 @@ const styles = StyleSheet.create({
   },
   label: {
     fontWeight: '700',
+  },
+  primaryMeniscus: {
+    position: 'absolute',
+    top: 1,
+    left: 12,
+    right: 12,
+    height: 1,
+    borderRadius: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.35)',
   },
 });

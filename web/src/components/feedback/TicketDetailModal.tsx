@@ -20,6 +20,7 @@ import type {
   FeedbackStatus,
   FeedbackTicket,
 } from '../../types/feedback'
+import { Modal } from '../ui/modal'
 
 export interface TicketDetailModalProps {
   ticket: FeedbackTicket | null
@@ -69,26 +70,26 @@ function renderCategoryPill(category: FeedbackCategory) {
   switch (category) {
     case 'bug':
       return (
-        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-red-200 bg-red-50 text-red-700">
+        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-rose-500/30 bg-rose-500/10 text-rose-400">
           Bug Report
         </span>
       )
     case 'feature':
       return (
-        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-blue-200 bg-blue-50 text-blue-700">
+        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-sky-500/30 bg-sky-500/10 text-sky-400">
           Feature Suggestion
         </span>
       )
     case 'complaint':
       return (
-        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700">
+        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-400">
           Grievance
         </span>
       )
     case 'general':
     default:
       return (
-        <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-100 text-gray-700">
+        <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md border border-border bg-muted/60 text-muted-foreground">
           General Inquiry
         </span>
       )
@@ -161,22 +162,19 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
   }
 
   return (
-    <div
-      className="bg-white rounded-lg shadow-xl border border-gray-200 w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]"
-      onClick={(e) => e.stopPropagation()}
-    >
+    <>
       {/* 1. Modal Header */}
-      <div className="p-4 sm:p-5 border-b border-gray-200 flex items-center justify-between gap-3 bg-gray-50/50">
+      <div className="p-4 sm:p-5 border-b border-border flex items-center justify-between gap-3 bg-muted/40">
         <div className="flex flex-wrap items-center gap-2.5">
-          <span className="font-mono text-sm font-bold text-black px-2 py-0.5 rounded bg-gray-100 border border-gray-300">
+          <span className="font-mono text-xs font-bold text-foreground px-2.5 py-0.5 rounded-md bg-muted border border-border">
             {ticket.ticket_no}
           </span>
           {renderCategoryPill(ticket.category)}
           <span
-            className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded border ${
+            className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded-md border ${
               ticket.kind === 'contact'
-                ? 'border-blue-200 bg-blue-50 text-blue-700'
-                : 'border-gray-200 bg-gray-100 text-gray-700'
+                ? 'border-sky-500/30 bg-sky-500/10 text-sky-400'
+                : 'border-border bg-muted/60 text-muted-foreground'
             }`}
           >
             {ticket.kind}
@@ -186,7 +184,7 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
         <button
           type="button"
           onClick={onClose}
-          className="p-1 rounded text-gray-400 hover:text-black hover:bg-gray-100 transition-colors cursor-pointer"
+          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -198,14 +196,14 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
         <div className="lg:col-span-7 space-y-5">
           {/* Subject & Tournament Context */}
           <div className="space-y-1.5">
-            <h2 className="text-lg font-black text-black leading-snug">
+            <h2 className="text-lg font-black text-foreground leading-snug">
               {ticket.subject}
             </h2>
-            <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+            <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
               <span>Submitted {formatDate(ticket.created_at)}</span>
               {ticket.event_title && (
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-700 bg-gray-100 border border-gray-200 px-2 py-0.5 rounded">
-                  <Trophy className="w-3 h-3 text-gray-500" />
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-foreground bg-muted border border-border px-2 py-0.5 rounded-md">
+                  <Trophy className="w-3 h-3 text-primary" />
                   {ticket.event_title}
                 </span>
               )}
@@ -214,10 +212,10 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
 
           {/* Description Block */}
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-black">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-foreground">
               Detailed Description
             </label>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3.5 text-xs text-gray-800 whitespace-pre-wrap leading-relaxed">
+            <div className="bg-muted/40 border border-border rounded-xl p-3.5 text-xs text-foreground whitespace-pre-wrap leading-relaxed">
               {ticket.description}
             </div>
           </div>
@@ -225,7 +223,7 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
           {/* Attachments / Evidence */}
           {ticket.attachments && ticket.attachments.length > 0 && (
             <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-black">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-foreground">
                 Attached Media & Evidence ({ticket.attachments.length})
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -235,9 +233,9 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
                     href={url}
                     target="_blank"
                     rel="noreferrer"
-                    className="group block border border-gray-200 rounded-lg overflow-hidden bg-gray-50 hover:border-gray-400 transition-all"
+                    className="group block border border-border rounded-xl overflow-hidden bg-muted/40 hover:border-primary/40 transition-all"
                   >
-                    <div className="h-28 overflow-hidden bg-gray-100 flex items-center justify-center">
+                    <div className="h-28 overflow-hidden bg-muted flex items-center justify-center">
                       <img
                         src={url}
                         alt={`Attachment ${idx + 1}`}
@@ -247,9 +245,9 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
                         }}
                       />
                     </div>
-                    <div className="p-2 flex items-center justify-between text-[11px] text-gray-600">
+                    <div className="p-2 flex items-center justify-between text-[11px] text-muted-foreground">
                       <span className="truncate">Evidence file #{idx + 1}</span>
-                      <ExternalLink className="w-3.5 h-3.5 text-gray-400 group-hover:text-black flex-shrink-0" />
+                      <ExternalLink className="w-3.5 h-3.5 text-muted-foreground group-hover:text-foreground flex-shrink-0" />
                     </div>
                   </a>
                 ))}
@@ -258,49 +256,49 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
           )}
 
           {/* Reporter Information Card */}
-          <div className="border border-gray-200 rounded-lg p-3.5 bg-gray-50/50 space-y-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-black block">
+          <div className="border border-border rounded-xl p-3.5 bg-muted/30 space-y-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-foreground block">
               Reporter Identity & Privacy
             </span>
             {ticket.is_anonymous ? (
               <div className="space-y-1">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-gray-800">
-                  <EyeOff className="w-4 h-4 text-gray-500" />
+                <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                  <EyeOff className="w-4 h-4 text-muted-foreground" />
                   <span>Anonymous Grievance Filing</span>
                 </div>
-                <p className="text-[11px] text-gray-500">
+                <p className="text-[11px] text-muted-foreground">
                   The reporter requested complete anonymity. Contact email:{' '}
-                  <strong className="font-mono text-gray-700">
+                  <strong className="font-mono text-foreground">
                     {ticket.contact_email || 'Not provided'}
                   </strong>
                 </p>
               </div>
             ) : ticket.reporter ? (
               <div className="space-y-1">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-black">
-                  <UserCheck className="w-4 h-4 text-black" />
+                <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                  <UserCheck className="w-4 h-4 text-primary" />
                   <span>{ticket.reporter.display_name}</span>
-                  <span className="text-[11px] text-gray-500 font-mono font-normal">
+                  <span className="text-[11px] text-muted-foreground font-mono font-normal">
                     @{ticket.reporter.username}
                   </span>
                 </div>
-                <p className="text-[11px] text-gray-500">
+                <p className="text-[11px] text-muted-foreground">
                   Verified campus student &bull; User ID: {ticket.reporter.user_id}{' '}
                   &bull; Email:{' '}
-                  <span className="font-mono text-gray-700">
+                  <span className="font-mono text-foreground">
                     {ticket.contact_email || ticket.reporter.email}
                   </span>
                 </p>
               </div>
             ) : (
               <div className="space-y-1">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-black">
-                  <User className="w-4 h-4 text-gray-600" />
+                <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                  <User className="w-4 h-4 text-muted-foreground" />
                   <span>Public Contact Inquiry</span>
                 </div>
-                <p className="text-[11px] text-gray-500">
+                <p className="text-[11px] text-muted-foreground">
                   Email:{' '}
-                  <span className="font-mono text-gray-700">
+                  <span className="font-mono text-foreground">
                     {ticket.contact_email || 'Not provided'}
                   </span>
                 </p>
@@ -310,20 +308,20 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
 
           {/* Official Resolution Highlight */}
           {ticket.response && (
-            <div className="border border-green-200 bg-green-50/70 rounded-lg p-3.5 space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-bold text-green-900">
+            <div className="border border-emerald-500/30 bg-emerald-500/10 rounded-xl p-3.5 space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-bold text-emerald-400">
                 <span className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-green-700" />
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                   Official Resolution
                 </span>
-                <span className="text-[10px] text-green-800 font-normal">
+                <span className="text-[10px] text-muted-foreground font-normal">
                   {formatDate(ticket.response.at)}
                 </span>
               </div>
-              <p className="text-xs text-green-950 whitespace-pre-wrap leading-relaxed">
+              <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
                 {ticket.response.body}
               </p>
-              <div className="text-[10px] text-green-800 pt-1 border-t border-green-200/60">
+              <div className="text-[10px] text-muted-foreground pt-1 border-t border-emerald-500/20">
                 Answered by: {ticket.response.by_user_name || 'Admin Desk'}
               </div>
             </div>
@@ -334,24 +332,24 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
         <div className="lg:col-span-5 space-y-5">
           <form
             onSubmit={handleSaveChanges}
-            className="border border-gray-200 rounded-lg p-4 bg-white space-y-4 shadow-xs"
+            className="border border-border rounded-xl p-4 bg-card space-y-4 shadow-xs"
           >
-            <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-black flex items-center gap-1.5">
-                <Shield className="w-4 h-4 text-black" />
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                <Shield className="w-4 h-4 text-primary" />
                 Staff Triage & Actions
               </span>
             </div>
 
             {error && (
-              <div className="p-2.5 rounded bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
+              <div className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/30 text-xs text-destructive flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
                 <span>{error}</span>
               </div>
             )}
 
             {successMsg && (
-              <div className="p-2.5 rounded bg-green-50 border border-green-200 text-xs text-green-700 flex items-center gap-2">
+              <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-400 flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
                 <span>{successMsg}</span>
               </div>
@@ -359,7 +357,7 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
 
             {/* Severity Level Selector */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                 Severity Level
               </label>
               <select
@@ -368,7 +366,7 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
                   setSelectedSeverity(e.target.value as FeedbackSeverity)
                 }
                 disabled={isSubmitting}
-                className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+                className="w-full px-3 py-2 text-xs border border-border rounded-lg text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
               >
                 <option value="low">Low (Standard request / cosmetic)</option>
                 <option value="medium">Medium (Normal bug / proposal)</option>
@@ -379,7 +377,7 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
 
             {/* Status Progression Selector */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                 Ticket Status
               </label>
               <select
@@ -388,7 +386,7 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
                   setSelectedStatus(e.target.value as FeedbackStatus)
                 }
                 disabled={isSubmitting}
-                className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+                className="w-full px-3 py-2 text-xs border border-border rounded-lg text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
               >
                 <option value="submitted">Submitted (In Queue)</option>
                 <option value="under_review">Under Review (Investigating)</option>
@@ -399,7 +397,7 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
 
             {/* Official Reply Composer */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                 Official Reply to Reporter
               </label>
               <textarea
@@ -408,9 +406,9 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
                 disabled={isSubmitting}
                 rows={3}
                 placeholder="Write resolution notes, explanation, or requests for more information..."
-                className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black placeholder-gray-400 focus:outline-none focus:border-black resize-none"
+                className="w-full px-3 py-2 text-xs border border-border rounded-lg text-foreground bg-card placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none transition-all"
               />
-              <p className="text-[10px] text-gray-400">
+              <p className="text-[10px] text-muted-foreground">
                 This response will be recorded in the audit trail and emailed to the reporter.
               </p>
             </div>
@@ -419,7 +417,7 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded text-xs font-bold bg-black text-white hover:bg-gray-800 transition-colors disabled:opacity-50 cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer shadow-sm"
             >
               {isSubmitting ? (
                 <>
@@ -436,38 +434,38 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
           </form>
 
           {/* Audit History Timeline */}
-          <div className="border border-gray-200 rounded-lg p-4 bg-gray-50/50 space-y-3">
-            <div className="flex items-center justify-between border-b border-gray-200 pb-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-black flex items-center gap-1.5">
-                <Clock className="w-3.5 h-3.5 text-gray-600" />
+          <div className="border border-border rounded-xl p-4 bg-muted/20 space-y-3">
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-muted-foreground" />
                 Audit & Status History
               </span>
-              <span className="text-[10px] text-gray-500 font-mono">
+              <span className="text-[10px] text-muted-foreground font-mono">
                 {ticket.status_history.length} transition(s)
               </span>
             </div>
 
             {ticket.status_history.length === 0 ? (
-              <p className="text-xs text-gray-400 py-2">
+              <p className="text-xs text-muted-foreground py-2">
                 No status changes recorded yet.
               </p>
             ) : (
-              <div className="space-y-3 relative pl-4 before:content-[''] before:absolute before:left-1.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-gray-200">
+              <div className="space-y-3 relative pl-4 before:content-[''] before:absolute before:left-1.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-border">
                 {ticket.status_history.map((hist, idx) => (
                   <div key={idx} className="relative text-xs space-y-1">
-                    <span className="absolute -left-4 top-1.5 w-2 h-2 rounded-full bg-black" />
-                    <div className="flex items-center gap-1.5 font-semibold text-black text-[11px]">
+                    <span className="absolute -left-4 top-1.5 w-2 h-2 rounded-full bg-primary" />
+                    <div className="flex items-center gap-1.5 font-semibold text-foreground text-[11px]">
                       <span className="uppercase">{hist.from_status}</span>
-                      <ArrowRight className="w-3 h-3 text-gray-400" />
-                      <span className="uppercase text-black underline">
+                      <ArrowRight className="w-3 h-3 text-muted-foreground" />
+                      <span className="uppercase text-primary underline">
                         {hist.to_status}
                       </span>
                     </div>
-                    <div className="text-[10px] text-gray-500">
+                    <div className="text-[10px] text-muted-foreground">
                       by {hist.by_user_name || 'Admin'} &bull; {formatDate(hist.at)}
                     </div>
                     {hist.note && (
-                      <p className="text-[11px] text-gray-700 bg-white p-2 rounded border border-gray-200 leading-normal">
+                      <p className="text-[11px] text-foreground bg-card p-2 rounded-lg border border-border leading-normal">
                         {hist.note}
                       </p>
                     )}
@@ -478,7 +476,7 @@ const TicketDetailModalContent: React.FC<TicketDetailModalContentProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -489,13 +487,10 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
   onUpdateStatus,
   onUpdateSeverity,
 }) => {
-  if (!isOpen || !ticket) return null
+  if (!ticket) return null
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150"
-      onClick={onClose}
-    >
+    <Modal isOpen={isOpen} onClose={onClose} className="max-w-4xl max-h-[92vh]">
       <TicketDetailModalContent
         key={ticket.id}
         ticket={ticket}
@@ -503,7 +498,7 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
         onUpdateStatus={onUpdateStatus}
         onUpdateSeverity={onUpdateSeverity}
       />
-    </div>
+    </Modal>
   )
 }
 

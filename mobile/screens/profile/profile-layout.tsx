@@ -16,7 +16,7 @@ export function ProfileLayout({ title, children, refreshing = false, onRefresh }
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.content,
-          { padding: gutter, paddingBottom: Math.max(insets.bottom + 24, 40), gap: isCompactPhone ? 16 : 20 },
+          { padding: gutter, paddingBottom: Math.max(insets.bottom + 90, 110), gap: isCompactPhone ? 16 : 20 },
         ]}
         refreshControl={onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} /> : undefined}
       >

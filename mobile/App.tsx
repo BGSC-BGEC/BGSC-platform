@@ -22,12 +22,21 @@ if (Platform.OS === 'web' && typeof document !== 'undefined') {
 function AccountAppearance() {
   const { user } = useAuth();
   const { setMode, isDark } = useTheme();
+
   useEffect(() => {
     let active = true;
     if (user) usersRepository.me().then(profile => { if (active) setMode(profile.settings.theme); }).catch(() => undefined);
     else setMode('dark');
     return () => { active = false; };
   }, [user?.id, setMode]);
+
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      (StatusBar as any).setTranslucent?.(true);
+      (StatusBar as any).setBackgroundColor?.('transparent', true);
+    }
+  }, []);
+
   return <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />;
 }
 

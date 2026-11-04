@@ -27,11 +27,6 @@ export function SegmentedTabs<T extends string>({ tabs, value, onChange, style }
           backgroundColor: withAlpha(colors.surfaceMuted, 0.72),
           borderColor: withAlpha('#FFFFFF', 0.16),
         },
-        Platform.OS === 'web' && ({
-          backdropFilter: 'blur(14px)',
-          WebkitBackdropFilter: 'blur(14px)',
-          boxShadow: 'inset 0 1px 1.5px rgba(255, 255, 255, 0.12)',
-        } as any),
         style,
       ]}
     >
@@ -55,18 +50,16 @@ export function SegmentedTabs<T extends string>({ tabs, value, onChange, style }
                   borderColor: withAlpha('#FFFFFF', 0.25),
                   borderWidth: 1,
                 },
-                Platform.OS === 'web' && ({
-                  boxShadow: '0 3px 12px rgba(0, 0, 0, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.3)',
-                } as any),
                 shadow('flat'),
               ],
             ]}
           >
             <Typography
-              variant="button"
+              variant="caption"
               color={active ? 'accent' : 'textMuted'}
               align="center"
               numberOfLines={1}
+              style={{ fontWeight: '700', fontSize: 12.5 }}
             >
               {tab.label}
             </Typography>
@@ -82,6 +75,6 @@ export const SegmentedControl = SegmentedTabs;
 export type SegmentedControlProps<T extends string> = SegmentedTabsProps<T>;
 
 const styles = StyleSheet.create({
-  container: { flexDirection: 'row', borderRadius: 24, borderWidth: 1, padding: 4 },
-  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingHorizontal: 4, paddingVertical: 10, borderRadius: 20 },
+  container: { flexDirection: 'row', borderRadius: 13, borderWidth: 1, padding: 3 },
+  tab: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 33, paddingHorizontal: 4, paddingVertical: 5, borderRadius: 9 },
 });

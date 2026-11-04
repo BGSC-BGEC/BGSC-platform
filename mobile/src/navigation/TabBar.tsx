@@ -1,14 +1,22 @@
-import React from 'react';
-import { Pressable, StyleSheet, View, Platform } from 'react-native';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import {
+  Animated,
+  LayoutChangeEvent,
+  Platform,
+  Pressable,
+  StyleSheet,
+  View,
+} from 'react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import * as Haptics from 'expo-haptics';
 
-import { LiquidNavbar, NimbusIcons, type LiquidNavItem } from './LiquidNavbar';
 import { Icon, type IconName } from '../icons/Icon';
 import { Typography } from '../typography/Typography';
 import { useTheme } from '../theme/ThemeProvider';
-import { withAlpha } from '../theme/colors';
 import { FONT_FAMILIES } from '../theme/typography';
+import { withAlpha } from '../theme/colors';
 
 export const TAB_ICONS: Record<string, IconName> = {
   HomeTab: 'home',
@@ -18,119 +26,184 @@ export const TAB_ICONS: Record<string, IconName> = {
   SocialTab: 'users',
 };
 
+const SQUIRCLE_WIDTH = 68;
+
 /**
- * Waterline Liquid TabBar:
- * On Web: Full WebGL shader, fluid droplet splitting/merging, SVG refraction filter,
- * cursor meniscus, caustics, and synthesized water sound effects.
- * On Native: High-performance floating frosted pill with smooth active indicator.
+ * Mobile Bottom TabBar:
+ * Floating frosted pill capsule with sliding liquid-glass squircle indicator.
+ * Matches Image 2 layout with the refined curved square (squircle) glass aesthetic.
+ * 100% native on iOS and Android.
  */
 export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
-  const { colors, shadow, isDark } = useTheme();
+  const { isDark } = useTheme();
   const insets = useSafeAreaInsets();
-  const orangeAccent = colors.primary || '#f97316';
 
-  // 1. Web Implementation: Full Liquid Crystal Navbar with WebGL shader & physics
-  if (Platform.OS === 'web') {
-    const navItems: LiquidNavItem[] = state.routes.map((route, index) => {
-      const { options } = descriptors[route.key];
-      const label =
-        typeof options.tabBarLabel === 'string'
-          ? options.tabBarLabel
-          : options.title ?? route.name.replace(/Tab$/, '');
+  const routes = state.routes;
+  const numTabs = routes.length;
+  const activeIndex = state.index;
 
-      let icon = NimbusIcons.home;
-      let fx: LiquidNavItem['fx'] = 'glow';
+  const [barWidth, setBarWidth] = useState<number>(360);
+  const indicatorX = useRef(new Animated.Value(0)).current;
+  const isFirstRender = useRef(true);
 
-      if (route.name === 'HomeTab') {
-        icon = NimbusIcons.home;
-        fx = 'glow';
-      } else if (route.name === 'EventsTab') {
-        icon = NimbusIcons.flights;
-        fx = 'plane';
-      } else if (route.name === 'AnnouncementsTab') {
-        icon = NimbusIcons.status;
-        fx = 'drop';
-      } else if (route.name === 'ProfileTab') {
-        icon = NimbusIcons.profile;
-        fx = 'wave';
-      } else if (route.name === 'SocialTab') {
-        icon = NimbusIcons.user;
-        fx = 'wave';
+  // Tab bounce scale values
+  const iconScales = useRef(routes.map(() => new Animated.Value(1))).current;
+
+  const triggerHaptic = useCallback(() => {
+    if (Platform.OS !== 'web') {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  }, []);
+
+  const getTargetX = useCallback(
+    (index: number, containerW: number) => {
+      const tabW = containerW / numTabs;
+      return index * tabW + (tabW - SQUIRCLE_WIDTH) / 2;
+    },
+    [numTabs]
+  );
+
+  const animateToTab = useCallback(
+    (index: number, immediate = false, containerW = barWidth) => {
+      const targetX = getTargetX(index, containerW);
+
+      if (immediate) {
+        indicatorX.setValue(targetX);
+        return;
       }
 
-      return {
-        key: route.key,
-        label,
-        icon,
-        fx,
-        onPress: () => {
-          const focused = state.index === index;
-          const event = navigation.emit({
-            type: 'tabPress',
-            target: route.key,
-            canPreventDefault: true,
-          });
-          if (!focused && !event.defaultPrevented) {
-            navigation.navigate(route.name, route.params);
-          }
-        },
-      };
-    });
+      Animated.spring(indicatorX, {
+        toValue: targetX,
+        friction: 8,
+        tension: 70,
+        useNativeDriver: true,
+      }).start();
 
-    return (
-      <View
-        pointerEvents="box-none"
-        style={[
-          styles.webWrapper,
-          {
-            paddingBottom: Math.max(insets.bottom, 14),
-          },
-        ]}
-      >
-        <LiquidNavbar
-          items={navItems}
-          active={state.index}
-          tone={isDark ? 'dark' : 'light'}
-          sound={true}
-        />
-      </View>
-    );
-  }
+      // Icon pop micro-interaction
+      if (iconScales[index]) {
+        Animated.sequence([
+          Animated.timing(iconScales[index], {
+            toValue: 1.18,
+            duration: 100,
+            useNativeDriver: true,
+          }),
+          Animated.spring(iconScales[index], {
+            toValue: 1,
+            friction: 5,
+            tension: 80,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }
+    },
+    [barWidth, getTargetX, indicatorX, iconScales]
+  );
 
-  // 2. Native Fallback (iOS / Android)
+  const handleBarLayout = (e: LayoutChangeEvent) => {
+    const width = e.nativeEvent.layout.width;
+    if (width > 0 && Math.abs(width - barWidth) > 1) {
+      setBarWidth(width);
+      if (isFirstRender.current) {
+        animateToTab(activeIndex, true, width);
+        isFirstRender.current = false;
+      } else {
+        animateToTab(activeIndex, false, width);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!isFirstRender.current) {
+      animateToTab(activeIndex, false);
+    }
+  }, [activeIndex, animateToTab]);
+
+  const bgTone = isDark ? 'rgba(16, 20, 32, 0.94)' : 'rgba(255, 255, 255, 0.94)';
+  const borderTone = isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(0, 0, 0, 0.08)';
+  const topBorderTone = isDark ? 'rgba(255, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.95)';
+
   return (
     <View
       pointerEvents="box-none"
       style={[
-        styles.nativeWrapper,
+        styles.wrapper,
         {
           paddingBottom: Math.max(insets.bottom, 12),
         },
       ]}
     >
       <View
+        onLayout={handleBarLayout}
         style={[
           styles.pillBar,
           {
-            backgroundColor: isDark
-              ? withAlpha(colors.surface, 0.85)
-              : withAlpha(colors.surface, 0.92),
-            borderColor: isDark
-              ? withAlpha('#FFFFFF', 0.15)
-              : withAlpha('#000000', 0.08),
+            backgroundColor: bgTone,
+            borderColor: borderTone,
+            borderTopColor: topBorderTone,
           },
-          shadow('elevated'),
         ]}
       >
-        {state.routes.map((route, index) => {
-          const focused = state.index === index;
+        {/* Specular Glare Line along top edge */}
+        <View pointerEvents="none" style={styles.topSheen} />
+
+        {/* Sliding Liquid Orange Glass Squircle (Curved Square) */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.squircleIndicator,
+            {
+              transform: [{ translateX: indicatorX }],
+            },
+          ]}
+        >
+          {/* Multi-layer SVG Liquid Glass with Specular Curvature & Caustics */}
+          <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+            <Defs>
+              {/* Rich Translucent Orange Glass Body */}
+              <LinearGradient id="glassBodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <Stop offset="0%" stopColor="#FDBA74" stopOpacity={0.92} />
+                <Stop offset="28%" stopColor="#FB923C" stopOpacity={0.82} />
+                <Stop offset="72%" stopColor="#F97316" stopOpacity={0.85} />
+                <Stop offset="100%" stopColor="#C2410C" stopOpacity={0.95} />
+              </LinearGradient>
+              {/* Specular Curvature Reflection Highlight (top 50%) */}
+              <LinearGradient id="glassSheenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                <Stop offset="0%" stopColor="#FFFFFF" stopOpacity={0.55} />
+                <Stop offset="42%" stopColor="#FFFFFF" stopOpacity={0.16} />
+                <Stop offset="100%" stopColor="#FFFFFF" stopOpacity={0.0} />
+              </LinearGradient>
+              {/* Bottom Caustic Glow Reflection */}
+              <LinearGradient id="glassCausticGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+                <Stop offset="0%" stopColor="#FED7AA" stopOpacity={0.38} />
+                <Stop offset="100%" stopColor="#FED7AA" stopOpacity={0.0} />
+              </LinearGradient>
+            </Defs>
+            {/* Base Translucent Liquid Body */}
+            <Rect width="100%" height="100%" rx={16} ry={16} fill="url(#glassBodyGrad)" />
+            {/* Top Curvature Glass Sheen */}
+            <Rect width="100%" height="52%" rx={16} ry={16} fill="url(#glassSheenGrad)" />
+            {/* Bottom Caustic Glow */}
+            <Rect width="100%" height="32%" y="68%" rx={16} ry={16} fill="url(#glassCausticGrad)" />
+          </Svg>
+
+          {/* Crisp Specular Light Edge at very top */}
+          <View pointerEvents="none" style={styles.squircleSheen} />
+        </Animated.View>
+
+        {/* Tab Items */}
+        {routes.map((route, index) => {
+          const focused = activeIndex === index;
           const { options } = descriptors[route.key];
           const label =
             typeof options.tabBarLabel === 'string'
               ? options.tabBarLabel
               : options.title ?? route.name.replace(/Tab$/, '');
 
+          const iconName = TAB_ICONS[route.name] ?? 'home';
+          const iconScale = iconScales[index] || 1;
+
           const onPress = () => {
+            triggerHaptic();
             const event = navigation.emit({
               type: 'tabPress',
               target: route.key,
@@ -141,6 +214,11 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             }
           };
 
+          const activeColor = '#FFFFFF';
+          const inactiveColor = isDark
+            ? withAlpha('#FFFFFF', 0.65)
+            : withAlpha('#0F172A', 0.65);
+
           return (
             <Pressable
               key={route.key}
@@ -150,39 +228,33 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
               accessibilityLabel={label}
               style={styles.tab}
             >
-              <View
+              <Animated.View
                 style={[
-                  styles.itemCapsule,
-                  focused && [
-                    styles.itemCapsuleActive,
-                    {
-                      backgroundColor: orangeAccent,
-                      shadowColor: orangeAccent,
-                      shadowOffset: { width: 0, height: 4 },
-                      shadowOpacity: 0.38,
-                      shadowRadius: 10,
-                      elevation: 6,
-                    },
-                  ],
+                  styles.iconWrap,
+                  { transform: [{ scale: iconScale }] },
                 ]}
               >
                 <Icon
-                  name={TAB_ICONS[route.name] ?? 'home'}
+                  name={iconName}
                   size={19}
-                  color={focused ? '#FFFFFF' : 'textMuted'}
+                  color={focused ? activeColor : inactiveColor}
                 />
-                <Typography
-                  variant="caption"
-                  color={focused ? '#FFFFFF' : 'textMuted'}
-                  style={[
-                    styles.label,
-                    focused ? styles.activeLabel : styles.inactiveLabel,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {label}
-                </Typography>
-              </View>
+              </Animated.View>
+
+              <Typography
+                variant="caption"
+                style={[
+                  styles.label,
+                  {
+                    color: focused ? activeColor : inactiveColor,
+                    fontFamily: focused ? FONT_FAMILIES.bodyBold : FONT_FAMILIES.bodyMedium,
+                    fontWeight: focused ? '700' : '500',
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {label}
+              </Typography>
             </Pressable>
           );
         })}
@@ -192,16 +264,7 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 }
 
 const styles = StyleSheet.create({
-  webWrapper: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 9999,
-  },
-  nativeWrapper: {
+  wrapper: {
     position: 'absolute',
     bottom: 0,
     left: 0,
@@ -211,49 +274,75 @@ const styles = StyleSheet.create({
     zIndex: 99,
   },
   pillBar: {
+    width: '92%',
+    maxWidth: 400,
+    height: 58,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 5,
-    paddingHorizontal: 6,
+    justifyContent: 'space-around',
     borderRadius: 9999,
     borderWidth: 1,
-    minWidth: 280,
-    maxWidth: 420,
-    marginHorizontal: 16,
-    marginBottom: 4,
+    position: 'relative',
+    paddingHorizontal: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  topSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 24,
+    right: 24,
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.35)',
+    borderRadius: 9999,
+  },
+  squircleIndicator: {
+    position: 'absolute',
+    top: 4,
+    bottom: 4,
+    left: 0,
+    width: SQUIRCLE_WIDTH,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.75)',
+    borderBottomColor: 'rgba(154, 52, 18, 0.50)',
+    borderLeftColor: 'rgba(255, 255, 255, 0.30)',
+    borderRightColor: 'rgba(255, 255, 255, 0.22)',
+    shadowColor: '#F97316',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  squircleSheen: {
+    position: 'absolute',
+    top: 1.5,
+    left: 8,
+    right: 8,
+    height: 1.5,
+    backgroundColor: 'rgba(255, 255, 255, 0.65)',
+    borderRadius: 1,
   },
   tab: {
     flex: 1,
+    height: '100%',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  itemCapsule: {
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 9999,
-    minWidth: 64,
-    minHeight: 50,
     gap: 3,
+    zIndex: 2,
   },
-  itemCapsuleActive: {
-    paddingHorizontal: 16,
+  iconWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 22,
   },
   label: {
-    fontSize: 11,
+    fontSize: 10.5,
     lineHeight: 13,
     letterSpacing: -0.1,
-  },
-  activeLabel: {
-    fontFamily: FONT_FAMILIES.bodyBold,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  inactiveLabel: {
-    fontFamily: FONT_FAMILIES.bodyMedium,
-    fontWeight: '500',
   },
 });

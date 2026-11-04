@@ -1,10 +1,22 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useCallback } from 'react'
+import {
+  X,
+  Megaphone,
+  AlertTriangle,
+  Loader2,
+  Pin,
+  Send,
+  FileText,
+} from 'lucide-react'
 import type {
   Announcement,
   AnnouncementCategory,
   AnnouncementPriority,
 } from '../../types/announcement'
 import { announcementService } from '../../services/announcementService'
+import { Modal } from '../ui/modal'
+import { Button } from '../ui/button'
+import { cn } from '../../lib/utils'
 
 export interface CreateAnnouncementModalProps {
   isOpen: boolean
@@ -31,9 +43,9 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
 }) => {
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-  const [selectedCategories, setSelectedCategories] = useState<
-    AnnouncementCategory[]
-  >(['highlight'])
+  const [selectedCategories, setSelectedCategories] = useState<AnnouncementCategory[]>([
+    'highlight',
+  ])
   const [tagsInput, setTagsInput] = useState('')
   const [priority, setPriority] = useState<AnnouncementPriority>('normal')
   const [isPinned, setIsPinned] = useState(false)
@@ -58,29 +70,9 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
     onClose()
   }, [resetForm, onClose])
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        handleClose()
-      }
-    }
-
-    if (isOpen) {
-      window.addEventListener('keydown', handleKeyDown)
-    }
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isOpen, handleClose])
-
-  if (!isOpen) return null
-
   const toggleCategory = (cat: AnnouncementCategory) => {
     setSelectedCategories((prev) =>
-      prev.includes(cat)
-        ? prev.filter((c) => c !== cat)
-        : [...prev, cat]
+      prev.includes(cat) ? prev.filter((c) => c !== cat) : [...prev, cat]
     )
   }
 
@@ -124,70 +116,77 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
       onCreated(created)
       handleClose()
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to create announcement'
-      )
+      setError(err instanceof Error ? err.message : 'Failed to create announcement')
     } finally {
       setIsSubmitting(false)
     }
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-      onClick={handleClose}
-    >
-      <div
-        className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-black">
-            Compose Broadcast Announcement
-          </h2>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="px-2 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-white cursor-pointer"
-          >
-            X
-          </button>
-        </div>
-
-        {/* Error Alert */}
-        {error && (
-          <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded">
-            {error}
+    <Modal isOpen={isOpen} onClose={handleClose} className="max-w-xl">
+      {/* Modal Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
+            <Megaphone className="w-4 h-4" />
           </div>
-        )}
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
+              Compose Broadcast Announcement
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Publish news, alerts, and updates to the member feed
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleClose}
+          aria-label="Close modal"
+          className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Form Body */}
+      <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+        <div className="p-6 space-y-5 overflow-y-auto flex-1">
+          {/* Error Alert */}
+          {error && (
+            <div className="flex items-center gap-2 p-3 text-xs rounded-xl border border-destructive/40 bg-destructive/10 text-destructive animate-in fade-in">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
           {/* Title */}
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-black mb-1">
-              Title <span className="text-red-500">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-bold uppercase tracking-wider text-foreground">
+                Title <span className="text-destructive">*</span>
+              </label>
+              <span className="text-[10px] text-muted-foreground font-mono">
+                {title.length}/120
+              </span>
+            </div>
             <input
               type="text"
               required
               maxLength={120}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Inclement Weather Notice"
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              placeholder="e.g. Inclement Weather Notice: Outdoor Matches Rescheduled"
+              className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
             />
-            <span className="text-[10px] text-gray-500 mt-0.5 block text-right">
-              {title.length}/120
-            </span>
           </div>
 
           {/* Category Selector */}
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-black mb-1.5">
-              Categories (Multi-select) <span className="text-red-500">*</span>
+            <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-2">
+              Categories (Multi-select) <span className="text-destructive">*</span>
             </label>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-2">
               {ALL_CATEGORIES.map(({ id, label }) => {
                 const isSelected = selectedCategories.includes(id)
                 return (
@@ -195,11 +194,12 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
                     key={id}
                     type="button"
                     onClick={() => toggleCategory(id)}
-                    className={`px-2.5 py-1 text-xs font-semibold rounded border transition-colors cursor-pointer ${
+                    className={cn(
+                      'px-3 py-1 text-xs font-semibold rounded-lg border transition-all cursor-pointer',
                       isSelected
-                        ? 'bg-black text-white border-black'
-                        : 'bg-white text-gray-700 border-gray-300 hover:border-gray-400'
-                    }`}
+                        ? 'bg-primary text-primary-foreground border-primary shadow-xs'
+                        : 'bg-muted/40 text-muted-foreground border-border hover:bg-muted hover:text-foreground'
+                    )}
                   >
                     {label}
                   </button>
@@ -207,128 +207,142 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
               })}
             </div>
             {selectedCategories.length === 0 && (
-              <span className="text-[11px] text-red-500 mt-1 block">
+              <span className="text-[11px] text-destructive mt-1.5 block">
                 At least one category is required.
               </span>
             )}
           </div>
 
-          {/* Priority */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-black mb-1">
-              Priority Level
-            </label>
-            <select
-              value={priority}
-              onChange={(e) =>
-                setPriority(e.target.value as AnnouncementPriority)
-              }
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
-            >
-              <option value="normal">Normal (Standard feed item)</option>
-              <option value="important">Important (High-contrast styling)</option>
-              <option value="urgent">Urgent (High-visibility alert)</option>
-            </select>
+          {/* Priority & Status Controls */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
+                Priority Level
+              </label>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as AnnouncementPriority)}
+                className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+              >
+                <option value="normal">Normal (Standard bulletin)</option>
+                <option value="important">Important (High-contrast card)</option>
+                <option value="urgent">Urgent (High-visibility alert)</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
+                Tags (comma-separated)
+              </label>
+              <input
+                type="text"
+                value={tagsInput}
+                onChange={(e) => setTagsInput(e.target.value)}
+                placeholder="weather, turf, safety"
+                className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+              />
+            </div>
           </div>
 
           {/* Message Body */}
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-black mb-1">
-              Message Body <span className="text-red-500">*</span>
+            <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
+              Message Body <span className="text-destructive">*</span>
             </label>
             <textarea
               required
-              rows={5}
+              rows={4}
               value={body}
               onChange={(e) => setBody(e.target.value)}
               placeholder="Write the complete announcement details for the club community..."
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black resize-y leading-relaxed"
+              className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all resize-y leading-relaxed"
             />
           </div>
 
-          {/* Tags Input */}
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-black mb-1">
-              Tags (comma-separated)
-            </label>
-            <input
-              type="text"
-              value={tagsInput}
-              onChange={(e) => setTagsInput(e.target.value)}
-              placeholder="e.g. weather, turf, matches, safety"
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
-            />
-          </div>
-
-          {/* Pin Checkbox */}
-          <div className="pt-1">
-            <label className="flex items-center gap-2 text-xs font-semibold text-black cursor-pointer select-none">
+          {/* Pin & Status Options */}
+          <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-3">
+            <label className="flex items-center gap-2.5 text-xs font-medium text-foreground cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={isPinned}
                 onChange={(e) => setIsPinned(e.target.checked)}
-                className="w-4 h-4 accent-black rounded cursor-pointer"
+                className="w-4 h-4 accent-primary rounded cursor-pointer"
               />
-              Pin to top of feed for high visibility
+              <span className="flex items-center gap-1.5">
+                <Pin className="w-3.5 h-3.5 text-primary" />
+                Pin to top of feed for maximum visibility
+              </span>
             </label>
-          </div>
 
-          {/* Status Option */}
-          <div className="pt-2 border-t border-gray-200">
-            <label className="block text-xs font-bold uppercase tracking-wider text-black mb-2">
-              Publishing Option
-            </label>
-            <div className="flex items-center gap-6">
-              <label className="flex items-center gap-2 text-xs font-medium text-black cursor-pointer select-none">
-                <input
-                  type="radio"
-                  name="status"
-                  value="published"
-                  checked={status === 'published'}
-                  onChange={() => setStatus('published')}
-                  className="accent-black cursor-pointer"
-                />
-                Publish Immediately
-              </label>
-              <label className="flex items-center gap-2 text-xs font-medium text-black cursor-pointer select-none">
-                <input
-                  type="radio"
-                  name="status"
-                  value="draft"
-                  checked={status === 'draft'}
-                  onChange={() => setStatus('draft')}
-                  className="accent-black cursor-pointer"
-                />
-                Save as Draft
-              </label>
+            <div className="pt-2 border-t border-border flex items-center justify-between">
+              <span className="text-xs font-semibold text-muted-foreground">
+                Publishing State:
+              </span>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-1.5 text-xs font-medium text-foreground cursor-pointer select-none">
+                  <input
+                    type="radio"
+                    name="status"
+                    value="published"
+                    checked={status === 'published'}
+                    onChange={() => setStatus('published')}
+                    className="accent-primary cursor-pointer"
+                  />
+                  <span>Publish Immediately</span>
+                </label>
+                <label className="flex items-center gap-1.5 text-xs font-medium text-foreground cursor-pointer select-none">
+                  <input
+                    type="radio"
+                    name="status"
+                    value="draft"
+                    checked={status === 'draft'}
+                    onChange={() => setStatus('draft')}
+                    className="accent-primary cursor-pointer"
+                  />
+                  <span>Save as Draft</span>
+                </label>
+              </div>
             </div>
           </div>
+        </div>
 
-          {/* Modal Actions */}
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={handleClose}
-              disabled={isSubmitting}
-              className="px-4 py-2 text-xs border border-gray-300 text-black hover:bg-gray-100 rounded transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-4 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {isSubmitting
-                ? 'Submitting...'
-                : status === 'published'
-                ? 'Publish Announcement'
-                : 'Save Draft'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        {/* Action Footer */}
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border bg-muted/20 shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleClose}
+            disabled={isSubmitting}
+            className="text-xs font-medium"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            disabled={isSubmitting}
+            className="text-xs font-semibold gap-1.5"
+          >
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Submitting...
+              </>
+            ) : status === 'published' ? (
+              <>
+                <Send className="w-3.5 h-3.5" />
+                Publish Announcement
+              </>
+            ) : (
+              <>
+                <FileText className="w-3.5 h-3.5" />
+                Save Draft
+              </>
+            )}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 

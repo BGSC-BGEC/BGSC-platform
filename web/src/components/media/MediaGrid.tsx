@@ -43,38 +43,38 @@ function renderCategoryPill(category: MediaCategory) {
   switch (category) {
     case 'event':
       return (
-        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-black/80 text-white backdrop-blur-xs">
+        <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-black/80 text-white backdrop-blur-xs border border-white/10">
           Event
         </span>
       )
     case 'sponsor':
       return (
-        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-blue-900/80 text-white backdrop-blur-xs">
+        <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-sky-950/80 text-sky-300 backdrop-blur-xs border border-sky-500/20">
           Sponsor
         </span>
       )
     case 'memories':
       return (
-        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-900/80 text-white backdrop-blur-xs">
+        <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-purple-950/80 text-purple-300 backdrop-blur-xs border border-purple-500/20">
           Memories
         </span>
       )
     case 'community':
       return (
-        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-900/80 text-white backdrop-blur-xs">
+        <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-950/80 text-emerald-300 backdrop-blur-xs border border-emerald-500/20">
           Community
         </span>
       )
     case 'hall_of_fame':
       return (
-        <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-900/80 text-white backdrop-blur-xs">
+        <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-950/80 text-amber-300 backdrop-blur-xs border border-amber-500/20">
           Hall of Fame
         </span>
       )
     case 'general':
     default:
       return (
-        <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-gray-900/80 text-white backdrop-blur-xs">
+        <span className="text-[9px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-md bg-neutral-900/80 text-neutral-300 backdrop-blur-xs border border-neutral-700/30">
           General
         </span>
       )
@@ -85,23 +85,23 @@ function renderStatusBadge(status: MediaStatus) {
   switch (status) {
     case 'approved':
       return (
-        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-green-300 bg-green-50 text-green-700">
-          <CheckCircle2 className="w-3 h-3 text-green-600" />
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
+          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
           Approved
         </span>
       )
     case 'pending':
       return (
-        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800">
-          <Clock className="w-3 h-3 text-amber-600" />
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-400">
+          <Clock className="w-3 h-3 text-amber-400" />
           Pending
         </span>
       )
     case 'rejected':
     default:
       return (
-        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-red-300 bg-red-50 text-red-700">
-          <AlertCircle className="w-3 h-3 text-red-600" />
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-destructive/30 bg-destructive/10 text-destructive">
+          <AlertCircle className="w-3 h-3 text-destructive" />
           Rejected
         </span>
       )
@@ -116,12 +116,12 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
 }) => {
   if (items.length === 0) {
     return (
-      <div className="bg-white rounded-lg border border-gray-200 py-16 text-center space-y-2">
-        <Inbox className="w-8 h-8 text-gray-300 mx-auto" />
-        <h3 className="text-sm font-bold text-black uppercase tracking-wider">
+      <div className="bg-card rounded-2xl border border-border py-16 text-center space-y-2">
+        <Inbox className="w-8 h-8 text-muted-foreground/60 mx-auto" />
+        <h3 className="text-sm font-bold text-foreground uppercase tracking-wider">
           No Media Assets Found
         </h3>
-        <p className="text-xs text-gray-500 max-w-sm mx-auto">
+        <p className="text-xs text-muted-foreground max-w-sm mx-auto">
           No assets match the selected category, media type, or search term.
         </p>
       </div>
@@ -136,10 +136,10 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
           <div
             key={item.id}
             onClick={() => onSelectItem(item)}
-            className="group relative bg-white rounded-lg border border-gray-200 overflow-hidden shadow-xs hover:border-black transition-all cursor-pointer flex flex-col"
+            className="group relative bg-card rounded-2xl border border-border overflow-hidden shadow-xs hover:border-primary/40 transition-all cursor-pointer flex flex-col"
           >
             {/* Visual Thumbnail Stage */}
-            <div className="relative aspect-video bg-gray-100 overflow-hidden flex items-center justify-center">
+            <div className="relative aspect-video bg-muted/40 overflow-hidden flex items-center justify-center">
               {item.media_type === 'video' ? (
                 <>
                   <img
@@ -150,8 +150,8 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
                       e.currentTarget.style.display = 'none'
                     }}
                   />
-                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center group-hover:bg-black/20 transition-colors">
-                    <span className="w-10 h-10 rounded-full bg-white/90 text-black flex items-center justify-center shadow">
+                  <div className="absolute inset-0 bg-black/40 flex items-center justify-center group-hover:bg-black/30 transition-colors">
+                    <span className="w-10 h-10 rounded-full bg-black/70 backdrop-blur-md text-white flex items-center justify-center border border-white/20 shadow-md">
                       <Film className="w-5 h-5 ml-0.5" />
                     </span>
                   </div>
@@ -180,19 +180,19 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
               <div className="absolute top-2 right-2">
                 {item.status === 'approved' && (
                   <span
-                    className="w-2.5 h-2.5 rounded-full bg-green-500 ring-2 ring-white shadow"
+                    className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-card shadow"
                     title="Approved"
                   />
                 )}
                 {item.status === 'pending' && (
                   <span
-                    className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-white shadow animate-pulse"
+                    className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-card shadow animate-pulse"
                     title="Pending Moderation"
                   />
                 )}
                 {item.status === 'rejected' && (
                   <span
-                    className="w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-white shadow"
+                    className="w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-card shadow"
                     title="Rejected"
                   />
                 )}
@@ -200,28 +200,28 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
             </div>
 
             {/* Bottom Info Strip */}
-            <div className="p-3 space-y-1.5 flex-1 flex flex-col justify-between">
+            <div className="p-3.5 space-y-2 flex-1 flex flex-col justify-between">
               <div className="space-y-0.5">
-                <h4 className="text-xs font-bold text-black truncate font-mono">
+                <h4 className="text-xs font-bold text-foreground truncate font-mono">
                   {item.original_filename}
                 </h4>
                 {item.caption && (
-                  <p className="text-[11px] text-gray-500 line-clamp-1">
+                  <p className="text-[11px] text-muted-foreground line-clamp-1">
                     {item.caption}
                   </p>
                 )}
               </div>
 
-              <div className="pt-2 border-t border-gray-100 flex items-center justify-between text-[10px] text-gray-500 font-mono">
+              <div className="pt-2 border-t border-border/60 flex items-center justify-between text-[10px] text-muted-foreground font-mono">
                 <span>{formatBytes(item.size_bytes)}</span>
 
                 <div className="flex items-center gap-2">
                   <span className="flex items-center gap-0.5">
-                    <Eye className="w-3 h-3 text-gray-400" />
+                    <Eye className="w-3 h-3 text-muted-foreground" />
                     {item.views_count}
                   </span>
                   <span className="flex items-center gap-0.5">
-                    <Heart className="w-3 h-3 text-gray-400" />
+                    <Heart className="w-3 h-3 text-muted-foreground" />
                     {item.likes_count}
                   </span>
                 </div>
@@ -235,33 +235,33 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
 
   // 2. Table Mode (List View)
   return (
-    <div className="bg-white rounded-lg border border-gray-200 overflow-hidden shadow-xs">
+    <div className="bg-card rounded-2xl border border-border overflow-hidden shadow-xs">
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
-            <tr className="border-b border-gray-200 bg-gray-50 text-[10px] uppercase font-bold text-gray-500 tracking-wider">
-              <th className="py-2.5 px-4 w-16">Preview</th>
-              <th className="py-2.5 px-4">Filename & Details</th>
-              <th className="py-2.5 px-3">Category</th>
-              <th className="py-2.5 px-3">Type</th>
-              <th className="py-2.5 px-3">Size</th>
-              <th className="py-2.5 px-3">Status</th>
-              <th className="py-2.5 px-4">Uploader</th>
-              <th className="py-2.5 px-4 text-right">Actions</th>
+            <tr className="border-b border-border bg-muted/40 text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+              <th className="py-3 px-4 w-16">Preview</th>
+              <th className="py-3 px-4">Filename & Details</th>
+              <th className="py-3 px-3">Category</th>
+              <th className="py-3 px-3">Type</th>
+              <th className="py-3 px-3">Size</th>
+              <th className="py-3 px-3">Status</th>
+              <th className="py-3 px-4">Uploader</th>
+              <th className="py-3 px-4 text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 text-xs">
+          <tbody className="divide-y divide-border text-xs">
             {items.map((item) => (
               <tr
                 key={item.id}
-                className="hover:bg-gray-50/80 transition-colors cursor-pointer"
+                className="hover:bg-muted/40 transition-colors cursor-pointer"
                 onClick={() => onSelectItem(item)}
               >
                 {/* Thumbnail */}
                 <td className="py-2.5 px-4">
-                  <div className="w-12 h-12 rounded bg-gray-100 overflow-hidden border border-gray-200 flex-shrink-0 flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-lg bg-muted overflow-hidden border border-border flex-shrink-0 flex items-center justify-center">
                     {item.media_type === 'video' ? (
-                      <Film className="w-5 h-5 text-gray-500" />
+                      <Film className="w-5 h-5 text-muted-foreground" />
                     ) : (
                       <img
                         src={item.thumbnail_url || item.url}
@@ -278,16 +278,16 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
                 {/* Filename & Details */}
                 <td className="py-2.5 px-4 max-w-xs">
                   <div className="space-y-0.5">
-                    <span className="font-mono text-xs font-bold text-black truncate block">
+                    <span className="font-mono text-xs font-bold text-foreground truncate block">
                       {item.original_filename}
                     </span>
                     {item.caption && (
-                      <p className="text-[11px] text-gray-500 truncate">
+                      <p className="text-[11px] text-muted-foreground truncate">
                         {item.caption}
                       </p>
                     )}
                     {item.event_title && (
-                      <span className="text-[10px] text-gray-400 font-medium block truncate">
+                      <span className="text-[10px] text-muted-foreground font-medium block truncate">
                         {item.event_title}
                       </span>
                     )}
@@ -296,25 +296,25 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
 
                 {/* Category */}
                 <td className="py-2.5 px-3">
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700">
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-border bg-muted/60 text-muted-foreground">
                     {item.category.replace('_', ' ')}
                   </span>
                 </td>
 
                 {/* Type */}
                 <td className="py-2.5 px-3">
-                  <div className="flex items-center gap-1 text-[11px] text-gray-700 font-semibold uppercase">
+                  <div className="flex items-center gap-1 text-[11px] text-foreground font-semibold uppercase">
                     {item.media_type === 'video' ? (
-                      <Film className="w-3.5 h-3.5 text-gray-500" />
+                      <Film className="w-3.5 h-3.5 text-muted-foreground" />
                     ) : (
-                      <ImageIcon className="w-3.5 h-3.5 text-gray-500" />
+                      <ImageIcon className="w-3.5 h-3.5 text-muted-foreground" />
                     )}
                     <span>{item.media_type}</span>
                   </div>
                 </td>
 
                 {/* Size */}
-                <td className="py-2.5 px-3 font-mono text-[11px] text-gray-600">
+                <td className="py-2.5 px-3 font-mono text-[11px] text-muted-foreground">
                   {formatBytes(item.size_bytes)}
                 </td>
 
@@ -324,12 +324,12 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
                 </td>
 
                 {/* Uploader */}
-                <td className="py-2.5 px-4 text-xs text-gray-700">
+                <td className="py-2.5 px-4 text-xs text-foreground">
                   <div className="truncate">
                     <span className="font-bold block truncate">
                       {item.uploader.display_name}
                     </span>
-                    <span className="text-[10px] text-gray-400 font-mono">
+                    <span className="text-[10px] text-muted-foreground font-mono">
                       {formatDate(item.created_at)}
                     </span>
                   </div>
@@ -344,7 +344,7 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
                     <button
                       type="button"
                       onClick={() => onSelectItem(item)}
-                      className="p-1.5 rounded text-gray-500 hover:text-black hover:bg-gray-100 transition-colors cursor-pointer"
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
                       title="Inspect Media"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
@@ -360,7 +360,7 @@ export const MediaGrid: React.FC<MediaGridProps> = ({
                           onDeleteItem(item.id)
                         }
                       }}
-                      className="p-1.5 rounded text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
                       title="Delete Asset"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

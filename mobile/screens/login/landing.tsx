@@ -51,8 +51,8 @@ export default function LandingScreen() {
 
   return (
     <View style={styles.screen}>
-      {/* Cosmic Canvas / SVG Starfield & Horizon Glow */}
-      <CosmicSpaceBackground showAstronaut astronautTop={insets.top + 16} astronautRight={12} />
+      {/* Cosmic Vector Starfield & Horizon Glow */}
+      <CosmicSpaceBackground showAstronaut astronautTop={insets.top + 8} astronautRight={14} astronautScale={0.8} />
 
       <ScrollView
         style={styles.scrollView}
@@ -129,11 +129,22 @@ export default function LandingScreen() {
 /** Three tilted preview glass cards: an event, season points and the leaderboard. */
 function HeroCollage() {
   const { colors } = useTheme();
+  const { width } = useWindowDimensions();
+  const collageWidth = Math.min(width - PADDING * 2, 400);
+  const scale = Math.min(collageWidth / 330, 1.05);
 
   return (
-    <View style={styles.collage} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+    <View style={[styles.collage, { height: 280 * scale }]} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
       {/* Card 1: Valorant Tournament */}
-      <GlassCard style={cardStyle({ left: 16, top: 24, width: 200, height: 154, transform: [{ rotate: '-6deg' }] })}>
+      <GlassCard
+        style={cardStyle({
+          left: 4 * scale,
+          top: 24 * scale,
+          width: 184 * scale,
+          height: 146 * scale,
+          transform: [{ rotate: '-6deg' }],
+        })}
+      >
         <View style={styles.cardHeader}>
           <Badge label="Open" variant="success" />
           <Typography variant="bodySmall" color="textMuted" style={styles.monoSmall}>
@@ -154,7 +165,15 @@ function HeroCollage() {
       </GlassCard>
 
       {/* Card 2: Season Points */}
-      <GlassCard style={cardStyle({ left: 154, top: 8, width: 180, height: 124, transform: [{ rotate: '5deg' }] })}>
+      <GlassCard
+        style={cardStyle({
+          right: 4 * scale,
+          top: 8 * scale,
+          width: 164 * scale,
+          height: 120 * scale,
+          transform: [{ rotate: '5deg' }],
+        })}
+      >
         <Typography color="textMuted" style={styles.kicker}>
           SEASON POINTS
         </Typography>
@@ -167,7 +186,15 @@ function HeroCollage() {
       </GlassCard>
 
       {/* Card 3: Live Standings */}
-      <GlassCard style={cardStyle({ left: 140, top: 152, width: 200, height: 136, transform: [{ rotate: '2deg' }] })}>
+      <GlassCard
+        style={cardStyle({
+          right: 10 * scale,
+          top: 138 * scale,
+          width: 186 * scale,
+          height: 134 * scale,
+          transform: [{ rotate: '2deg' }],
+        })}
+      >
         <Typography color="textMuted" style={styles.kicker}>
           LEADERBOARD · TOP 3
         </Typography>

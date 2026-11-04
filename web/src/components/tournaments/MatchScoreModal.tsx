@@ -1,6 +1,9 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
+import { X, Trophy, AlertTriangle, Loader2, Calendar, MapPin } from 'lucide-react'
 import type { Match } from '../../types/bracket'
 import { bracketService } from '../../services/bracketService'
+import { Modal } from '../ui/modal'
+import { Button } from '../ui/button'
 
 export interface MatchScoreModalProps {
   match: Match | null
@@ -32,19 +35,6 @@ const MatchScoreModalContent: React.FC<MatchScoreModalContentProps> = ({
   )
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [onClose])
 
   const handleReportScore = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -104,77 +94,78 @@ const MatchScoreModalContent: React.FC<MatchScoreModalContentProps> = ({
   const bothParticipantsSet = Boolean(match.a && match.b)
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-lg w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 pb-3">
+    <>
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
+            <Trophy className="w-4 h-4" />
+          </div>
           <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-black">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
               Match Controls & Scoring
             </h2>
-            <span className="text-[10px] text-gray-500 uppercase tracking-wider">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-mono">
               Round {match.round} • Match #{match.slot}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-2 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-white cursor-pointer"
-          >
-            X
-          </button>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close modal"
+          className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
 
+      <div className="p-6 space-y-5 overflow-y-auto flex-1">
         {/* Error Alert */}
         {error && (
-          <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded">
-            {error}
+          <div className="p-3 text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-xl flex items-center gap-2 animate-in fade-in">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
 
         {/* Matchup Overview */}
-        <div className="p-3.5 border border-gray-200 bg-gray-50 rounded space-y-2">
-          <div className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+        <div className="p-4 border border-border bg-muted/20 rounded-xl space-y-2.5">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             Current Matchup
           </div>
-          <div className="flex items-center justify-between text-xs font-semibold text-black">
+          <div className="flex items-center justify-between text-xs font-semibold text-foreground">
             <div className="flex items-center gap-2">
-              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-800">
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-foreground">
                 {match.a ? `#${match.a.seed}` : '-'}
               </span>
               <span>{match.a ? match.a.displayName : 'TBD'}</span>
             </div>
-            <span className="text-gray-400 font-normal">vs</span>
+            <span className="text-muted-foreground font-normal">vs</span>
             <div className="flex items-center gap-2">
               <span>{match.b ? match.b.displayName : 'TBD'}</span>
-              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-800">
+              <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-foreground">
                 {match.b ? `#${match.b.seed}` : '-'}
               </span>
             </div>
           </div>
-          <div className="text-[10px] text-gray-500 pt-1 border-t border-gray-200 flex justify-between">
-            <span>Status: <strong className="uppercase text-black">{match.status}</strong></span>
+          <div className="text-[10px] text-muted-foreground pt-2 border-t border-border flex justify-between">
+            <span>Status: <strong className="uppercase text-foreground">{match.status}</strong></span>
             {match.winner && (
-              <span>Winner: <strong className="text-black">Side {match.winner.toUpperCase()}</strong></span>
+              <span>Winner: <strong className="text-primary">Side {match.winner.toUpperCase()}</strong></span>
             )}
           </div>
         </div>
 
         {/* Section 1: Score Reporting Form */}
-        <form onSubmit={handleReportScore} className="space-y-3 pt-1 border-t border-gray-200">
-          <div className="text-xs font-bold uppercase tracking-wider text-black">
+        <form onSubmit={handleReportScore} className="space-y-3.5 pt-2 border-t border-border">
+          <div className="text-xs font-bold uppercase tracking-wider text-foreground">
             Report Final Result
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] font-semibold text-gray-700 mb-1 truncate">
+              <label className="block text-[11px] font-semibold text-muted-foreground mb-1 truncate">
                 {match.a ? match.a.displayName : 'Side A'} Score
               </label>
               <input
@@ -187,11 +178,11 @@ const MatchScoreModalContent: React.FC<MatchScoreModalContentProps> = ({
                   setScoreA(e.target.value === '' ? '' : parseInt(e.target.value, 10))
                 }
                 placeholder="0"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black disabled:bg-gray-100 disabled:text-gray-400"
+                className="w-full px-3.5 py-2 text-sm border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
               />
             </div>
             <div>
-              <label className="block text-[11px] font-semibold text-gray-700 mb-1 truncate">
+              <label className="block text-[11px] font-semibold text-muted-foreground mb-1 truncate">
                 {match.b ? match.b.displayName : 'Side B'} Score
               </label>
               <input
@@ -204,85 +195,97 @@ const MatchScoreModalContent: React.FC<MatchScoreModalContentProps> = ({
                   setScoreB(e.target.value === '' ? '' : parseInt(e.target.value, 10))
                 }
                 placeholder="0"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black disabled:bg-gray-100 disabled:text-gray-400"
+                className="w-full px-3.5 py-2 text-sm border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50"
               />
             </div>
           </div>
 
           {!bothParticipantsSet && (
-            <p className="text-[11px] text-gray-500 italic">
+            <p className="text-[11px] text-muted-foreground italic">
               Scores can only be submitted once prior round winners have advanced to this match.
             </p>
           )}
 
           <div className="flex justify-end">
-            <button
+            <Button
               type="submit"
               disabled={!bothParticipantsSet || isSubmitting}
-              className="px-4 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer disabled:opacity-50"
+              size="sm"
+              className="text-xs font-semibold gap-1.5"
             >
-              {isSubmitting ? 'Reporting...' : 'Report Final Score'}
-            </button>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Reporting...
+                </>
+              ) : (
+                'Report Final Score'
+              )}
+            </Button>
           </div>
         </form>
 
         {/* Section 2: Scheduling & Venue */}
-        <div className="space-y-3 pt-3 border-t border-gray-200">
-          <div className="text-xs font-bold uppercase tracking-wider text-black">
+        <div className="space-y-3 pt-3 border-t border-border">
+          <div className="text-xs font-bold uppercase tracking-wider text-foreground">
             Match Logistics
           </div>
 
           <div className="space-y-3">
             <div>
-              <label className="block text-[11px] font-semibold text-gray-700 mb-1">
-                Scheduled Date & Time
+              <label className="block text-[11px] font-semibold text-muted-foreground mb-1 flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5" /> Scheduled Date & Time
               </label>
               <input
                 type="datetime-local"
                 value={scheduledAt}
                 onChange={(e) => setScheduledAt(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+                className="w-full px-3.5 py-2 text-sm border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold text-gray-700 mb-1">
-                Venue / Court / Lab
+              <label className="block text-[11px] font-semibold text-muted-foreground mb-1 flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5" /> Venue / Court / Lab
               </label>
               <input
                 type="text"
                 value={venue}
                 onChange={(e) => setVenue(e.target.value)}
                 placeholder="e.g. Gaming Lab A, Court 2"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+                className="w-full px-3.5 py-2 text-sm border border-border rounded-xl text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
           </div>
 
           <div className="flex justify-end pt-1">
-            <button
+            <Button
               type="button"
+              variant="outline"
+              size="sm"
               onClick={handleUpdateSchedule}
               disabled={isSubmitting}
-              className="px-4 py-2 text-xs font-semibold border border-black text-black bg-white hover:bg-black hover:text-white rounded transition-colors cursor-pointer disabled:opacity-50"
+              className="text-xs font-semibold gap-1.5"
             >
               {isSubmitting ? 'Updating...' : 'Update Schedule & Venue'}
-            </button>
+            </Button>
           </div>
         </div>
-
-        {/* Modal Close Action */}
-        <div className="flex justify-end pt-3 border-t border-gray-200">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-1.5 text-xs border border-gray-300 text-black hover:bg-gray-100 rounded transition-colors cursor-pointer"
-          >
-            Close
-          </button>
-        </div>
       </div>
-    </div>
+
+      {/* Modal Close Action */}
+      <div className="flex justify-end px-6 py-4 border-t border-border bg-muted/20 shrink-0">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onClose}
+          className="text-xs px-4"
+        >
+          Close
+        </Button>
+      </div>
+    </>
   )
 }
 
@@ -292,15 +295,17 @@ export const MatchScoreModal: React.FC<MatchScoreModalProps> = ({
   onClose,
   onMatchUpdated,
 }) => {
-  if (!isOpen || !match) return null
+  if (!match) return null
 
   return (
-    <MatchScoreModalContent
-      key={match.id}
-      match={match}
-      onClose={onClose}
-      onMatchUpdated={onMatchUpdated}
-    />
+    <Modal isOpen={isOpen} onClose={onClose} className="max-w-lg">
+      <MatchScoreModalContent
+        key={match.id}
+        match={match}
+        onClose={onClose}
+        onMatchUpdated={onMatchUpdated}
+      />
+    </Modal>
   )
 }
 
