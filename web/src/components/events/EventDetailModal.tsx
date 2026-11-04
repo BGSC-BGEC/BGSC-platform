@@ -217,11 +217,14 @@ export const EventDetailModal: React.FC<EventDetailModalProps> = ({
       const published = await registrationService.publishForm(formToPublish.id)
       setCurrentForm(published)
 
-      // Only attach the form. The registration closing time was set when the event was
-      // created; overwriting it with the end date broke the backend rule closes_at <= start_at.
+      const closesIso = new Date(
+        event.endAt ? `${event.endAt}T23:59:59Z` : Date.now() + 7 * 86400000
+      ).toISOString()
+
       const updatedEvent = await eventService.updateEvent(event.id, {
         registration: {
           form_id: published.id,
+          closes_at: closesIso,
           max_participants: event.maxParticipants,
           waitlist_enabled: event.waitlistEnabled ?? true,
           requires_approval: event.requiresApproval ?? false,
