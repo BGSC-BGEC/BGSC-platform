@@ -446,7 +446,6 @@ export const Auction: React.FC = () => {
                 teams={auctionState.teams}
                 status={auctionState.status}
                 isSubmitting={isSubmitting}
-                timerRunning={auctionState.status === 'live' && timerSeconds > 0}
                 onAdvance={handleAdvanceLot}
                 onTogglePause={handleTogglePause}
                 onPlaceBid={handlePlaceBid}

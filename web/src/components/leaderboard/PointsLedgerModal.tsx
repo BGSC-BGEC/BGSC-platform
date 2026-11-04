@@ -1,15 +1,11 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect } from 'react'
 import { FileText } from 'lucide-react'
-import type { LeaderboardEntry, PointsTransaction } from '../../types/leaderboard'
-import { leaderboardService } from '../../services/leaderboardService'
+import type { PointsTransaction } from '../../types/leaderboard'
 
 export interface PointsLedgerModalProps {
   isOpen: boolean
   onClose: () => void
-  /** Members to choose from (the backend only serves one member's history at a time). */
-  members: LeaderboardEntry[]
-  /** Member to show first, e.g. the one just adjusted. */
-  initialUserId?: string | null
+  transactions: PointsTransaction[]
 }
 
 function formatTxDate(dateStr: string): string {
@@ -27,14 +23,8 @@ function formatTxDate(dateStr: string): string {
 export const PointsLedgerModal: React.FC<PointsLedgerModalProps> = ({
   isOpen,
   onClose,
-  members,
-  initialUserId,
+  transactions,
 }) => {
-  const [selectedUserId, setSelectedUserId] = useState('')
-  const [transactions, setTransactions] = useState<PointsTransaction[]>([])
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -50,41 +40,6 @@ export const PointsLedgerModal: React.FC<PointsLedgerModalProps> = ({
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [isOpen, onClose])
-
-  // Each time the modal opens, start on the requested member (or the first one).
-  useEffect(() => {
-    if (isOpen) {
-      setSelectedUserId(initialUserId || members[0]?.userId || '')
-    }
-  }, [isOpen, initialUserId, members])
-
-  useEffect(() => {
-    if (!isOpen || !selectedUserId) {
-      setTransactions([])
-      return
-    }
-    let ignore = false
-    const member = members.find((m) => m.userId === selectedUserId)
-    setIsLoading(true)
-    setError(null)
-    leaderboardService
-      .getPointsTransactions(selectedUserId, member?.name)
-      .then((txs) => {
-        if (!ignore) setTransactions(txs)
-      })
-      .catch((err) => {
-        if (!ignore) {
-          setTransactions([])
-          setError(err instanceof Error ? err.message : 'Failed to load points history')
-        }
-      })
-      .finally(() => {
-        if (!ignore) setIsLoading(false)
-      })
-    return () => {
-      ignore = true
-    }
-  }, [isOpen, selectedUserId, members])
 
   if (!isOpen) return null
 
@@ -116,36 +71,12 @@ export const PointsLedgerModal: React.FC<PointsLedgerModalProps> = ({
           </button>
         </div>
 
-        {/* Member picker */}
-        <div>
-          <label className="block text-xs font-bold uppercase text-black mb-1">
-            Member
-          </label>
-          <select
-            value={selectedUserId}
-            onChange={(e) => setSelectedUserId(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
-          >
-            {members.map((m) => (
-              <option key={m.userId} value={m.userId}>
-                {m.name} (@{m.username})
-              </option>
-            ))}
-          </select>
-        </div>
-
         {/* Ledger Table */}
-        {error ? (
-          <div className="p-3 border border-red-200 rounded bg-red-50 text-xs text-red-700">
-            {error}
-          </div>
-        ) : isLoading ? (
-          <div className="p-8 text-center text-xs text-gray-500">Loading points history...</div>
-        ) : transactions.length === 0 ? (
+        {transactions.length === 0 ? (
           <div className="p-8 text-center border border-gray-200 rounded bg-gray-50 space-y-2">
             <FileText className="w-8 h-8 text-gray-400 mx-auto" />
             <p className="text-xs text-gray-500 font-semibold">
-              No points transactions recorded yet for this member.
+              No points transactions recorded yet in the audit log.
             </p>
           </div>
         ) : (
