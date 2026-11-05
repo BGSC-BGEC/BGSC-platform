@@ -3,15 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   Trophy,
-  Sparkles,
   Gavel,
   Crown,
   ChevronRight,
   ArrowRight,
-  ShieldCheck,
   Layers,
   Radio,
-  Timer,
 } from 'lucide-react'
 import {
   CosmicStarfield,
@@ -292,7 +289,8 @@ export const Landing: React.FC = () => {
           <Glass
             variant="default"
             borderRadius={20}
-            className="p-5 flex flex-col justify-between border border-white/10 bg-black/40 backdrop-blur-xl shadow-xl hover:border-amber-500/40 transition-colors group"
+            className="p-5 flex flex-col justify-between border border-white/10 border-l-2 border-l-amber-500 !border-l-2 !border-l-amber-500 bg-black/40 backdrop-blur-xl shadow-xl transition-colors group"
+            style={{ borderLeft: '2px solid #f59e0b' }}
           >
             <div>
               <div className="flex items-center justify-between mb-4">
@@ -302,39 +300,38 @@ export const Landing: React.FC = () => {
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-white">Live Player Auction</h3>
-                    <p className="text-[10px] text-amber-300/80">Lot #14 &bull; Striker Draft</p>
+                    <p className="text-[10px] text-amber-300/80">Lot #12 &bull; Striker Draft</p>
                   </div>
                 </div>
-                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 text-[10px] font-bold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" />
-                  Live Bid
+                <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold tracking-wider uppercase">
+                  SOLD
                 </span>
               </div>
 
-              {/* Player Profile & Bid pulse */}
-              <div className="p-3.5 rounded-xl bg-white/[0.04] border border-white/10 mb-4">
+              {/* Player Profile & Sold Details */}
+              <div className="p-3.5 rounded-xl bg-white/[0.04] border border-white/10 mb-3">
                 <div className="flex items-center justify-between text-xs mb-1.5">
                   <span className="font-semibold text-neutral-200">Aarav Sharma</span>
-                  <span className="font-mono text-amber-400 font-bold text-sm">42,500 Pts</span>
+                  <span className="font-mono text-amber-400 font-bold text-sm">48,500 pts</span>
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-neutral-400">
                   <span>Dept of Comp Science</span>
-                  <span>Leading: Titans FC</span>
+                  <span className="text-emerald-400 font-medium">Sold to: Phoenix Strikers</span>
                 </div>
               </div>
 
-              {/* Countdown & Purse */}
+              {/* Team Purse & Squad context */}
               <div className="flex items-center justify-between text-xs text-neutral-300 p-2.5 rounded-lg bg-black/30 border border-white/5">
                 <div className="flex items-center gap-1.5">
-                  <Timer className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Clock: <strong className="text-white font-mono">00:12s</strong></span>
+                  <span className="text-neutral-400">Winning Team:</span>
+                  <strong className="text-white font-semibold">Phoenix Strikers</strong>
                 </div>
-                <div>Purse: <strong className="text-emerald-400 font-mono">157,500 Pts</strong></div>
+                <div>Purse: <strong className="text-emerald-400 font-mono">51,500 pts</strong></div>
               </div>
             </div>
 
             <div className="mt-5 pt-3 border-t border-white/10 flex items-center justify-between text-xs">
-              <span className="text-neutral-400">Captains in Draft: <strong className="text-white">8/8</strong></span>
+              <span className="text-neutral-400">Next: <strong className="text-white">Lot #13 (Defender)</strong></span>
               <span className="text-amber-400 font-semibold group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
                 Explore Auction <ChevronRight className="w-3.5 h-3.5" />
               </span>
@@ -345,34 +342,35 @@ export const Landing: React.FC = () => {
           <Glass
             variant="default"
             borderRadius={20}
-            className="p-5 flex flex-col justify-between border border-white/10 bg-black/40 backdrop-blur-xl shadow-xl hover:border-amber-500/40 transition-colors group"
+            className="p-5 flex flex-col justify-between border border-white/10 border-l-2 border-l-cyan-500 !border-l-2 !border-l-cyan-500 bg-black/40 backdrop-blur-xl shadow-xl transition-colors group"
+            style={{ borderLeft: '2px solid #06b6d4' }}
           >
             <div>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-orange-500/20 border border-orange-500/40 flex items-center justify-center text-orange-400">
+                  <div className="w-8 h-8 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400">
                     <Trophy className="w-4 h-4" />
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-white">Championship Bracket</h3>
-                    <p className="text-[10px] text-orange-300/80">Valorant Inter-Dept Finals</p>
+                    <p className="text-[10px] text-cyan-300/80">Valorant Inter-Dept Finals</p>
                   </div>
                 </div>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold">
-                  Match 3
+                <span className="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[10px] font-bold tracking-wider">
+                  GRAND FINALS
                 </span>
               </div>
 
               {/* Matchup scores */}
-              <div className="space-y-2 mb-4">
-                <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.04] border border-amber-500/30">
+              <div className="space-y-2 mb-3">
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.04] border border-cyan-500/30">
                   <div className="flex items-center gap-2">
-                    <span className="w-5 h-5 rounded-md bg-amber-500/30 text-amber-300 font-bold text-[11px] flex items-center justify-center">
+                    <span className="w-5 h-5 rounded-md bg-cyan-500/30 text-cyan-300 font-bold text-[11px] flex items-center justify-center">
                       1
                     </span>
                     <span className="text-xs font-bold text-white">Titan Sparks (CS)</span>
                   </div>
-                  <span className="font-mono font-black text-amber-400 text-sm">13</span>
+                  <span className="font-mono font-black text-cyan-400 text-sm">13</span>
                 </div>
 
                 <div className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.02] border border-white/5">
@@ -388,13 +386,13 @@ export const Landing: React.FC = () => {
 
               <div className="flex items-center justify-between text-xs text-neutral-400 px-1">
                 <span>Map: Ascent (Decider)</span>
-                <span className="text-amber-300 font-semibold">Match Point Titan</span>
+                <span className="text-cyan-300 font-semibold">Match Point Titan</span>
               </div>
             </div>
 
             <div className="mt-5 pt-3 border-t border-white/10 flex items-center justify-between text-xs">
               <span className="text-neutral-400">Double Elimination</span>
-              <span className="text-orange-400 font-semibold group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
+              <span className="text-cyan-400 font-semibold group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
                 View Brackets <ChevronRight className="w-3.5 h-3.5" />
               </span>
             </div>
@@ -404,55 +402,62 @@ export const Landing: React.FC = () => {
           <Glass
             variant="default"
             borderRadius={20}
-            className="p-5 flex flex-col justify-between border border-white/10 bg-black/40 backdrop-blur-xl shadow-xl hover:border-amber-500/40 transition-colors group"
+            className="p-5 flex flex-col justify-between border border-white/10 border-l-2 border-l-violet-500 !border-l-2 !border-l-violet-500 bg-black/40 backdrop-blur-xl shadow-xl transition-colors group"
+            style={{ borderLeft: '2px solid #8b5cf6' }}
           >
             <div>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-yellow-500/20 border border-yellow-500/40 flex items-center justify-center text-yellow-400">
+                  <div className="w-8 h-8 rounded-lg bg-violet-500/20 border border-violet-500/40 flex items-center justify-center text-violet-400">
                     <Crown className="w-4 h-4" />
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-white">Season Leaderboard</h3>
-                    <p className="text-[10px] text-yellow-300/80">MVP Race & Standings</p>
+                    <p className="text-[10px] text-violet-300/80">MVP Race & Standings</p>
                   </div>
                 </div>
-                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-bold">
-                  Top 3
+                <span className="px-2 py-0.5 rounded bg-violet-500/20 text-violet-300 border border-violet-500/40 text-[10px] font-bold tracking-wider">
+                  TOP 3
                 </span>
               </div>
 
-              {/* Ranks list */}
-              <div className="space-y-2 mb-4">
-                <div className="flex items-center justify-between text-xs p-2 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
+              {/* 3 Ranked Rows with names and scores */}
+              <div className="space-y-2 mb-3">
+                <div className="flex items-center justify-between text-xs p-2 rounded-lg bg-white/[0.04] border border-violet-500/20">
                   <div className="flex items-center gap-2">
-                    <span className="text-yellow-400 font-black">#1</span>
-                    <span className="font-semibold text-white">Rohan K. (ECE)</span>
+                    <span className="w-5 h-5 rounded flex items-center justify-center bg-amber-400/20 text-amber-300 font-black text-[10px]">
+                      #1
+                    </span>
+                    <span className="font-semibold text-white">Rohan K. (Comp Sci)</span>
                   </div>
-                  <span className="font-mono text-yellow-300 font-bold">2,450 XP</span>
+                  <span className="font-mono text-white font-bold">2,450 pts</span>
                 </div>
 
-                <div className="flex items-center justify-between text-xs p-2 rounded-lg bg-white/[0.03] border border-white/5">
+                <div className="flex items-center justify-between text-xs p-2 rounded-lg bg-white/[0.02] border border-white/5">
                   <div className="flex items-center gap-2">
-                    <span className="text-neutral-400 font-bold">#2</span>
-                    <span className="text-neutral-200">Sneha P. (Civil)</span>
+                    <span className="w-5 h-5 rounded flex items-center justify-center bg-slate-300/20 text-slate-300 font-black text-[10px]">
+                      #2
+                    </span>
+                    <span className="text-neutral-200">Sneha P. (Mechanical)</span>
                   </div>
-                  <span className="font-mono text-neutral-300 font-semibold">2,180 XP</span>
+                  <span className="font-mono text-neutral-300 font-semibold">2,180 pts</span>
                 </div>
 
-                <div className="flex items-center justify-between text-xs p-2 rounded-lg bg-white/[0.03] border border-white/5">
+                <div className="flex items-center justify-between text-xs p-2 rounded-lg bg-white/[0.02] border border-white/5">
                   <div className="flex items-center gap-2">
-                    <span className="text-amber-600 font-bold">#3</span>
-                    <span className="text-neutral-200">Aditya N. (IT)</span>
+                    <span className="w-5 h-5 rounded flex items-center justify-center bg-amber-700/20 text-amber-500 font-black text-[10px]">
+                      #3
+                    </span>
+                    <span className="text-neutral-200">Aditya N. (Electronics)</span>
                   </div>
-                  <span className="font-mono text-neutral-300 font-semibold">1,940 XP</span>
+                  <span className="font-mono text-neutral-300 font-semibold">1,940 pts</span>
                 </div>
               </div>
             </div>
 
             <div className="mt-5 pt-3 border-t border-white/10 flex items-center justify-between text-xs">
-              <span className="text-neutral-400">Season 2026</span>
-              <span className="text-yellow-400 font-semibold group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
+              <span className="text-neutral-400">Season 2026 &bull; 48 Athletes</span>
+              <span className="text-violet-400 font-semibold group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
                 Hall of Fame <ChevronRight className="w-3.5 h-3.5" />
               </span>
             </div>
@@ -462,105 +467,79 @@ export const Landing: React.FC = () => {
 
       {/* 6. Core Pillars Feature Grid */}
       <section id="features" className="relative z-10 py-16 px-4 sm:px-6 max-w-6xl mx-auto">
-        <div className="text-center mb-12">
-          <h2 className="text-2xl sm:text-4xl font-extrabold text-white tracking-tight">
-            Engineered for Campus Esports & Athletics
-          </h2>
-          <p className="text-xs sm:text-sm text-neutral-400 mt-2 max-w-xl mx-auto">
-            Everything your collegiate council needs to orchestrate seamless competitions, from squad draft day to grand final trophies.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {/* Feature 1 */}
-          <Glass
-            variant="subtle"
-            borderRadius={20}
-            className="p-6 flex flex-col border border-white/10 hover:border-amber-400/30 transition-all group"
-          >
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 mb-4 group-hover:scale-110 transition-transform">
-              <Gavel className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white mb-2">Live Player Auctions</h3>
-            <p className="text-xs text-neutral-400 leading-relaxed">
-              Run real-time bidding rooms where captains manage team purses, place instant counter-bids, and draft rosters under rapid countdown timers.
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+          {/* Left Column: Left-aligned, smaller heading and narrative */}
+          <div className="lg:col-span-4 space-y-3">
+            <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight leading-snug">
+              Engineered for Campus Esports & Athletics
+            </h2>
+            <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed">
+              Everything your collegiate council needs to orchestrate seamless competitions, from squad draft day to grand final trophies.
             </p>
-          </Glass>
+          </div>
 
-          {/* Feature 2 */}
-          <Glass
-            variant="subtle"
-            borderRadius={20}
-            className="p-6 flex flex-col border border-white/10 hover:border-amber-400/30 transition-all group"
-          >
-            <div className="w-10 h-10 rounded-xl bg-orange-500/20 border border-orange-500/40 flex items-center justify-center text-orange-400 mb-4 group-hover:scale-110 transition-transform">
-              <Layers className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white mb-2">Dynamic Tournament Brackets</h3>
-            <p className="text-xs text-neutral-400 leading-relaxed">
-              Automated single-elimination, double-elimination, and round-robin brackets with live match scoring and automatic winner advancement.
-            </p>
-          </Glass>
+          {/* Right Column: Tight 4-card 2x2 grid */}
+          <div className="lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* Feature 1: Auctions */}
+            <Glass
+              variant="subtle"
+              borderRadius={16}
+              className="p-5 flex flex-col border border-white/10 hover:bg-white/[0.05] transition-colors"
+            >
+              <div className="w-9 h-9 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 mb-3.5">
+                <Gavel className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-white mb-1.5">Live Player Auctions</h3>
+              <p className="text-xs text-neutral-400 leading-relaxed">
+                Run real-time bidding rooms where captains manage team purses, place counter-bids, and draft rosters under rapid countdown timers.
+              </p>
+            </Glass>
 
-          {/* Feature 3 */}
-          <Glass
-            variant="subtle"
-            borderRadius={20}
-            className="p-6 flex flex-col border border-white/10 hover:border-amber-400/30 transition-all group"
-          >
-            <div className="w-10 h-10 rounded-xl bg-yellow-500/20 border border-yellow-500/40 flex items-center justify-center text-yellow-400 mb-4 group-hover:scale-110 transition-transform">
-              <Trophy className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white mb-2">Real-Time Leaderboard</h3>
-            <p className="text-xs text-neutral-400 leading-relaxed">
-              Track department standings, individual athlete stats, and season points automatically updated following verified match results.
-            </p>
-          </Glass>
+            {/* Feature 2: Brackets */}
+            <Glass
+              variant="subtle"
+              borderRadius={16}
+              className="p-5 flex flex-col border border-white/10 hover:bg-white/[0.05] transition-colors"
+            >
+              <div className="w-9 h-9 rounded-lg bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 mb-3.5">
+                <Layers className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-white mb-1.5">Tournament Brackets</h3>
+              <p className="text-xs text-neutral-400 leading-relaxed">
+                Automated single-elimination, double-elimination, and round-robin brackets with live scoring and automatic advancement.
+              </p>
+            </Glass>
 
-          {/* Feature 4 */}
-          <Glass
-            variant="subtle"
-            borderRadius={20}
-            className="p-6 flex flex-col border border-white/10 hover:border-amber-400/30 transition-all group"
-          >
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 mb-4 group-hover:scale-110 transition-transform">
-              <Crown className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white mb-2">Hall of Fame Legacy</h3>
-            <p className="text-xs text-neutral-400 leading-relaxed">
-              Immortalize collegiate champions, record-breaking captains, and standout MVP athletes with permanent campus accolades and awards.
-            </p>
-          </Glass>
+            {/* Feature 3: Leaderboards */}
+            <Glass
+              variant="subtle"
+              borderRadius={16}
+              className="p-5 flex flex-col border border-white/10 hover:bg-white/[0.05] transition-colors"
+            >
+              <div className="w-9 h-9 rounded-lg bg-yellow-500/20 border border-yellow-500/40 flex items-center justify-center text-yellow-400 mb-3.5">
+                <Trophy className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-white mb-1.5">Real-Time Leaderboard</h3>
+              <p className="text-xs text-neutral-400 leading-relaxed">
+                Track department standings, individual athlete stats, and season points automatically updated following verified match results.
+              </p>
+            </Glass>
 
-          {/* Feature 5 */}
-          <Glass
-            variant="subtle"
-            borderRadius={20}
-            className="p-6 flex flex-col border border-white/10 hover:border-amber-400/30 transition-all group"
-          >
-            <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-400 mb-4 group-hover:scale-110 transition-transform">
-              <Radio className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white mb-2">Instant Campus Broadcasts</h3>
-            <p className="text-xs text-neutral-400 leading-relaxed">
-              Publish critical schedule alerts, emergency bracket revisions, match delay notices, and official announcements across all student channels.
-            </p>
-          </Glass>
-
-          {/* Feature 6 */}
-          <Glass
-            variant="subtle"
-            borderRadius={20}
-            className="p-6 flex flex-col border border-white/10 hover:border-amber-400/30 transition-all group"
-          >
-            <div className="w-10 h-10 rounded-xl bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-400 mb-4 group-hover:scale-110 transition-transform">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <h3 className="text-base font-bold text-white mb-2">Role-Based Governance</h3>
-            <p className="text-xs text-neutral-400 leading-relaxed">
-              Granular permission levels for Coordinators, Core Council Organizers, and Founders ensuring integrity across points and brackets.
-            </p>
-          </Glass>
+            {/* Feature 4: Hall of Fame */}
+            <Glass
+              variant="subtle"
+              borderRadius={16}
+              className="p-5 flex flex-col border border-white/10 hover:bg-white/[0.05] transition-colors"
+            >
+              <div className="w-9 h-9 rounded-lg bg-violet-500/20 border border-violet-500/40 flex items-center justify-center text-violet-400 mb-3.5">
+                <Crown className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-white mb-1.5">Hall of Fame Legacy</h3>
+              <p className="text-xs text-neutral-400 leading-relaxed">
+                Immortalize collegiate champions, record-breaking captains, and standout MVP athletes with permanent campus accolades and awards.
+              </p>
+            </Glass>
+          </div>
         </div>
       </section>
 
@@ -571,97 +550,106 @@ export const Landing: React.FC = () => {
           borderRadius={24}
           className="p-8 border border-white/15 bg-black/50 backdrop-blur-2xl shadow-2xl"
         >
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-            <div>
+          <div className="grid grid-cols-2 md:grid-cols-4 text-center">
+            <div className="px-4 py-2 border-r border-white/10 border-b md:border-b-0 pb-4 md:pb-2">
+              <div className="text-xs text-white/50 font-medium mb-1.5">Tournaments</div>
               <div className="text-3xl sm:text-4xl font-black text-amber-400 font-mono">12+</div>
-              <div className="text-xs text-neutral-300 font-medium mt-1">Tournaments Hosted</div>
             </div>
-            <div>
+            <div className="px-4 py-2 md:border-r md:border-white/10 border-b md:border-b-0 pb-4 md:pb-2">
+              <div className="text-xs text-white/50 font-medium mb-1.5">Athletes</div>
               <div className="text-3xl sm:text-4xl font-black text-orange-400 font-mono">500+</div>
-              <div className="text-xs text-neutral-300 font-medium mt-1">Athletes & Gamers</div>
             </div>
-            <div>
+            <div className="px-4 py-2 border-r border-white/10 pt-4 md:pt-2">
+              <div className="text-xs text-white/50 font-medium mb-1.5">Draft Points</div>
               <div className="text-3xl sm:text-4xl font-black text-amber-300 font-mono">₹250K+</div>
-              <div className="text-xs text-neutral-300 font-medium mt-1">Auction Pts Drafted</div>
             </div>
-            <div>
-              <div className="text-3xl sm:text-4xl font-black text-emerald-400 font-mono">99.9%</div>
-              <div className="text-xs text-neutral-300 font-medium mt-1">Uptime Under Peak</div>
+            <div className="px-4 py-2 pt-4 md:pt-2">
+              <div className="text-xs text-white/50 font-medium mb-1.5">Active Teams</div>
+              <div className="text-3xl sm:text-4xl font-black text-emerald-400 font-mono">18</div>
             </div>
           </div>
         </Glass>
       </section>
 
       {/* 8. Call to Action Banner */}
-      <section className="relative z-10 py-16 px-4 sm:px-6 max-w-4xl mx-auto text-center">
+      <section className="relative z-10 py-16 px-4 sm:px-6 max-w-5xl mx-auto">
         <Glass
           variant="bold"
-          borderRadius={28}
-          className="p-8 sm:p-12 border border-amber-500/30 bg-gradient-to-b from-amber-500/10 via-black/60 to-black/90 backdrop-blur-2xl shadow-[0_0_50px_rgba(245,158,11,0.2)]"
+          borderRadius={24}
+          className="p-8 sm:p-10 border border-amber-500/25 bg-gradient-to-r from-amber-500/10 via-black/60 to-black/90 backdrop-blur-xl"
         >
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 text-xs font-bold mb-4">
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>Campus Season In Progress</span>
-          </div>
-          <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight mb-4">
-            Ready to Coordinate Your Next Championship?
-          </h2>
-          <p className="text-xs sm:text-sm text-neutral-300 max-w-lg mx-auto leading-relaxed mb-8">
-            Enter the BGSC Admin Console to supervise live registrations, run dynamic player draft auctions, and advance tournament brackets.
-          </p>
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5">
-            <button
-              type="button"
-              onClick={() => navigate('/login')}
-              className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-neutral-950 font-black text-sm tracking-wide shadow-[0_0_25px_rgba(245,158,11,0.4)] transition-all cursor-pointer flex items-center justify-center gap-2"
-            >
-              <span>Access Admin Console</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 md:gap-8 text-left">
+            <div className="space-y-2 max-w-xl">
+              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight leading-snug">
+                Ready to Coordinate Your Next Championship?
+              </h2>
+              <p className="text-xs sm:text-sm text-neutral-400 leading-relaxed">
+                Supervise registrations, run real-time player draft auctions, and advance tournament brackets.
+              </p>
+            </div>
+
+            <div className="flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => navigate('/login')}
+                className="w-full sm:w-auto px-8 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:via-orange-400 hover:to-amber-500 text-neutral-950 font-black text-sm tracking-wide shadow-[0_4px_30px_rgba(245,158,11,0.4)] transition-all flex items-center justify-center gap-2 cursor-pointer group whitespace-nowrap"
+              >
+                <span>Launch Admin Console</span>
+                <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              </button>
+            </div>
           </div>
         </Glass>
       </section>
 
       {/* 9. Cosmic Liquid Glass Footer */}
-      <footer className="relative z-10 border-t border-white/10 bg-black/60 backdrop-blur-xl py-10 px-4 sm:px-8 mt-12">
-        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6 text-xs text-neutral-400">
-          <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white">
-              <Trophy className="w-4 h-4" />
+      <footer className="relative z-10 border-t border-white/10 bg-black/60 backdrop-blur-xl pt-10 pb-8 px-4 sm:px-8 mt-12">
+        <div className="max-w-6xl mx-auto space-y-6">
+          {/* Top row: Logo on left, links and status on right */}
+          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-sm">
+                <Trophy className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="font-bold text-white tracking-tight">BGSC Platform</span>
+                <span className="text-neutral-500 text-xs ml-2">Collegiate Sports & Esports OS</span>
+              </div>
             </div>
-            <div>
-              <span className="font-bold text-white">BGSC Platform</span>
-              <span className="text-neutral-500 ml-2">&copy; {new Date().getFullYear()} Campus Sports & Gaming</span>
+
+            <div className="flex flex-wrap items-center gap-6 text-xs text-neutral-400 font-medium">
+              <button
+                type="button"
+                onClick={() => scrollToSection('showcase')}
+                className="hover:text-white transition-colors cursor-pointer"
+              >
+                Auctions & Brackets
+              </button>
+              <button
+                type="button"
+                onClick={() => scrollToSection('features')}
+                className="hover:text-white transition-colors cursor-pointer"
+              >
+                Features
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/login')}
+                className="hover:text-amber-400 transition-colors cursor-pointer"
+              >
+                Admin Sign In
+              </button>
+              <div className="flex items-center gap-2 text-neutral-500 pl-2 border-l border-white/10">
+                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                <span className="text-[11px]">Systems Operational</span>
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-6 font-medium">
-            <button
-              type="button"
-              onClick={() => navigate('/login')}
-              className="hover:text-amber-400 transition-colors cursor-pointer"
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('features')}
-              className="hover:text-amber-400 transition-colors cursor-pointer"
-            >
-              Features
-            </button>
-            <button
-              type="button"
-              onClick={() => scrollToSection('showcase')}
-              className="hover:text-amber-400 transition-colors cursor-pointer"
-            >
-              Auctions & Brackets
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2 text-[11px] text-neutral-500">
-            <span className="w-2 h-2 rounded-full bg-emerald-400" />
-            <span>Systems Operational</span>
+          {/* Bottom row: Hairline separator, copyright, and season info */}
+          <div className="border-t border-white/8 pt-5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-white/30">
+            <div>&copy; 2025 BGSC &bull; BGEC</div>
+            <div>Season 2026</div>
           </div>
         </div>
       </footer>

@@ -282,6 +282,7 @@ export const Glass: React.FC<GlassProps> = (rawProps) => {
         background: isDarkMode ? `hsl(0 0% 0% / ${v.backgroundOpacity})` : `hsl(0 0% 100% / ${v.backgroundOpacity})`,
         backdropFilter: `url(#${filterId}) saturate(${v.saturation})`,
         border: isDarkMode ? "1px solid rgba(255, 255, 255, 0.08)" : "1px solid rgba(0, 0, 0, 0.06)",
+        ...(style?.borderLeft !== undefined ? { borderLeft: style.borderLeft } : {}),
         boxShadow: isDarkMode
           ? "0 0 1px 0 rgba(255, 255, 255, 0.1) inset, 0px 4px 16px rgba(17, 17, 26, 0.05)"
           : "0 0 1px 0 rgba(0, 0, 0, 0.05) inset, 0px 4px 16px rgba(17, 17, 26, 0.05)",
@@ -294,6 +295,7 @@ export const Glass: React.FC<GlassProps> = (rawProps) => {
       backdropFilter: "blur(16px)",
       WebkitBackdropFilter: "blur(16px)",
       border: isDarkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.08)",
+      ...(style?.borderLeft !== undefined ? { borderLeft: style.borderLeft } : {}),
     } as React.CSSProperties;
   };
 
@@ -619,6 +621,7 @@ export function SpaceLogin({
   onSignUp,
   onGoogleLogin,
   onSocialLogin,
+  onBackToLanding,
   className,
   defaultEmail = "",
   showSocialButtons = true,
@@ -645,6 +648,7 @@ export function SpaceLogin({
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotSent, setForgotSent] = useState(false);
+  const [showOtherAuth, setShowOtherAuth] = useState(false);
 
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
@@ -720,13 +724,31 @@ export function SpaceLogin({
           </motion.div>
         </motion.div>
 
-        {/* Central Sign In Form */}
-        <motion.div
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="relative z-10 w-full max-w-[420px] mx-auto flex flex-col items-center"
-        >
+        {/* Central Sign In Form Container */}
+        <div className="relative z-10 w-full max-w-[440px] mx-auto flex flex-col items-center">
+          {/* Mobile Identity Context (shown when astronaut is hidden) */}
+          <div className="lg:hidden flex flex-col items-center text-center mb-4">
+            <span className="text-xs uppercase tracking-widest text-amber-400 font-bold">BGSC Platform</span>
+            <span className="text-xs text-neutral-400 mt-0.5">Collegiate Sports & Esports OS</span>
+          </div>
+
+          {/* Central Sign In Form Card */}
+          <motion.div
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="w-full flex flex-col items-center p-6 sm:p-8 rounded-2xl border border-white/12 bg-black/40 backdrop-blur-xl shadow-2xl"
+          >
+          {onBackToLanding && (
+            <button
+              type="button"
+              onClick={onBackToLanding}
+              className="self-start text-sm text-white/40 hover:text-white/70 transition-colors mb-3 cursor-pointer"
+            >
+              &larr; Home
+            </button>
+          )}
+
           <div className="flex flex-col items-center mb-6 text-center">
             <div className="flex items-center gap-2.5 mb-2">
               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-[0_0_18px_rgba(245,158,11,0.4)]">
@@ -898,43 +920,60 @@ export function SpaceLogin({
             </div>
 
             {showSocialButtons && (
-              <div className="flex flex-col gap-2.5 w-full mt-1">
+              <div className="flex flex-col gap-2 w-full mt-1.5">
                 <button
                   type="button"
                   onClick={() => (onGoogleLogin ? onGoogleLogin() : onSocialLogin?.("google"))}
-                  className="w-full h-11 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center gap-2.5 text-xs font-semibold text-neutral-200 transition-colors shadow-sm"
+                  className="w-full h-12 py-3 px-4 rounded-xl bg-white/[0.08] hover:bg-white/[0.12] border border-white/15 flex items-center justify-center gap-2.5 text-sm font-semibold text-white transition-colors shadow-sm cursor-pointer"
                 >
                   <GoogleIcon className="w-4 h-4 text-amber-400" />
                   <span>Continue with Campus Google</span>
                 </button>
 
-                <div className="flex items-center justify-center gap-3 pt-0.5">
+                {/* Collapsed Other Options */}
+                <div className="text-center pt-1">
                   <button
                     type="button"
-                    onClick={() => onSocialLogin?.("github")}
-                    className="w-9 h-9 rounded-xl bg-[#242730]/70 hover:bg-[#2e323e] border border-white/10 flex items-center justify-center text-neutral-300"
+                    onClick={() => setShowOtherAuth(!showOtherAuth)}
+                    className="text-[11px] text-neutral-400 hover:text-neutral-300 transition-colors cursor-pointer"
                   >
-                    <GitHubIcon className="w-3.5 h-3.5" />
+                    Other options {showOtherAuth ? "↑" : "↓"}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => onSocialLogin?.("windows")}
-                    className="w-9 h-9 rounded-xl bg-[#242730]/70 hover:bg-[#2e323e] border border-white/10 flex items-center justify-center text-neutral-300"
-                  >
-                    <WindowsIcon className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onSocialLogin?.("passkey")}
-                    className="w-9 h-9 rounded-xl bg-[#242730]/70 hover:bg-[#2e323e] border border-white/10 flex items-center justify-center text-neutral-300"
-                  >
-                    <KeyRound className="w-3.5 h-3.5 -rotate-45" />
-                  </button>
+
+                  {showOtherAuth && (
+                    <div className="flex items-center justify-center gap-3 pt-2.5">
+                      <button
+                        type="button"
+                        onClick={() => onSocialLogin?.("github")}
+                        title="Sign in with GitHub"
+                        className="w-9 h-9 rounded-xl bg-[#242730]/70 hover:bg-[#2e323e] border border-white/10 flex items-center justify-center text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                      >
+                        <GitHubIcon className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onSocialLogin?.("windows")}
+                        title="Sign in with Microsoft"
+                        className="w-9 h-9 rounded-xl bg-[#242730]/70 hover:bg-[#2e323e] border border-white/10 flex items-center justify-center text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                      >
+                        <WindowsIcon className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onSocialLogin?.("passkey")}
+                        title="Sign in with Passkey"
+                        className="w-9 h-9 rounded-xl bg-[#242730]/70 hover:bg-[#2e323e] border border-white/10 flex items-center justify-center text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                      >
+                        <KeyRound className="w-3.5 h-3.5 -rotate-45" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
           </form>
         </motion.div>
+        </div>
       </div>
 
       {/* Forgot Password Modal */}
