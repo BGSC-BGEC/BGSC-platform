@@ -157,13 +157,13 @@ export default function Media() {
       <SegmentedTabs tabs={TYPES} value={type} onChange={setType} />
       <FilterChips options={CATEGORIES} value={category} onChange={setCategory} />
       <SectionHeader title="Albums" />
-      {albums.loading ? <Skeleton height={80} /> : albums.error ? <ErrorState title="Could not load albums" message={albums.error} onRetry={() => void albums.reload()} /> : albums.data?.items?.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.albumRow}>
+      {albums.loading ? <Skeleton height={80} /> : albums.error ? <ErrorState title="Could not load albums" message={albums.error} onRetry={() => void albums.reload()} /> : albums.data?.items.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.albumRow}>
         <Card onPress={() => setAlbum('all')} selected={album === 'all'} style={styles.album}><Icon name="image" color="accent" /><Typography variant="h4">All moments</Typography></Card>
         {albums.data.items.map((item) => <Card key={item._id} onPress={() => setAlbum(item._id)} selected={album === item._id} style={styles.album}><Icon name="image" color="accent" /><Typography variant="h4">{item.title}</Typography><Typography variant="caption" color="textMuted">{item.media_count} items</Typography></Card>)}
       </ScrollView> : <Typography color="textMuted">Albums will appear after your first event.</Typography>}
       {(albums.data?.total_pages ?? 1) > 1 ? <View style={styles.albumRow}><Button label="Previous albums" variant="ghost" disabled={albumPage === 1} onPress={() => setAlbumPage(albumPage - 1)} /><Button label="More albums" variant="ghost" disabled={albumPage >= (albums.data?.total_pages ?? 1)} onPress={() => setAlbumPage(albumPage + 1)} /></View> : null}
       {pending.error ? <ErrorState title="Your pending uploads are unavailable" message={pending.error} onRetry={() => void pending.reload()} /> : null}
-      {pending.data?.items?.length ? (
+      {pending.data?.items.length ? (
         <Card variant="inner">
           <View style={styles.pendingHeader}>
             <Icon name="clock" color="warning" />
@@ -214,7 +214,7 @@ export default function Media() {
         onEndReached={() => {
           if (!loading && !loadingMore && page < totalPages) void load('more', page + 1);
         }}
-        renderItem={({ item }) => (
+        renderItem={({ item, index }) => (
           <Pressable
             onPress={() => navigation.navigate('MediaViewer', { id: item._id, ids: items.map((entry) => entry._id) })}
             style={({ pressed }) => [

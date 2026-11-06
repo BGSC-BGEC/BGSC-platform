@@ -46,15 +46,10 @@ import PhoneOtp from '../profile/phone-otp';
 import FeedbackSuccess from '../feedback/feedback-success';
 import MyTickets from '../feedback/my-tickets';
 import ContactFaq from '../feedback/contact-faq';
-import NotFoundScreen from '../not-found';
 
 const linking = {
   prefixes: ['bgsc://app', 'bgsc://'],
-  config: {
-    screens: {
-      StravaConnect: 'settings/integrations',
-    },
-  },
+  config: { screens: { StravaConnect: 'settings/integrations' } },
   // Google sign-in's redirect is read by the auth browser session, not routed.
   filter: (url: string) => !/^bgsc:\/\/auth\/callback/.test(url),
   getStateFromPath(path: string, options: any) {
@@ -104,25 +99,31 @@ function LoggedInStack() {
     <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <Stack.Screen name="App" component={AppDrawer} />
 
+      {/* A · home & announcements */}
       <Stack.Screen name="AnnouncementDetail" component={AnnouncementDetailScreen} />
 
+      {/* B · events & registration */}
       <Stack.Screen name="EventDetails" component={EventDetails} />
       <Stack.Screen name="EventRegistration" component={EventRegistration} />
       <Stack.Screen name="TeamJoin" component={TeamJoin} />
 
+      {/* C · live auction */}
       <Stack.Screen name="Auction" component={Auction} />
       <Stack.Screen name="AuctionLots" component={AuctionLots} />
       <Stack.Screen name="MyBids" component={MyBids} />
 
+      {/* D · leaderboards & brackets */}
       <Stack.Screen name="EventStandings" component={EventLeaderboard} />
       <Stack.Screen name="EventLeaderboard" component={EventLeaderboard} />
       <Stack.Screen name="Match" component={Match} />
 
+      {/* E · points, challenges & Strava */}
       <Stack.Screen name="Points" component={History} />
       <Stack.Screen name="History" component={History} />
       <Stack.Screen name="ChallengeDetail" component={ChallengeDetail} />
       <Stack.Screen name="StravaConnect" component={StravaConnect} />
 
+      {/* F · profile, settings & notifications */}
       <Stack.Screen name="Profile" component={Profile} />
       <Stack.Screen name="EditProfile" component={EditProfile} />
       <Stack.Screen name="Settings" component={Settings} />
@@ -130,6 +131,7 @@ function LoggedInStack() {
       <Stack.Screen name="Notifications" component={Notifications} />
       <Stack.Screen name="PhoneOtp" component={PhoneOtp} />
 
+      {/* H · hall of fame, media & feedback */}
       <Stack.Screen name="HallOfFameDetail" component={HallOfFameDetail} />
       <Stack.Screen
         name="MediaViewer"
@@ -139,7 +141,6 @@ function LoggedInStack() {
       <Stack.Screen name="FeedbackSuccess" component={FeedbackSuccess} />
       <Stack.Screen name="MyTickets" component={MyTickets} />
       <Stack.Screen name="ContactFaq" component={ContactFaq} />
-      <Stack.Screen name="NotFound" component={NotFoundScreen} />
     </Stack.Navigator>
   );
 }
@@ -152,7 +153,6 @@ function AuthStack() {
       <Stack.Screen name="Register" component={RegisterScreen} />
       <Stack.Screen name="RestoreAccount" component={RestoreAccountScreen} />
       <Stack.Screen name="ForgotPassword" component={ForgotPassword} />
-      <Stack.Screen name="NotFound" component={NotFoundScreen} />
     </Stack.Navigator>
   );
 }

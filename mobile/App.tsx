@@ -8,7 +8,6 @@ import DrawerLayout from './screens/drawer/layout';
 import { AuthProvider, useAuth } from './store/auth';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { PopupProvider } from './src/popups/PopupProvider';
-import { ErrorBoundary } from './src/feedback/ErrorBoundary';
 import { usersRepository } from './src/repositories/UsersRepository';
 
 // Web only: the inputs already show the orange focus border from the theme, so drop
@@ -46,15 +45,13 @@ export default function App() {
   if (!fontsLoaded && !fontError) return null;
 
   return (
-    <ErrorBoundary fallbackTitle="Application encountered an error">
-      <AuthProvider>
-        <ThemeProvider initialMode="dark">
-          <AccountAppearance />
-          <PopupProvider>
-            <DrawerLayout />
-          </PopupProvider>
-        </ThemeProvider>
-      </AuthProvider>
-    </ErrorBoundary>
-  );
+    <AuthProvider>
+      <ThemeProvider initialMode="dark">
+        <AccountAppearance />
+        <PopupProvider>
+          <DrawerLayout />
+        </PopupProvider>
+      </ThemeProvider>
+    </AuthProvider>
+  ) ;
 }
