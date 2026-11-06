@@ -19,8 +19,5 @@ export { StatTile, type StatTileProps } from './StatTile';
 export { OptionTile, type OptionTileProps } from './OptionTile';
 export { SeverityPill, type SeverityPillProps } from './SeverityPill';
 export { InterestTile, type InterestTileProps } from './InterestTile';
-export { GlobePattern, type GlobePatternProps } from './GlobePattern';
-export { GamingBackdrop, type GamingBackdropProps } from './GamingBackdrop';
 export { SegmentedTabs, SegmentedControl, type SegmentedTabsProps, type SegmentedControlProps } from './SegmentedTabs';
 export { Podium, StandingRow, type RankedRow } from './LeaderboardParts';
-export { RetroTvError, type RetroTvErrorProps } from './RetroTvError';

@@ -7,7 +7,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-
+import { BlurView } from 'expo-blur';
 
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from './Icon';
@@ -60,7 +60,7 @@ export function IconButton({
   accessibilityLabel,
   style,
 }: IconButtonProps) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [scale] = useState(() => new Animated.Value(1));
   const [opacity] = useState(() => new Animated.Value(1));
 

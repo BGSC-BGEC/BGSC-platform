@@ -1,37 +1,20 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import {
-  Animated,
-  Linking,
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  View,
-} from 'react-native';
-import {
-  DrawerActions,
-  useFocusEffect,
-  useNavigation,
-  type NavigationProp,
-  type ParamListBase,
-} from '@react-navigation/native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import React, { useCallback } from 'react';
+import { Linking, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 
+import { AppHeader } from '../../src/components/AppHeader';
 import { Avatar } from '../../src/components/Avatar';
 import { authorColor } from '../../src/components/AnnouncementCard';
 import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
 import { EventCard, eventCardData } from '../../src/components/EventCard';
 import { SectionHeader } from '../../src/components/SectionHeader';
-import { GamingBackdrop } from '../../src/components/GamingBackdrop';
 import { SkeletonEventCard, Skeleton } from '../../src/feedback/Skeleton';
 import { ErrorState } from '../../src/feedback/ErrorState';
 import { Icon, type IconName } from '../../src/icons/Icon';
 import { Typography } from '../../src/typography/Typography';
 import { FONT_FAMILIES } from '../../src/theme/typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
-import { withAlpha } from '../../src/theme/colors';
 import { useAuth } from '../../store/auth';
 import { useAsyncResource } from '../../src/hooks/useAsyncResource';
 import { api } from '../../src/api/client';
@@ -39,8 +22,7 @@ import { announcementsRepository } from '../../src/repositories/AnnouncementsRep
 import { eventsRepository } from '../../src/repositories/EventsRepository';
 import { leaderboardRepository } from '../../src/repositories/LeaderboardRepository';
 import { pointsRepository } from '../../src/repositories/PointsRepository';
-import { notificationsRepository } from '../../src/repositories/NotificationsRepository';
-import type { Announcement, AnnouncementHead, ApiEvent, EventCategory, PointTransaction } from '../../src/api/types';
+import type { Announcement, AnnouncementHead, ApiEvent, PointTransaction } from '../../src/api/types';
 import {
   ANNOUNCEMENT_CATEGORY_LABELS,
   eventStatusPill,
@@ -50,71 +32,9 @@ import {
   timeAgo,
 } from '../../src/utils/format';
 
+// ponytail: placeholder community link — swap for the real BGSC WhatsApp invite.
 const WHATSAPP_URL = 'https://www.whatsapp.com/';
 const WEEK_MS = 7 * 24 * 3600 * 1000;
-
-export type FinderCategory = 'general' | 'gaming' | 'sports';
-
-export const FINDER_CONFIG: Record<
-  FinderCategory,
-  {
-    disciplineCode: string;
-    disciplineLabel: string;
-    disciplineSub: string;
-    arenaCode: string;
-    arenaLabel: string;
-    arenaSub: string;
-    schedule: string;
-    time: string;
-    squad: string;
-    format: string;
-    ctaLabel: string;
-    targetCategory?: EventCategory;
-  }
-> = {
-  general: {
-    disciplineCode: 'ALL',
-    disciplineLabel: 'COMMUNITY',
-    disciplineSub: 'General Events & Socials',
-    arenaCode: 'AUD',
-    arenaLabel: 'VENUE',
-    arenaSub: 'Main Auditorium · Hall A',
-    schedule: 'Sun, 6 Sep',
-    time: '5:00 PM IST',
-    squad: 'Solo / Teams',
-    format: 'Open Stage',
-    ctaLabel: 'Explore General Events',
-    targetCategory: 'general',
-  },
-  gaming: {
-    disciplineCode: 'VAL',
-    disciplineLabel: 'DISCIPLINE',
-    disciplineSub: 'Valorant 5v5 · PC Esports',
-    arenaCode: 'FNL',
-    arenaLabel: 'ARENA',
-    arenaSub: 'Grand Finals · Discord',
-    schedule: 'Fri, 4 Sep',
-    time: '6:00 PM IST',
-    squad: '5 Players (Team)',
-    format: 'Double Elim',
-    ctaLabel: 'Search Gaming Tournaments',
-    targetCategory: 'bgec',
-  },
-  sports: {
-    disciplineCode: 'BPL',
-    disciplineLabel: 'LEAGUE',
-    disciplineSub: 'Badminton & Football',
-    arenaCode: 'SAC',
-    arenaLabel: 'ARENA',
-    arenaSub: 'Indoor Courts · Turf',
-    schedule: 'Sat, 5 Sep',
-    time: '4:30 PM IST',
-    squad: 'Franchise Teams',
-    format: 'Round Robin',
-    ctaLabel: 'Search Sports Leagues',
-    targetCategory: 'leagues',
-  },
-};
 
 const SOURCE_ICON: Record<PointTransaction['source'], IconName> = {
   event: 'trophy',
@@ -140,6 +60,7 @@ interface HomeData {
 const ACTIVE_PARTICIPATION = ['accepted', 'submitted', 'under_review'];
 
 async function loadHome(userId: string | undefined): Promise<HomeData> {
+  // Each tile degrades on its own; if the core feed all fails we're offline and the screen says so.
   let firstError: unknown = null;
   const settle = <T,>(p: Promise<T>): Promise<T | null> =>
     p.catch((err) => {
@@ -163,6 +84,7 @@ async function loadHome(userId: string | undefined): Promise<HomeData> {
   const weekAgo = Date.now() - WEEK_MS;
   const week = tx.filter((t) => Date.parse(t.created_at) >= weekAgo && t.amount > 0).reduce((n, t) => n + t.amount, 0);
 
+  // Transactions only carry a reference id — look up event titles for the three rows shown.
   const recent = tx.slice(0, 3);
   const titles = await Promise.all(
     recent.map((t) =>
@@ -188,610 +110,273 @@ async function loadHome(userId: string | undefined): Promise<HomeData> {
 }
 
 function greeting(now = new Date()): string {
+  // IST, like every other date on screen.
   const h = Number(now.toLocaleString('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Kolkata' }));
   return h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening';
 }
 
-/**
- * Home screen displaying featured events, announcements, and quick actions.
- */
+/** v2 Home (34:563). */
 export default function Home() {
-  const { colors, shadow } = useTheme();
-  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { user } = useAuth();
   const { data, loading, refreshing, error, reload } = useAsyncResource(() => loadHome(user?.id), [user?.id]);
-  const [searchTab, setSearchTab] = useState<FinderCategory>('gaming');
-  const [unread, setUnread] = useState(0);
-
-  const currentConfig = FINDER_CONFIG[searchTab];
-
-  const carouselEvents = useMemo(() => {
-    const all = data?.events ?? [];
-    if (!all.length) return [];
-    if (searchTab === 'gaming') {
-      const matches = all.filter((e) => e.domain === 'esports' || e.category === 'bgec');
-      return matches.length > 0 ? matches : all;
-    }
-    if (searchTab === 'sports') {
-      const matches = all.filter(
-        (e) => e.domain === 'sports' || e.domain === 'fitness' || e.category === 'leagues' || e.category === 'fitsoc',
-      );
-      return matches.length > 0 ? matches : all;
-    }
-    if (searchTab === 'general') {
-      const matches = all.filter((e) => e.domain === 'general' || e.category === 'general');
-      return matches.length > 0 ? matches : all;
-    }
-    return all;
-  }, [data?.events, searchTab]);
-
-  const scrollY = useRef(new Animated.Value(0)).current;
-
-  // Poll notifications for top bar
-  useFocusEffect(
-    useCallback(() => {
-      let alive = true;
-      const load = () =>
-        notificationsRepository
-          .getUnreadCount()
-          .then((n) => alive && setUnread(n))
-          .catch(() => undefined);
-      load();
-      const timer = setInterval(load, 30000);
-      return () => {
-        alive = false;
-        clearInterval(timer);
-      };
-    }, []),
-  );
 
   const openEvents = (data?.events ?? []).filter((e) => eventStatusPill(e).registrationOpen);
+  const [featured, ...more] = data?.events ?? [];
   const firstName = (user?.fullName || user?.username || '').split(' ')[0];
+  const today = new Date()
+    .toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' })
+    .toUpperCase();
 
   const goEvent = useCallback(
     (e: ApiEvent) => navigation.navigate('EventDetails', { eventId: e.slug || e._id }),
     [navigation],
   );
 
-  const heroOpacity = scrollY.interpolate({
-    inputRange: [0, 110],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
-
-  const heroScale = scrollY.interpolate({
-    inputRange: [0, 110],
-    outputRange: [1, 0.9],
-    extrapolate: 'clamp',
-  });
-
-  const heroTranslateY = scrollY.interpolate({
-    inputRange: [0, 110],
-    outputRange: [0, -26],
-    extrapolate: 'clamp',
-  });
-
-  const topBarBg = scrollY.interpolate({
-    inputRange: [50, 110],
-    outputRange: ['rgba(44, 49, 53, 0)', 'rgba(44, 49, 53, 0.98)'],
-    extrapolate: 'clamp',
-  });
-
-  const topBarBorder = scrollY.interpolate({
-    inputRange: [75, 115],
-    outputRange: ['rgba(255, 255, 255, 0)', colors.border],
-    extrapolate: 'clamp',
-  });
-
-  const heroHeight = insets.top + 300;
-  const spacerHeight = insets.top + 215;
-
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <View style={[styles.heroFixedLayer, { height: heroHeight }]} pointerEvents="none">
-        <GamingBackdrop height={heroHeight} />
-      </View>
-
-      <Animated.View
-        style={[
-          styles.heroTextBlock,
-          {
-            paddingTop: insets.top + 78,
-            opacity: heroOpacity,
-            transform: [{ translateY: heroTranslateY }, { scale: heroScale }],
-          },
-        ]}
-        pointerEvents="none"
+      <AppHeader title="BGSC" />
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => reload()} tintColor={colors.primary} />}
       >
-        <Typography variant="bodySmall" color="textMuted" style={styles.greetingText}>
-          Good {greeting()}{firstName ? `, ${firstName}` : ''}
-        </Typography>
+        {/* Greeting */}
+        <View style={styles.greeting}>
+          <Typography color="textMuted" style={styles.kicker}>
+            {today}
+          </Typography>
+          <Typography variant="displayHero" color="text" style={styles.hello}>
+            {greeting()}
+            {firstName ? `, ${firstName}` : ''}.
+          </Typography>
+          {data ? (
+            <Typography variant="body" color="textMuted">
+              {openEvents.length === 0
+                ? 'Nothing open for registration right now.'
+                : `${openEvents.length} ${openEvents.length === 1 ? 'event is' : 'events are'} open for registration.`}
+            </Typography>
+          ) : null}
+        </View>
 
-        <Typography color="text" style={styles.headline}>
-          Where Are You Competing?
-        </Typography>
+        {error && !data ? <ErrorState title="Couldn’t load your home feed" message={error} onRetry={() => reload()} /> : null}
 
-        {data ? (
-          <View
-            style={[
-              styles.statusPill,
-              {
-                backgroundColor: withAlpha(colors.primary, 0.15),
-                borderColor: withAlpha(colors.primary, 0.4),
-              },
-              Platform.OS === 'web' && ({
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                boxShadow: `0 4px 14px -2px ${withAlpha(colors.primary, 0.3)}, inset 0 1px 1px rgba(255, 255, 255, 0.35)`,
-              } as any),
+        {/* Pinned broadcast */}
+        {data?.pinned ? (
+          <Pressable
+            onPress={() => navigation.navigate('AnnouncementDetail', { id: data.pinned!._id })}
+            accessibilityRole="button"
+            style={({ pressed }) => [
+              styles.pinned,
+              { backgroundColor: colors.accentMuted, borderColor: colors.primary },
+              pressed && styles.pressed,
             ]}
           >
-            <Icon name="trophy" size={13} color="primary" />
-            <Typography variant="caption" color="primary" style={styles.statusPillText}>
-              {openEvents.length === 0
-                ? 'No tournaments open today · Browse upcoming'
-                : `${openEvents.length} tournament${openEvents.length === 1 ? '' : 's'} open for entry`}
-            </Typography>
+            <View style={[styles.iconTile, { backgroundColor: colors.primarySolid }]}>
+              <Icon name="megaphone" size={20} color="white" />
+            </View>
+            <View style={styles.flex}>
+              <Typography color="primary" style={styles.pinnedKicker}>
+                PINNED · {ANNOUNCEMENT_CATEGORY_LABELS[data.pinned.categories[0]]?.toUpperCase()}
+              </Typography>
+              <Typography variant="body" color="text" style={styles.semibold} numberOfLines={2}>
+                {data.pinned.title}
+              </Typography>
+            </View>
+            <Icon name="chevron-right" size={20} color="primary" />
+          </Pressable>
+        ) : null}
+
+        {/* Points card */}
+        {loading ? (
+          <Skeleton height={230} borderRadius={24} />
+        ) : data?.points ? (
+          <View style={[styles.card, styles.pointsCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.row}>
+              <Typography color="textMuted" style={[styles.kicker, styles.flex]}>
+                SEASON POINTS
+              </Typography>
+              {data.rank ? <Badge label={`Top ${data.rank.topPercent}%`} variant="success" /> : null}
+            </View>
+            <View style={styles.balanceRow}>
+              <Typography color="text" style={styles.balance}>
+                {formatNumber(data.points.balance)}
+              </Typography>
+              {data.points.week > 0 ? (
+                <Typography variant="mono" color="success" style={styles.week}>
+                  +{formatNumber(data.points.week)} this week
+                </Typography>
+              ) : null}
+            </View>
+            <View style={styles.stats}>
+              <Stat value={data.rank ? `#${data.rank.rank}` : '—'} label="Global rank" />
+              <Stat value={data.eventsJoined != null ? String(data.eventsJoined) : '—'} label="Events" />
+              <Stat
+                value={data.activeChallenges != null ? String(data.activeChallenges) : '—'}
+                label="Challenges"
+                onPress={() => navigation.navigate('Challenges')}
+              />
+            </View>
+            <View style={styles.row}>
+              <Button label="Points history" variant="outline" onPress={() => navigation.navigate('Points')} containerStyle={styles.flex} />
+              <Button label="Leaderboard" onPress={() => navigation.navigate('Leaderboard')} containerStyle={styles.flex} />
+            </View>
           </View>
         ) : null}
-      </Animated.View>
 
-      <Animated.ScrollView
-        showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => reload()}
-            tintColor={colors.primary}
-            progressViewOffset={insets.top + 60}
+        {/* Quick actions */}
+        <View style={styles.row}>
+          <QuickAction icon="calendar" title="Register" meta={`${openEvents.length} open`} onPress={() => navigation.navigate('Events')} />
+          <QuickAction
+            icon="target"
+            title="Challenges"
+            meta={data?.activeChallenges != null ? `${data.activeChallenges} active` : 'Browse'}
+            onPress={() => navigation.navigate('Challenges')}
           />
-        }
-        contentContainerStyle={styles.scrollContent}
-      >
-        <View style={{ height: spacerHeight }} />
+          <QuickAction icon="image" title="Media" meta="Share" onPress={() => navigation.navigate('Media')} />
+        </View>
 
-        <View
-          style={[
-            styles.contentSheet,
-            {
-              backgroundColor: colors.surface,
-              borderColor: colors.border,
-              borderTopColor: withAlpha('#FFFFFF', 0.18),
-            },
-            Platform.OS === 'web' && ({
-              boxShadow: '0 -8px 30px -4px rgba(0, 0, 0, 0.25), inset 0 1px 1.5px rgba(255, 255, 255, 0.16)',
-            } as any),
-            shadow('elevated'),
-          ]}
-        >
-          <View
-            style={[
-              styles.finderBoxWrap,
-              {
-                backgroundColor: withAlpha(colors.surfaceInner, 0.88),
-                borderColor: withAlpha(colors.border, 0.8),
-                borderTopColor: withAlpha('#FFFFFF', 0.2),
-              },
-              Platform.OS === 'web' && ({
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
-                boxShadow: '0 12px 32px -8px rgba(0, 0, 0, 0.35), inset 0 1px 1.5px rgba(255, 255, 255, 0.15)',
-              } as any),
-            ]}
-          >
-            <View
-              style={[
-                styles.finderTabs,
-                {
-                  backgroundColor: withAlpha(colors.surface, 0.65),
-                  borderColor: withAlpha(colors.border, 0.7),
-                  borderTopColor: withAlpha('#FFFFFF', 0.14),
-                },
-                Platform.OS === 'web' && ({
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  boxShadow: 'inset 0 1px 1.5px rgba(255, 255, 255, 0.1)',
-                } as any),
-              ]}
-            >
-              {(['general', 'gaming', 'sports'] as const).map((tabKey) => {
-                const active = searchTab === tabKey;
+        {/* From the heads */}
+        {data?.heads.length ? (
+          <View style={styles.section}>
+            <SectionHeader title="From the heads" actionLabel="All posts" onAction={() => navigation.navigate('AnnouncementsTab')} />
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
+              {data.heads.map((h) => (
+                <HeadBubble
+                  key={h.coordinator.user_id}
+                  head={h}
+                  onPress={h.announcement ? () => navigation.navigate('AnnouncementDetail', { id: h.announcement!._id }) : undefined}
+                />
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
+
+        {/* Upcoming events */}
+        <View style={styles.section}>
+          <SectionHeader title="Upcoming events" actionLabel="See all" onAction={() => navigation.navigate('Events')} />
+          {loading ? (
+            <SkeletonEventCard />
+          ) : featured ? (
+            (() => {
+              const card = eventCardData(featured);
+              return (
+                <EventCard
+                  {...card}
+                  onPress={() => goEvent(featured)}
+                  cta={
+                    card.registrationOpen
+                      ? { label: 'Register', onPress: () => navigation.navigate('EventRegistration', { eventId: featured.slug || featured._id }) }
+                      : { label: 'View', variant: 'outline', onPress: () => goEvent(featured) }
+                  }
+                />
+              );
+            })()
+          ) : (
+            <Typography variant="body" color="textMuted">
+              No upcoming events yet — check back soon.
+            </Typography>
+          )}
+          {more.length ? (
+            <View style={styles.row}>
+              {more.slice(0, 2).map((e) => {
+                const pill = eventStatusPill(e);
                 return (
                   <Pressable
-                    key={tabKey}
-                    onPress={() => setSearchTab(tabKey)}
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected: active }}
-                    style={[
-                      styles.finderTab,
-                      active && [
-                        {
-                          backgroundColor: colors.surfaceElevated,
-                          borderColor: withAlpha(colors.primary, 0.35),
-                          shadowColor: colors.primary,
-                          shadowOffset: { width: 0, height: 2 },
-                          shadowOpacity: 0.22,
-                          shadowRadius: 6,
-                          elevation: 3,
-                        },
-                        Platform.OS === 'web' && ({
-                          boxShadow: `0 2px 10px ${withAlpha(colors.primary, 0.22)}, inset 0 1px 1px rgba(255, 255, 255, 0.28)`,
-                        } as any),
-                      ],
+                    key={e._id}
+                    onPress={() => goEvent(e)}
+                    accessibilityRole="button"
+                    style={({ pressed }) => [
+                      styles.card,
+                      styles.compact,
+                      { backgroundColor: colors.surface, borderColor: colors.border },
+                      pressed && styles.pressed,
                     ]}
                   >
-                    <Typography
-                      variant="caption"
-                      style={{
-                        fontFamily: active ? FONT_FAMILIES.bodyBold : FONT_FAMILIES.bodyMedium,
-                        color: active ? colors.text : colors.textMuted,
-                        textTransform: 'capitalize',
-                        fontSize: 12,
-                      }}
-                    >
-                      {tabKey}
+                    <Badge label={pill.label} variant={pill.variant} />
+                    <Typography variant="body" color="text" style={styles.semibold} numberOfLines={1}>
+                      {e.title}
+                    </Typography>
+                    <Typography color="textMuted" style={styles.tiny} numberOfLines={1}>
+                      {new Date(e.start_at).toLocaleDateString('en-IN', { weekday: 'short', timeZone: 'Asia/Kolkata' })}
+                      {e.venue ? ` · ${e.venue}` : ''}
                     </Typography>
                   </Pressable>
                 );
               })}
             </View>
-
-            <View style={styles.finderCarouselContainer}>
-              {loading ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.eventsCarousel}>
-                  <View style={styles.carouselCardWrap}>
-                    <SkeletonEventCard />
-                  </View>
-                  <View style={styles.carouselCardWrap}>
-                    <SkeletonEventCard />
-                  </View>
-                </ScrollView>
-              ) : carouselEvents.length > 0 ? (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.eventsCarousel}
-                  snapToInterval={300}
-                  decelerationRate="fast"
-                >
-                  {carouselEvents.map((event) => {
-                    const card = eventCardData(event);
-                    return (
-                      <View key={event._id} style={styles.carouselCardWrap}>
-                        <EventCard
-                          {...card}
-                          onPress={() => goEvent(event)}
-                          cta={
-                            card.registrationOpen
-                              ? {
-                                  label: 'Register',
-                                  onPress: () =>
-                                    navigation.navigate('EventRegistration', {
-                                      eventId: event.slug || event._id,
-                                    }),
-                                }
-                              : {
-                                  label: 'View Details',
-                                  variant: 'outline',
-                                  onPress: () => goEvent(event),
-                                }
-                          }
-                        />
-                      </View>
-                    );
-                  })}
-                </ScrollView>
-              ) : (
-                <View style={[styles.emptyEventsBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Icon name="calendar-outline" size={24} color="textMuted" />
-                  <Typography variant="bodySmall" color="textMuted" style={{ textAlign: 'center' }}>
-                    No upcoming {searchTab} events right now.{'\n'}Check back soon or browse all events.
-                  </Typography>
-                </View>
-              )}
-            </View>
-
-            <Pressable
-              onPress={() =>
-                navigation.navigate(
-                  'Events',
-                  currentConfig.targetCategory ? { category: currentConfig.targetCategory } : undefined,
-                )
-              }
-              accessibilityRole="button"
-              accessibilityLabel={`Show all ${searchTab} events`}
-              style={({ pressed }) => [
-                styles.finderFooterRow,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-                pressed && styles.pressed,
-              ]}
-            >
-              <Typography variant="caption" color="textMuted" style={{ fontSize: 12, fontWeight: '500' }}>
-                {carouselEvents.length} event{carouselEvents.length === 1 ? '' : 's'}
-              </Typography>
-              <View style={styles.finderFooterAction}>
-                <Typography variant="caption" color="primary" style={[styles.semibold, { fontSize: 12 }]}>
-                  Show all
-                </Typography>
-                <Icon name="chevron-right" size={14} color="primary" />
-              </View>
-            </Pressable>
-          </View>
-
-          {/* Feed Error Alert */}
-          {error && !data ? <ErrorState title="Couldn’t load your home feed" message={error} onRetry={() => reload()} /> : null}
-
-          {data?.pinned ? (
-            <Pressable
-              onPress={() => navigation.navigate('AnnouncementDetail', { id: data.pinned!._id })}
-              accessibilityRole="button"
-              style={({ pressed }) => [
-                styles.pinned,
-                { backgroundColor: colors.accentMuted, borderColor: colors.primary },
-                shadow('flat'),
-                pressed && styles.pressed,
-              ]}
-            >
-              <View style={[styles.iconTile, { backgroundColor: colors.primarySolid }]}>
-                <Icon name="megaphone" size={20} color="white" />
-              </View>
-              <View style={styles.flex}>
-                <Typography color="primary" style={styles.pinnedKicker}>
-                  PINNED · {ANNOUNCEMENT_CATEGORY_LABELS[data.pinned.categories[0]]?.toUpperCase()}
-                </Typography>
-                <Typography variant="body" color="text" style={styles.semibold} numberOfLines={2}>
-                  {data.pinned.title}
-                </Typography>
-              </View>
-              <Icon name="chevron-right" size={20} color="primary" />
-            </Pressable>
           ) : null}
-
-          {loading ? (
-            <Skeleton height={210} borderRadius={24} />
-          ) : data?.points ? (
-            <View style={[styles.card, styles.pointsPass, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('raised')]}>
-              <View style={[styles.passRibbon, { borderBottomColor: colors.border }]}>
-                <View style={styles.passType}>
-                  <Icon name="zap" size={14} color="primary" />
-                  <Typography variant="mono" color="textMuted" style={styles.passLabel}>
-                    BGSC MEMBER PASS
-                  </Typography>
-                </View>
-                {data.rank ? <Badge label={`Top ${data.rank.topPercent}%`} variant="success" /> : null}
-              </View>
-
-              {/* Point Balance */}
-              <View style={styles.balanceRow}>
-                <View>
-                  <Typography variant="caption" color="textMuted">
-                    TOTAL BALANCE
-                  </Typography>
-                  <Typography color="text" style={styles.balance}>
-                    {formatNumber(data.points.balance)}
-                  </Typography>
-                </View>
-                {data.points.week > 0 ? (
-                  <View style={[styles.weekPill, { backgroundColor: withAlpha(colors.success, 0.15) }]}>
-                    <Icon name="arrow-up" size={12} color="success" />
-                    <Typography variant="mono" color="success" style={styles.week}>
-                      +{formatNumber(data.points.week)} this week
-                    </Typography>
-                  </View>
-                ) : null}
-              </View>
-
-              <View style={[styles.statsStrip, { backgroundColor: colors.surfaceInner, borderColor: colors.border }]}>
-                <Stat value={data.rank ? `#${data.rank.rank}` : '—'} label="Global Rank" />
-                <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-                <Stat value={data.eventsJoined != null ? String(data.eventsJoined) : '—'} label="Events Joined" />
-                <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-                <Stat
-                  value={data.activeChallenges != null ? String(data.activeChallenges) : '—'}
-                  label="Challenges"
-                  onPress={() => navigation.navigate('Challenges')}
-                />
-              </View>
-
-              {/* Actions */}
-              <View style={styles.passActions}>
-                <Button label="History" variant="outline" onPress={() => navigation.navigate('Points')} containerStyle={styles.flex} />
-                <Button label="Leaderboard" onPress={() => navigation.navigate('Leaderboard')} containerStyle={styles.flex} />
-              </View>
-            </View>
-          ) : null}
-
-          {/* Quick Actions */}
-          <View style={styles.quickGrid}>
-            <QuickAction icon="calendar" title="Events" meta={`${openEvents.length} open`} onPress={() => navigation.navigate('Events')} />
-            <QuickAction
-              icon="target"
-              title="Challenges"
-              meta={data?.activeChallenges != null ? `${data.activeChallenges} active` : 'Browse'}
-              onPress={() => navigation.navigate('Challenges')}
-            />
-            <QuickAction icon="trophy" title="Hall of Fame" meta="Champions" onPress={() => navigation.navigate('HallOfFame')} />
-          </View>
-
-          {/* From the heads */}
-          {data?.heads.length ? (
-            <View style={styles.section}>
-              <SectionHeader title="From the heads" actionLabel="All posts" onAction={() => navigation.navigate('AnnouncementsTab')} />
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
-                {data.heads.map((h) => (
-                  <HeadBubble
-                    key={h.coordinator.user_id}
-                    head={h}
-                    onPress={h.announcement ? () => navigation.navigate('AnnouncementDetail', { id: h.announcement!._id }) : undefined}
-                  />
-                ))}
-              </ScrollView>
-            </View>
-          ) : null}
-
-          {/* Recent Activity */}
-          {data?.activity.length ? (
-            <View style={styles.section}>
-              <SectionHeader title="Recent Activity" actionLabel="History" onAction={() => navigation.navigate('Points')} />
-              <View style={[styles.card, styles.list, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('flat')]}>
-                {data.activity.map((t, i) => (
-                  <View
-                    key={t.id}
-                    style={[styles.activityRow, i < data.activity.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}
-                  >
-                    <View style={[styles.iconTile, { backgroundColor: colors.surfaceInner }]}>
-                      <Icon name={SOURCE_ICON[t.source] ?? 'zap'} size={18} color="textMuted" />
-                    </View>
-                    <View style={styles.flex}>
-                      <Typography color="text" style={[styles.semibold, styles.small]} numberOfLines={1}>
-                        {t.title}
-                      </Typography>
-                      <Typography color="textMuted" style={styles.tiny}>
-                        {timeAgo(t.created_at)}
-                      </Typography>
-                    </View>
-                    <Typography variant="mono" style={{ color: t.amount >= 0 ? colors.success : colors.dangerText, fontWeight: '700' }}>
-                      {t.amount >= 0 ? '+' : '−'}
-                      {formatNumber(Math.abs(t.amount))}
-                    </Typography>
-                  </View>
-                ))}
-              </View>
-            </View>
-          ) : null}
-
-          {/* WhatsApp community */}
-          <Pressable
-            onPress={() => void Linking.openURL(WHATSAPP_URL)}
-            accessibilityRole="link"
-            style={({ pressed }) => [
-              styles.card,
-              styles.whatsapp,
-              { backgroundColor: colors.successMuted, borderColor: colors.success },
-              pressed && styles.pressed,
-            ]}
-          >
-            <View style={[styles.iconTile, { backgroundColor: colors.success }]}>
-              <Icon name="message" size={20} color="white" />
-            </View>
-            <View style={styles.flex}>
-              <Typography variant="body" color="text" style={styles.semibold}>
-                Join the BGSC WhatsApp
-              </Typography>
-              <Typography color="textMuted" style={styles.tiny}>
-                Announcements land there first
-              </Typography>
-            </View>
-            <Icon name="chevron-right" size={18} color="success" />
-          </Pressable>
         </View>
-      </Animated.ScrollView>
 
-      <Animated.View
-        style={[
-          styles.topBar,
-          {
-            paddingTop: insets.top + 8,
-            backgroundColor: topBarBg,
-            borderBottomColor: topBarBorder,
-          },
-          Platform.OS === 'web' && ({
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
-            boxShadow: '0 4px 20px -4px rgba(0, 0, 0, 0.15)',
-          } as any),
-        ]}
-      >
+        {/* Recent activity */}
+        {data?.activity.length ? (
+          <View style={styles.section}>
+            <SectionHeader title="Recent activity" actionLabel="History" onAction={() => navigation.navigate('Points')} />
+            <View style={[styles.card, styles.list, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              {data.activity.map((t, i) => (
+                <View
+                  key={t.id}
+                  style={[styles.activityRow, i < data.activity.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}
+                >
+                  <View style={[styles.iconTile, { backgroundColor: colors.surfaceInner }]}>
+                    <Icon name={SOURCE_ICON[t.source] ?? 'zap'} size={18} color="textMuted" />
+                  </View>
+                  <View style={styles.flex}>
+                    <Typography color="text" style={[styles.semibold, styles.small]} numberOfLines={1}>
+                      {t.title}
+                    </Typography>
+                    <Typography color="textMuted" style={styles.tiny}>
+                      {timeAgo(t.created_at)}
+                    </Typography>
+                  </View>
+                  <Typography variant="mono" style={{ color: t.amount >= 0 ? colors.success : colors.dangerText }}>
+                    {t.amount >= 0 ? '+' : '−'}
+                    {formatNumber(Math.abs(t.amount))}
+                  </Typography>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {/* WhatsApp community */}
         <Pressable
-          onPress={() => navigation.dispatch(DrawerActions.openDrawer())}
-          accessibilityRole="button"
-          accessibilityLabel="Open menu"
-          hitSlop={8}
+          onPress={() => void Linking.openURL(WHATSAPP_URL)}
+          accessibilityRole="link"
           style={({ pressed }) => [
-            styles.topPillBtn,
-            {
-              backgroundColor: withAlpha(colors.surface, 0.75),
-              borderColor: withAlpha('#FFFFFF', 0.22),
-            },
-            Platform.OS === 'web' && ({
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
-              boxShadow: '0 2px 10px rgba(0, 0, 0, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.25)',
-            } as any),
-            shadow('flat'),
+            styles.card,
+            styles.whatsapp,
+            { backgroundColor: colors.successMuted, borderColor: colors.success },
             pressed && styles.pressed,
           ]}
         >
-          <Icon name="menu" size={20} color="text" />
+          <View style={[styles.iconTile, { backgroundColor: colors.success }]}>
+            <Icon name="message" size={20} color="white" />
+          </View>
+          <View style={styles.flex}>
+            <Typography variant="body" color="text" style={styles.semibold}>
+              Join the BGSC WhatsApp
+            </Typography>
+            <Typography color="textMuted" style={styles.tiny}>
+              Announcements land there first
+            </Typography>
+          </View>
+          <Icon name="external-link" size={18} color="success" />
         </Pressable>
-
-        <View style={styles.topLogo}>
-          <Typography variant="h3" color="text" style={styles.logoTitle}>
-            BGSC
-          </Typography>
-          <View style={[styles.logoDot, { backgroundColor: colors.primary }]} />
-        </View>
-
-        <View style={styles.topActions}>
-          <Pressable
-            onPress={() => navigation.navigate('Notifications', undefined, { pop: true })}
-            accessibilityRole="button"
-            accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
-            hitSlop={6}
-            style={({ pressed }) => [
-              styles.topPillBtn,
-              styles.bellBtn,
-              {
-                backgroundColor: withAlpha(colors.surface, 0.75),
-                borderColor: withAlpha('#FFFFFF', 0.22),
-              },
-              Platform.OS === 'web' && ({
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
-                boxShadow: '0 2px 10px rgba(0, 0, 0, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.25)',
-              } as any),
-              shadow('flat'),
-              pressed && styles.pressed,
-            ]}
-          >
-            <Icon name="bell" size={19} color="text" />
-            {unread > 0 ? (
-              <View
-                style={[
-                  styles.unreadDot,
-                  {
-                    backgroundColor: colors.primary,
-                    borderColor: colors.surface,
-                  },
-                ]}
-              />
-            ) : null}
-          </Pressable>
-          <Pressable
-            onPress={() => navigation.navigate('Profile', undefined, { pop: true })}
-            accessibilityRole="button"
-            accessibilityLabel="Your profile"
-            hitSlop={6}
-            style={({ pressed }) => pressed && styles.pressed}
-          >
-            <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={36} ring />
-          </Pressable>
-        </View>
-      </Animated.View>
+      </ScrollView>
     </View>
   );
 }
 
 function Stat({ value, label, onPress }: { value: string; label: string; onPress?: () => void }) {
+  const { colors } = useTheme();
   return (
     <Pressable
       onPress={onPress}
       disabled={!onPress}
       accessibilityRole={onPress ? 'button' : undefined}
-      style={styles.stat}
+      style={[styles.stat, { backgroundColor: colors.surfaceInner }]}
     >
       <Typography variant="mono" color="text" style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
         {value}
@@ -804,20 +389,20 @@ function Stat({ value, label, onPress }: { value: string; label: string; onPress
 }
 
 function QuickAction({ icon, title, meta, onPress }: { icon: IconName; title: string; meta: string; onPress: () => void }) {
-  const { colors, shadow } = useTheme();
+  const { colors } = useTheme();
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`${title}, ${meta}`}
       style={({ pressed }) => [
+        styles.card,
         styles.quick,
         { backgroundColor: colors.surface, borderColor: colors.border },
-        shadow('flat'),
         pressed && styles.pressed,
       ]}
     >
-      <View style={[styles.iconTile, { backgroundColor: withAlpha(colors.primary, 0.15) }]}>
+      <View style={[styles.iconTile, { backgroundColor: colors.accentMuted }]}>
         <Icon name={icon} size={20} color="primary" />
       </View>
       <View>
@@ -832,6 +417,7 @@ function QuickAction({ icon, title, meta, onPress }: { icon: IconName; title: st
   );
 }
 
+/** A head's latest post as a speech bubble, with who said it underneath. */
 function HeadBubble({ head, onPress }: { head: AnnouncementHead; onPress?: () => void }) {
   const { colors } = useTheme();
   const name = head.coordinator.display_name;
@@ -864,220 +450,30 @@ function HeadBubble({ head, onPress }: { head: AnnouncementHead; onPress?: () =>
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  scrollContent: { paddingBottom: 32 },
+  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 32, gap: 24 },
   flex: { flex: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  pressed: { opacity: 0.85, transform: [{ scale: 0.98 }] },
+  pressed: { opacity: 0.85 },
   semibold: { fontFamily: FONT_FAMILIES.bodySemiBold },
   small: { fontSize: 13 },
-  tiny: { fontSize: 11, lineHeight: 16 },
-
-  heroFixedLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    overflow: 'hidden',
-  },
-
-  heroTextBlock: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 20,
-    gap: 4,
-  },
-  greetingText: {
-    fontFamily: FONT_FAMILIES.bodyMedium,
-    fontSize: 13,
-    letterSpacing: 0.3,
-    marginBottom: 2,
-  },
-  headline: {
-    fontFamily: FONT_FAMILIES.bodyBold,
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: '700',
-    letterSpacing: -0.2,
-    marginBottom: 6,
-  },
-  statusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 5,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignSelf: 'flex-start',
-  },
-  statusPillText: { fontSize: 11, fontWeight: '600' },
-
-  topBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    gap: 12,
-    zIndex: 10,
-    elevation: 10,
-  },
-  topPillBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  topLogo: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  logoTitle: {
-    fontFamily: FONT_FAMILIES.hero,
-    fontSize: 20,
-    letterSpacing: 0.5,
-  },
-  logoDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    marginBottom: 5,
-  },
-  topActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  bellBtn: {
-    position: 'relative',
-  },
-  unreadDot: {
-    position: 'absolute',
-    top: 7,
-    right: 7,
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    borderWidth: 1.5,
-  },
-
-  contentSheet: {
-    maxWidth: 600,
-    width: '100%',
-    alignSelf: 'center',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    borderTopWidth: 1,
-    paddingHorizontal: 15,
-    paddingTop: 16,
-    paddingBottom: 40,
-    gap: 16,
-  },
-
-  finderBoxWrap: {
-    borderRadius: 22,
-    borderWidth: 1,
-    padding: 13,
-    gap: 10,
-  },
-  finderTabs: {
-    flexDirection: 'row',
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 3,
-    marginBottom: 2,
-  },
-  finderTab: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 7,
-    borderRadius: 11,
-  },
-  finderCarouselContainer: {
-    marginVertical: 6,
-  },
-  emptyEventsBox: {
-    borderRadius: 18,
-    borderWidth: 1,
-    padding: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    width: '100%',
-  },
-  finderFooterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginTop: 2,
-  },
-  finderFooterAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-
+  tiny: { fontSize: 11, lineHeight: 18 },
+  kicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, lineHeight: 15, letterSpacing: 1 },
+  greeting: { gap: 4 },
+  hello: { fontSize: 34, lineHeight: 52 },
   card: { borderWidth: 1 },
   pinned: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 20, borderWidth: 1 },
   pinnedKicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
-  iconTile: { padding: 10, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  pointsPass: { borderRadius: 24, padding: 18, gap: 14 },
-  passRibbon: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-  },
-  passType: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  passLabel: { fontSize: 10, letterSpacing: 1 },
-  balanceRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
-  balance: { fontFamily: FONT_FAMILIES.hero, fontSize: 40, lineHeight: 44 },
-  weekPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  week: { fontSize: 11, fontWeight: '700' },
-  statsStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 16,
-    borderWidth: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-  },
-  stat: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 4 },
-  statDivider: { width: 1, height: 26 },
-  statValue: { fontSize: 17, fontWeight: '700' },
-  passActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  quickGrid: { flexDirection: 'row', gap: 10 },
-  quick: { flex: 1, gap: 10, padding: 12, borderRadius: 20, borderWidth: 1 },
+  iconTile: { padding: 8, borderRadius: 12 },
+  pointsCard: { borderRadius: 24, padding: 20, gap: 16 },
+  balanceRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-end', columnGap: 16 },
+  balance: { fontFamily: FONT_FAMILIES.hero, fontSize: 48, lineHeight: 52 },
+  week: { fontSize: 12, paddingBottom: 12 },
+  stats: { flexDirection: 'row', gap: 8 },
+  stat: { flex: 1, gap: 2, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 16 },
+  statValue: { fontSize: 18 },
+  quick: { flex: 1, gap: 12, padding: 12, borderRadius: 20 },
   section: { gap: 12 },
   carousel: { gap: 12 },
-  eventsCarousel: { gap: 12, paddingRight: 8, paddingVertical: 2 },
-  carouselCardWrap: { width: 288 },
   head: { width: 250, gap: 12 },
   bubble: {
     padding: 16,
@@ -1087,9 +483,7 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 4,
   },
   headWho: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  compactPass: { flex: 1, gap: 6, padding: 14, borderRadius: 20 },
-  compactTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  tinyCode: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  compact: { flex: 1, gap: 8, padding: 16, borderRadius: 20 },
   list: { borderRadius: 20, paddingHorizontal: 16, paddingVertical: 4 },
   activityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
   whatsapp: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 20 },

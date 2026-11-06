@@ -37,7 +37,7 @@ export interface TypographyProps extends RNTextProps {
 }
 
 /**
- * Unified Typography component enforcing design system font scales,
+ * Unified Typography component enforcing non-"vibe-coded", consistent font scales,
  * line heights, letter spacings, and semantic color resolution.
  */
 export function Typography({

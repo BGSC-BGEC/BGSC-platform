@@ -95,7 +95,7 @@ export default function EventLeaderboard() {
     <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: gutter, paddingTop: gutter }]} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={event.refreshing || table.refreshing || draw.refreshing} onRefresh={() => void reload()} tintColor={colors.accent} />}>
       <Typography variant="displayTitle">{event.data?.title ?? board?.event_title ?? 'Event standings'}</Typography>
       <View style={styles.row}>
-        {board?.format ? <Badge label={board.format.replace(/_/g, ' ')} variant="muted" /> : null}
+        {board && <Badge label={board.format.replace(/_/g, ' ')} variant="muted" />}
         {event.data && <Badge label={event.data.status} variant={event.data.status === 'ongoing' ? 'success' : 'muted'} />}
       </View>
       <SegmentedTabs tabs={[{ label: 'Table', value: 'table' }, { label: 'Bracket', value: 'bracket' }, { label: 'Matches', value: 'matches' }]} value={view} onChange={setView} />
