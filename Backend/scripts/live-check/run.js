@@ -396,22 +396,24 @@ async function register(key, ev, ctx, expect = 201, extra = {}) {
 async function bootstrap() {
     for (const key of USER_KEYS) {
         const u = { key, email: `${key.toLowerCase()}.${RUN}@example.com`, username: `${key.toLowerCase()}_${RUN}`, password: PW, full_name: `Live ${key}` };
-        const r = await api('POST', '/auth/register', { body: { email: u.email, username: u.username, password: u.password, full_name: u.full_name }, expect: 201 });
-        need(r.data && r.data.user, `register ${key}`);
+        // Verify-before-create: register mails a code and creates nothing; the code creates the account.
+        const p = await api('POST', '/auth/register', { body: { email: u.email, username: u.username, password: u.password, full_name: u.full_name }, expect: 202 });
+        check(p.data && p.data.status === 'verification_required' && !p.data.tokens, `register ${key} is pending, no tokens`, p.data);
+        const tok = await mailToken(u.email, 'Verify');
+        need(tok, `verification token for ${key} in auth-service log`);
+        const r = await api('POST', '/auth/register/verify', { body: { email: u.email, otp: tok }, expect: 201 });
+        need(r.data && r.data.user, `register/verify ${key}`);
         u.id = r.data.user.id;
         u.token = r.data.tokens.access_token;
         u.refresh = r.data.tokens.refresh_token;
         check(r.data.user.role === 'user', `new account ${key} starts as 'user'`, r.data.user.role);
+        check(r.data.user.is_email_verified === true, `new account ${key} is born verified`, r.data.user);
         S.u[key] = u;
-        const tok = await mailToken(u.email, 'Verify');
-        need(tok, `verification token for ${key} in auth-service log`);
-        const v = await api('POST', '/auth/verify-email', { body: { email: u.email, otp: tok }, expect: 200 });
-        check(v.data && v.data.is_email_verified === true, `verify-email ${key}`, v.data);
     }
     // duplicate registration
     await api('POST', '/auth/register', { body: { email: S.u.userA.email, username: `dup_${RUN}`, password: PW, full_name: 'Dup' }, expect: 409 });
-    // verifying twice: code consumed
-    await api('POST', '/auth/verify-email', { body: { email: S.u.userA.email, otp: '000000' }, expect: 400 });
+    // verifying twice: the pending sign-up was consumed
+    await api('POST', '/auth/register/verify', { body: { email: S.u.userA.email, otp: '000000' }, expect: 400 });
 
     // founder bootstrap, the documented way
     try {

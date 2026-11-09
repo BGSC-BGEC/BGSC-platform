@@ -54,7 +54,7 @@ docker compose up -d mongodb redis
 npm run build
 ```
 
-Once the stack is up (either way below), register your account through the app or `POST /auth/register`, then make it founder once:
+Once the stack is up (either way below), register your account through the app or `POST /auth/register` followed by `POST /auth/register/verify` with the mailed code (printed to the auth-service log while `SMTP_HOST` is blank), then make it founder once:
 
 ```bash
 FOUNDER_EMAIL=you@example.com npm run seed:founder
@@ -203,8 +203,33 @@ ceiling. Paths are matched the way Express matches them (any case, trailing slas
 login does not count; the mail/SMS-sending paths count every call, because they answer 200
 whatever happened. The gateway parses bodies for those paths only.
 
+`POST /auth/refresh` and `GET`/`HEAD` under `/uploads/` are outside the 100/min bucket: a busy
+screen of images, or the refresh that screen needed, must not be what logs a user out. Refresh
+still needs a valid, current refresh token.
+
+**Behind a proxy** (cloudflared, nginx, a load balancer) set `TRUST_PROXY_HOPS` to the number of
+proxies in front of the gateway — 1 for a cloudflared tunnel. At the default 0 every client
+behind the proxy has the proxy's IP, so all anonymous traffic shares one bucket. Never set it
+higher than the real count: the extra `X-Forwarded-For` entries are written by the client.
+
 `/internal/*` is **404 from the edge, always** — even with a valid service token. Those routes are
 service-to-service only and are additionally guarded by `X-Internal-Token` at each service.
+
+---
+
+## Sign-up
+
+An email + password account does not exist until its address is proven. `register` holds the
+details in `pending_registrations` (TTL'd at the code's deadline) and creates nothing:
+
+| Call | Body | Success | Refusals |
+|---|---|---|---|
+| `POST /auth/register` | `{ email, username, password, full_name }` | `202 { status: "verification_required", email, expires_in }` (seconds; the code lives 10 min). No user, no tokens. Repeating it for the same email replaces the pending sign-up and mails a fresh code. | `422 validation_failed`; `409 conflict` — email or username held by an account (live, or deleted but still restorable), or the username held by another address's live pending sign-up |
+| `POST /auth/register/verify` | `{ email, otp }` (6 digits) | `201 { user, tokens }` — the account, born `is_email_verified: true`, signed in | `422 validation_failed`; `400 no_pending_registration` (none, or expired); `400 invalid_otp`; `429 too_many_attempts` (5 wrong guesses on this code); `409 conflict` (the email or username was taken meanwhile) |
+| `POST /auth/resend-verification` | `{ email }` | `200 { message: "verification_email_sent" }`, always | `422` only. A pending sign-up gets a fresh code (same guess budget while its window is live); otherwise a legacy unverified account does |
+
+`POST /auth/verify-email` remains for accounts created before this flow and never verified. A
+Google sign-in for an address deletes any pending sign-up for it.
 
 ---
 

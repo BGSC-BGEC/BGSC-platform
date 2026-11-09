@@ -87,6 +87,8 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET in .env}
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?set INTERNAL_API_TOKEN in .env}
       CORS_ORIGIN: ${CORS_ORIGIN:?set CORS_ORIGIN in .env}
+      # Proxy hops in front of the gateway (1 behind cloudflared). 0 = clients connect directly.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
       # Container-network addresses, not localhost.
       AUTH_SERVICE_URL: http://auth-service:3001
       USER_SERVICE_URL: http://user-service:3002

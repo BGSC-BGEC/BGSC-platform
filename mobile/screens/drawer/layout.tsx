@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Linking } from 'react-native';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import { NavigationContainer, getStateFromPath } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -11,6 +12,7 @@ import Media from './media';
 import Feedback from './feedback';
 import Profile from './profile';
 import { useAuth } from '../../store/auth';
+import { isGoogleCallbackUrl } from '../../src/repositories/AuthRepository';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { DrawerContent } from '../../src/navigation/DrawerContent';
 
@@ -55,8 +57,8 @@ const linking = {
       StravaConnect: 'settings/integrations',
     },
   },
-  // Google sign-in's redirect is read by the auth browser session, not routed.
-  filter: (url: string) => !/^bgsc:\/\/auth\/callback/.test(url),
+  // Google sign-in's redirect isn't a screen: the auth session or the fallback in DrawerLayout reads it.
+  filter: (url: string) => !isGoogleCallbackUrl(url),
   getStateFromPath(path: string, options: any) {
     if (path.split(/[?#]/)[0].replace(/^\//, '') === 'settings/integrations') {
       return { routes: [{ name: 'App' }, { name: 'StravaConnect', params: { callbackUrl: path } }] };
@@ -150,6 +152,7 @@ function AuthStack() {
       <Stack.Screen name="Landing" component={LandingScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Register" component={RegisterScreen} />
+      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
       <Stack.Screen name="RestoreAccount" component={RestoreAccountScreen} />
       <Stack.Screen name="ForgotPassword" component={ForgotPassword} />
       <Stack.Screen name="NotFound" component={NotFoundScreen} />
@@ -157,18 +160,44 @@ function AuthStack() {
   );
 }
 
-/** Signed in straight from sign-up: verify email, then pick interests, then the app. */
-function OnboardingStack({ start }: { start: 'VerifyEmail' | 'GetStarted' }) {
+/** Signed in straight from sign-up (email already verified): pick interests, then the app. */
+function OnboardingStack() {
   return (
-    <Stack.Navigator initialRouteName={start} screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
-      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
+    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <Stack.Screen name="GetStarted" component={GetStartedScreen} />
     </Stack.Navigator>
   );
 }
 
+/**
+ * Fallback for Google sign-in: when the redirect reaches the app as a deep link
+ * (cold start, or the auth session reported "dismiss"), finish the exchange here.
+ * The stored verifier is consumed once, so this never double-exchanges.
+ */
+function useGoogleCallbackLinks(enabled: boolean) {
+  const { completeGoogleCallback } = useAuth();
+  const handlerRef = React.useRef(completeGoogleCallback);
+  handlerRef.current = completeGoogleCallback;
+  const initialHandled = React.useRef(false);
+
+  React.useEffect(() => {
+    // Wait for session restore so it can't overwrite a fresh Google sign-in.
+    if (!enabled) return undefined;
+    const handle = (url?: string | null) => {
+      if (url && isGoogleCallbackUrl(url)) void handlerRef.current(url);
+    };
+    if (!initialHandled.current) {
+      initialHandled.current = true;
+      void Linking.getInitialURL().then(handle).catch(() => undefined);
+    }
+    const subscription = Linking.addEventListener('url', (event) => handle(event.url));
+    return () => subscription.remove();
+  }, [enabled]);
+}
+
 function DrawerLayout() {
   const { isLoggedIn, isBootstrapping, onboarding } = useAuth();
+  useGoogleCallbackLinks(!isBootstrapping);
 
   if (isBootstrapping) return <SplashScreen />;
 
@@ -177,7 +206,7 @@ function DrawerLayout() {
       {!isLoggedIn ? (
         <AuthStack />
       ) : onboarding ? (
-        <OnboardingStack start={onboarding === 'verify' ? 'VerifyEmail' : 'GetStarted'} />
+        <OnboardingStack />
       ) : (
         <LoggedInStack />
       )}

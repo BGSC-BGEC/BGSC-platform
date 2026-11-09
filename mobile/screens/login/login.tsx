@@ -43,6 +43,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [keepLoggedIn, setKeepLoggedIn] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [googleNotice, setGoogleNotice] = useState<string | null>(null);
 
   // Auth error drop when leaving screen
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -54,6 +55,7 @@ export default function LoginScreen() {
 
   const submit = async () => {
     clearError();
+    setGoogleNotice(null);
     const errors: FieldErrors = {};
     if (!identifier.trim()) errors.login = 'Enter your BITS email or username.';
     if (!password) errors.password = 'Enter your password.';
@@ -98,7 +100,13 @@ export default function LoginScreen() {
           <AuthTabs mode="login" onChange={() => navigation.dispatch(StackActions.replace('Register'))} />
 
           {/* Error / Notice Banners */}
-          {error ? <AuthBanner message={error} /> : notice ? <AuthBanner message={notice} tone="success" /> : null}
+          {error ? (
+            <AuthBanner message={error} />
+          ) : googleNotice ? (
+            <AuthBanner message={googleNotice} tone="info" />
+          ) : notice ? (
+            <AuthBanner message={notice} tone="success" />
+          ) : null}
 
           {/* Glass Form Container */}
           <GlassCard style={styles.formCard}>
@@ -168,7 +176,10 @@ export default function LoginScreen() {
                 disabled={isLoading}
                 onPress={async () => {
                   clearError();
-                  await googleSignIn();
+                  setGoogleNotice(null);
+                  const res = await googleSignIn();
+                  // Browser closed before finishing: a gentle notice, not an error.
+                  if (res.cancelled) setGoogleNotice('Google sign-in was cancelled.');
                 }}
               />
             </View>

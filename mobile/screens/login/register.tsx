@@ -63,14 +63,18 @@ export default function RegisterScreen() {
     setErrors(e);
     if (Object.values(e).some(Boolean)) return;
 
-    await register({
+    const contact = form.contact.trim();
+    const res = await register({
       fullName: form.fullName.trim(),
       username: form.username.trim(),
       email: form.email.trim(),
       password: form.password,
-      contact: form.contact.trim(),
+      contact,
     });
-    // On success the navigator swaps to onboarding (Verify email) on its own.
+    // No account exists until the emailed code is verified; the phone number is saved after that.
+    if (res.success && res.email) {
+      navigation.navigate('VerifyEmail', { email: res.email, contact, expiresIn: res.expiresIn });
+    }
   };
 
   return (

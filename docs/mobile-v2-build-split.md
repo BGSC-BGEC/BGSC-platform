@@ -141,8 +141,8 @@ Existing route names (`EventDetails`, `EventRegistration`, `Auction`, `MediaView
 | G1 | Splash | 55:1979 | `BootSplash` in layout.tsx | session restore | Don't wipe the session when offline (audit). |
 | G2 | Landing · tour | 55:1999 | new | — | Get started / I have an account / guest. |
 | G3 | Login | 55:2048 | `screens/login/login.tsx` | `POST /auth/login`, `GET /auth/google` → `POST /auth/google/exchange` | Show 401/429 banners; deleted account → `RestoreAccount`. |
-| G4 | Create account | 56:1996 | `screens/login/register.tsx` | `POST /auth/register` | Username availability, password strength. |
-| G5 | Verify email | 56:2070 | `screens/login/otp.tsx` → rename | `POST /auth/resend-verification`, `POST /auth/verify-email` | ⚠ Email sending is a stub in prod — flow can't complete until a mail provider is wired (backend). |
+| G4 | Create account | 56:1996 | `screens/login/register.tsx` | `POST /auth/register` | Username availability, password strength. Answers `202 { status: "verification_required", email, expires_in }` — no account and no tokens yet; go to G5. |
+| G5 | Verify email | 56:2070 | `screens/login/otp.tsx` → rename | `POST /auth/register/verify` (`{ email, otp }` → `201 { user, tokens }`: the account is created here and signed in), `POST /auth/resend-verification` | ⚠ Email sending is a stub in prod — flow can't complete until a mail provider is wired (backend). |
 | G6 | Get started · interests | 58:2024 | `screens/login/complete-profile.tsx` → replace | `PATCH /users/me` (`interests[]`) | Min 3, Skip allowed. |
 | G7 | Restore account | 58:2107 | new | `POST /account/reactivate` | Countdown of restore window. |
 

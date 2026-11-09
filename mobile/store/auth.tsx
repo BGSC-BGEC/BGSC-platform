@@ -3,6 +3,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import {
   AccountDeactivatedError,
   authRepository,
+  type AuthResponse,
   type RegisterDto,
   type User,
 } from '../src/repositories/AuthRepository';
@@ -17,16 +18,21 @@ interface AuthContextType {
   authToken: string | null;
   isLoading: boolean;
   error: string | null;
-  /** Signed in but still on the post-sign-up steps (verify email → interests). */
+  /** Signed in but still on the post-sign-up step (interests). */
   onboarding: OnboardingStep | null;
   setOnboarding: (step: OnboardingStep | null) => void;
   /** Set when login hit a soft-deleted account that can still be restored. */
   restoreCandidate: RestoreCandidate | null;
   login: (emailOrUsername: string, password?: string) => Promise<boolean>;
-  register: (dto: RegisterDto) => Promise<boolean>;
+  /** Starts sign-up; on success the emailed code is checked by completeRegistration. */
+  register: (dto: RegisterDto) => Promise<{ success: boolean; email?: string; expiresIn?: number }>;
+  /** Verifies the sign-up code, creates the account and signs in. Throws (SignUpAgainError when expired). */
+  completeRegistration: (email: string, otp: string, contact?: string) => Promise<void>;
   restoreAccount: () => Promise<boolean>;
   cancelRestore: () => void;
-  googleSignIn: () => Promise<{ success: boolean; requiresProfileCompletion?: boolean }>;
+  googleSignIn: () => Promise<{ success: boolean; cancelled?: boolean; requiresProfileCompletion?: boolean }>;
+  /** Deep-link fallback for the Google redirect; a no-op when no sign-in is pending. */
+  completeGoogleCallback: (url: string) => Promise<void>;
   forgotPassword: (email: string) => Promise<boolean>;
   refreshUser: () => Promise<void>;
   logout: () => Promise<void>;
@@ -34,7 +40,7 @@ interface AuthContextType {
   devLogin: () => void;
 }
 
-export type OnboardingStep = 'verify' | 'interests';
+export type OnboardingStep = 'interests';
 
 export interface RestoreCandidate {
   login: string;
@@ -128,15 +134,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     });
 
-  const register = (dto: RegisterDto) =>
-    run(async () => {
-      const res = await authRepository.register(dto);
-      setAuthToken(res.token);
-      setUser(res.user);
-      // Sign-up lands on the onboarding steps before the main app.
-      setOnboarding(res.user.isEmailVerified ? 'interests' : 'verify');
-      setIsLoggedIn(true);
+  const register = async (dto: RegisterDto) => {
+    let pending: Awaited<ReturnType<typeof authRepository.register>> | undefined;
+    const ok = await run(async () => {
+      // No account yet: the Register screen moves on to Verify email.
+      pending = await authRepository.register(dto);
     });
+    return { success: ok, email: pending?.email, expiresIn: pending?.expiresIn };
+  };
+
+  const completeRegistration = async (email: string, otp: string, contact?: string) => {
+    const res = await authRepository.completeRegistration(email, otp);
+    try {
+      const updated = await authRepository.setPhoneNumber(contact);
+      if (updated) res.user = updated;
+    } catch {
+      // Non-blocking: the member can add their number later from Edit profile.
+    }
+    setAuthToken(res.token);
+    setUser(res.user);
+    // Sign-up lands on the interests step before the main app.
+    setOnboarding('interests');
+    setIsLoggedIn(true);
+    void refreshUser();
+  };
 
   const restoreAccount = () =>
     run(async () => {
@@ -163,17 +184,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const cancelRestore = () => setRestoreCandidate(null);
 
+  const signInWith = (res: AuthResponse) => {
+    setAuthToken(res.token);
+    setUser(res.user);
+    setIsLoggedIn(true);
+    void refreshUser();
+  };
+
   const googleSignIn = async () => {
+    let cancelled = false;
     const ok = await run(async () => {
       const res = await authRepository.googleSignIn();
-      // Browser closed: not an error.
-      if (!res) return;
-      setAuthToken(res.token);
-      setUser(res.user);
-      setIsLoggedIn(true);
-      void refreshUser();
+      // Browser closed: not an error. 'handled': the deep-link fallback is signing in.
+      if (res === 'cancelled') cancelled = true;
+      if (typeof res === 'string') return;
+      signInWith(res);
     });
-    return { success: ok, requiresProfileCompletion: false };
+    return { success: ok && !cancelled, cancelled, requiresProfileCompletion: false };
+  };
+
+  const completeGoogleCallback = async (url: string) => {
+    try {
+      const res = await authRepository.completeGoogleSignIn(url);
+      if (res) signInWith(res);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    }
   };
 
   const forgotPassword = (email: string) =>
@@ -229,9 +265,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         restoreCandidate,
         login,
         register,
+        completeRegistration,
         restoreAccount,
         cancelRestore,
         googleSignIn,
+        completeGoogleCallback,
         forgotPassword,
         refreshUser,
         logout,
