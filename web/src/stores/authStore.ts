@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { AdminUser, UserRole } from '../types/admin'
-import { apiClient } from '../services/apiClient'
+import { apiClient, onSessionExpired } from '../services/apiClient'
 
 const isMock = import.meta.env.VITE_USE_MOCK === 'true'
 
@@ -132,5 +132,38 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user: null, status: 'unauthenticated' })
   },
 }))
+
+// Refresh token rejected by the server: drop to logged-out so RequireAuth
+// redirects to /login instead of showing a page full of 401 errors.
+onSessionExpired(() => {
+  useAuthStore.setState({ user: null, status: 'unauthenticated' })
+})
+
+// Cross-tab sync: another tab logged in, rotated tokens or logged out.
+// Token rotation needs no action here since apiClient reads localStorage per request.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    const loggedOut =
+      e.key === null ||
+      (e.key === 'auth_user' && e.newValue === null) ||
+      (!isMock && e.key === 'refresh_token' && e.newValue === null)
+    if (loggedOut) {
+      if (useAuthStore.getState().user) {
+        useAuthStore.setState({ user: null, status: 'unauthenticated' })
+      }
+      return
+    }
+    if (e.key === 'auth_user' && e.newValue) {
+      try {
+        useAuthStore.setState({
+          user: JSON.parse(e.newValue) as AdminUser,
+          status: 'authenticated',
+        })
+      } catch {
+        // Ignore malformed value written by another tab
+      }
+    }
+  })
+}
 
 export default useAuthStore

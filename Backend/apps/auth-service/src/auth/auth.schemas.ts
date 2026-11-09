@@ -49,6 +49,12 @@ export const VerifyEmailSchema = z.object({
   otp: mailCode,
 });
 
+/** Finishes a pending sign-up: the address it was made with and the code mailed to it. */
+export const VerifyRegistrationSchema = z.object({
+  email: z.string().trim().toLowerCase().email(),
+  otp: mailCode,
+});
+
 export const ResendVerificationSchema = z.object({
   email: z.string().trim().toLowerCase().email(),
 });
@@ -87,6 +93,7 @@ export type RegisterInput = z.infer<typeof RegisterSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
 export type RefreshTokenInput = z.infer<typeof RefreshTokenSchema>;
 export type VerifyEmailInput = z.infer<typeof VerifyEmailSchema>;
+export type VerifyRegistrationInput = z.infer<typeof VerifyRegistrationSchema>;
 export type ResendVerificationInput = z.infer<typeof ResendVerificationSchema>;
 export type ForgotPasswordInput = z.infer<typeof ForgotPasswordSchema>;
 export type ResetPasswordInput = z.infer<typeof ResetPasswordSchema>;

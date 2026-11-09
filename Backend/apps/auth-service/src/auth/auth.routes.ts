@@ -7,6 +7,7 @@ import {
   RefreshTokenSchema,
   LogoutSchema,
   VerifyEmailSchema,
+  VerifyRegistrationSchema,
   ResendVerificationSchema,
   ForgotPasswordSchema,
   ResetPasswordSchema,
@@ -26,7 +27,10 @@ export const authRoutes = Router();
 export const accountRoutes = Router();
 
 // Public Credentials & Session
+// Sign-up is two steps: /register mails a code and creates nothing; /register/verify creates the
+// account from the code and signs it in.
 authRoutes.post('/register', validate({ body: RegisterSchema }), AuthController.register);
+authRoutes.post('/register/verify', validate({ body: VerifyRegistrationSchema }), AuthController.verifyRegistration);
 authRoutes.post('/login', validate({ body: LoginSchema }), AuthController.login);
 authRoutes.post('/refresh', validate({ body: RefreshTokenSchema }), AuthController.refresh);
 
@@ -34,7 +38,8 @@ authRoutes.post('/refresh', validate({ body: RefreshTokenSchema }), AuthControll
 // expired bearer is ignored rather than refused, so the refresh token in the body still counts).
 authRoutes.post('/logout', optionalAuth, validate({ body: LogoutSchema }), AuthController.logout);
 
-// Email Verification
+// Email Verification. /verify-email is for accounts created before verify-before-create; new
+// sign-ups verify through /register/verify. /resend-verification serves both.
 authRoutes.post('/verify-email', validate({ body: VerifyEmailSchema }), AuthController.verifyEmail);
 authRoutes.post(
   '/resend-verification',

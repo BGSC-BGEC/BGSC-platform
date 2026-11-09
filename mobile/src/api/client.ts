@@ -39,6 +39,10 @@ const FRIENDLY_MESSAGES: Record<string, string> = {
   // auth
   invalid_or_expired_token: 'This link is invalid or has expired.',
   account_deactivated: 'This account is scheduled for deletion.',
+  no_pending_registration: 'Your sign-up code has expired. Please sign up again.',
+  invalid_otp: 'That code is incorrect. Check the latest email and try again.',
+  too_many_attempts: 'Too many wrong codes. Request a new code and try again.',
+  verification_required: 'Verify your email to continue. We’ve sent you a 6-digit code.',
   // events
   event_not_found: 'This event could not be found. It may have been removed.',
   event_is_not_an_auction_league: 'This event does not have a player auction.',
@@ -147,27 +151,50 @@ http.interceptors.request.use(async (config) => {
 });
 
 // Single-flight refresh: concurrent 401s share one /auth/refresh call.
-let refreshing: Promise<string | null | undefined> | null = null;
+let refreshing: Promise<string | null | ApiError> | null = null;
 
-/** New access token; null when the server rejected the refresh; undefined when it couldn't be reached (keep the session). */
-async function refreshAccessToken(): Promise<string | null | undefined> {
+/**
+ * New access token; null when the server rejected the refresh (401/403 → log out);
+ * an ApiError for anything transient (offline, timeout, 429, 5xx) — the session is kept.
+ */
+async function refreshAccessToken(): Promise<string | null | ApiError> {
   const { refreshToken } = await tokenStorage.get();
   if (!refreshToken) return null;
   try {
     const res = await axios.post(`${API_BASE_URL}/auth/refresh`, { refresh_token: refreshToken }, { timeout: 15000 });
     const tokens = res.data?.data?.tokens;
-    if (!tokens?.access_token || !tokens?.refresh_token) return null;
+    if (!tokens?.access_token || !tokens?.refresh_token) return new ApiError(res.status, 'internal_error');
     // Refresh tokens rotate, so both must be stored.
     await tokenStorage.set(tokens.access_token, tokens.refresh_token);
     return tokens.access_token as string;
   } catch (err) {
-    const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-    return status != null && status >= 400 && status < 500 ? null : undefined;
+    if (!axios.isAxiosError(err) || !err.response) {
+      const timedOut = axios.isAxiosError(err) && err.code === 'ECONNABORTED';
+      return new ApiError(0, timedOut ? 'timeout' : 'network_error');
+    }
+    const { status } = err.response;
+    if (status === 401 || status === 403) return null;
+    const body = (err.response.data ?? {}) as Record<string, unknown>;
+    const fallback = status === 429 ? 'too_many_requests' : status >= 500 ? 'bad_gateway' : `http_${status}`;
+    return new ApiError(status, typeof body.error === 'string' ? body.error : fallback, body);
   }
 }
 
+// Auth endpoints answer 401 for their own reasons (wrong code, bad credentials): show those, not "session expired".
 // '/account/reactivate' runs on held credentials of a deleted account; a 401 there is final, not a refresh cue.
-const NO_REFRESH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout', '/account/reactivate'];
+const NO_REFRESH_PATHS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/register/verify',
+  '/auth/refresh',
+  '/auth/logout',
+  '/auth/google/exchange',
+  '/auth/verify-email',
+  '/auth/resend-verification',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/account/reactivate',
+];
 
 http.interceptors.response.use(
   (response) => {
@@ -188,13 +215,13 @@ http.interceptors.response.use(
       refreshing ??= refreshAccessToken().finally(() => {
         refreshing = null;
       });
-      const newToken = await refreshing;
-      if (newToken) {
-        config.headers.Authorization = `Bearer ${newToken}`;
+      const refreshed = await refreshing;
+      if (typeof refreshed === 'string') {
+        config.headers.Authorization = `Bearer ${refreshed}`;
         return http(config);
       }
-      // Offline or server down: a network blip must not log anyone out.
-      if (newToken === undefined) return Promise.reject(new ApiError(0, 'network_error'));
+      // Offline, rate-limited or server down: fail this request but keep the session for the next try.
+      if (refreshed instanceof ApiError) return Promise.reject(refreshed);
       const { accessToken } = await tokenStorage.get();
       if (accessToken) {
         await tokenStorage.clear();
