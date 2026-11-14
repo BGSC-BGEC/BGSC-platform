@@ -7,26 +7,77 @@ interface RequestOptions extends Omit<RequestInit, 'body'> {
   _retry?: boolean
 }
 
-async function tryRefreshToken(): Promise<string | null> {
-  const refreshToken = localStorage.getItem('refresh_token')
-  if (!refreshToken) return null
+// Outcome of a refresh attempt:
+// - 'ok': a usable access token is now in localStorage
+// - 'rejected': the server refused the refresh token (401/403); session is gone
+// - 'error': transient failure (network, 408, 429, 5xx); session is kept
+type RefreshResult =
+  | { kind: 'ok'; token: string }
+  | { kind: 'rejected' }
+  | { kind: 'error' }
 
+// Lets the auth store react to a dead session without apiClient importing it
+// (authStore already imports apiClient, so a direct import would be circular).
+type SessionExpiredListener = () => void
+const sessionExpiredListeners = new Set<SessionExpiredListener>()
+
+export function onSessionExpired(listener: SessionExpiredListener): () => void {
+  sessionExpiredListeners.add(listener)
+  return () => sessionExpiredListeners.delete(listener)
+}
+
+function clearSession() {
+  localStorage.removeItem('auth_token')
+  localStorage.removeItem('refresh_token')
+  localStorage.removeItem('auth_user')
+  sessionExpiredListeners.forEach((listener) => listener())
+}
+
+// Single-flight: the backend rotates refresh tokens, so concurrent 401s must
+// share one refresh call instead of racing each other with the same token.
+let refreshPromise: Promise<RefreshResult> | null = null
+
+function refreshAccessToken(): Promise<RefreshResult> {
+  if (!refreshPromise) {
+    refreshPromise = doRefresh().finally(() => {
+      refreshPromise = null
+    })
+  }
+  return refreshPromise
+}
+
+async function doRefresh(): Promise<RefreshResult> {
+  const refreshToken = localStorage.getItem('refresh_token')
+  if (!refreshToken) return { kind: 'rejected' }
+
+  let res: Response
   try {
     const refreshUrl = `${BASE_URL.replace(/\/+$/, '')}/auth/refresh`
-    const res = await fetch(refreshUrl, {
+    res = await fetch(refreshUrl, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refreshToken }),
     })
+  } catch {
+    // Network failure: keep the session for the next attempt
+    return { kind: 'error' }
+  }
 
-    if (!res.ok) {
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('refresh_token')
-      localStorage.removeItem('auth_user')
-      return null
+  if (res.status === 401 || res.status === 403) {
+    // Another tab may have rotated the token while we were waiting; if so,
+    // our token was just retired and the stored one is still valid.
+    const currentRefresh = localStorage.getItem('refresh_token')
+    const currentAccess = localStorage.getItem('auth_token')
+    if (currentRefresh && currentRefresh !== refreshToken && currentAccess) {
+      return { kind: 'ok', token: currentAccess }
     }
+    return { kind: 'rejected' }
+  }
 
+  if (!res.ok) return { kind: 'error' }
+
+  try {
     const result = await res.json()
     const tokens = result?.data?.tokens || result?.tokens
     if (tokens?.access_token) {
@@ -34,19 +85,12 @@ async function tryRefreshToken(): Promise<string | null> {
       if (tokens.refresh_token) {
         localStorage.setItem('refresh_token', tokens.refresh_token)
       }
-      return tokens.access_token as string
+      return { kind: 'ok', token: tokens.access_token as string }
     }
-
-    localStorage.removeItem('auth_token')
-    localStorage.removeItem('refresh_token')
-    localStorage.removeItem('auth_user')
-    return null
   } catch {
-    localStorage.removeItem('auth_token')
-    localStorage.removeItem('refresh_token')
-    localStorage.removeItem('auth_user')
-    return null
+    // Malformed body; treat as transient
   }
+  return { kind: 'error' }
 }
 
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
@@ -86,9 +130,20 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     !normalizedEndpoint.startsWith('/auth/google') &&
     !normalizedEndpoint.startsWith('/auth/refresh')
   ) {
-    const newAccessToken = await tryRefreshToken()
-    if (newAccessToken) {
+    // Token already replaced (by a refresh that finished while this request
+    // was in flight, or by another tab): just retry with the current one.
+    const currentToken = localStorage.getItem('auth_token')
+    if (currentToken && currentToken !== token) {
       return request<T>(endpoint, { ...options, _retry: true })
+    }
+
+    const outcome = await refreshAccessToken()
+    if (outcome.kind === 'ok') {
+      return request<T>(endpoint, { ...options, _retry: true })
+    }
+    if (outcome.kind === 'rejected' && localStorage.getItem('auth_token') === token) {
+      // Only the first waiter clears; later ones see tokens already gone
+      clearSession()
     }
   }
 

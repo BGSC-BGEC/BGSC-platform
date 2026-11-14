@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import { AuditLog, IUser, RESERVED_USERNAMES, ServiceError, TOKEN_ALGORITHMS, User, UserRole, UserStatus, config, publish, recordAudit, restorableUntil } from '@bgsc/shared';
+import { AuditLog, IPendingRegistration, IUser, PendingRegistration, RESERVED_USERNAMES, ServiceError, TOKEN_ALGORITHMS, User, UserRole, UserStatus, config, publish, recordAudit, restorableUntil } from '@bgsc/shared';
 import { MAIL_CODE_TTL_MIN, MailerService } from './mailer.service';
 import {
   RegisterInput,
@@ -26,6 +26,14 @@ export interface AuthResult {
     profile: IUser['profile'];
   };
   tokens: TokenPair;
+}
+
+/** What `register` answers: no account and no tokens until the mailed code is confirmed. */
+export interface PendingRegistrationResult {
+  status: 'verification_required';
+  email: string;
+  /** Seconds the mailed code stays valid. */
+  expires_in: number;
 }
 
 /** Wrong guesses allowed per OTP window. A resend does not buy more (see sendPhoneOtp). */
@@ -166,36 +174,114 @@ export class AuthService {
   }
 
   /**
-   * Registers a new user.
+   * Starts an email + password sign-up. Creates NO account: the details wait in a
+   * PendingRegistration until the mailed code comes back to `verifyRegistration`. An account that
+   * existed before its address was proven could log in, and held its email and username against
+   * the real owner, for as long as nobody verified it.
+   *
+   * Same 409s as an account would get (a live or restorable account on the email or username), plus
+   * one for a username a live pending sign-up of another address is holding. Registering the same
+   * email again replaces its pending row: new details, new code, guesses back to zero. That is a
+   * way to buy fresh guesses, which the gateway's per-(IP, email) send limit on this path bounds.
    */
-  static async register(input: RegisterInput): Promise<AuthResult> {
-    const existing = await User.find({
-      $or: [{ email: input.email }, { username: input.username }],
-    }).select('+google_id');
-
-    // Only an account past its restore window gives way; anything live or restorable is a conflict.
-    if (existing.some((u) => !this.pastRestore(u))) {
+  static async register(input: RegisterInput): Promise<PendingRegistrationResult> {
+    await this.assertKeysFree(input.email, input.username);
+    const reserved = await PendingRegistration.exists({
+      username: input.username,
+      email: { $ne: input.email },
+      expires_at: { $gt: new Date() },
+    });
+    if (reserved) {
       throw new ServiceError(409, 'conflict');
     }
-    for (const u of existing) await this.releaseKeys(u);
 
     const passwordHash = await bcrypt.hash(input.password, 10);
     const verificationCode = sixDigits();
 
+    let pending: IPendingRegistration;
+    try {
+      pending = (await PendingRegistration.findOneAndUpdate(
+        { email: input.email },
+        {
+          $set: {
+            username: input.username,
+            full_name: input.full_name,
+            password_hash: passwordHash,
+            code_hash: await bcrypt.hash(verificationCode, 10),
+            attempts: 0,
+            expires_at: new Date(Date.now() + MAIL_CODE_TTL_MS),
+          },
+          $setOnInsert: { _id: crypto.randomUUID() },
+        },
+        { upsert: true, returnDocument: 'after' }
+      ))!;
+    } catch (err) {
+      // Two sign-ups for one email in the same instant: the unique index decides, and the loser gets
+      // a 409 rather than a 500.
+      if ((err as { code?: number }).code === 11000) throw new ServiceError(409, 'conflict');
+      throw err;
+    }
+
+    // Not awaited: an SMTP hiccup must not turn a sign-up into a 500. The user resends.
+    MailerService.sendVerificationEmail(pending._id, pending.email, verificationCode).catch((err) =>
+      console.error(`[auth-service] verification mail for pending sign-up ${pending._id} failed:`, err)
+    );
+
+    return { status: 'verification_required', email: pending.email, expires_in: MAIL_CODE_TTL_MIN * 60 };
+  }
+
+  /**
+   * Finishes a sign-up: the mailed code for `email`'s pending registration becomes the account,
+   * verified, and its first session.
+   *
+   * A guess is spent (atomic $inc) before the compare, so parallel guesses cannot share one, and
+   * the row is claimed by a delete conditional on the code just checked — a resend in between, or a
+   * parallel verify that already won, leaves this one a 400. The email and username are re-checked
+   * against `users` here, because the pending row reserves nothing there: either can have been
+   * taken (a Google sign-in, another sign-up) since the code was sent.
+   */
+  static async verifyRegistration(email: string, code: string): Promise<AuthResult> {
+    const address = email.toLowerCase();
+    const now = new Date();
+    const pending = await PendingRegistration.findOneAndUpdate(
+      { email: address, expires_at: { $gt: now }, attempts: { $lt: MAIL_CODE_MAX_ATTEMPTS } },
+      { $inc: { attempts: 1 } },
+      { returnDocument: 'after' }
+    ).select('+code_hash +password_hash');
+
+    if (!pending) {
+      const live = await PendingRegistration.exists({ email: address, expires_at: { $gt: now } });
+      if (live) throw new ServiceError(429, 'too_many_attempts');
+      throw new ServiceError(400, 'no_pending_registration');
+    }
+    if (!(await bcrypt.compare(code, pending.code_hash))) {
+      throw new ServiceError(400, 'invalid_otp');
+    }
+
+    await this.assertKeysFree(pending.email, pending.username);
+    const claimed = await PendingRegistration.findOneAndDelete({ _id: pending._id, code_hash: pending.code_hash });
+    if (!claimed) {
+      throw new ServiceError(400, 'invalid_otp');
+    }
+
+    // Only an account past its restore window gives way (assertKeysFree refused anything else).
+    const existing = await User.find({
+      $or: [{ email: pending.email }, { username: pending.username }],
+    }).select('+google_id');
+    for (const u of existing) await this.releaseKeys(u);
+
     let user: IUser;
     try {
       user = await User.create({
-        email: input.email,
-        username: input.username,
-        password_hash: passwordHash,
+        email: pending.email,
+        username: pending.username,
+        password_hash: pending.password_hash,
         role: UserRole.USER,
         status: UserStatus.ACTIVE,
-        is_email_verified: false,
-        email_verification_token: await bcrypt.hash(verificationCode, 10),
-        email_verification_expires: new Date(Date.now() + MAIL_CODE_TTL_MS),
-        email_verification_attempts: 0,
+        // The code just proved the address: no verification token is ever put on the account.
+        is_email_verified: true,
         profile: {
-          full_name: input.full_name,
+          full_name: pending.full_name,
           avatar_url: null,
           phone_number: null,
           bio: '',
@@ -218,19 +304,14 @@ export class AuthService {
         },
       });
     } catch (err) {
-      // Two sign-ups for one email/username in the same instant: the unique index decides, and the
-      // loser gets the same 409 the pre-check would have given it, not a 500.
+      // Lost a race for the email or username since the re-check: the unique index decides, and the
+      // loser gets the same 409 the re-check would have given it, not a 500.
       if ((err as { code?: number }).code === 11000) throw new ServiceError(409, 'conflict');
       throw err;
     }
 
     const tokens = this.generateTokenPair(user);
     await User.updateOne({ _id: user._id }, { $set: this.sessionSet(tokens) });
-
-    // Not awaited: an SMTP hiccup must not turn a created account into a 500. The user resends.
-    MailerService.sendVerificationEmail(user._id, user.email, verificationCode).catch((err) =>
-      console.error(`[auth-service] verification mail for ${user._id} failed:`, err)
-    );
 
     // Id only: no consumer needs the address, and the bus is not a place for PII.
     publish('UserRegistered', 'auth-service', { user_id: user._id });
@@ -239,6 +320,19 @@ export class AuthService {
       user: this.formatUser(user),
       tokens,
     };
+  }
+
+  /**
+   * 409 when a live or restorable account holds `email` or `username`. An account past its restore
+   * window does not count: its keys are released when the new account is actually created.
+   */
+  private static async assertKeysFree(email: string, username: string): Promise<void> {
+    const existing = await User.find({
+      $or: [{ email }, { username }],
+    }).select('+google_id');
+    if (existing.some((u) => !this.pastRestore(u))) {
+      throw new ServiceError(409, 'conflict');
+    }
   }
 
   /**
@@ -472,6 +566,25 @@ export class AuthService {
   }
 
   /**
+   * `issueMailCode` for a pending sign-up: a fresh code on the live row, keeping its attempt count,
+   * with a new deadline (which is also the row's TTL, so a resend keeps the sign-up alive). `code`
+   * is null while the current code's guesses are spent. Null overall when no live row exists — an
+   * expired one is the TTL sweeper's, and registering again is how it starts over.
+   */
+  private static async reissuePendingCode(email: string): Promise<{ id: string; email: string; code: string | null } | null> {
+    const now = new Date();
+    const live = await PendingRegistration.findOne({ email, expires_at: { $gt: now } });
+    if (!live) return null;
+
+    const code = sixDigits();
+    const kept = await PendingRegistration.updateOne(
+      { _id: live._id, expires_at: { $gt: now }, attempts: { $lt: MAIL_CODE_MAX_ATTEMPTS } },
+      { $set: { code_hash: await bcrypt.hash(code, 10), expires_at: new Date(now.getTime() + MAIL_CODE_TTL_MS) } }
+    );
+    return { id: live._id, email: live.email, code: kept.matchedCount > 0 ? code : null };
+  }
+
+  /**
    * Spends one guess on `email`'s code (atomic $inc before the compare, so parallel guesses cannot
    * share an attempt) and, when it matches, consumes the code and applies `onMatch` in the same
    * conditional write. Every failure — no account, no code, expired, spent, wrong — is the same 400
@@ -519,9 +632,16 @@ export class AuthService {
   }
 
   /**
-   * Mails a new verification code.
+   * Mails a new verification code: to the pending sign-up for the address if there is one, else to
+   * a legacy account created (before verify-before-create) and never verified.
    */
   static async resendVerification(email: string): Promise<void> {
+    const pending = await this.reissuePendingCode(email.toLowerCase());
+    if (pending) {
+      if (pending.code) await MailerService.sendVerificationEmail(pending.id, pending.email, pending.code);
+      return;
+    }
+
     const user = await User.findOne({ email: email.toLowerCase() });
     if (!user || user.is_email_verified) {
       return; // Generic success to prevent email enumeration
@@ -838,6 +958,9 @@ export class AuthService {
     }
 
     const email = googleUser.email.toLowerCase();
+    // Google just proved who owns the address, so a password sign-up waiting on it — the owner's
+    // abandoned one, or a squatter's — has nothing left to prove and must not complete later.
+    await PendingRegistration.deleteOne({ email });
     // google_id first: it is the stable identity. Email only when no account holds this google_id.
     // An account past its restore window is gone for good: its keys go to the account made below.
     const unlessExpired = async (u: IUser | null): Promise<IUser | null> =>

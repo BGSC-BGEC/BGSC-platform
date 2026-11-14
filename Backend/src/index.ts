@@ -23,19 +23,21 @@ export const app = express();
 
 app.disable('x-powered-by');
 /**
- * `trust proxy` is deliberately NOT set: compose publishes :3000 straight to the client, so
- * `req.ip` is the real peer and the rate limiters bucket per client correctly.
+ * `trust proxy` is the number of proxy hops in front of this process, from TRUST_PROXY_HOPS
+ * (default 0 = trust none). At 0, compose publishing :3000 straight to the client, `req.ip` is the
+ * real peer and the rate limiters bucket per client correctly.
  *
- * **If the gateway is ever put behind nginx, an ALB or Cloudflare, this must change**, or `req.ip`
+ * **Behind cloudflared, nginx, an ALB or Cloudflare it must be set (1 per proxy)**, or `req.ip`
  * becomes the proxy's address for everyone: the general limiter collapses into a single shared
  * bucket, and `authAttemptLimiter` (5 per 15 min) locks out every user in the world after five
- * failed logins by any one of them. Setting it blindly is the opposite failure — an untrusted
- * `X-Forwarded-For` is client-controlled, so a caller spoofs their way past both limiters. Set it
- * to the exact number of proxy hops in front of this process, nothing else.
+ * failed logins by any one of them. Setting it higher than the real count is the opposite failure —
+ * an untrusted `X-Forwarded-For` entry is client-controlled, so a caller spoofs their way past both
+ * limiters. The exact number of proxy hops in front of this process, nothing else.
  *
- * The domain services behind it DO set `trust proxy: 1`, because they always have exactly one hop
- * in front of them: this gateway.
+ * The domain services behind it set `trust proxy: 1` regardless, because they always have exactly
+ * one hop in front of them: this gateway.
  */
+if (config.trustProxyHops > 0) app.set('trust proxy', config.trustProxyHops);
 app.use(cors({ origin: config.corsOrigin, credentials: true }));
 app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');

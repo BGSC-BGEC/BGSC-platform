@@ -5,6 +5,7 @@ import {
     ACCOUNT_DELETION_GRACE_DAYS,
     AuditLog,
     DomainEvent,
+    PendingRegistration,
     User,
     UserRole,
     UserStatus,
@@ -87,10 +88,20 @@ async function activeUser(): Promise<string> {
 const outcome = (p: Promise<unknown>) =>
     p.then(() => 'ok', (e: any) => `${e.status}:${e.code}`);
 
+/** The code `send` mailed, read off the dev mailer's log line (no SMTP host here), or '' if none. */
+async function mailedCode(send: () => Promise<unknown>): Promise<string> {
+    const realLog = console.log;
+    let mailed = '';
+    console.log = (...a: unknown[]) => { const m = String(a[0]).match(/^Code: (\d{6})$/); if (m) mailed = m[1]; };
+    try { await send(); } finally { console.log = realLog; }
+    return mailed;
+}
+
 async function main() {
     await mongoose.connect(TEST_DB);
     await mongoose.connection.dropDatabase();
     await User.createIndexes();
+    await PendingRegistration.createIndexes();
     subscribe('*', (e) => void events.push(e));
 
     // ---- reactivation inside the window ------------------------------------
@@ -363,15 +374,7 @@ async function main() {
     // ---- reset codes: stored hashed, consumed once, guesses capped -----------
     const resetId = await activeUser();
     const resetEmail = `${resetId}@authe2e.local`;
-    const realLog = console.log;
-    let mailed = '';
-    const mailedCode = async (send: () => Promise<void>) => {
-        mailed = '';
-        console.log = (...a: unknown[]) => { const m = String(a[0]).match(/^Code: (\d{6})$/); if (m) mailed = m[1]; };
-        try { await send(); } finally { console.log = realLog; }
-        return mailed;
-    };
-    await mailedCode(() => AuthService.forgotPassword(resetEmail));
+    const mailed = await mailedCode(() => AuthService.forgotPassword(resetEmail));
     const stored = (await User.findById(resetId).select('+password_reset_token'))!.password_reset_token!;
     assert.ok(mailed && stored !== mailed && (await bcrypt.compare(mailed, stored)), 'the reset code is stored as a digest, never raw');
     const resets = await Promise.all([0, 1].map(() => outcome(AuthService.resetPassword({ email: resetEmail, otp: mailed, new_password: 'N3w!Passw0rd' }))));
@@ -393,14 +396,59 @@ async function main() {
     assert.ok(reopened, 'an expired window reopens with a fresh code');
     assert.strictEqual(await outcome(AuthService.resetPassword({ email: resetEmail, otp: reopened, new_password: 'N3w!Passw0rd' })), 'ok');
 
-    // ---- register race is a 409, not a 500 -----------------------------------
+    // ---- register creates nothing; the mailed code creates the account --------
     const regName = `reg_${Date.now()}`;
     const reg = { email: `${regName}@authe2e.local`, username: regName, password: PASSWORD, full_name: 'Reg Race' };
     const regsBefore = events.length;
-    const regs = await Promise.all([0, 1].map(() => outcome(AuthService.register(reg))));
-    assert.deepStrictEqual(regs.sort(), ['409:conflict', 'ok'], 'two simultaneous sign-ups: one wins, one gets 409');
+    let started: unknown;
+    const regCode = await mailedCode(async () => { started = await AuthService.register(reg); });
+    assert.ok(/^\d{6}$/.test(regCode), 'register mails a code');
+    assert.deepStrictEqual(started, { status: 'verification_required', email: reg.email, expires_in: 600 }, 'and answers without tokens');
+    assert.strictEqual(await User.countDocuments({ email: reg.email }), 0, 'no account exists before the code comes back');
+    assert.strictEqual(events.slice(regsBefore).some((e) => e.type === 'UserRegistered'), false, 'nor is one announced');
+    const pendingRow = (await PendingRegistration.findOne({ email: reg.email }).select('+code_hash +password_hash'))!;
+    assert.ok(pendingRow.code_hash !== regCode && (await bcrypt.compare(regCode, pendingRow.code_hash)), 'the code is stored as a digest');
+    assert.ok(await bcrypt.compare(PASSWORD, pendingRow.password_hash), 'and the password as the bcrypt the account will hold');
+    await assert.rejects(() => AuthService.register({ ...reg, email: `other_${regName}@authe2e.local` }),
+        (e: any) => e.status === 409 && e.code === 'conflict', 'a live pending sign-up holds its username against other addresses');
+    assert.strictEqual(await outcome(AuthService.verifyRegistration(reg.email, regCode === '000000' ? '111111' : '000000')),
+        '400:invalid_otp', 'a wrong code is refused');
+    assert.strictEqual(await outcome(AuthService.verifyRegistration('nobody@authe2e.local', regCode)), '400:no_pending_registration');
+
+    // Two tabs verifying with the right code: one account, and the loser a 4xx, never a 500.
+    const regs = await Promise.all([0, 1].map(() => outcome(AuthService.verifyRegistration(reg.email, regCode))));
+    assert.strictEqual(regs.filter((r) => r === 'ok').length, 1, 'two simultaneous verifies: one wins');
+    assert.ok(regs.every((r) => r === 'ok' || /^(400|409):/.test(r)), `and the other is refused cleanly: ${regs}`);
+    const regUser = (await User.findOne({ email: reg.email }).select('+email_verification_token +refresh_token_hash'))!;
+    assert.strictEqual(regUser.is_email_verified, true, 'the account is born verified');
+    assert.ok(!regUser.email_verification_token && regUser.refresh_token_hash, 'with no verification token and a live session');
+    assert.strictEqual(await PendingRegistration.countDocuments({ email: reg.email }), 0, 'the pending row is consumed');
     const registered = events.slice(regsBefore).find((e) => e.type === 'UserRegistered')!;
     assert.deepStrictEqual(Object.keys(registered.payload), ['user_id'], 'UserRegistered carries the id only, no email');
+    await assert.rejects(() => AuthService.register(reg), (e: any) => e.status === 409, 'and the email is now taken');
+
+    // Guesses are capped per code; a resend replaces the code but buys no new guesses.
+    const capName = `cap_${Date.now()}`;
+    const capEmail = `${capName}@authe2e.local`;
+    const capCode = await mailedCode(() => AuthService.register({ email: capEmail, username: capName, password: PASSWORD, full_name: 'Cap' }));
+    const capGuesses = await Promise.all(Array.from({ length: MAIL_CODE_MAX_ATTEMPTS + 2 }, () =>
+        outcome(AuthService.verifyRegistration(capEmail, capCode === '000000' ? '111111' : '000000'))));
+    assert.strictEqual(capGuesses.filter((g) => g === '400:invalid_otp').length, MAIL_CODE_MAX_ATTEMPTS, 'parallel guesses get exactly the cap');
+    assert.strictEqual(capGuesses.filter((g) => g === '429:too_many_attempts').length, 2, 'the rest are 429');
+    assert.strictEqual(await outcome(AuthService.verifyRegistration(capEmail, capCode)), '429:too_many_attempts', 'even with the right code');
+    assert.strictEqual(await mailedCode(() => AuthService.resendVerification(capEmail)), '', 'a resend buys no new code inside the window');
+    await mailedCode(() => AuthService.register({ email: capEmail, username: capName, password: PASSWORD, full_name: 'Cap' }));
+    assert.strictEqual((await PendingRegistration.findOne({ email: capEmail }))!.attempts, 0, 'registering again starts over');
+    const resent = await mailedCode(() => AuthService.resendVerification(capEmail));
+    assert.ok(/^\d{6}$/.test(resent), 'resend mails a pending sign-up a fresh code');
+    assert.strictEqual(await outcome(AuthService.verifyRegistration(capEmail, resent)), 'ok', 'and the resent code creates the account');
+
+    // Google proving the address voids a password sign-up waiting on it.
+    const gPendName = `gpend_${Date.now()}`;
+    await mailedCode(() => AuthService.register({ email: `${gPendName}@authe2e.local`, username: gPendName, password: PASSWORD, full_name: 'Squat' }));
+    await AuthService.upsertGoogleUser({ id: `g-${gPendName}`, email: `${gPendName}@authe2e.local`, verified_email: true });
+    assert.strictEqual(await PendingRegistration.countDocuments({ email: `${gPendName}@authe2e.local` }), 0,
+        'a Google sign-in deletes the pending sign-up for its address');
 
     // ---- phone OTP: attempts are atomic and a resend buys no new guesses -------
     const otpId = await activeUser();
@@ -509,7 +557,9 @@ async function main() {
     await assert.rejects(
         () => AuthService.register({ email: `${restorable}@authe2e.local`, username: 'fresh_one', password: PASSWORD, full_name: 'Too Soon' }),
         (e: any) => e.status === 409, 'an account still inside its restore window keeps its email');
-    const reborn = await AuthService.register({ email: tomb.email, username: tomb.username, password: PASSWORD, full_name: 'Reborn' });
+    const rebornCode = await mailedCode(() => AuthService.register({ email: tomb.email, username: tomb.username, password: PASSWORD, full_name: 'Reborn' }));
+    assert.strictEqual((await User.findById(expired))!.email, tomb.email, 'a sign-up that is only pending releases nothing yet');
+    const reborn = await AuthService.verifyRegistration(tomb.email, rebornCode);
     assert.notStrictEqual(reborn.user.id, expired, 'an expired account no longer blocks its email and username');
     const released = (await User.findById(expired))!;
     assert.deepStrictEqual([released.email, released.username], [`deleted+${expired}@invalid`, `deleted_${expired}`],
@@ -571,10 +621,19 @@ async function httpChecks(): Promise<void> {
         assert.strictEqual(r.status, 422, `register refuses ${label} with 422, not a 500`);
         assert.ok(r.body.fields.some((f: any) => f.key === key), `and names the field: ${key}`);
     }
-    const created = await call('POST', '/auth/register', { body: signup });
-    assert.strictEqual(created.status, 201, 'a valid sign-up is created');
-    assert.strictEqual(created.body.user.email, signup.email.trim().toLowerCase(), 'with the email trimmed and lowercased');
+    let pendingSignup = { status: 0, body: null as any };
+    const signupCode = await mailedCode(async () => { pendingSignup = await call('POST', '/auth/register', { body: signup }); });
+    assert.strictEqual(pendingSignup.status, 202, 'a valid sign-up is accepted, not created');
+    assert.deepStrictEqual(Object.keys(pendingSignup.body).sort(), ['email', 'expires_in', 'status'], 'and carries no user and no tokens');
+    assert.strictEqual(pendingSignup.body.email, signup.email.trim().toLowerCase(), 'with the email trimmed and lowercased');
+    assert.strictEqual((await call('POST', '/auth/register/verify', { body: { email: signup.email, otp: '12345' } })).status, 422,
+        'register/verify validates the code shape');
+    const created = await call('POST', '/auth/register/verify', { body: { email: signup.email, otp: signupCode } });
+    assert.strictEqual(created.status, 201, 'the mailed code creates the account');
+    assert.strictEqual(created.body.user.email, signup.email.trim().toLowerCase(), 'under the normalised email');
+    assert.strictEqual(created.body.user.is_email_verified, true, 'already verified');
     assert.strictEqual(created.body.user.is_phone_verified, false, 'and the phone badge in the user payload');
+    assert.ok(created.body.tokens.access_token && created.body.tokens.refresh_token, 'and signs it in');
 
     // ---- login's 403 for a pending deletion ---------------------------------
     const pendingId = await seedDeletedUser(5);

@@ -28,8 +28,9 @@ const PORT = parseInt(process.env.PORT || '3001', 10);
 const options = {
     name: NAME,
     port: PORT,
-    // Shares `users` with User Service (auth fields here, profile fields there).
-    models: ['User'],
+    // Shares `users` with User Service (auth fields here, profile fields there). Sole owner of
+    // `pending_registrations`, whose TTL and unique-email indexes must exist before it serves.
+    models: ['User', 'PendingRegistration'],
     routes(app: express.Express) {
         app.use('/auth', authRoutes);
         // Its own prefix, matching the gateway's routing table rather than nesting under /auth.

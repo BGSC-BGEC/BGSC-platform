@@ -4,7 +4,7 @@ import * as WebBrowser from 'expo-web-browser';
 
 import { api, ApiError } from '../api/client';
 import { API_BASE_URL, resolveMediaUrl } from '../api/config';
-import { tokenStorage } from '../api/tokenStorage';
+import { googleSignInStorage, tokenStorage } from '../api/tokenStorage';
 import type { ApiUser, AuthResult } from '../api/types';
 
 export interface User {
@@ -37,6 +37,24 @@ export interface RegisterDto {
   password: string;
   contact?: string;
 }
+
+/** Sign-up waits for the emailed code; no account exists until it is verified. */
+export interface PendingRegistration {
+  email: string;
+  /** Seconds the code stays valid. */
+  expiresIn?: number;
+}
+
+/** The pending sign-up is gone (expired, or the email/username was taken meanwhile): start over. */
+export class SignUpAgainError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SignUpAgainError';
+  }
+}
+
+/** Google sign-in result: signed in, browser closed, or the deep-link fallback already handled it. */
+export type GoogleSignInOutcome = AuthResponse | 'cancelled' | 'handled';
 
 /** Login hit a soft-deleted account: the password was right, the account can still be restored. */
 export class AccountDeactivatedError extends Error {
@@ -77,7 +95,23 @@ const GOOGLE_ERRORS: Record<string, string> = {
   account_deactivated: 'This account is scheduled for deletion. Log in with your password to restore it.',
   invalid_oauth_state: 'Google sign-in timed out. Please try again.',
   server_error: 'Google sign-in failed. Please try again.',
+  conflict: 'That Google account’s email is already linked to another BGSC account. Log in with your password instead.',
+  forbidden: 'This account has been suspended.',
+  too_many_requests: 'Too many sign-in attempts. Wait a few minutes, then try again.',
+  unauthorized: 'Google sign-in expired before it finished. Please try again.',
+  google_unreachable: 'We couldn’t reach Google. Check your connection and try again.',
+  google_token_exchange_failed: 'Google didn’t confirm your sign-in. Please try again.',
 };
+
+/** True for the Google redirect in dev/prod builds (bgsc://) and Expo Go (exp://…/--/auth/callback). */
+export function isGoogleCallbackUrl(url: string): boolean {
+  return /^(bgsc:\/\/auth\/callback|exps?:\/\/[^?#]*\/--\/auth\/callback)([?#]|$)/.test(url);
+}
+
+function urlParam(url: string, key: string): string | null {
+  const match = url.match(new RegExp(`[?&#]${key}=([^&#]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
 
 /** Shared by the email-verification and password-reset code checks. */
 function codeError(err: unknown): unknown {
@@ -117,28 +151,16 @@ export class AuthRepository {
     }
   }
 
-  /** POST /auth/register — the account is signed in immediately. */
-  async register(dto: RegisterDto): Promise<AuthResponse> {
+  /** POST /auth/register — emails a 6-digit code; the account is only created once it is verified. */
+  async register(dto: RegisterDto): Promise<PendingRegistration> {
     try {
-      const result = await api.post<AuthResult>('/auth/register', {
+      const result = await api.post<{ status: string; email?: string; expires_in?: number }>('/auth/register', {
         email: dto.email,
         username: dto.username,
         full_name: dto.fullName,
         password: dto.password,
       });
-      const response = await persist(result);
-
-      // Contact number is optional and stored on the profile, not the account.
-      const phone = toE164(dto.contact);
-      if (phone) {
-        try {
-          const updated = await api.patch<ApiUser>('/users/me', { phone_number: phone });
-          response.user = mapUser(updated);
-        } catch {
-          // Non-blocking: the member can add their number later from Edit profile.
-        }
-      }
-      return response;
+      return { email: result?.email ?? dto.email, expiresIn: result?.expires_in };
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         throw new Error('That email or username is already registered.');
@@ -152,6 +174,35 @@ export class AuthRepository {
       }
       throw err;
     }
+  }
+
+  /** POST /auth/register/verify — checks the emailed code, creates the account and signs it in. */
+  async completeRegistration(email: string, otp: string): Promise<AuthResponse> {
+    try {
+      return await persist(await api.post<AuthResult>('/auth/register/verify', { email, otp }));
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'no_pending_registration') {
+        throw new SignUpAgainError('This code has expired. Please sign up again to get a new one.');
+      }
+      if (err instanceof ApiError && err.status === 409) {
+        throw new SignUpAgainError('That email or username was taken before you verified. Please sign up again.');
+      }
+      if (err instanceof ApiError && err.code === 'invalid_otp') {
+        throw new Error('That code is incorrect. Check the latest email and try again.');
+      }
+      if (err instanceof ApiError && err.code === 'too_many_attempts') {
+        throw new Error('Too many wrong codes. Tap Resend for a new code, then try again.');
+      }
+      throw codeError(err);
+    }
+  }
+
+  /** PATCH /users/me — optional contact number from sign-up; null when it isn't a valid number. */
+  async setPhoneNumber(contact?: string): Promise<User | null> {
+    // Contact number is optional and stored on the profile, not the account.
+    const phone = toE164(contact);
+    if (!phone) return null;
+    return mapUser(await api.patch<ApiUser>('/users/me', { phone_number: phone }));
   }
 
   /** GET /users/me — used to restore a session on app start. */
@@ -200,9 +251,10 @@ export class AuthRepository {
   /**
    * Google sign-in via the browser (PKCE). The backend redirects back to the app
    * with a one-time `login_code`, which is exchanged together with the verifier.
-   * Resolves null when the member closes the browser.
+   * The verifier is stored first so a redirect delivered as a deep link instead
+   * (see completeGoogleSignIn) can still finish the sign-in.
    */
-  async googleSignIn(): Promise<AuthResponse | null> {
+  async googleSignIn(): Promise<GoogleSignInOutcome> {
     // Hex keeps the verifier inside the PKCE charset; 32 bytes → 64 chars.
     const verifier = Array.from(Crypto.getRandomBytes(32), (b) => b.toString(16).padStart(2, '0')).join('');
     const challenge = (
@@ -216,24 +268,36 @@ export class AuthRepository {
       Constants.executionEnvironment === ExecutionEnvironment.StoreClient
         ? `${Constants.linkingUri.replace(/\/+$/, '')}/auth/callback`
         : 'bgsc://auth/callback';
+    await googleSignInStorage.save({ verifier, redirectUri });
     const result = await WebBrowser.openAuthSessionAsync(
       `${API_BASE_URL}/auth/google?redirect_uri=${encodeURIComponent(redirectUri)}&code_challenge=${challenge}`,
       redirectUri,
     );
-    if (result.type !== 'success') return null;
+    // The verifier stays stored: the redirect may still arrive as a deep link after a "dismiss".
+    if (result.type !== 'success') return 'cancelled';
 
-    const param = (key: string) => {
-      const match = result.url.match(new RegExp(`[?&#]${key}=([^&#]*)`));
-      return match ? decodeURIComponent(match[1]) : null;
-    };
-    const failure = param('error');
+    const response = await this.completeGoogleSignIn(result.url);
+    // Null: the deep-link fallback consumed the verifier first and is signing in.
+    return response ?? 'handled';
+  }
+
+  /**
+   * Exchanges the `login_code` in a Google redirect URL. Consumes the stored
+   * verifier exactly once, so the auth session and the deep-link listener can't
+   * both exchange; resolves null when there is no pending sign-in to finish.
+   */
+  async completeGoogleSignIn(callbackUrl: string): Promise<AuthResponse | null> {
+    const pending = await googleSignInStorage.take();
+    if (!pending) return null;
+
+    const failure = urlParam(callbackUrl, 'error');
     if (failure) throw new Error(GOOGLE_ERRORS[failure] ?? GOOGLE_ERRORS.server_error);
-    const loginCode = param('login_code');
+    const loginCode = urlParam(callbackUrl, 'login_code');
     if (!loginCode) throw new Error(GOOGLE_ERRORS.server_error);
 
     try {
       return await persist(
-        await api.post<AuthResult>('/auth/google/exchange', { login_code: loginCode, code_verifier: verifier }),
+        await api.post<AuthResult>('/auth/google/exchange', { login_code: loginCode, code_verifier: pending.verifier }),
       );
     } catch (err) {
       if (err instanceof ApiError && err.code in GOOGLE_ERRORS) throw new Error(GOOGLE_ERRORS[err.code]);

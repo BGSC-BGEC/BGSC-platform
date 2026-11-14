@@ -1,5 +1,6 @@
 export * from './shared';
 export * from './User';
+export * from './PendingRegistration';
 export * from './AuditLog';
 export * from './Event';
 export * from './Team';

@@ -168,6 +168,14 @@ export const config = {
 
   /** Port this process listens on. Each service overrides via its own PORT. */
   gatewayPort: parseInt(process.env.GATEWAY_PORT || '3000', 10),
+  /**
+   * Reverse-proxy hops in front of the GATEWAY (Express `trust proxy`). 0 = trust none, `req.ip` is
+   * the TCP peer: right when compose publishes :3000 straight to clients. Behind cloudflared, nginx
+   * or a load balancer it must be the exact hop count (1 for one tunnel/proxy), or every client
+   * shares the proxy's IP and one rate-limit bucket. Never more than the real count: each extra hop
+   * trusted is an `X-Forwarded-For` entry the client writes itself. Garbage reads as 0.
+   */
+  trustProxyHops: positiveIntOr(process.env.TRUST_PROXY_HOPS, 0),
 
   /**
    * Downstream service addresses, used by the gateway to route and by services to call each other.

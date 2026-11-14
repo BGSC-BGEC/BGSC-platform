@@ -12,7 +12,7 @@ import { gzipSync } from 'zlib';
 import { drainUnreadBody } from '@bgsc/shared';
 import { createServiceProxy } from './proxy';
 import { isAuthAttempt, isCredentialAttempt, isInternalPath } from './routing';
-import { attemptIdentity, authAttemptIpCeiling, authAttemptLimiter, ceilingSkips, parseAttemptBody } from './rateLimit';
+import { attemptIdentity, authAttemptIpCeiling, authAttemptLimiter, ceilingSkips, generalLimiterSkips, parseAttemptBody } from './rateLimit';
 
 /* ------------------------------- routing -------------------------------- */
 
@@ -28,6 +28,17 @@ for (const p of ['/auth/resend-verification', '/auth/phone/send-otp', '/auth/pho
 assert.ok(!isAuthAttempt('/auth/resend-otp') && !isAuthAttempt('/auth/totp/verify'), 'dead paths are gone');
 assert.ok(!isAuthAttempt('/auth/me') && !isAuthAttempt('/auth/refresh'), 'ordinary auth routes stay general');
 assert.ok(isCredentialAttempt('/auth/login') && !isCredentialAttempt('/auth/forgot-password'), 'send paths count every call');
+// The sign-up code check is a guessable secret like verify-email: strict, keyed on the email.
+assert.ok(isCredentialAttempt('/auth/register/verify') && isCredentialAttempt('/auth/Register/Verify/'), 'register/verify is a credential path');
+assert.strictEqual(attemptIdentity({ path: '/auth/register/verify', body: { email: ' Ana@X.io ', login: 'junk' } } as never), 'ana@x.io',
+    'register/verify keys on the email');
+// Token renewal and image loads never spend the general bucket; everything else does.
+assert.ok(generalLimiterSkips({ method: 'POST', path: '/auth/refresh' } as never), 'refresh is outside the general bucket');
+assert.ok(generalLimiterSkips({ method: 'GET', path: '/uploads/avatars/a.webp' } as never) &&
+    generalLimiterSkips({ method: 'HEAD', path: '/uploads/events/b.jpg' } as never), 'upload reads are outside the general bucket');
+assert.ok(!generalLimiterSkips({ method: 'POST', path: '/uploads/x' } as never) && !generalLimiterSkips({ method: 'GET', path: '/uploadsx/a' } as never) &&
+    !generalLimiterSkips({ method: 'GET', path: '/auth/refresh' } as never) && !generalLimiterSkips({ method: 'GET', path: '/users/me' } as never),
+    'and nothing else is');
 assert.ok(isInternalPath('/INTERNAL/users') && isInternalPath('/internal/'), '/internal is blocked in any case');
 // The per-IP ceiling frees successful logins and signups, never the always-200 mail/OTP sends.
 const res200 = { statusCode: 200 } as never;
@@ -48,7 +59,7 @@ async function limiterChecks(): Promise<void> {
         res.status(req.body?.password === 'ok' ? 200 : 401).json({ got: req.body });
     });
     down.post('/auth/forgot-password', (_req, res) => { res.json({ ok: true }); });
-    down.post('/auth/register', (req, res) => { res.status(201).json({ email: req.body?.email }); });
+    down.post('/auth/register', (req, res) => { res.status(202).json({ email: req.body?.email }); });
     const ds = down.listen(0);
     await new Promise((r) => ds.once('listening', r));
 
@@ -95,7 +106,7 @@ async function limiterChecks(): Promise<void> {
         // Successful sends do not count toward the per-IP ceiling (30), so a NAT can onboard.
         for (let i = 0; i < 35; i++) {
             const r = await post('/auth/register', { email: `s${i}@campus.edu` });
-            assert.strictEqual(r.status, 201, `registration ${i + 1} from one IP is not throttled by the ceiling`);
+            assert.strictEqual(r.status, 202, `registration ${i + 1} from one IP is not throttled by the ceiling`);
         }
 
         // A chunked or gzip body is parsed here, so those headers must not be forwarded.

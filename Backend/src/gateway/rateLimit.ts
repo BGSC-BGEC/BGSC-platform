@@ -15,7 +15,7 @@ const ipKey = (req: Request) => ipKeyGenerator(req.ip ?? '', 56);
 /**
  * The body field each strict path actually reads to pick an account. Keying every path on
  * `body.login ?? body.email` let a junk `login` field on an email route rotate the per-account
- * bucket at will. The mailed-code paths (verify-email, reset-password) name the account by
+ * bucket at will. The mailed-code paths (verify-email, register/verify, reset-password) name the account by
  * email; /auth/google/exchange has no account to key on, so it falls to the IP alone; the phone
  * OTP routes are the signed-in caller.
  */
@@ -23,6 +23,7 @@ const IDENTITY_FIELD: Record<string, 'login' | 'email' | 'user'> = {
     '/auth/login': 'login',
     '/account/reactivate': 'login',
     '/auth/register': 'email',
+    '/auth/register/verify': 'email',
     '/auth/resend-verification': 'email',
     '/auth/forgot-password': 'email',
     '/auth/verify-email': 'email',
@@ -78,7 +79,7 @@ export const authAttemptLimiter = rateLimit({
  * The per-IP ceiling under the per-account bucket. Without it, keying on the account would let one
  * IP spray five guesses at every account on the platform.
  *
- * It counts failures of logins and signups only: counting successful signups (register answers 201)
+ * It counts failures of logins and signups only: counting successful signups (register answers 202)
  * meant a campus NAT onboarding thirty students in fifteen minutes hit 429. The mail/OTP
  * send paths count EVERY call — they answer 200 whatever happens (no account enumeration), so a
  * failures-only rule would never count them and one IP could spray reset mail at every address.
@@ -98,6 +99,20 @@ export const authAttemptIpCeiling = rateLimit({
     requestWasSuccessful: ceilingSkips,
 });
 
+/**
+ * Requests the general bucket never counts:
+ *  - `POST /auth/refresh`: a renewal that lost to the bucket logged the user out (the client drops
+ *    the session on a failed refresh), so a busy screen spent its own sign-in. It is no free-for-all:
+ *    it needs a valid, current refresh token, and replaying a retired one ends the session.
+ *  - `GET`/`HEAD` under `/uploads/`: one screen of avatars and event images is dozens of requests,
+ *    and they shared the bucket with the API calls (and the refresh) that screen needed.
+ */
+export const generalLimiterSkips = (req: Request) => {
+    const p = normalizePath(req.path);
+    if (req.method === 'POST' && p === '/auth/refresh') return true;
+    return (req.method === 'GET' || req.method === 'HEAD') && p.startsWith('/uploads/');
+};
+
 /** 100 requests per minute per user, falling back to IP for anonymous callers. */
 export const generalLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -109,4 +124,5 @@ export const generalLimiter = rateLimit({
     // IPv6 to a /64 subnet — using req.ip raw lets one IPv6 client rotate addresses past the limit.
     // `/health` is answered before this runs (src/index.ts), so a probe is never throttled.
     keyGenerator: (req) => req.user?.id ?? ipKeyGenerator(req.ip ?? '', 64) ?? 'unknown',
+    skip: generalLimiterSkips,
 });

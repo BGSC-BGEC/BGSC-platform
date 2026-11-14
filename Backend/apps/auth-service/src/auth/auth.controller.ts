@@ -33,7 +33,13 @@ export function readCookie(req: Request, name: string): string | undefined {
 
 export class AuthController {
   static register = wrap(async (req: Request, res: Response): Promise<void> => {
+    // 202: nothing is created yet. The account (and its tokens) comes from /auth/register/verify.
     const result = await AuthService.register(req.body);
+    res.status(202).json(result);
+  });
+
+  static verifyRegistration = wrap(async (req: Request, res: Response): Promise<void> => {
+    const result = await AuthService.verifyRegistration(req.body.email, req.body.otp);
     res.status(201).json(result);
   });
 

@@ -1,5 +1,6 @@
 import { createProxyMiddleware, fixRequestBody, Options } from 'http-proxy-middleware';
 import { Request, Response } from 'express';
+import { config } from '@bgsc/shared';
 import { LIVE_SERVICES, ROUTES, startsWithSegment } from './routing';
 
 /**
@@ -42,6 +43,12 @@ export function createServiceProxy(key: string, target: string, prefixes: string
         on: {
             proxyReq: (proxyReq, req) => {
                 for (const header of CLIENT_FORBIDDEN_HEADERS) proxyReq.removeHeader(header);
+                // Behind a trusted proxy (TRUST_PROXY_HOPS), `xfwd` appended THAT proxy's address,
+                // so every service's req.ip — audit rows, feedback's anonymous throttle — was the
+                // tunnel's. Forward the client address the gateway resolved instead, alone: the
+                // services trust one hop and read the rightmost entry.
+                const clientIp = (req as Request).ip;
+                if (config.trustProxyHops > 0 && clientIp) proxyReq.setHeader('x-forwarded-for', clientIp);
                 // A consumed stream would otherwise forward an empty body and hang the service. The
                 // parser already un-chunked and inflated it, so the client's Transfer-Encoding and
                 // Content-Encoding no longer describe what is sent: kept, a chunked or gzip login

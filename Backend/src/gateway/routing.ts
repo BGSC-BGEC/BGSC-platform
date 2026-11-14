@@ -89,6 +89,8 @@ export const startsWithSegment = (path: string, prefix: string) =>
 export const CREDENTIAL_ATTEMPT_PATHS = [
     '/auth/login',
     '/auth/verify-email',
+    // Checks the mailed sign-up code and, on success, creates the account and mints tokens.
+    '/auth/register/verify',
     '/auth/reset-password',
     '/auth/phone/verify-otp',
     // Trades a one-time Google login code for tokens.
