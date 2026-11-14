@@ -32,6 +32,11 @@ web-build/
 android/
 ios/
 
+# Mock Development Data (offline / expo tunnel testing)
+mobile/src/mock/
+mobile/mock/
+*mock-data*
+
 # React / Vite (web) 
 *.local
 

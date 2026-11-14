@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, View, Platform } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -15,12 +15,12 @@ import { useAsyncResource } from '../hooks/useAsyncResource';
 import { eventsRepository } from '../repositories/EventsRepository';
 import { leaderboardRepository } from '../repositories/LeaderboardRepository';
 
-type Item = { label: string; icon: IconName; route: string };
+type Item = { label: string; icon: IconName; route: string; screen?: string };
 
 /** Drawer routes, in order. `route` is the drawer screen; Settings is a pushed stack screen. */
 const PRIMARY: Item[] = [
-  { label: 'Home', icon: 'home', route: 'MainTabs' },
-  { label: 'Events', icon: 'calendar', route: 'Events' },
+  { label: 'Home', icon: 'home', route: 'MainTabs', screen: 'HomeTab' },
+  { label: 'Events', icon: 'calendar', route: 'MainTabs', screen: 'EventsTab' },
   { label: 'Leaderboard', icon: 'trophy', route: 'Leaderboard' },
   { label: 'Points & challenges', icon: 'target', route: 'Challenges' },
   { label: 'Hall of Fame', icon: 'sparkles', route: 'HallOfFame' },
@@ -42,7 +42,12 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const confirmLogout = useConfirmLogout();
-  const current = state.routes[state.index]?.name;
+  const drawerRoute = state.routes[state.index];
+  const current = drawerRoute?.name;
+
+  // If inside MainTabs (BottomTabsLayout), determine the currently focused tab
+  const childState = drawerRoute?.state;
+  const activeTabName = childState?.routes?.[childState?.index ?? 0]?.name ?? 'HomeTab';
 
   // Badges and rank are nice-to-have: failures just hide them.
   const { data: openCount } = useAsyncResource(
@@ -58,10 +63,15 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
     [user?.id],
   );
 
-  const go = (route: string) => {
+  const go = (route: string, screen?: string) => {
     navigation.closeDrawer();
-    // pop: reuse an existing copy of a stack route (Profile, Settings) instead of stacking another.
-    navigation.navigate(route, undefined, { pop: true });
+    if (screen) {
+      // Switching to a tab inside MainTabs shifts both the screen and bottom navigation bar
+      (navigation as any).navigate(route, { screen });
+    } else {
+      // pop: reuse an existing copy of a stack route (Profile, Settings) instead of stacking another.
+      navigation.navigate(route, undefined, { pop: true });
+    }
   };
 
   const badge: Record<string, string | undefined> = {
@@ -77,28 +87,23 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
     .join(' · ');
 
   const renderItem = (item: Item) => {
-    const active = current === item.route;
+    const active = item.screen
+      ? current === item.route && activeTabName === item.screen
+      : current === item.route;
     const tint = active ? 'primary' : 'text';
     return (
       <Pressable
-        key={item.route}
-        onPress={() => go(item.route)}
+        key={item.screen ? `${item.route}-${item.screen}` : item.route}
+        onPress={() => go(item.route, item.screen)}
         accessibilityRole="button"
         accessibilityState={{ selected: active }}
         style={({ pressed }) => [
           styles.item,
-          active && [
-            {
-              backgroundColor: withAlpha(colors.primary, 0.16),
-              borderColor: withAlpha(colors.primary, 0.38),
-              borderWidth: 1,
-            },
-            Platform.OS === 'web' && ({
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
-              boxShadow: `0 4px 14px -2px ${withAlpha(colors.primary, 0.25)}, inset 0 1px 1px rgba(255, 255, 255, 0.25)`,
-            } as any),
-          ],
+          active && {
+            backgroundColor: withAlpha(colors.primary, 0.16),
+            borderColor: withAlpha(colors.primary, 0.38),
+            borderWidth: 1,
+          },
           pressed && styles.pressed,
         ]}
       >
@@ -106,10 +111,10 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
         <Typography variant="body" color={tint} style={styles.itemLabel}>
           {item.label}
         </Typography>
-        {badge[item.route] ? (
+        {badge[item.label] || badge[item.route] ? (
           <View style={[styles.badge, { backgroundColor: colors.accentMuted }]}>
             <Typography variant="caption" color="primary" style={styles.badgeText}>
-              {badge[item.route]}
+              {badge[item.label] || badge[item.route]}
             </Typography>
           </View>
         ) : null}
@@ -133,11 +138,6 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
             borderColor: withAlpha(colors.border, 0.75),
             borderTopColor: withAlpha('#FFFFFF', 0.2),
           },
-          Platform.OS === 'web' && ({
-            backdropFilter: 'blur(14px)',
-            WebkitBackdropFilter: 'blur(14px)',
-            boxShadow: '0 4px 16px -2px rgba(0, 0, 0, 0.2), inset 0 1px 1.5px rgba(255, 255, 255, 0.15)',
-          } as any),
           pressed && styles.pressed,
         ]}
       >

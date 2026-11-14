@@ -23,5 +23,3 @@ export interface ClubEvent {
   waitlistEnabled?: boolean
   requiresApproval?: boolean
 }
-
-export type EventItem = ClubEvent

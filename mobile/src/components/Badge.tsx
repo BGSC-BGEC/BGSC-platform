@@ -92,9 +92,9 @@ export function Badge({
       style={[
         styles.badge,
         {
-          minHeight: isSmall ? 20 : 23,
+          minHeight: isSmall ? 18 : 21,
           maxWidth: '100%',
-          paddingHorizontal: isSmall ? 8 : 12,
+          paddingHorizontal: isSmall ? 6 : 9,
           backgroundColor: outlined ? 'transparent' : bgColor,
           borderColor: outlined ? borderColor : 'transparent',
           borderWidth: outlined ? 1 : 0,

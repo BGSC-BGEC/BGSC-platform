@@ -1,14 +1,17 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import {
   Animated,
+  Easing,
   Image,
-  Platform,
   StyleSheet,
+  useWindowDimensions,
   View,
   type ViewStyle,
 } from 'react-native';
 import Svg, {
+  Circle,
   Defs,
+  LinearGradient,
   Path,
   RadialGradient,
   Rect,
@@ -19,199 +22,319 @@ import { DEFAULT_ASTRONAUT_IMAGE } from '../assets/astronaut';
 
 export { DEFAULT_ASTRONAUT_IMAGE };
 
-function WebCosmicStarfield() {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+interface StarData {
+  id: number;
+  xPercent: number;
+  yPercent: number;
+  size: number;
+  baseOpacity: number;
+  color: string;
+  isSparkle: boolean;
+  group: 1 | 2;
+}
+
+const STAR_COLORS = ['#ffffff', '#e0f2fe', '#fdf4ff', '#fbcfe8', '#bae6fd', '#fed7aa'];
+
+interface SubtleShootingStarProps {
+  id: string;
+  delayMs: number;
+  intervalMs: number;
+  durationMs?: number;
+  startX: number;
+  startY: number;
+  travelDistance?: number;
+  length?: number;
+}
+
+/**
+ * Subtle shooting star: a delicate, glowing linear streak gliding diagonally from
+ * top-left to bottom-right across the dark background, matching the original web effect.
+ */
+export function SubtleShootingStar({
+  id,
+  delayMs,
+  intervalMs,
+  durationMs = 900,
+  startX,
+  startY,
+  travelDistance = 180,
+  length = 80,
+}: SubtleShootingStarProps) {
+  const anim = useRef(new Animated.Value(0)).current;
+
+  // Running diagonally from left to right (42-degree angle)
+  const angleDeg = '42deg';
+  const angleRad = (42 * Math.PI) / 180;
+  const travelX = Math.cos(angleRad) * travelDistance;
+  const travelY = Math.sin(angleRad) * travelDistance;
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    let timer: any;
+    let isMounted = true;
 
-    let animationFrameId: number;
-    let width = (canvas.width = window.innerWidth);
-    let height = (canvas.height = window.innerHeight);
-
-    const handleResize = () => {
-      if (!canvas) return;
-      width = canvas.width = window.innerWidth;
-      height = canvas.height = window.innerHeight;
-      initStars();
-    };
-    window.addEventListener('resize', handleResize);
-
-    interface Star {
-      x: number;
-      y: number;
-      size: number;
-      opacity: number;
-      baseOpacity: number;
-      twinkleSpeed: number;
-      color: string;
-      isSparkle?: boolean;
-    }
-
-    let stars: Star[] = [];
-    const starColors = ['#ffffff', '#e0f2fe', '#fdf4ff', '#fbcfe8', '#bae6fd', '#fed7aa'];
-
-    const initStars = () => {
-      stars = [];
-      const count = Math.floor((width * height) / 2800);
-      for (let i = 0; i < count; i++) {
-        const isSparkle = Math.random() < 0.1;
-        const color = starColors[Math.floor(Math.random() * starColors.length)];
-        const baseOpacity = isSparkle ? 0.6 + Math.random() * 0.4 : 0.2 + Math.random() * 0.7;
-        stars.push({
-          x: Math.random() * width,
-          y: Math.random() * height,
-          size: isSparkle ? Math.random() * 1.8 + 1.2 : Math.random() * 1.3 + 0.5,
-          opacity: baseOpacity,
-          baseOpacity,
-          twinkleSpeed: 0.008 + Math.random() * 0.02,
-          color,
-          isSparkle,
-        });
-      }
-    };
-    initStars();
-
-    let targetMouseX = 0;
-    let targetMouseY = 0;
-    let currentMouseX = 0;
-    let currentMouseY = 0;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      targetMouseX = (e.clientX - width / 2) * 0.03;
-      targetMouseY = (e.clientY - height / 2) * 0.03;
-    };
-    window.addEventListener('mousemove', handleMouseMove);
-
-    interface ShootingStar {
-      x: number;
-      y: number;
-      length: number;
-      speed: number;
-      angle: number;
-      opacity: number;
-      life: number;
-    }
-
-    let shootingStars: ShootingStar[] = [];
-
-    const maybeAddShootingStar = () => {
-      if (Math.random() < 0.02 && shootingStars.length < 3) {
-        shootingStars.push({
-          x: Math.random() * width,
-          y: Math.random() * (height * 0.55),
-          length: Math.random() * 90 + 45,
-          speed: Math.random() * 9 + 7,
-          angle: Math.PI / 4 + (Math.random() * 0.2 - 0.1),
-          opacity: 1,
-          life: 1,
-        });
-      }
-    };
-
-    let tick = 0;
-
-    const render = () => {
-      tick++;
-      currentMouseX += (targetMouseX - currentMouseX) * 0.05;
-      currentMouseY += (targetMouseY - currentMouseY) * 0.05;
-
-      ctx.clearRect(0, 0, width, height);
-
-      for (let i = 0; i < stars.length; i++) {
-        const star = stars[i];
-        star.opacity = star.baseOpacity + Math.sin(tick * star.twinkleSpeed + i) * 0.35;
-        const boundedOpacity = Math.max(0.1, Math.min(1, star.opacity));
-
-        const posX = star.x + currentMouseX * (star.size * 0.8);
-        const posY = star.y + currentMouseY * (star.size * 0.8);
-
-        ctx.fillStyle = star.color;
-        ctx.globalAlpha = boundedOpacity;
-
-        if (star.isSparkle) {
-          const s = star.size * 2.2;
-          ctx.beginPath();
-          ctx.moveTo(posX, posY - s);
-          ctx.lineTo(posX + s * 0.25, posY - s * 0.25);
-          ctx.lineTo(posX + s, posY);
-          ctx.lineTo(posX + s * 0.25, posY + s * 0.25);
-          ctx.lineTo(posX, posY + s);
-          ctx.lineTo(posX - s * 0.25, posY + s * 0.25);
-          ctx.lineTo(posX - s, posY);
-          ctx.lineTo(posX - s * 0.25, posY - s * 0.25);
-          ctx.closePath();
-          ctx.fill();
-
-          ctx.beginPath();
-          ctx.arc(posX, posY, star.size * 0.8, 0, Math.PI * 2);
-          ctx.fill();
-        } else {
-          ctx.beginPath();
-          ctx.arc(posX, posY, star.size, 0, Math.PI * 2);
-          ctx.fill();
+    const streak = () => {
+      if (!isMounted) return;
+      anim.setValue(0);
+      Animated.timing(anim, {
+        toValue: 1,
+        duration: durationMs,
+        easing: Easing.bezier(0.25, 0.4, 0.25, 1),
+        useNativeDriver: true,
+      }).start(() => {
+        if (isMounted) {
+          timer = setTimeout(streak, intervalMs + Math.random() * 800);
         }
-      }
-
-      maybeAddShootingStar();
-
-      for (let i = shootingStars.length - 1; i >= 0; i--) {
-        const ss = shootingStars[i];
-        ss.x += Math.cos(ss.angle) * ss.speed;
-        ss.y += Math.sin(ss.angle) * ss.speed;
-        ss.life -= 0.015;
-
-        if (ss.life <= 0 || ss.x > width + 100 || ss.y > height + 100) {
-          shootingStars.splice(i, 1);
-          continue;
-        }
-
-        ctx.strokeStyle = `rgba(255, 255, 255, ${ss.life * 0.85})`;
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        ctx.moveTo(ss.x, ss.y);
-        ctx.lineTo(
-          ss.x - Math.cos(ss.angle) * ss.length,
-          ss.y - Math.sin(ss.angle) * ss.length
-        );
-        ctx.stroke();
-      }
-
-      animationFrameId = requestAnimationFrame(render);
+      });
     };
 
-    render();
-
+    timer = setTimeout(streak, delayMs);
     return () => {
-      cancelAnimationFrame(animationFrameId);
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('mousemove', handleMouseMove);
+      isMounted = false;
+      clearTimeout(timer);
     };
+  }, [anim, delayMs, intervalMs, durationMs]);
+
+  const translateX = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, travelX],
+  });
+  const translateY = anim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, travelY],
+  });
+  const opacity = anim.interpolate({
+    inputRange: [0, 0.1, 0.65, 1],
+    outputRange: [0, 0.8, 0.7, 0],
+  });
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.meteorWrap,
+        {
+          left: startX,
+          top: startY,
+          opacity,
+          transform: [
+            { translateX },
+            { translateY },
+            { rotate: angleDeg },
+          ],
+        },
+      ]}
+    >
+      <Svg width={length + 10} height={6} viewBox={`0 0 ${length + 10} 6`}>
+        <Defs>
+          <LinearGradient id={`subtleStreak-${id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+            <Stop offset="0%" stopColor="#FFFFFF" stopOpacity={0} />
+            <Stop offset="60%" stopColor="#FED7AA" stopOpacity={0.35} />
+            <Stop offset="90%" stopColor="#FFFFFF" stopOpacity={0.85} />
+            <Stop offset="100%" stopColor="#FFFFFF" stopOpacity={1} />
+          </LinearGradient>
+        </Defs>
+
+        {/* Subtle 1.6px tapered line streak */}
+        <Path
+          d={`M 0 3 L ${length} 3`}
+          stroke={`url(#subtleStreak-${id})`}
+          strokeWidth={1.6}
+          strokeLinecap="round"
+        />
+
+        {/* Soft pinpoint leading head */}
+        <Circle cx={length} cy={3} r={1.2} fill="#FFFFFF" opacity={0.9} />
+      </Svg>
+    </Animated.View>
+  );
+}
+
+// Backward-compatible alias for any existing imports
+export const FallingMeteor = SubtleShootingStar;
+export function MeteorShowerOverlay() {
+  return null;
+}
+
+/**
+ * 100% Native Starfield:
+ * High-performance vector stars with subtle twinkling and animated shooting stars.
+ * Works natively on iOS, Android, and Web without canvas or DOM dependencies.
+ */
+function NativeCosmicStarfield() {
+  const { width, height } = useWindowDimensions();
+
+  // Generate a deterministic constellation of stars
+  const stars: StarData[] = useMemo(() => {
+    const list: StarData[] = [];
+    const count = 72;
+    for (let i = 0; i < count; i++) {
+      const seed = (i * 9301 + 49297) % 233280;
+      const rnd1 = seed / 233280;
+      const seed2 = (seed * 9301 + 49297) % 233280;
+      const rnd2 = seed2 / 233280;
+      const seed3 = (seed2 * 9301 + 49297) % 233280;
+      const rnd3 = seed3 / 233280;
+
+      const isSparkle = i % 7 === 0;
+      list.push({
+        id: i,
+        xPercent: rnd1 * 100,
+        yPercent: rnd2 * 85,
+        size: isSparkle ? 2.4 : rnd3 * 1.5 + 0.8,
+        baseOpacity: isSparkle ? 0.75 : rnd3 * 0.5 + 0.3,
+        color: STAR_COLORS[i % STAR_COLORS.length],
+        isSparkle,
+        group: i % 2 === 0 ? 1 : 2,
+      });
+    }
+    return list;
   }, []);
 
-  return React.createElement('canvas', {
-    ref: canvasRef,
-    style: {
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100%',
-      height: '100%',
-      pointerEvents: 'none',
-      zIndex: 0,
-    },
-  });
+  // Twinkle animations
+  const twinkle1 = useRef(new Animated.Value(0.4)).current;
+  const twinkle2 = useRef(new Animated.Value(0.8)).current;
+
+  useEffect(() => {
+    const anim1 = Animated.loop(
+      Animated.sequence([
+        Animated.timing(twinkle1, {
+          toValue: 1,
+          duration: 2200,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(twinkle1, {
+          toValue: 0.35,
+          duration: 2200,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    const anim2 = Animated.loop(
+      Animated.sequence([
+        Animated.timing(twinkle2, {
+          toValue: 0.3,
+          duration: 2800,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(twinkle2, {
+          toValue: 0.95,
+          duration: 2800,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+
+    anim1.start();
+    anim2.start();
+
+    return () => {
+      anim1.stop();
+      anim2.stop();
+    };
+  }, [twinkle1, twinkle2]);
+
+  const group1Stars = stars.filter((s) => s.group === 1);
+  const group2Stars = stars.filter((s) => s.group === 2);
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {/* Group 1 Stars */}
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: twinkle1 }]}>
+        <Svg width="100%" height="100%">
+          {group1Stars.map((s) =>
+            s.isSparkle ? (
+              <Path
+                key={s.id}
+                d="M12 0L14.59 9.41L24 12L14.59 14.59L12 24L9.41 14.59L0 12L9.41 9.41L12 0Z"
+                fill={s.color}
+                opacity={s.baseOpacity}
+                transform={`translate(${(s.xPercent * width) / 100}, ${(s.yPercent * height) / 100}) scale(${s.size / 16})`}
+              />
+            ) : (
+              <Circle
+                key={s.id}
+                cx={`${s.xPercent}%`}
+                cy={`${s.yPercent}%`}
+                r={s.size}
+                fill={s.color}
+                opacity={s.baseOpacity}
+              />
+            )
+          )}
+        </Svg>
+      </Animated.View>
+
+      {/* Group 2 Stars */}
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: twinkle2 }]}>
+        <Svg width="100%" height="100%">
+          {group2Stars.map((s) =>
+            s.isSparkle ? (
+              <Path
+                key={s.id}
+                d="M12 0L14.59 9.41L24 12L14.59 14.59L12 24L9.41 14.59L0 12L9.41 9.41L12 0Z"
+                fill={s.color}
+                opacity={s.baseOpacity}
+                transform={`translate(${(s.xPercent * width) / 100}, ${(s.yPercent * height) / 100}) scale(${s.size / 16})`}
+              />
+            ) : (
+              <Circle
+                key={s.id}
+                cx={`${s.xPercent}%`}
+                cy={`${s.yPercent}%`}
+                r={s.size}
+                fill={s.color}
+                opacity={s.baseOpacity}
+              />
+            )
+          )}
+        </Svg>
+      </Animated.View>
+
+      {/* Subtle shooting stars running diagonally from left to right */}
+      <SubtleShootingStar
+        id="streak-1"
+        delayMs={600}
+        intervalMs={3600}
+        durationMs={850}
+        startX={width * 0.12}
+        startY={height * 0.08}
+        travelDistance={190}
+        length={85}
+      />
+      <SubtleShootingStar
+        id="streak-2"
+        delayMs={2400}
+        intervalMs={4400}
+        durationMs={920}
+        startX={width * 0.38}
+        startY={height * 0.18}
+        travelDistance={210}
+        length={90}
+      />
+      <SubtleShootingStar
+        id="streak-3"
+        delayMs={4800}
+        intervalMs={4800}
+        durationMs={880}
+        startX={width * 0.05}
+        startY={height * 0.28}
+        travelDistance={170}
+        length={75}
+      />
+    </View>
+  );
 }
 
 export function CosmicSpaceBackground({
   showAstronaut = true,
   astronautTop = 40,
   astronautRight = 10,
-  astronautScale = 1,
+  astronautScale = 0.85,
 }: {
   showAstronaut?: boolean;
   astronautTop?: number;
@@ -219,50 +342,59 @@ export function CosmicSpaceBackground({
   astronautScale?: number;
 }) {
   const floatAnim = useRef(new Animated.Value(0)).current;
-  const pulseAnim = useRef(new Animated.Value(0.8)).current;
+  const pulseAnim = useRef(new Animated.Value(0.85)).current;
 
   useEffect(() => {
-    Animated.loop(
+    const floatLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(floatAnim, {
-          toValue: -12,
-          duration: 3500,
+          toValue: -10,
+          duration: 3200,
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(floatAnim, {
           toValue: 0,
-          duration: 3500,
+          duration: 3200,
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])
-    ).start();
+    );
 
-    Animated.loop(
+    const pulseLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
-          toValue: 1.25,
-          duration: 1500,
+          toValue: 1.2,
+          duration: 1400,
           useNativeDriver: true,
         }),
         Animated.timing(pulseAnim, {
           toValue: 0.85,
-          duration: 1500,
+          duration: 1400,
           useNativeDriver: true,
         }),
       ])
-    ).start();
+    );
+
+    floatLoop.start();
+    pulseLoop.start();
+
+    return () => {
+      floatLoop.stop();
+      pulseLoop.stop();
+    };
   }, [floatAnim, pulseAnim]);
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       <View style={[StyleSheet.absoluteFill, { backgroundColor: '#03060f' }]} />
 
-      {Platform.OS === 'web' && <WebCosmicStarfield />}
-
+      {/* Horizon Solar Glow (Atmospheric Backdrop) */}
       <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox="0 0 390 844" preserveAspectRatio="none">
         <Defs>
           <RadialGradient id="horizon-glow" cx="195" cy="844" rx="260" ry="240" gradientUnits="userSpaceOnUse">
-            <Stop offset="0" stopColor="#f97316" stopOpacity="0.85" />
+            <Stop offset="0%" stopColor="#f97316" stopOpacity="0.85" />
             <Stop offset="0.3" stopColor="#ea580c" stopOpacity="0.6" />
             <Stop offset="0.6" stopColor="#0891b2" stopOpacity="0.15" />
             <Stop offset="1" stopColor="#03060f" stopOpacity="0" />
@@ -271,6 +403,10 @@ export function CosmicSpaceBackground({
         <Rect x="0" y="550" width="390" height="294" fill="url(#horizon-glow)" />
       </Svg>
 
+      {/* Native Twinkling Starfield & Animated Falling Meteors */}
+      <NativeCosmicStarfield />
+
+      {/* Floating Astronaut Companion */}
       {showAstronaut && (
         <Animated.View
           style={[
@@ -284,7 +420,7 @@ export function CosmicSpaceBackground({
         >
           <Image source={{ uri: DEFAULT_ASTRONAUT_IMAGE }} style={styles.astronautImage} resizeMode="contain" />
           <Animated.View style={[styles.sparkleStar, { transform: [{ scale: pulseAnim }] }]}>
-            <Svg width="20" height="20" viewBox="0 0 24 24" fill="#ff4bb8">
+            <Svg width="18" height="18" viewBox="0 0 24 24" fill="#ff4bb8">
               <Path d="M12 0L14.59 9.41L24 12L14.59 14.59L12 24L9.41 14.59L0 12L9.41 9.41L12 0Z" />
             </Svg>
           </Animated.View>
@@ -305,7 +441,7 @@ export function GlassCard({
 }) {
   return (
     <View style={[styles.glassBorder, { borderRadius }, style]}>
-      <BlurView intensity={30} tint="dark" style={[styles.glassBlur, { borderRadius }]}>
+      <BlurView intensity={28} tint="dark" style={[styles.glassBlur, { borderRadius }]}>
         <View style={styles.glassTint}>{children}</View>
       </BlurView>
     </View>
@@ -313,38 +449,43 @@ export function GlassCard({
 }
 
 const styles = StyleSheet.create({
+  meteorWrap: {
+    position: 'absolute',
+    zIndex: 5,
+  },
   astronautWrap: {
     position: 'absolute',
-    width: 130,
-    height: 130,
+    width: 100,
+    height: 100,
     zIndex: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   astronautImage: {
-    width: 110,
-    height: 110,
+    width: 86,
+    height: 86,
   },
   sparkleStar: {
     position: 'absolute',
-    top: 24,
-    right: 14,
+    top: 14,
+    right: 8,
   },
   glassBorder: {
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderTopColor: 'rgba(255, 255, 255, 0.32)',
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 18,
-    elevation: 12,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 14,
+    elevation: 8,
   },
   glassBlur: {
     overflow: 'hidden',
   },
   glassTint: {
-    backgroundColor: 'rgba(10, 15, 28, 0.65)',
+    backgroundColor: 'rgba(10, 15, 28, 0.72)',
     padding: 16,
   },
 });

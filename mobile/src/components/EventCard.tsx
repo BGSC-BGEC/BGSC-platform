@@ -111,7 +111,10 @@ export function EventCard({
   const themeAccent = EVENT_CATEGORY_STYLE[category] ?? EVENT_CATEGORY_STYLE.general;
   const cover = resolveMediaUrl(coverUrl);
 
-  const gradId = `grad-${title.replace(/[^a-zA-Z0-9]/g, '')}`;
+  const gradId = React.useMemo(
+    () => `grad-${category}-${Math.random().toString(36).slice(2, 7)}`,
+    [category]
+  );
 
   let displayDayName = dayName;
   let displayDateNum = dateDisplay;
@@ -217,41 +220,44 @@ export function EventCard({
             </Svg>
           </View>
 
-          <View style={styles.badgeRow}>
-            <View style={[styles.badgePill, { backgroundColor: 'rgba(24, 32, 40, 0.75)' }]}>
-              <Typography style={[styles.badgeText, { color: themeAccent.tagColor }]}>
-                {categoryLabel.toUpperCase()}
-              </Typography>
-            </View>
+          <View style={styles.coverHeaderRow}>
+            <View style={styles.badgeRow}>
+              <View style={[styles.badgePill, { backgroundColor: 'rgba(24, 32, 40, 0.75)' }]}>
+                <Typography style={[styles.badgeText, { color: themeAccent.tagColor }]} numberOfLines={1}>
+                  {categoryLabel.toUpperCase()}
+                </Typography>
+              </View>
 
-            <View
-              style={[
-                styles.badgePill,
-                {
-                  backgroundColor: status.isOpen ? 'rgba(18, 42, 32, 0.8)' : 'rgba(38, 42, 48, 0.8)',
-                },
-              ]}
-            >
-              <Typography
+              <View
                 style={[
-                  styles.badgeText,
+                  styles.badgePill,
                   {
-                    color: status.isOpen ? '#34D399' : colors.textMuted,
+                    backgroundColor: status.isOpen ? 'rgba(18, 42, 32, 0.8)' : 'rgba(38, 42, 48, 0.8)',
                   },
                 ]}
               >
-                {status.label}
+                <Typography
+                  style={[
+                    styles.badgeText,
+                    {
+                      color: status.isOpen ? '#34D399' : colors.textMuted,
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {status.label}
+                </Typography>
+              </View>
+            </View>
+
+            <View style={styles.dateStampWrap}>
+              <Typography style={styles.dateStampDay} numberOfLines={1}>
+                {displayDayName}
+              </Typography>
+              <Typography style={styles.dateStampDate} numberOfLines={1}>
+                {displayDateNum}
               </Typography>
             </View>
-          </View>
-
-          <View style={styles.dateStampWrap}>
-            <Typography style={styles.dateStampDay}>
-              {displayDayName}
-            </Typography>
-            <Typography style={styles.dateStampDate}>
-              {displayDateNum}
-            </Typography>
           </View>
         </View>
 
@@ -261,14 +267,14 @@ export function EventCard({
           </Typography>
 
           <View style={styles.metaRow}>
-            <Icon name="time-outline" size={15} color="textMuted" />
+            <Icon name="clock" size={15} color="textMuted" />
             <Typography variant="bodySmall" color="textMuted" style={styles.metaText} numberOfLines={1}>
               {timeDisplay ? `${timeDisplay} IST` : dateLabel}
             </Typography>
           </View>
 
           <View style={styles.metaRow}>
-            <Icon name="location-outline" size={15} color="textMuted" />
+            <Icon name="map-pin" size={15} color="textMuted" />
             <Typography variant="bodySmall" color="textMuted" style={styles.metaText} numberOfLines={1}>
               {venue || 'BGSC Arena'}
             </Typography>
@@ -314,12 +320,12 @@ export function EventCard({
 const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
-    borderRadius: 22,
+    borderRadius: 18,
     overflow: 'hidden',
     position: 'relative',
   },
   coverBanner: {
-    height: 126,
+    height: 114,
     position: 'relative',
     overflow: 'hidden',
   },
@@ -335,98 +341,108 @@ const styles = StyleSheet.create({
     right: 30,
     top: 6,
   },
-  badgeRow: {
+  coverHeaderRow: {
     position: 'absolute',
-    top: 12,
-    left: 12,
+    top: 7,
+    left: 8,
+    right: 9,
     flexDirection: 'row',
-    gap: 6,
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
     zIndex: 2,
+    gap: 6,
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    flexShrink: 1,
   },
   badgePill: {
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: 6.5,
+    paddingVertical: 2.5,
+    borderRadius: 5.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   badgeText: {
     fontFamily: FONT_FAMILIES.bodyBold,
-    fontSize: 10.5,
+    fontSize: 9,
     fontWeight: '700',
-    letterSpacing: 0.6,
+    letterSpacing: 0.3,
   },
   dateStampWrap: {
-    position: 'absolute',
-    top: 11,
-    right: 14,
     alignItems: 'flex-end',
-    zIndex: 3,
+    flexShrink: 0,
   },
   dateStampDay: {
     fontFamily: FONT_FAMILIES.bodyBold,
-    fontSize: 11,
+    fontSize: 9.5,
     fontWeight: '700',
-    letterSpacing: 0.8,
-    color: '#D48D66',
+    letterSpacing: 1.0,
+    color: '#6BA4E8',
     textTransform: 'uppercase',
-    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowColor: 'rgba(0, 0, 0, 0.85)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
   dateStampDate: {
     fontFamily: FONT_FAMILIES.bodyBold,
-    fontSize: 23,
-    lineHeight: 27,
+    fontSize: 21,
+    lineHeight: 24,
     fontWeight: '800',
     color: '#FFFFFF',
-    letterSpacing: -0.2,
-    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    letterSpacing: -0.3,
+    marginTop: -2,
+    textShadowColor: 'rgba(0, 0, 0, 0.85)',
     textShadowOffset: { width: 0, height: 1.5 },
     textShadowRadius: 4,
   },
   body: {
-    padding: 15,
-    gap: 7,
+    paddingHorizontal: 12,
+    paddingTop: 9,
+    paddingBottom: 11,
+    gap: 4,
   },
   title: {
     fontFamily: FONT_FAMILIES.bodyBold,
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 15.5,
+    lineHeight: 20,
     fontWeight: '700',
-    marginBottom: 3,
+    marginBottom: 1,
   },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   metaText: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 16,
   },
   footerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 10,
+    marginTop: 5,
   },
   footerCapacity: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
   },
   ctaPill: {
-    paddingVertical: 9,
-    paddingHorizontal: 22,
+    paddingVertical: 5.5,
+    paddingHorizontal: 15,
     borderRadius: 9999,
     alignItems: 'center',
     justifyContent: 'center',
   },
   ctaText: {
     fontFamily: FONT_FAMILIES.bodyBold,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
+    letterSpacing: 0.2,
   },
   pressed: {
     opacity: 0.9,

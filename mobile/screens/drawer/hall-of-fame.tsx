@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { FlatList, Pressable, RefreshControl, ScrollView, Share, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../../src/components/Button';
 import { Badge } from '../../src/components/Badge';
 import { AppHeader } from '../../src/components/AppHeader';
@@ -39,6 +39,7 @@ export function shareHallOfFame(entry: HallOfFameEntry) {
 
 export default function HallOfFame() {
   const { colors, shadow } = useTheme();
+  const insets = useSafeAreaInsets();
   const { width, gutter } = useResponsive();
   const featuredWidth = Math.min(width - gutter * 2 - 24, 320);
   const navigation = useNavigation<any>();
@@ -147,7 +148,14 @@ export default function HallOfFame() {
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
       <AppHeader title="Hall of Fame" />
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingHorizontal: gutter, paddingTop: 10 }]}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingHorizontal: gutter,
+            paddingTop: 10,
+            paddingBottom: Math.max(110, insets.bottom + 90),
+          },
+        ]}
         keyboardShouldPersistTaps="handled"
         refreshControl={
           <RefreshControl
