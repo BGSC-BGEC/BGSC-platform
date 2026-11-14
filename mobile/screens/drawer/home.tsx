@@ -166,11 +166,17 @@ async function loadHome(userId: string | undefined): Promise<HomeData> {
   const recent = tx.slice(0, 3);
   const titles = await Promise.all(
     recent.map((t) =>
-      t.reference.type === 'event' && t.reference.id
-        ? eventsRepository.get(t.reference.id).then((e) => e.title).catch(() => null)
+      t.reference?.type === 'event' && t.reference?.id
+        ? eventsRepository.get(t.reference.id).then((e) => e?.title).catch(() => null)
         : Promise.resolve(null),
     ),
   );
+
+  const regList = Array.isArray(regs)
+    ? regs
+    : Array.isArray((regs as any)?.registrations)
+      ? (regs as any).registrations
+      : [];
 
   return {
     points: points ? { balance: points.balance, week } : null,
@@ -178,11 +184,16 @@ async function loadHome(userId: string | undefined): Promise<HomeData> {
       rank?.rank && total?.total
         ? { rank: rank.rank, topPercent: Math.max(1, Math.ceil((rank.rank / total.total) * 100)) }
         : null,
-    eventsJoined: regs ? regs.filter((r) => r.owner?.type === 'event').length : null,
-    activeChallenges: parts ? parts.participations.filter((p) => ACTIVE_PARTICIPATION.includes(p.status)).length : null,
-    pinned: pinnedList?.announcements.find((a) => isPinned(a)) ?? null,
-    heads: heads ?? [],
-    events: events?.events ?? [],
+    eventsJoined: regList.filter((r: any) => r?.owner?.type === 'event').length,
+    activeChallenges:
+      parts && Array.isArray(parts.participations)
+        ? parts.participations.filter((p) => p && ACTIVE_PARTICIPATION.includes(p.status)).length
+        : 0,
+    pinned: Array.isArray(pinnedList?.announcements)
+      ? pinnedList.announcements.find((a) => a && isPinned(a)) ?? null
+      : null,
+    heads: Array.isArray(heads) ? heads : [],
+    events: Array.isArray(events?.events) ? events.events : [],
     activity: recent.map((t, i) => ({ ...t, title: titles[i] ? `${humanizeReason(t.reason)} · ${titles[i]}` : humanizeReason(t.reason) })),
   };
 }
@@ -254,6 +265,33 @@ export default function Home() {
     [navigation],
   );
 
+  const renderFinderEventCard = (event: ApiEvent, isSingle: boolean) => {
+    const card = eventCardData(event);
+    return (
+      <View key={event._id} style={isSingle ? styles.carouselSingleCardWrap : styles.carouselCardWrap}>
+        <EventCard
+          {...card}
+          onPress={() => goEvent(event)}
+          cta={
+            card.registrationOpen
+              ? {
+                  label: 'Register',
+                  onPress: () =>
+                    navigation.navigate('EventRegistration', {
+                      eventId: event.slug || event._id,
+                    }),
+                }
+              : {
+                  label: 'View Details',
+                  variant: 'outline',
+                  onPress: () => goEvent(event),
+                }
+          }
+        />
+      </View>
+    );
+  };
+
   const heroOpacity = scrollY.interpolate({
     inputRange: [0, 110],
     outputRange: [1, 0],
@@ -272,20 +310,8 @@ export default function Home() {
     extrapolate: 'clamp',
   });
 
-  const topBarBg = scrollY.interpolate({
-    inputRange: [50, 110],
-    outputRange: ['rgba(44, 49, 53, 0)', 'rgba(44, 49, 53, 0.98)'],
-    extrapolate: 'clamp',
-  });
-
-  const topBarBorder = scrollY.interpolate({
-    inputRange: [75, 115],
-    outputRange: ['rgba(255, 255, 255, 0)', colors.border],
-    extrapolate: 'clamp',
-  });
-
-  const heroHeight = insets.top + 300;
-  const spacerHeight = insets.top + 215;
+  const heroHeight = insets.top + 200;
+  const spacerHeight = insets.top + 138;
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -297,7 +323,7 @@ export default function Home() {
         style={[
           styles.heroTextBlock,
           {
-            paddingTop: insets.top + 78,
+            paddingTop: insets.top + 52,
             opacity: heroOpacity,
             transform: [{ translateY: heroTranslateY }, { scale: heroScale }],
           },
@@ -320,14 +346,9 @@ export default function Home() {
                 backgroundColor: withAlpha(colors.primary, 0.15),
                 borderColor: withAlpha(colors.primary, 0.4),
               },
-              Platform.OS === 'web' && ({
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                boxShadow: `0 4px 14px -2px ${withAlpha(colors.primary, 0.3)}, inset 0 1px 1px rgba(255, 255, 255, 0.35)`,
-              } as any),
             ]}
           >
-            <Icon name="trophy" size={13} color="primary" />
+            <Icon name="trophy" size={12} color="primary" />
             <Typography variant="caption" color="primary" style={styles.statusPillText}>
               {openEvents.length === 0
                 ? 'No tournaments open today · Browse upcoming'
@@ -349,7 +370,10 @@ export default function Home() {
             progressViewOffset={insets.top + 60}
           />
         }
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: Math.max(110, insets.bottom + 90) },
+        ]}
       >
         <View style={{ height: spacerHeight }} />
 
@@ -361,195 +385,13 @@ export default function Home() {
               borderColor: colors.border,
               borderTopColor: withAlpha('#FFFFFF', 0.18),
             },
-            Platform.OS === 'web' && ({
-              boxShadow: '0 -8px 30px -4px rgba(0, 0, 0, 0.25), inset 0 1px 1.5px rgba(255, 255, 255, 0.16)',
-            } as any),
             shadow('elevated'),
           ]}
         >
-          <View
-            style={[
-              styles.finderBoxWrap,
-              {
-                backgroundColor: withAlpha(colors.surfaceInner, 0.88),
-                borderColor: withAlpha(colors.border, 0.8),
-                borderTopColor: withAlpha('#FFFFFF', 0.2),
-              },
-              Platform.OS === 'web' && ({
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
-                boxShadow: '0 12px 32px -8px rgba(0, 0, 0, 0.35), inset 0 1px 1.5px rgba(255, 255, 255, 0.15)',
-              } as any),
-            ]}
-          >
-            <View
-              style={[
-                styles.finderTabs,
-                {
-                  backgroundColor: withAlpha(colors.surface, 0.65),
-                  borderColor: withAlpha(colors.border, 0.7),
-                  borderTopColor: withAlpha('#FFFFFF', 0.14),
-                },
-                Platform.OS === 'web' && ({
-                  backdropFilter: 'blur(10px)',
-                  WebkitBackdropFilter: 'blur(10px)',
-                  boxShadow: 'inset 0 1px 1.5px rgba(255, 255, 255, 0.1)',
-                } as any),
-              ]}
-            >
-              {(['general', 'gaming', 'sports'] as const).map((tabKey) => {
-                const active = searchTab === tabKey;
-                return (
-                  <Pressable
-                    key={tabKey}
-                    onPress={() => setSearchTab(tabKey)}
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected: active }}
-                    style={[
-                      styles.finderTab,
-                      active && [
-                        {
-                          backgroundColor: colors.surfaceElevated,
-                          borderColor: withAlpha(colors.primary, 0.35),
-                          shadowColor: colors.primary,
-                          shadowOffset: { width: 0, height: 2 },
-                          shadowOpacity: 0.22,
-                          shadowRadius: 6,
-                          elevation: 3,
-                        },
-                        Platform.OS === 'web' && ({
-                          boxShadow: `0 2px 10px ${withAlpha(colors.primary, 0.22)}, inset 0 1px 1px rgba(255, 255, 255, 0.28)`,
-                        } as any),
-                      ],
-                    ]}
-                  >
-                    <Typography
-                      variant="caption"
-                      style={{
-                        fontFamily: active ? FONT_FAMILIES.bodyBold : FONT_FAMILIES.bodyMedium,
-                        color: active ? colors.text : colors.textMuted,
-                        textTransform: 'capitalize',
-                        fontSize: 12,
-                      }}
-                    >
-                      {tabKey}
-                    </Typography>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <View style={styles.finderCarouselContainer}>
-              {loading ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.eventsCarousel}>
-                  <View style={styles.carouselCardWrap}>
-                    <SkeletonEventCard />
-                  </View>
-                  <View style={styles.carouselCardWrap}>
-                    <SkeletonEventCard />
-                  </View>
-                </ScrollView>
-              ) : carouselEvents.length > 0 ? (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.eventsCarousel}
-                  snapToInterval={300}
-                  decelerationRate="fast"
-                >
-                  {carouselEvents.map((event) => {
-                    const card = eventCardData(event);
-                    return (
-                      <View key={event._id} style={styles.carouselCardWrap}>
-                        <EventCard
-                          {...card}
-                          onPress={() => goEvent(event)}
-                          cta={
-                            card.registrationOpen
-                              ? {
-                                  label: 'Register',
-                                  onPress: () =>
-                                    navigation.navigate('EventRegistration', {
-                                      eventId: event.slug || event._id,
-                                    }),
-                                }
-                              : {
-                                  label: 'View Details',
-                                  variant: 'outline',
-                                  onPress: () => goEvent(event),
-                                }
-                          }
-                        />
-                      </View>
-                    );
-                  })}
-                </ScrollView>
-              ) : (
-                <View style={[styles.emptyEventsBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Icon name="calendar-outline" size={24} color="textMuted" />
-                  <Typography variant="bodySmall" color="textMuted" style={{ textAlign: 'center' }}>
-                    No upcoming {searchTab} events right now.{'\n'}Check back soon or browse all events.
-                  </Typography>
-                </View>
-              )}
-            </View>
-
-            <Pressable
-              onPress={() =>
-                navigation.navigate(
-                  'Events',
-                  currentConfig.targetCategory ? { category: currentConfig.targetCategory } : undefined,
-                )
-              }
-              accessibilityRole="button"
-              accessibilityLabel={`Show all ${searchTab} events`}
-              style={({ pressed }) => [
-                styles.finderFooterRow,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-                pressed && styles.pressed,
-              ]}
-            >
-              <Typography variant="caption" color="textMuted" style={{ fontSize: 12, fontWeight: '500' }}>
-                {carouselEvents.length} event{carouselEvents.length === 1 ? '' : 's'}
-              </Typography>
-              <View style={styles.finderFooterAction}>
-                <Typography variant="caption" color="primary" style={[styles.semibold, { fontSize: 12 }]}>
-                  Show all
-                </Typography>
-                <Icon name="chevron-right" size={14} color="primary" />
-              </View>
-            </Pressable>
-          </View>
-
           {/* Feed Error Alert */}
           {error && !data ? <ErrorState title="Couldn’t load your home feed" message={error} onRetry={() => reload()} /> : null}
 
-          {data?.pinned ? (
-            <Pressable
-              onPress={() => navigation.navigate('AnnouncementDetail', { id: data.pinned!._id })}
-              accessibilityRole="button"
-              style={({ pressed }) => [
-                styles.pinned,
-                { backgroundColor: colors.accentMuted, borderColor: colors.primary },
-                shadow('flat'),
-                pressed && styles.pressed,
-              ]}
-            >
-              <View style={[styles.iconTile, { backgroundColor: colors.primarySolid }]}>
-                <Icon name="megaphone" size={20} color="white" />
-              </View>
-              <View style={styles.flex}>
-                <Typography color="primary" style={styles.pinnedKicker}>
-                  PINNED · {ANNOUNCEMENT_CATEGORY_LABELS[data.pinned.categories[0]]?.toUpperCase()}
-                </Typography>
-                <Typography variant="body" color="text" style={styles.semibold} numberOfLines={2}>
-                  {data.pinned.title}
-                </Typography>
-              </View>
-              <Icon name="chevron-right" size={20} color="primary" />
-            </Pressable>
-          ) : null}
-
+          {/* Credits / Points Pass Card (Visible on Top) */}
           {loading ? (
             <Skeleton height={210} borderRadius={24} />
           ) : data?.points ? (
@@ -603,6 +445,152 @@ export default function Home() {
               </View>
             </View>
           ) : null}
+
+          {/* Pinned Announcement */}
+          {data?.pinned ? (
+            <Pressable
+              onPress={() => navigation.navigate('AnnouncementDetail', { id: data.pinned!._id })}
+              accessibilityRole="button"
+              style={({ pressed }) => [
+                styles.pinned,
+                { backgroundColor: colors.accentMuted, borderColor: colors.primary },
+                shadow('flat'),
+                pressed && styles.pressed,
+              ]}
+            >
+              <View style={[styles.iconTile, { backgroundColor: colors.primarySolid }]}>
+                <Icon name="megaphone" size={20} color="white" />
+              </View>
+              <View style={styles.flex}>
+                <Typography color="primary" style={styles.pinnedKicker}>
+                  PINNED · {ANNOUNCEMENT_CATEGORY_LABELS[data.pinned.categories[0]]?.toUpperCase()}
+                </Typography>
+                <Typography variant="body" color="text" style={styles.semibold} numberOfLines={2}>
+                  {data.pinned.title}
+                </Typography>
+              </View>
+              <Icon name="chevron-right" size={20} color="primary" />
+            </Pressable>
+          ) : null}
+
+          {/* Tournament & Event Finder */}
+          <View
+            style={[
+              styles.finderBoxWrap,
+              {
+                backgroundColor: withAlpha(colors.surfaceInner, 0.88),
+                borderColor: withAlpha(colors.border, 0.8),
+                borderTopColor: withAlpha('#FFFFFF', 0.2),
+              },
+            ]}
+          >
+            <View
+              style={[
+                styles.finderTabs,
+                {
+                  backgroundColor: withAlpha(colors.surface, 0.65),
+                  borderColor: withAlpha(colors.border, 0.7),
+                  borderTopColor: withAlpha('#FFFFFF', 0.14),
+                },
+              ]}
+            >
+              {(['general', 'gaming', 'sports'] as const).map((tabKey) => {
+                const active = searchTab === tabKey;
+                return (
+                  <Pressable
+                    key={tabKey}
+                    onPress={() => setSearchTab(tabKey)}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    style={[
+                      styles.finderTab,
+                      active && [
+                        {
+                          backgroundColor: colors.surfaceElevated,
+                          borderColor: withAlpha(colors.primary, 0.35),
+                          shadowColor: colors.primary,
+                          shadowOffset: { width: 0, height: 2 },
+                          shadowOpacity: 0.22,
+                          shadowRadius: 6,
+                          elevation: 3,
+                        },
+                      ],
+                    ]}
+                  >
+                    <Typography
+                      variant="caption"
+                      style={{
+                        fontFamily: active ? FONT_FAMILIES.bodyBold : FONT_FAMILIES.bodyMedium,
+                        color: active ? colors.text : colors.textMuted,
+                        textTransform: 'capitalize',
+                        fontSize: 12,
+                      }}
+                    >
+                      {tabKey}
+                    </Typography>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.finderCarouselContainer}>
+              {loading ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.eventsCarousel}>
+                  <View style={styles.carouselCardWrap}>
+                    <SkeletonEventCard />
+                  </View>
+                  <View style={styles.carouselCardWrap}>
+                    <SkeletonEventCard />
+                  </View>
+                </ScrollView>
+              ) : carouselEvents.length === 1 ? (
+                renderFinderEventCard(carouselEvents[0], true)
+              ) : carouselEvents.length > 1 ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.eventsCarousel}
+                  snapToInterval={278}
+                  decelerationRate="fast"
+                >
+                  {carouselEvents.map((event) => renderFinderEventCard(event, false))}
+                </ScrollView>
+              ) : (
+                <View style={[styles.emptyEventsBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <Icon name="calendar-outline" size={24} color="textMuted" />
+                  <Typography variant="bodySmall" color="textMuted" style={{ textAlign: 'center' }}>
+                    No upcoming {searchTab} events right now.{'\n'}Check back soon or browse all events.
+                  </Typography>
+                </View>
+              )}
+            </View>
+
+            <Pressable
+              onPress={() =>
+                navigation.navigate(
+                  'Events',
+                  currentConfig.targetCategory ? { category: currentConfig.targetCategory } : undefined,
+                )
+              }
+              accessibilityRole="button"
+              accessibilityLabel={`Show all ${searchTab} events`}
+              style={({ pressed }) => [
+                styles.finderFooterRow,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Typography variant="caption" color="textMuted" style={{ fontSize: 12, fontWeight: '500' }}>
+                {carouselEvents.length} event{carouselEvents.length === 1 ? '' : 's'}
+              </Typography>
+              <View style={styles.finderFooterAction}>
+                <Typography variant="caption" color="primary" style={[styles.semibold, { fontSize: 12 }]}>
+                  Show all
+                </Typography>
+                <Icon name="chevron-right" size={14} color="primary" />
+              </View>
+            </Pressable>
+          </View>
 
           {/* Quick Actions */}
           <View style={styles.quickGrid}>
@@ -690,37 +678,26 @@ export default function Home() {
         </View>
       </Animated.ScrollView>
 
-      <Animated.View
+      <View
+        pointerEvents="box-none"
         style={[
           styles.topBar,
           {
-            paddingTop: insets.top + 8,
-            backgroundColor: topBarBg,
-            borderBottomColor: topBarBorder,
+            paddingTop: insets.top + 4,
           },
-          Platform.OS === 'web' && ({
-            backdropFilter: 'blur(16px)',
-            WebkitBackdropFilter: 'blur(16px)',
-            boxShadow: '0 4px 20px -4px rgba(0, 0, 0, 0.15)',
-          } as any),
         ]}
       >
         <Pressable
           onPress={() => navigation.dispatch(DrawerActions.openDrawer())}
           accessibilityRole="button"
           accessibilityLabel="Open menu"
-          hitSlop={8}
+          hitSlop={10}
           style={({ pressed }) => [
-            styles.topPillBtn,
+            styles.menuButton,
             {
-              backgroundColor: withAlpha(colors.surface, 0.75),
-              borderColor: withAlpha('#FFFFFF', 0.22),
+              backgroundColor: withAlpha(colors.surface, 0.72),
+              borderColor: withAlpha(colors.border, 0.5),
             },
-            Platform.OS === 'web' && ({
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
-              boxShadow: '0 2px 10px rgba(0, 0, 0, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.25)',
-            } as any),
             shadow('flat'),
             pressed && styles.pressed,
           ]}
@@ -728,36 +705,31 @@ export default function Home() {
           <Icon name="menu" size={20} color="text" />
         </Pressable>
 
-        <View style={styles.topLogo}>
-          <Typography variant="h3" color="text" style={styles.logoTitle}>
+        <View style={styles.brandCenterWrap} pointerEvents="none">
+          <Typography variant="h3" color="text" style={styles.brandTitle}>
             BGSC
           </Typography>
-          <View style={[styles.logoDot, { backgroundColor: colors.primary }]} />
+          <View style={[styles.brandDot, { backgroundColor: colors.primary }]} />
         </View>
 
-        <View style={styles.topActions}>
+        <View
+          style={[
+            styles.actionsCapsule,
+            {
+              backgroundColor: withAlpha(colors.surface, 0.72),
+              borderColor: withAlpha(colors.border, 0.5),
+            },
+            shadow('flat'),
+          ]}
+        >
           <Pressable
             onPress={() => navigation.navigate('Notifications', undefined, { pop: true })}
             accessibilityRole="button"
             accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
-            hitSlop={6}
-            style={({ pressed }) => [
-              styles.topPillBtn,
-              styles.bellBtn,
-              {
-                backgroundColor: withAlpha(colors.surface, 0.75),
-                borderColor: withAlpha('#FFFFFF', 0.22),
-              },
-              Platform.OS === 'web' && ({
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
-                boxShadow: '0 2px 10px rgba(0, 0, 0, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.25)',
-              } as any),
-              shadow('flat'),
-              pressed && styles.pressed,
-            ]}
+            hitSlop={8}
+            style={({ pressed }) => [styles.capsuleBtn, pressed && styles.pressed]}
           >
-            <Icon name="bell" size={19} color="text" />
+            <Icon name="bell" size={18} color="text" />
             {unread > 0 ? (
               <View
                 style={[
@@ -770,17 +742,20 @@ export default function Home() {
               />
             ) : null}
           </Pressable>
+
+          <View style={[styles.capsuleDivider, { backgroundColor: withAlpha(colors.border, 0.6) }]} />
+
           <Pressable
             onPress={() => navigation.navigate('Profile', undefined, { pop: true })}
             accessibilityRole="button"
             accessibilityLabel="Your profile"
             hitSlop={6}
-            style={({ pressed }) => pressed && styles.pressed}
+            style={({ pressed }) => [styles.avatarPressable, pressed && styles.pressed]}
           >
-            <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={36} ring />
+            <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={28} ring={false} />
           </Pressable>
         </View>
-      </Animated.View>
+      </View>
     </View>
   );
 }
@@ -885,34 +860,34 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 20,
-    gap: 4,
+    paddingHorizontal: 18,
+    gap: 2,
   },
   greetingText: {
     fontFamily: FONT_FAMILIES.bodyMedium,
-    fontSize: 13,
-    letterSpacing: 0.3,
-    marginBottom: 2,
+    fontSize: 12,
+    letterSpacing: 0.2,
+    marginBottom: 0,
   },
   headline: {
     fontFamily: FONT_FAMILIES.bodyBold,
-    fontSize: 24,
-    lineHeight: 30,
+    fontSize: 21,
+    lineHeight: 26,
     fontWeight: '700',
-    letterSpacing: -0.2,
-    marginBottom: 6,
+    letterSpacing: -0.3,
+    marginBottom: 4,
   },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 5,
-    borderRadius: 12,
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
     borderWidth: 1,
     alignSelf: 'flex-start',
   },
-  statusPillText: { fontSize: 11, fontWeight: '600' },
+  statusPillText: { fontSize: 10.5, fontWeight: '600' },
 
   topBar: {
     position: 'absolute',
@@ -921,53 +896,79 @@ const styles = StyleSheet.create({
     right: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    gap: 12,
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingBottom: 6,
     zIndex: 10,
-    elevation: 10,
+    backgroundColor: 'transparent',
+    elevation: 0,
+    borderWidth: 0,
+    borderBottomWidth: 0,
+    shadowOpacity: 0,
   },
-  topPillBtn: {
+  menuButton: {
     width: 38,
     height: 38,
-    borderRadius: 19,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
+    zIndex: 2,
   },
-  topLogo: {
-    flex: 1,
+  brandCenterWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 6,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    justifyContent: 'center',
+    gap: 4,
   },
-  logoTitle: {
+  brandTitle: {
     fontFamily: FONT_FAMILIES.hero,
-    fontSize: 20,
-    letterSpacing: 0.5,
+    fontSize: 19,
+    letterSpacing: 1.1,
   },
-  logoDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+  brandDot: {
+    width: 4.5,
+    height: 4.5,
+    borderRadius: 2.25,
     marginBottom: 5,
   },
-  topActions: {
+  actionsCapsule: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    paddingLeft: 4,
+    paddingRight: 4,
+    gap: 1,
+    zIndex: 2,
   },
-  bellBtn: {
+  capsuleBtn: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
     position: 'relative',
+  },
+  capsuleDivider: {
+    width: 1,
+    height: 14,
+    marginHorizontal: 2,
+  },
+  avatarPressable: {
+    borderRadius: 14,
   },
   unreadDot: {
     position: 'absolute',
-    top: 7,
-    right: 7,
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
+    top: 4,
+    right: 4,
+    width: 6.5,
+    height: 6.5,
+    borderRadius: 3.25,
     borderWidth: 1.5,
   },
 
@@ -975,122 +976,125 @@ const styles = StyleSheet.create({
     maxWidth: 600,
     width: '100%',
     alignSelf: 'center',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
     borderTopWidth: 1,
-    paddingHorizontal: 15,
-    paddingTop: 16,
-    paddingBottom: 40,
-    gap: 16,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 28,
+    gap: 10,
   },
 
   finderBoxWrap: {
-    borderRadius: 22,
+    borderRadius: 16,
     borderWidth: 1,
-    padding: 13,
-    gap: 10,
+    padding: 9,
+    gap: 6,
   },
   finderTabs: {
     flexDirection: 'row',
-    borderRadius: 14,
+    borderRadius: 10,
     borderWidth: 1,
-    padding: 3,
-    marginBottom: 2,
+    padding: 2.5,
+    marginBottom: 0,
   },
   finderTab: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 7,
-    borderRadius: 11,
+    minHeight: 32,
+    paddingVertical: 5,
+    borderRadius: 8,
   },
   finderCarouselContainer: {
-    marginVertical: 6,
+    marginVertical: 1,
   },
   emptyEventsBox: {
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 1,
-    padding: 24,
+    padding: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
     width: '100%',
   },
   finderFooterRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 14,
+    minHeight: 34,
+    paddingVertical: 5,
+    paddingHorizontal: 11,
+    borderRadius: 10,
     borderWidth: 1,
-    marginTop: 2,
+    marginTop: 0,
   },
   finderFooterAction: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 3,
   },
 
   card: { borderWidth: 1 },
-  pinned: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 20, borderWidth: 1 },
-  pinnedKicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
-  iconTile: { padding: 10, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  pointsPass: { borderRadius: 24, padding: 18, gap: 14 },
+  pinned: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 14, borderWidth: 1 },
+  pinnedKicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 9.5, lineHeight: 14, letterSpacing: 0.6 },
+  iconTile: { padding: 8, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  pointsPass: { borderRadius: 18, padding: 12, gap: 9 },
   passRibbon: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: 10,
+    paddingBottom: 7,
     borderBottomWidth: 1,
   },
-  passType: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  passLabel: { fontSize: 10, letterSpacing: 1 },
+  passType: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  passLabel: { fontSize: 9.5, letterSpacing: 0.8 },
   balanceRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
-  balance: { fontFamily: FONT_FAMILIES.hero, fontSize: 40, lineHeight: 44 },
+  balance: { fontFamily: FONT_FAMILIES.hero, fontSize: 32, lineHeight: 36 },
   weekPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2.5,
+    borderRadius: 7,
   },
-  week: { fontSize: 11, fontWeight: '700' },
+  week: { fontSize: 10.5, fontWeight: '700' },
   statsStrip: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+    paddingVertical: 5,
+    paddingHorizontal: 3,
   },
-  stat: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 4 },
-  statDivider: { width: 1, height: 26 },
-  statValue: { fontSize: 17, fontWeight: '700' },
+  stat: { flex: 1, alignItems: 'center', gap: 1, paddingVertical: 2 },
+  statDivider: { width: 1, height: 20 },
+  statValue: { fontSize: 15, fontWeight: '700' },
   passActions: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
   },
-  quickGrid: { flexDirection: 'row', gap: 10 },
-  quick: { flex: 1, gap: 10, padding: 12, borderRadius: 20, borderWidth: 1 },
-  section: { gap: 12 },
-  carousel: { gap: 12 },
-  eventsCarousel: { gap: 12, paddingRight: 8, paddingVertical: 2 },
-  carouselCardWrap: { width: 288 },
-  head: { width: 250, gap: 12 },
+  quickGrid: { flexDirection: 'row', gap: 8 },
+  quick: { flex: 1, gap: 6, padding: 9, borderRadius: 14, borderWidth: 1 },
+  section: { gap: 8 },
+  carousel: { gap: 8 },
+  eventsCarousel: { gap: 8, paddingRight: 6, paddingVertical: 1 },
+  carouselCardWrap: { width: 270 },
+  carouselSingleCardWrap: { width: '100%' },
+  head: { width: 230, gap: 8 },
   bubble: {
-    padding: 16,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderBottomRightRadius: 20,
+    padding: 12,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderBottomRightRadius: 16,
     borderBottomLeftRadius: 4,
   },
-  headWho: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  compactPass: { flex: 1, gap: 6, padding: 14, borderRadius: 20 },
+  headWho: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  compactPass: { flex: 1, gap: 5, padding: 10, borderRadius: 14 },
   compactTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  tinyCode: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
-  list: { borderRadius: 20, paddingHorizontal: 16, paddingVertical: 4 },
-  activityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
-  whatsapp: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 20 },
+  tinyCode: { fontSize: 9.5, fontWeight: '700', letterSpacing: 0.5 },
+  list: { borderRadius: 16, paddingHorizontal: 12, paddingVertical: 2 },
+  activityRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  whatsapp: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 16 },
 });

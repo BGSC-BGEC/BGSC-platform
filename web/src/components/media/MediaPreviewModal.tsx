@@ -12,6 +12,7 @@ import {
   Trophy,
 } from 'lucide-react'
 import type { MediaItem, MediaStatus } from '../../types/media'
+import { Modal } from '../ui/modal'
 
 export interface MediaPreviewModalProps {
   item: MediaItem | null
@@ -106,7 +107,7 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
   const handleReject = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!rejectionReason.trim()) {
-      setError('Please provide a reason for rejecting this asset.')
+      setError('Please provide a reason for rejecting this media.')
       return
     }
 
@@ -115,6 +116,7 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
     try {
       await onModerate(item.id, 'rejected', rejectionReason.trim())
       setRejecting(false)
+      setRejectionReason('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reject asset.')
     } finally {
@@ -142,17 +144,14 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
   }
 
   return (
-    <div
-      className="bg-white rounded-lg shadow-2xl border border-gray-200 w-full max-w-5xl overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in duration-150"
-      onClick={(e) => e.stopPropagation()}
-    >
+    <>
       {/* 1. Modal Header */}
-      <div className="p-4 sm:p-5 border-b border-gray-200 flex items-center justify-between gap-3 bg-gray-50/50">
+      <div className="p-4 sm:p-5 border-b border-border flex items-center justify-between gap-3 bg-muted/40">
         <div className="flex items-center gap-2.5 truncate">
-          <span className="font-mono text-xs font-bold text-black px-2 py-0.5 rounded bg-gray-100 border border-gray-300 truncate">
+          <span className="font-mono text-xs font-bold text-foreground px-2.5 py-0.5 rounded-md bg-muted border border-border truncate">
             {item.original_filename}
           </span>
-          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700 flex-shrink-0">
+          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-border bg-muted/60 text-muted-foreground flex-shrink-0">
             {item.category.replace('_', ' ')}
           </span>
         </div>
@@ -160,7 +159,7 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
         <button
           type="button"
           onClick={onClose}
-          className="p-1 rounded text-gray-400 hover:text-black hover:bg-gray-100 transition-colors cursor-pointer flex-shrink-0"
+          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer flex-shrink-0"
         >
           <X className="w-5 h-5" />
         </button>
@@ -170,26 +169,26 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
       <div className="flex-1 overflow-y-auto p-5 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left / Main Stage (Asset Showcase) */}
         <div className="lg:col-span-8 space-y-4">
-          <div className="rounded-lg bg-neutral-900/5 border border-gray-200 overflow-hidden flex items-center justify-center min-h-[300px] max-h-[60vh]">
+          <div className="rounded-xl bg-black/40 border border-border overflow-hidden flex items-center justify-center min-h-[300px] max-h-[60vh]">
             {item.media_type === 'video' ? (
               <video
                 controls
                 src={item.url}
-                className="w-full max-h-[60vh] object-contain bg-black rounded"
+                className="w-full max-h-[60vh] object-contain bg-black rounded-lg"
               />
             ) : (
               <img
                 src={item.url}
                 alt={item.original_filename}
-                className="w-full max-h-[60vh] object-contain rounded"
+                className="w-full max-h-[60vh] object-contain rounded-lg"
               />
             )}
           </div>
 
           {/* Caption & Event */}
           {item.caption && (
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-xs text-gray-800 leading-relaxed">
-              <strong className="text-black block mb-0.5">Caption:</strong>
+            <div className="bg-muted/30 border border-border rounded-xl p-3 text-xs text-foreground leading-relaxed">
+              <strong className="text-foreground block mb-0.5">Caption:</strong>
               {item.caption}
             </div>
           )}
@@ -197,8 +196,8 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
           {/* Tournament context & Tags */}
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
             {item.event_title && (
-              <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded">
-                <Trophy className="w-3.5 h-3.5 text-black" />
+              <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-foreground bg-muted border border-border px-2.5 py-1 rounded-md">
+                <Trophy className="w-3.5 h-3.5 text-primary" />
                 <span>{item.event_title}</span>
               </div>
             )}
@@ -208,7 +207,7 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
                 {item.tags.map((tag, idx) => (
                   <span
                     key={idx}
-                    className="text-[10px] font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded border border-gray-200"
+                    className="text-[10px] font-mono text-muted-foreground bg-muted px-2 py-0.5 rounded-md border border-border"
                   >
                     #{tag}
                   </span>
@@ -221,37 +220,37 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
         {/* Right Column (Metadata & Moderation) */}
         <div className="lg:col-span-4 space-y-4">
           {error && (
-            <div className="p-3 rounded bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
+            <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/30 text-xs text-destructive flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
           {/* Technical Specs Box */}
-          <div className="border border-gray-200 rounded-lg p-4 bg-gray-50/50 space-y-3">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-black block border-b border-gray-200 pb-2">
+          <div className="border border-border rounded-xl p-4 bg-muted/20 space-y-3">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-foreground block border-b border-border pb-2">
               Technical Specifications
             </span>
 
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between">
-                <span className="text-gray-500">MIME Format:</span>
-                <span className="font-mono font-bold text-black">
+                <span className="text-muted-foreground">MIME Format:</span>
+                <span className="font-mono font-bold text-foreground">
                   {item.mime_type}
                 </span>
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="text-gray-500">File Size:</span>
-                <span className="font-mono font-bold text-black">
+                <span className="text-muted-foreground">File Size:</span>
+                <span className="font-mono font-bold text-foreground">
                   {formatBytes(item.size_bytes)}
                 </span>
               </div>
 
               {item.metadata?.width && item.metadata?.height && (
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-500">Dimensions:</span>
-                  <span className="font-mono font-bold text-black">
+                  <span className="text-muted-foreground">Dimensions:</span>
+                  <span className="font-mono font-bold text-foreground">
                     {item.metadata.width} &times; {item.metadata.height} px
                   </span>
                 </div>
@@ -259,43 +258,43 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
 
               {item.metadata?.duration_seconds && (
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-500">Duration:</span>
-                  <span className="font-mono font-bold text-black">
+                  <span className="text-muted-foreground">Duration:</span>
+                  <span className="font-mono font-bold text-foreground">
                     {item.metadata.duration_seconds} seconds
                   </span>
                 </div>
               )}
 
               <div className="flex items-center justify-between">
-                <span className="text-gray-500">Uploader:</span>
-                <span className="font-semibold text-black">
+                <span className="text-muted-foreground">Uploader:</span>
+                <span className="font-semibold text-foreground">
                   {item.uploader.display_name}
                 </span>
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="text-gray-500">Uploaded:</span>
-                <span className="text-[11px] text-gray-600">
+                <span className="text-muted-foreground">Uploaded:</span>
+                <span className="text-[11px] text-muted-foreground">
                   {formatDate(item.created_at)}
                 </span>
               </div>
             </div>
 
             {/* Direct URL Button */}
-            <div className="pt-2 border-t border-gray-200">
+            <div className="pt-2 border-t border-border">
               <button
                 type="button"
                 onClick={handleCopyUrl}
-                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded border border-gray-300 bg-white text-gray-700 hover:text-black hover:border-black transition-colors cursor-pointer"
+                className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-card text-foreground hover:bg-muted transition-colors cursor-pointer"
               >
                 {copied ? (
                   <>
-                    <Check className="w-3.5 h-3.5 text-green-600" />
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
                     <span>Copied Direct URL</span>
                   </>
                 ) : (
                   <>
-                    <Copy className="w-3.5 h-3.5" />
+                    <Copy className="w-3.5 h-3.5 text-muted-foreground" />
                     <span>Copy Direct Asset URL</span>
                   </>
                 )}
@@ -304,28 +303,28 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
           </div>
 
           {/* Moderation Controls */}
-          <div className="border border-gray-200 rounded-lg p-4 bg-white space-y-3 shadow-xs">
-            <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-black flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-black" />
+          <div className="border border-border rounded-xl p-4 bg-card space-y-3 shadow-xs">
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-primary" />
                 Moderation Status
               </span>
 
               {item.status === 'approved' && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-green-300 bg-green-50 text-green-700">
-                  <CheckCircle2 className="w-3 h-3 text-green-600" />
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
+                  <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                   Approved
                 </span>
               )}
               {item.status === 'pending' && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-amber-300 bg-amber-50 text-amber-800">
-                  <Clock className="w-3 h-3 text-amber-600" />
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-400">
+                  <Clock className="w-3 h-3 text-amber-400" />
                   Pending
                 </span>
               )}
               {item.status === 'rejected' && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-red-300 bg-red-50 text-red-700">
-                  <AlertCircle className="w-3 h-3 text-red-600" />
+                <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border border-destructive/30 bg-destructive/10 text-destructive">
+                  <AlertCircle className="w-3 h-3 text-destructive" />
                   Rejected
                 </span>
               )}
@@ -333,7 +332,7 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
 
             {/* Rejection Note if already rejected */}
             {item.status === 'rejected' && item.rejection_reason && (
-              <div className="bg-red-50 border border-red-200 rounded p-2.5 text-xs text-red-700 space-y-1">
+              <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-2.5 text-xs text-destructive space-y-1">
                 <span className="font-bold block">Rejection Reason:</span>
                 <p>{item.rejection_reason}</p>
               </div>
@@ -347,20 +346,20 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
                   onChange={(e) => setRejectionReason(e.target.value)}
                   placeholder="State reason for rejecting this asset..."
                   rows={2}
-                  className="w-full px-2.5 py-1.5 text-xs border border-gray-300 rounded text-black placeholder-gray-400 focus:outline-none focus:border-black resize-none"
+                  className="w-full px-2.5 py-1.5 text-xs border border-border rounded-lg text-foreground bg-card placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none transition-all"
                 />
                 <div className="flex items-center gap-2">
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="flex-1 px-3 py-1.5 rounded text-xs font-bold bg-red-600 text-white hover:bg-red-700 transition-colors cursor-pointer disabled:opacity-50"
+                    className="flex-1 px-3 py-1.5 rounded-lg text-xs font-bold bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
                   >
                     Confirm Rejection
                   </button>
                   <button
                     type="button"
                     onClick={() => setRejecting(false)}
-                    className="px-3 py-1.5 rounded text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-100 cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-border text-foreground hover:bg-muted cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -373,7 +372,7 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
                     type="button"
                     onClick={handleApprove}
                     disabled={isSubmitting}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded bg-black text-white hover:bg-gray-800 transition-colors disabled:opacity-50 cursor-pointer"
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer shadow-xs"
                   >
                     {isSubmitting ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -391,9 +390,9 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
                     type="button"
                     onClick={() => setRejecting(true)}
                     disabled={isSubmitting}
-                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 transition-colors disabled:opacity-50 cursor-pointer"
+                    className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-destructive/30 text-destructive bg-destructive/10 hover:bg-destructive/20 transition-colors disabled:opacity-50 cursor-pointer"
                   >
-                    <AlertCircle className="w-3.5 h-3.5 text-red-600" />
+                    <AlertCircle className="w-3.5 h-3.5 text-destructive" />
                     <span>
                       {item.status === 'approved' ? 'Take Down / Reject' : 'Reject Asset'}
                     </span>
@@ -409,7 +408,7 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
               type="button"
               onClick={handleDelete}
               disabled={isSubmitting}
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded border border-gray-200 text-gray-600 hover:text-red-700 hover:border-red-300 hover:bg-red-50 transition-colors disabled:opacity-50 cursor-pointer"
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-border text-muted-foreground hover:text-destructive hover:border-destructive/30 hover:bg-destructive/10 transition-colors disabled:opacity-50 cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Delete from Library</span>
@@ -417,7 +416,7 @@ const MediaPreviewModalContent: React.FC<MediaPreviewModalContentProps> = ({
           </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -428,13 +427,10 @@ export const MediaPreviewModal: React.FC<MediaPreviewModalProps> = ({
   onModerate,
   onDelete,
 }) => {
-  if (!isOpen || !item) return null
+  if (!item) return null
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-150"
-      onClick={onClose}
-    >
+    <Modal isOpen={isOpen} onClose={onClose} className="max-w-5xl max-h-[92vh]">
       <MediaPreviewModalContent
         key={item.id}
         item={item}
@@ -442,7 +438,7 @@ export const MediaPreviewModal: React.FC<MediaPreviewModalProps> = ({
         onModerate={onModerate}
         onDelete={onDelete}
       />
-    </div>
+    </Modal>
   )
 }
 
