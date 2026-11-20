@@ -4,10 +4,12 @@ import * as svc from './announcement.service';
 import { markAllRead as markAllReadInStore, markRead as markReadInStore, unreadCount, withUnread } from './reads';
 import { actorOf, userOf } from './actor';
 import { Viewer, viewerFor } from './audience';
+import { statsForMany, statsForOne } from './stats';
 import {
     CreateAnnouncementInput,
     ListAnnouncementsInput,
     PublishAnnouncementInput,
+    StatsQueryInput,
     UpdateAnnouncementInput,
 } from './announcement.schemas';
 
@@ -93,6 +95,19 @@ export const deleteAnnouncement = wrap(async (req, res) => {
  *  actor IPs and identities, which is sensitive beyond the coordinator rank. */
 export const auditForAnnouncement = wrap(async (req, res) => {
     res.json({ entries: await svc.auditTrail(req.params.id as string) });
+});
+
+/* ---- broadcast analytics (coordinator+) ---------------------------------- */
+
+/** Reach and read count for one published/archived announcement. See stats.ts for how reads count. */
+export const getStats = wrap(async (req, res) => {
+    res.json(await statsForOne(req.params.id as string, actorOf(res).role));
+});
+
+/** The same for a batch of announcements (the web History view). */
+export const listStats = wrap(async (req, res) => {
+    const { ids } = req.query as unknown as StatsQueryInput;
+    res.json({ stats: await statsForMany(ids, actorOf(res).role) });
 });
 
 /* ---- read tracking ------------------------------------------------------- */

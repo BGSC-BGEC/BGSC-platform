@@ -3,13 +3,20 @@ import type {
   Announcement,
   AnnouncementCategory,
   AnnouncementPriority,
+  AudienceRole,
 } from '../../types/announcement'
+import type { ClubEvent } from '../../types/event'
 import { announcementService } from '../../services/announcementService'
+import { eventService } from '../../services/eventService'
+import { rankOf } from '../../services/permissions'
+import { useAuthStore } from '../../stores/authStore'
+import { describeAnnouncementError } from './announcementErrors'
 
 export interface CreateAnnouncementModalProps {
   isOpen: boolean
   onClose: () => void
-  onCreated: (newAnnouncement: Announcement) => void
+  /** `warning` is set when the draft was saved but the publish/schedule step failed. */
+  onCreated: (newAnnouncement: Announcement, warning?: string) => void
 }
 
 const ALL_CATEGORIES: { id: AnnouncementCategory; label: string }[] = [
@@ -24,11 +31,32 @@ const ALL_CATEGORIES: { id: AnnouncementCategory; label: string }[] = [
   { id: 'teams', label: 'Teams' },
 ]
 
+/** Backend ROLE_RANK order. The backend refuses a minimum above the composer's own rank. */
+const AUDIENCE_ROLES: { id: AudienceRole; label: string }[] = [
+  { id: 'guest', label: 'Everyone (including guests)' },
+  { id: 'user', label: 'Signed-in users' },
+  { id: 'member', label: 'Members and above' },
+  { id: 'core', label: 'Core and above' },
+  { id: 'coordinator', label: 'Coordinators and above' },
+  { id: 'founder', label: 'Founders only' },
+]
+
+type PublishMode = 'published' | 'scheduled' | 'draft'
+
+/** `<input type="datetime-local">` value (local wall time) → ISO with zone, or null if invalid. */
+function localToIso(value: string): string | null {
+  if (!value) return null
+  const d = new Date(value)
+  return isNaN(d.getTime()) ? null : d.toISOString()
+}
+
 export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = ({
   isOpen,
   onClose,
   onCreated,
 }) => {
+  const myRole = useAuthStore((s) => s.user?.role)
+
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [selectedCategories, setSelectedCategories] = useState<
@@ -37,9 +65,16 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
   const [tagsInput, setTagsInput] = useState('')
   const [priority, setPriority] = useState<AnnouncementPriority>('normal')
   const [isPinned, setIsPinned] = useState(false)
-  const [status, setStatus] = useState<'published' | 'draft'>('published')
+  const [pinnedUntilInput, setPinnedUntilInput] = useState('')
+  const [minRole, setMinRole] = useState<AudienceRole>('guest')
+  const [eventId, setEventId] = useState('')
+  const [mode, setMode] = useState<PublishMode>('published')
+  const [scheduledForInput, setScheduledForInput] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const [events, setEvents] = useState<ClubEvent[]>([])
+  const [eventsLoading, setEventsLoading] = useState(false)
 
   const resetForm = useCallback(() => {
     setTitle('')
@@ -48,7 +83,11 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
     setTagsInput('')
     setPriority('normal')
     setIsPinned(false)
-    setStatus('published')
+    setPinnedUntilInput('')
+    setMinRole('guest')
+    setEventId('')
+    setMode('published')
+    setScheduledForInput('')
     setIsSubmitting(false)
     setError(null)
   }, [])
@@ -74,7 +113,27 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
     }
   }, [isOpen, handleClose])
 
+  // Events for the "only participants of event" selector, loaded when the modal opens.
+  useEffect(() => {
+    if (!isOpen) return
+    let ignore = false
+    setEventsLoading(true)
+    eventService
+      .getEvents()
+      .then((list) => {
+        if (!ignore) setEvents(list)
+      })
+      .finally(() => {
+        if (!ignore) setEventsLoading(false)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [isOpen])
+
   if (!isOpen) return null
+
+  const roleOptions = AUDIENCE_ROLES.filter((r) => rankOf(r.id) <= rankOf(myRole))
 
   const toggleCategory = (cat: AnnouncementCategory) => {
     setSelectedCategories((prev) =>
@@ -102,34 +161,84 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
       return
     }
 
+    let pinnedUntil: string | null = null
+    if (isPinned) {
+      pinnedUntil = localToIso(pinnedUntilInput)
+      if (!pinnedUntil) {
+        setError('Choose the date and time the pin should end')
+        return
+      }
+      if (new Date(pinnedUntil).getTime() <= Date.now()) {
+        setError('Pin end must be in the future')
+        return
+      }
+    }
+
+    let scheduledFor: string | null = null
+    if (mode === 'scheduled') {
+      scheduledFor = localToIso(scheduledForInput)
+      if (!scheduledFor) {
+        setError('Choose the date and time to publish')
+        return
+      }
+      if (new Date(scheduledFor).getTime() <= Date.now()) {
+        setError('Scheduled time must be in the future')
+        return
+      }
+    }
+
     setIsSubmitting(true)
     setError(null)
 
-    try {
-      const parsedTags = tagsInput
-        .split(',')
-        .map((t) => t.trim().toLowerCase())
-        .filter(Boolean)
+    const parsedTags = tagsInput
+      .split(',')
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
 
-      const created = await announcementService.createAnnouncement({
+    // Step 1: create. The backend always creates a draft.
+    let draft: Announcement
+    try {
+      draft = await announcementService.createAnnouncement({
         title: title.trim(),
         body: body.trim(),
         categories: selectedCategories,
         tags: parsedTags,
         priority,
-        isPinned,
-        status,
+        pinnedUntil,
+        audience: {
+          minRole,
+          eventId: eventId || null,
+        },
       })
-
-      onCreated(created)
-      handleClose()
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to create announcement'
-      )
-    } finally {
+      setError(describeAnnouncementError(err, 'Failed to create announcement'))
       setIsSubmitting(false)
+      return
     }
+
+    // Step 2: publish now or schedule. If this fails the draft already exists, so hand it to the
+    // page with a warning rather than leaving the form open (a resubmit would create a duplicate).
+    if (mode === 'draft') {
+      onCreated(draft)
+      handleClose()
+      return
+    }
+
+    try {
+      const updated = await announcementService.publishAnnouncement(
+        draft.id,
+        scheduledFor ?? undefined
+      )
+      onCreated(updated)
+    } catch (err) {
+      onCreated(
+        draft,
+        `"${draft.title}" was saved as a draft, but ${
+          mode === 'scheduled' ? 'scheduling' : 'publishing'
+        } failed: ${describeAnnouncementError(err, 'unknown error')}`
+      )
+    }
+    handleClose()
   }
 
   return (
@@ -239,6 +348,7 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
             <textarea
               required
               rows={5}
+              maxLength={5000}
               value={body}
               onChange={(e) => setBody(e.target.value)}
               placeholder="Write the complete announcement details for the club community..."
@@ -260,8 +370,61 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
             />
           </div>
 
-          {/* Pin Checkbox */}
-          <div className="pt-1">
+          {/* Audience */}
+          <div className="pt-2 border-t border-gray-200 space-y-3">
+            <label className="block text-xs font-bold uppercase tracking-wider text-black">
+              Audience
+            </label>
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-700 mb-1">
+                Minimum role
+              </label>
+              <select
+                value={minRole}
+                onChange={(e) => setMinRole(e.target.value as AudienceRole)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              >
+                {roleOptions.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+              {selectedCategories.includes('teams') && rankOf(minRole) < rankOf('core') && (
+                <span className="text-[11px] text-gray-500 mt-1 block">
+                  The Teams category is always restricted to Core and above.
+                </span>
+              )}
+            </div>
+            <div>
+              <label className="block text-[11px] font-semibold text-gray-700 mb-1">
+                Only participants of event (optional)
+              </label>
+              <select
+                value={eventId}
+                onChange={(e) => setEventId(e.target.value)}
+                disabled={eventsLoading}
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black disabled:opacity-50"
+              >
+                <option value="">
+                  {eventsLoading ? 'Loading events...' : 'No event restriction'}
+                </option>
+                {events.map((ev) => (
+                  <option key={ev.id} value={ev.id}>
+                    {ev.title} ({ev.status})
+                  </option>
+                ))}
+              </select>
+              {eventId && (
+                <span className="text-[11px] text-gray-500 mt-1 block">
+                  Visible only to users with a confirmed registration for this event.
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Pin */}
+          <div className="pt-1 space-y-2">
             <label className="flex items-center gap-2 text-xs font-semibold text-black cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -271,6 +434,23 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
               />
               Pin to top of feed for high visibility
             </label>
+            {isPinned && (
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1">
+                  Pinned until <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={pinnedUntilInput}
+                  onChange={(e) => setPinnedUntilInput(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+                />
+                <span className="text-[11px] text-gray-500 mt-1 block">
+                  Must not be later than the announcement's 4-month expiry.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Status Option */}
@@ -278,14 +458,14 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
             <label className="block text-xs font-bold uppercase tracking-wider text-black mb-2">
               Publishing Option
             </label>
-            <div className="flex items-center gap-6">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <label className="flex items-center gap-2 text-xs font-medium text-black cursor-pointer select-none">
                 <input
                   type="radio"
                   name="status"
                   value="published"
-                  checked={status === 'published'}
-                  onChange={() => setStatus('published')}
+                  checked={mode === 'published'}
+                  onChange={() => setMode('published')}
                   className="accent-black cursor-pointer"
                 />
                 Publish Immediately
@@ -294,14 +474,39 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
                 <input
                   type="radio"
                   name="status"
+                  value="scheduled"
+                  checked={mode === 'scheduled'}
+                  onChange={() => setMode('scheduled')}
+                  className="accent-black cursor-pointer"
+                />
+                Schedule for Later
+              </label>
+              <label className="flex items-center gap-2 text-xs font-medium text-black cursor-pointer select-none">
+                <input
+                  type="radio"
+                  name="status"
                   value="draft"
-                  checked={status === 'draft'}
-                  onChange={() => setStatus('draft')}
+                  checked={mode === 'draft'}
+                  onChange={() => setMode('draft')}
                   className="accent-black cursor-pointer"
                 />
                 Save as Draft
               </label>
             </div>
+            {mode === 'scheduled' && (
+              <div className="mt-3">
+                <label className="block text-[11px] font-semibold text-gray-700 mb-1">
+                  Publish at <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={scheduledForInput}
+                  onChange={(e) => setScheduledForInput(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+                />
+              </div>
+            )}
           </div>
 
           {/* Modal Actions */}
@@ -321,8 +526,10 @@ export const CreateAnnouncementModal: React.FC<CreateAnnouncementModalProps> = (
             >
               {isSubmitting
                 ? 'Submitting...'
-                : status === 'published'
+                : mode === 'published'
                 ? 'Publish Announcement'
+                : mode === 'scheduled'
+                ? 'Schedule Announcement'
                 : 'Save Draft'}
             </button>
           </div>

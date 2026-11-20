@@ -4,7 +4,8 @@ import type { LeaderboardEntry } from '../../types/leaderboard'
 
 export interface PodiumCardsProps {
   topThree: LeaderboardEntry[]
-  onAdjustPoints: (entry: LeaderboardEntry) => void
+  /** Omit to hide the Adjust Points buttons (role below `points.adjust`). */
+  onAdjustPoints?: (entry: LeaderboardEntry) => void
 }
 
 export const PodiumCards: React.FC<PodiumCardsProps> = ({
@@ -28,9 +29,9 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
                 <Medal className="w-3.5 h-3.5" />
                 #2 Silver
               </span>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700">
+              {second.domain && <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700">
                 {second.domain}
-              </span>
+              </span>}
             </div>
 
             <div>
@@ -48,13 +49,13 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
             </div>
           </div>
 
-          <button
+          {onAdjustPoints && (<button
             type="button"
             onClick={() => onAdjustPoints(second)}
             className="w-full mt-2 px-3 py-1.5 text-xs font-semibold border border-black text-black bg-white hover:bg-black hover:text-white rounded transition-colors cursor-pointer"
           >
             Adjust Points
-          </button>
+          </button>)}
         </div>
       )}
 
@@ -67,9 +68,9 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
                 <Trophy className="w-4 h-4 text-amber-400" />
                 #1 Champion
               </span>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-black bg-black text-white">
+              {first.domain && <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-black bg-black text-white">
                 {first.domain}
-              </span>
+              </span>}
             </div>
 
             <div>
@@ -87,13 +88,13 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
             </div>
           </div>
 
-          <button
+          {onAdjustPoints && (<button
             type="button"
             onClick={() => onAdjustPoints(first)}
             className="w-full mt-2 px-3 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer"
           >
             Adjust Points
-          </button>
+          </button>)}
         </div>
       )}
 
@@ -106,9 +107,9 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
                 <Award className="w-3.5 h-3.5 text-amber-800" />
                 #3 Bronze
               </span>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700">
+              {third.domain && <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700">
                 {third.domain}
-              </span>
+              </span>}
             </div>
 
             <div>
@@ -126,13 +127,13 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
             </div>
           </div>
 
-          <button
+          {onAdjustPoints && (<button
             type="button"
             onClick={() => onAdjustPoints(third)}
             className="w-full mt-2 px-3 py-1.5 text-xs font-semibold border border-black text-black bg-white hover:bg-black hover:text-white rounded transition-colors cursor-pointer"
           >
             Adjust Points
-          </button>
+          </button>)}
         </div>
       )}
     </div>

@@ -4,6 +4,7 @@ import type { User } from '../types/user'
 import { userService } from '../services/userService'
 import { UserTable } from '../components/users/UserTable'
 import { UserDetailModal } from '../components/users/UserDetailModal'
+import { useCan } from '../services/permissions'
 
 export const Users: React.FC = () => {
     const [users, setUsers] = useState<User[]>([])
@@ -15,9 +16,11 @@ export const Users: React.FC = () => {
     const [statusFilter, setStatusFilter] = useState('all')
     const [selectedUser, setSelectedUser] = useState<User | null>(null)
     const [isModalOpen, setIsModalOpen] = useState(false)
+    const canViewUsers = useCan('users.view')
 
 useEffect(() => {
     let ignore = false
+    if (!canViewUsers) return
 
     userService
         .getUsers()
@@ -37,7 +40,7 @@ useEffect(() => {
     return () => {
         ignore = true
     }
-    }, [])
+    }, [canViewUsers])
 
     // 4. Retry Handler (Safe to call setState synchronously in click events)
     const handleRetry = () => {
@@ -145,6 +148,18 @@ useEffect(() => {
         document.body.removeChild(link)
         URL.revokeObjectURL(url)
       }
+    // GET /users is coordinator+ on the backend; Core admins would only ever see a 403 here.
+    if (!canViewUsers) {
+        return (
+            <div className="p-12 text-center border border-gray-200 rounded bg-white">
+                <div className="text-base font-bold text-black">Coordinator access required</div>
+                <div className="text-xs text-gray-500 mt-1">
+                    The Users Directory is available to Coordinators and Founders.
+                </div>
+            </div>
+        )
+    }
+
     return (
     <div className="space-y-6">
         {/* Top Banner / Header */}
@@ -195,6 +210,7 @@ focus:border-black"
             <option value="coordinator">Coordinator</option>
             <option value="core">Core</option>
             <option value="member">Member</option>
+            <option value="user">User</option>
         </select>
 
         <select
@@ -205,9 +221,8 @@ focus:border-black"
         >
             <option value="all">All Statuses</option>
             <option value="active">Active</option>
-            <option value="pending">Pending</option>
             <option value="suspended">Suspended</option>
-            <option value="inactive">Inactive</option>
+            <option value="deleted">Deleted</option>
         </select>
         
         <button

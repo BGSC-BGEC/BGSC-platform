@@ -290,7 +290,7 @@ async function main(): Promise<void> {
 
     assert.strictEqual(
         (await call('PATCH', `/users/${bo._id}/role`, { as: coordT, body: { role: 'coordinator', reason: 'x' } })).status,
-        422, 'coordinator promotion is refused — needs 2FA (§5.15.5), not built');
+        403, 'a coordinator cannot grant coordinator — only a founder outranks the role');
     assert.strictEqual(
         (await call('PATCH', `/users/${coord._id}/role`, { as: coordT, body: { role: 'core', reason: 'x' } })).status,
         409, 'an admin cannot change their own role');

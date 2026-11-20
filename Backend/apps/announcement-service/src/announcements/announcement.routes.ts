@@ -6,6 +6,7 @@ import {
     IdParams,
     ListAnnouncementsQuery,
     PublishAnnouncementSchema,
+    StatsQuery,
     UpdateAnnouncementSchema,
 } from './announcement.schemas';
 
@@ -31,6 +32,15 @@ export const announcementRoutes = Router();
 announcementRoutes.get('/heads', optionalAuth, c.getHeads);
 announcementRoutes.get('/unread-count', requireAuth, c.getUnreadCount);
 announcementRoutes.post('/read-all', requireAuth, c.markAllRead);
+// Broadcast analytics (stats.ts). Coordinator+: it sizes the audience, which a core composer does
+// not need, and it costs two counts over `users` per announcement.
+announcementRoutes.get(
+    '/stats',
+    requireAuth,
+    requireActiveUser(UserRole.COORDINATOR),
+    validate({ query: StatsQuery }),
+    c.listStats
+);
 
 // ---- feed ------------------------------------------------------------------
 announcementRoutes.get('/', optionalAuth, validate({ query: ListAnnouncementsQuery }), c.listAnnouncements);
@@ -86,6 +96,14 @@ announcementRoutes.get(
     requireActiveUser(UserRole.FOUNDER),
     validate({ params: IdParams }),
     c.auditForAnnouncement
+);
+
+announcementRoutes.get(
+    '/:id/stats',
+    requireAuth,
+    requireActiveUser(UserRole.COORDINATOR),
+    validate({ params: IdParams }),
+    c.getStats
 );
 
 // Parameterised read last, so none of the literal paths above is swallowed by it.

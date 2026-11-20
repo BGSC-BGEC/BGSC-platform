@@ -125,6 +125,19 @@ export const ListAnnouncementsQuery = z.object({
 export const IdParams = z.object({ id: z.string().uuid() });
 
 /**
+ * `GET /announcements/stats?ids=a,b,c` — the History list's batch of read stats. Comma-separated
+ * rather than repeated keys so the query parser's array/string ambiguity never reaches the service.
+ * Capped at the feed's own page-size ceiling (50).
+ */
+export const StatsQuery = z.object({
+    ids: z
+        .string()
+        .max(50 * 37)
+        .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean))
+        .pipe(z.array(z.string().uuid()).min(1).max(50)),
+});
+
+/**
  * Delivery writeback from the Notification Service (`PATCH /internal/announcements/:id/delivery`).
  * Service-to-service only — the route mounts
  * `requireServiceToken` and the gateway refuses `/internal/*` at the edge.
@@ -172,4 +185,5 @@ export type CreateAnnouncementInput = z.infer<typeof CreateAnnouncementSchema>;
 export type UpdateAnnouncementInput = z.infer<typeof UpdateAnnouncementSchema>;
 export type PublishAnnouncementInput = z.infer<typeof PublishAnnouncementSchema>;
 export type ListAnnouncementsInput = z.infer<typeof ListAnnouncementsQuery>;
+export type StatsQueryInput = z.infer<typeof StatsQuery>;
 export type RecordDeliveryInput = z.infer<typeof RecordDeliverySchema>;

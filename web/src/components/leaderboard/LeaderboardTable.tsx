@@ -1,10 +1,11 @@
 import React from 'react'
-import { Trophy, Medal, Award, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { Trophy, Medal, Award } from 'lucide-react'
 import type { LeaderboardEntry } from '../../types/leaderboard'
 
 export interface LeaderboardTableProps {
   entries: LeaderboardEntry[]
-  onAdjustPoints: (entry: LeaderboardEntry) => void
+  /** Omit to hide the Action column (role below `points.adjust`). */
+  onAdjustPoints?: (entry: LeaderboardEntry) => void
 }
 
 export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
@@ -18,10 +19,8 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
           <tr>
             <th className="px-4 py-3 text-center w-16">Rank</th>
             <th className="px-4 py-3">Athlete / Member</th>
-            <th className="px-4 py-3">Domain</th>
-            <th className="px-4 py-3 text-center">Movement</th>
-            <th className="px-4 py-3 text-right">Points Balance</th>
-            <th className="px-4 py-3 text-right">Action</th>
+            <th className="px-4 py-3 text-right">Points Earned</th>
+            {onAdjustPoints && <th className="px-4 py-3 text-right">Action</th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
@@ -61,38 +60,14 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                   <div className="font-bold text-black text-xs sm:text-sm">
                     {entry.name}
                   </div>
-                  <div className="text-[11px] text-gray-500 font-mono">
-                    @{entry.username}
-                  </div>
-                </td>
-
-                {/* Domain Badge */}
-                <td className="px-4 py-3">
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700">
-                    {entry.domain}
-                  </span>
-                </td>
-
-                {/* Movement / Change */}
-                <td className="px-4 py-3 text-center">
-                  {entry.change > 0 ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded">
-                      <TrendingUp className="w-3 h-3" />
-                      +{entry.change}
-                    </span>
-                  ) : entry.change < 0 ? (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded">
-                      <TrendingDown className="w-3 h-3" />
-                      {entry.change}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center text-gray-400 text-xs">
-                      <Minus className="w-3 h-3" />
-                    </span>
+                  {entry.username && (
+                    <div className="text-[11px] text-gray-500 font-mono">
+                      @{entry.username}
+                    </div>
                   )}
                 </td>
 
-                {/* Points Balance */}
+                {/* Points Earned */}
                 <td className="px-4 py-3 text-right">
                   <span className="font-mono font-bold text-black text-xs sm:text-sm">
                     {entry.points.toLocaleString()}
@@ -101,15 +76,17 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                 </td>
 
                 {/* Action */}
-                <td className="px-4 py-3 text-right">
-                  <button
-                    type="button"
-                    onClick={() => onAdjustPoints(entry)}
-                    className="px-3 py-1 text-xs font-semibold border border-black text-black bg-white hover:bg-black hover:text-white rounded transition-colors cursor-pointer"
-                  >
-                    Adjust
-                  </button>
-                </td>
+                {onAdjustPoints && (
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => onAdjustPoints(entry)}
+                      className="px-3 py-1 text-xs font-semibold border border-black text-black bg-white hover:bg-black hover:text-white rounded transition-colors cursor-pointer"
+                    >
+                      Adjust
+                    </button>
+                  </td>
+                )}
               </tr>
             )
           })}

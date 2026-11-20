@@ -1,15 +1,21 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import type {
   LeaderboardEntry,
   PointsTransaction,
+  UserSearchResult,
 } from '../../types/leaderboard'
-import { leaderboardService } from '../../services/leaderboardService'
+import {
+  leaderboardService,
+  newRequestId,
+} from '../../services/leaderboardService'
+import { useCan } from '../../services/permissions'
+import { UserSearchPicker } from './UserSearchPicker'
 
 export interface PointsAdjustmentModalProps {
   isOpen: boolean
   onClose: () => void
+  /** Pre-selected member (from a leaderboard row); null opens with a member search. */
   targetEntry: LeaderboardEntry | null
-  allEntries: LeaderboardEntry[]
   onAdjusted: (result: {
     userId: string
     newBalance: number
@@ -17,91 +23,109 @@ export interface PointsAdjustmentModalProps {
   }) => void
 }
 
-interface PointsAdjustmentModalContentProps {
+interface ContentProps {
   onClose: () => void
   targetEntry: LeaderboardEntry | null
-  allEntries: LeaderboardEntry[]
-  onAdjusted: (result: {
-    userId: string
-    newBalance: number
-    transaction: PointsTransaction
-  }) => void
+  onAdjusted: PointsAdjustmentModalProps['onAdjusted']
 }
 
-const PointsAdjustmentModalContent: React.FC<
-  PointsAdjustmentModalContentProps
-> = ({ onClose, targetEntry, allEntries, onAdjusted }) => {
-  const [selectedUserId, setSelectedUserId] = useState<string>(
-    targetEntry?.userId || allEntries[0]?.userId || ''
+function fromEntry(entry: LeaderboardEntry): UserSearchResult {
+  return { id: entry.userId, username: entry.username, fullName: entry.name, pointsBalance: null }
+}
+
+const PointsAdjustmentModalContent: React.FC<ContentProps> = ({ onClose, targetEntry, onAdjusted }) => {
+  const [member, setMember] = useState<UserSearchResult | null>(
+    targetEntry ? fromEntry(targetEntry) : null
   )
+  const [balance, setBalance] = useState<number | null>(null)
+  const [balanceError, setBalanceError] = useState<string | null>(null)
   const [adjustmentType, setAdjustmentType] = useState<'grant' | 'deduct'>('grant')
   const [amount, setAmount] = useState<number | ''>('')
   const [note, setNote] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Idempotency key: reused only while the exact same adjustment is retried.
+  const requestRef = useRef<{ signature: string; id: string } | null>(null)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose()
-      }
+      if (e.key === 'Escape') onClose()
     }
-
     window.addEventListener('keydown', handleKeyDown)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
+    return () => window.removeEventListener('keydown', handleKeyDown)
   }, [onClose])
 
-  const selectedMember = allEntries.find((e) => e.userId === selectedUserId)
+  // The leaderboard shows points earned, not the spendable balance: read the live balance.
+  const memberId = member?.id
+  useEffect(() => {
+    if (!memberId) return
+    let ignore = false
+    leaderboardService
+      .getUserPointsSummary(memberId)
+      .then((s) => {
+        if (!ignore) {
+          setBalance(s.balance)
+          setBalanceError(null)
+        }
+      })
+      .catch((err) => {
+        if (!ignore) setBalanceError(err instanceof Error ? err.message : 'Could not load balance')
+      })
+    return () => {
+      ignore = true
+    }
+  }, [memberId])
+
+  const handleSelectMember = (u: UserSearchResult | null) => {
+    setBalance(null)
+    setBalanceError(null)
+    setMember(u)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!selectedUserId) {
+    if (!member) {
       setError('Please select a member to adjust points for.')
       return
     }
-
     if (amount === '' || Number(amount) <= 0) {
       setError('Please enter a valid points amount greater than 0.')
       return
     }
-
     if (Number(amount) > 100000) {
       setError('Points amount cannot exceed 100,000 in a single transaction.')
       return
     }
-
-    if (note.trim().length < 3) {
-      setError('An audit justification note of at least 3 characters is required.')
+    if (note.trim().length < 3 || note.trim().length > 500) {
+      setError('An audit justification note of 3 to 500 characters is required.')
       return
     }
 
     setIsSubmitting(true)
     setError(null)
 
-    try {
-      const numericAmount = Number(amount)
-      const signedAmount =
-        adjustmentType === 'grant' ? numericAmount : -numericAmount
+    const signedAmount = adjustmentType === 'grant' ? Number(amount) : -Number(amount)
+    const signature = `${member.id}|${signedAmount}|${note.trim()}`
+    if (!requestRef.current || requestRef.current.signature !== signature) {
+      requestRef.current = { signature, id: newRequestId() }
+    }
 
+    try {
       const result = await leaderboardService.adjustPoints({
-        userId: selectedUserId,
+        userId: member.id,
         amount: signedAmount,
         note: note.trim(),
+        requestId: requestRef.current.id,
       })
-
       onAdjusted({
-        userId: selectedUserId,
+        userId: member.id,
         newBalance: result.newBalance,
         transaction: result.transaction,
       })
       onClose()
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to adjust points balance'
-      )
+      setError(err instanceof Error ? err.message : 'Failed to adjust points balance')
     } finally {
       setIsSubmitting(false)
     }
@@ -122,9 +146,7 @@ const PointsAdjustmentModalContent: React.FC<
             <h2 className="text-sm font-bold uppercase tracking-wider text-black">
               Adjust Member Points
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Admin Ledger Audit Action
-            </p>
+            <p className="text-xs text-gray-500 mt-0.5">Admin Ledger Audit Action</p>
           </div>
           <button
             type="button"
@@ -137,32 +159,28 @@ const PointsAdjustmentModalContent: React.FC<
 
         {/* Error Alert */}
         {error && (
-          <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded">
-            {error}
-          </div>
+          <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded">{error}</div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Member Selection */}
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-black mb-1">
-              Select Member <span className="text-red-500">*</span>
+              Member <span className="text-red-500">*</span>
             </label>
-            <select
-              value={selectedUserId}
-              onChange={(e) => setSelectedUserId(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
-            >
-              {allEntries.map((entry) => (
-                <option key={entry.userId} value={entry.userId}>
-                  {entry.name} (@{entry.username}) — {entry.points.toLocaleString()} pts
-                </option>
-              ))}
-            </select>
-            {selectedMember && (
+            <UserSearchPicker selected={member} onSelect={handleSelectMember} />
+            {member && (
               <div className="text-[11px] text-gray-500 mt-1 flex justify-between">
-                <span>Domain: <strong className="uppercase text-black">{selectedMember.domain}</strong></span>
-                <span>Current Balance: <strong className="text-black">{selectedMember.points.toLocaleString()} pts</strong></span>
+                <span>Spendable balance</span>
+                <span>
+                  {balanceError ? (
+                    <span className="text-red-600">{balanceError}</span>
+                  ) : balance === null ? (
+                    'Loading...'
+                  ) : (
+                    <strong className="text-black">{balance.toLocaleString()} pts</strong>
+                  )}
+                </span>
               </div>
             )}
           </div>
@@ -210,9 +228,7 @@ const PointsAdjustmentModalContent: React.FC<
               max="100000"
               step="1"
               value={amount}
-              onChange={(e) =>
-                setAmount(e.target.value === '' ? '' : parseInt(e.target.value, 10))
-              }
+              onChange={(e) => setAmount(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
               placeholder="e.g. 250"
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black font-mono"
             />
@@ -226,35 +242,31 @@ const PointsAdjustmentModalContent: React.FC<
             <textarea
               required
               rows={3}
+              maxLength={500}
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="e.g. Champion prize for Smash Open or Conduct penalty"
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black resize-y"
             />
             <span className="text-[10px] text-gray-500 mt-0.5 block">
-              Required for compliance ledger auditing (min 3 characters).
+              Required for compliance ledger auditing (3-500 characters).
             </span>
           </div>
 
           {/* Projected Balance */}
-          {selectedMember && amount !== '' && Number(amount) > 0 && (
+          {balance !== null && amount !== '' && Number(amount) > 0 && (
             <div className="p-3 bg-gray-50 border border-gray-200 rounded text-xs text-black space-y-1">
               <div className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">
                 Projected Balance
               </div>
               <div className="font-mono font-bold text-sm">
-                {selectedMember.points.toLocaleString()} pts{' '}
+                {balance.toLocaleString()} pts{' '}
                 <span className={adjustmentType === 'grant' ? 'text-green-600' : 'text-red-600'}>
                   {adjustmentType === 'grant' ? '+' : '-'}
                   {Number(amount).toLocaleString()} pts
                 </span>{' '}
                 ={' '}
-                {Math.max(
-                  0,
-                  selectedMember.points +
-                    (adjustmentType === 'grant' ? Number(amount) : -Number(amount))
-                ).toLocaleString()}{' '}
-                pts
+                {(balance + (adjustmentType === 'grant' ? Number(amount) : -Number(amount))).toLocaleString()} pts
               </div>
             </div>
           )}
@@ -271,7 +283,7 @@ const PointsAdjustmentModalContent: React.FC<
             </button>
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !member}
               className={`px-4 py-2 text-xs font-bold rounded transition-colors cursor-pointer disabled:opacity-50 ${
                 adjustmentType === 'grant'
                   ? 'border border-black bg-black text-white hover:bg-gray-800'
@@ -295,17 +307,17 @@ export const PointsAdjustmentModal: React.FC<PointsAdjustmentModalProps> = ({
   isOpen,
   onClose,
   targetEntry,
-  allEntries,
   onAdjusted,
 }) => {
-  if (!isOpen) return null
+  // POST /points/adjust is coordinator+; never render the form for a role the backend refuses.
+  const canAdjust = useCan('points.adjust')
+  if (!isOpen || !canAdjust) return null
 
   return (
     <PointsAdjustmentModalContent
       key={targetEntry?.userId || 'default'}
       onClose={onClose}
       targetEntry={targetEntry}
-      allEntries={allEntries}
       onAdjusted={onAdjusted}
     />
   )

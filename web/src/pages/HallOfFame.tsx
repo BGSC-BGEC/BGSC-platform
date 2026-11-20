@@ -1,35 +1,31 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Crown, Plus, Search, Star, Trash2, AlertCircle } from 'lucide-react'
+import { Crown, Plus, Search, Star, Trash2, AlertCircle, Pencil } from 'lucide-react'
 import {
   hallOfFameService,
   type HallOfFameEntry,
-  type HofCategory,
 } from '../services/hallOfFameService'
-import { userService } from '../services/userService'
-import type { User } from '../types/user'
+import { useCan } from '../services/permissions'
+import { HallOfFameEntryForm } from '../components/halloffame/HallOfFameEntryForm'
+
+const SOURCE_LABEL: Record<HallOfFameEntry['source']['type'], string> = {
+  event: 'Event',
+  challenge: 'Challenge',
+  manual: 'Manual',
+}
 
 export const HallOfFame: React.FC = () => {
+  const canDelete = useCan('hallOfFame.delete')
+
   const [entries, setEntries] = useState<HallOfFameEntry[]>([])
-  const [users, setUsers] = useState<User[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
 
-  // Induct Modal state
+  // Create / edit modal: `editing` null + open = create.
   const [isModalOpen, setIsModalOpen] = useState(false)
-  const [selectedUserId, setSelectedUserId] = useState('')
-  const [honoreeId, setHonoreeId] = useState('')
-  const [honoreeName, setHonoreeName] = useState('')
-  const [category, setCategory] = useState<HofCategory>('event_winner')
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [quote, setQuote] = useState('')
-  const [domain, setDomain] = useState('sports')
-  const [year, setYear] = useState(new Date().getFullYear())
-  const [featured, setFeatured] = useState(true)
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [editing, setEditing] = useState<HallOfFameEntry | null>(null)
 
   const loadEntries = useCallback(async () => {
     setIsLoading(true)
@@ -51,52 +47,28 @@ export const HallOfFame: React.FC = () => {
     loadEntries()
   }, [loadEntries])
 
-  useEffect(() => {
-    userService
-      .getUsers()
-      .then((list) => setUsers(list))
-      .catch(() => {})
-  }, [])
-
-  const handleUserPick = (userId: string) => {
-    setSelectedUserId(userId)
-    const found = users.find((u) => u.id === userId)
-    if (found) {
-      setHonoreeId(found.id)
-      setHonoreeName(found.name || found.username)
-    }
+  const openCreate = () => {
+    setEditing(null)
+    setIsModalOpen(true)
   }
 
-  const handleCreateEntry = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!title.trim() || !honoreeName.trim()) return
+  const openEdit = (entry: HallOfFameEntry) => {
+    setEditing(entry)
+    setIsModalOpen(true)
+  }
 
-    setIsSubmitting(true)
-    setError(null)
-    try {
-      const fallbackUuid =
-        honoreeId.trim() || '00000000-0000-4000-8000-000000000001'
-      const created = await hallOfFameService.createEntry({
-        category,
-        title: title.trim(),
-        description: description.trim(),
-        quote: quote.trim(),
-        honoreeId: fallbackUuid,
-        honoreeName: honoreeName.trim(),
-        domain,
-        year,
-        featured,
-      })
-      setEntries((prev) => [created, ...prev])
-      setIsModalOpen(false)
-      setTitle('')
-      setDescription('')
-      setQuote('')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to induct honoree')
-    } finally {
-      setIsSubmitting(false)
-    }
+  const closeModal = () => {
+    setIsModalOpen(false)
+    setEditing(null)
+  }
+
+  const handleSaved = (saved: HallOfFameEntry) => {
+    setEntries((prev) =>
+      prev.some((item) => item.id === saved.id)
+        ? prev.map((item) => (item.id === saved.id ? saved : item))
+        : [saved, ...prev]
+    )
+    closeModal()
   }
 
   const handleToggleFeatured = async (entry: HallOfFameEntry) => {
@@ -136,7 +108,7 @@ export const HallOfFame: React.FC = () => {
         </div>
         <button
           type="button"
-          onClick={() => setIsModalOpen(true)}
+          onClick={openCreate}
           className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
@@ -152,6 +124,7 @@ export const HallOfFame: React.FC = () => {
             type="text"
             placeholder="Search honoree or achievement title..."
             value={searchTerm}
+            maxLength={64}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
           />
@@ -204,7 +177,7 @@ export const HallOfFame: React.FC = () => {
               <div className="space-y-2 text-left">
                 <div className="flex items-center justify-between gap-2">
                   <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-black rounded">
-                    {entry.category.replace('_', ' ')} &bull; {entry.year}
+                    {entry.category.replace('_', ' ')} &bull; {entry.achievement.year}
                   </span>
                   {entry.featured && (
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold uppercase bg-black text-white rounded">
@@ -215,7 +188,9 @@ export const HallOfFame: React.FC = () => {
                 </div>
 
                 <div>
-                  <h3 className="text-base font-bold text-black">{entry.honoreeName}</h3>
+                  <h3 className="text-base font-bold text-black">
+                    {entry.honoree.displayName || 'Unknown honoree'}
+                  </h3>
                   <p className="text-xs font-semibold text-gray-700">{entry.title}</p>
                 </div>
 
@@ -228,11 +203,16 @@ export const HallOfFame: React.FC = () => {
                     "{entry.quote}"
                   </blockquote>
                 )}
+
+                <p className="text-[11px] text-gray-500">
+                  Source: {SOURCE_LABEL[entry.source.type]}
+                  {entry.source.title ? ` — ${entry.source.title}` : ''}
+                </p>
               </div>
 
               <div className="flex items-center justify-between pt-3 border-t border-gray-100">
                 <span className="text-[11px] uppercase font-bold text-gray-500">
-                  Domain: {entry.domain}
+                  Domain: {entry.achievement.domain || '—'}
                 </span>
                 <div className="flex items-center gap-2">
                   <button
@@ -244,12 +224,22 @@ export const HallOfFame: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleDelete(entry.id)}
-                    className="p-1.5 text-red-600 hover:bg-red-50 border border-gray-200 rounded cursor-pointer"
-                    title="Delete entry"
+                    onClick={() => openEdit(entry)}
+                    className="p-1.5 text-gray-600 hover:text-black border border-gray-200 rounded cursor-pointer"
+                    title="Edit entry"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Pencil className="w-3.5 h-3.5" />
                   </button>
+                  {canDelete && (
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(entry.id)}
+                      className="p-1.5 text-red-600 hover:bg-red-50 border border-gray-200 rounded cursor-pointer"
+                      title="Delete entry"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -257,190 +247,13 @@ export const HallOfFame: React.FC = () => {
         </div>
       )}
 
-      {/* Induct Honoree Modal */}
       {isModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-          onClick={() => setIsModalOpen(false)}
-        >
-          <div
-            className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-              <h2 className="text-sm font-bold uppercase tracking-wider text-black">
-                Induct into Hall of Fame
-              </h2>
-              <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="px-2 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-white cursor-pointer"
-              >
-                X
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateEntry} className="space-y-4 text-left">
-              {users.length > 0 && (
-                <div>
-                  <label className="block text-xs font-bold uppercase text-black mb-1">
-                    Select Club Member (Optional)
-                  </label>
-                  <select
-                    value={selectedUserId}
-                    onChange={(e) => handleUserPick(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white"
-                  >
-                    <option value="">-- Choose member or enter manually below --</option>
-                    {users.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} (@{u.username})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold uppercase text-black mb-1">
-                    Honoree Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Arjun Sharma"
-                    value={honoreeName}
-                    onChange={(e) => setHonoreeName(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase text-black mb-1">
-                    Honoree UUID
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="User UUID"
-                    value={honoreeId}
-                    onChange={(e) => setHonoreeId(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white font-mono"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase text-black mb-1">
-                  Achievement Title
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. BGSC Badminton Smash S3 Champion"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white"
-                />
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-bold uppercase text-black mb-1">
-                    Category
-                  </label>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value as HofCategory)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white"
-                  >
-                    <option value="event_winner">Event Winner</option>
-                    <option value="challenge_legend">Challenge Legend</option>
-                    <option value="sponsor_champion">Sponsor Champion</option>
-                    <option value="custom">Custom</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase text-black mb-1">
-                    Domain
-                  </label>
-                  <select
-                    value={domain}
-                    onChange={(e) => setDomain(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white"
-                  >
-                    <option value="sports">Sports</option>
-                    <option value="esports">Esports</option>
-                    <option value="fitness">Fitness</option>
-                    <option value="general">General</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase text-black mb-1">
-                    Year
-                  </label>
-                  <input
-                    type="number"
-                    value={year}
-                    onChange={(e) => setYear(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase text-black mb-1">
-                  Description
-                </label>
-                <textarea
-                  rows={2}
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Story behind the championship or milestone..."
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase text-black mb-1">
-                  Winner Quote (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={quote}
-                  onChange={(e) => setQuote(e.target.value)}
-                  placeholder="Memorable quote..."
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white"
-                />
-              </div>
-
-              <label className="flex items-center gap-2 text-xs font-bold uppercase text-black cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={featured}
-                  onChange={(e) => setFeatured(e.target.checked)}
-                />
-                <span>Feature on Club Hall of Fame Spotlight</span>
-              </label>
-
-              <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-xs border border-gray-300 rounded text-black cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-2 text-xs font-bold border border-black bg-black text-white rounded cursor-pointer"
-                >
-                  {isSubmitting ? 'Inducting...' : 'Induct Honoree'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <HallOfFameEntryForm
+          key={editing?.id ?? 'new'}
+          entry={editing}
+          onClose={closeModal}
+          onSaved={handleSaved}
+        />
       )}
     </div>
   )

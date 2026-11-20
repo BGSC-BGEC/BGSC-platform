@@ -1,9 +1,8 @@
 /**
  * Founder bootstrap (owner decision): `npm run seed:founder`.
  *
- * The role API can never mint a founder — ASSIGNABLE_ROLES stops at core, and promotion past
- * coordinator needs Founder 2FA that does not exist yet — so the first founder has to come from
- * outside the API. This is that path, and only that:
+ * The role API can never mint a founder — ASSIGNABLE_ROLES stops at coordinator — so the first
+ * founder has to come from outside the API. This is that path, and only that:
  *
  *   1. register the account normally (so it has a password, a verified-able email, a real row);
  *   2. FOUNDER_EMAIL=you@example.com npm run seed:founder

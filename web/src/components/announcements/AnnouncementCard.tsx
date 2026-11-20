@@ -1,11 +1,38 @@
 import React from 'react'
 import { Pin, Trash2 } from 'lucide-react'
-import type { Announcement } from '../../types/announcement'
+import type { Announcement, AudienceRole } from '../../types/announcement'
+import { DeliveryStatusSummary } from './DeliveryStatusSummary'
 
 export interface AnnouncementCardProps {
   announcement: Announcement
-  onDelete: (id: string) => void
+  /** Omitted when the viewer may not delete (useCan('announcements.delete')). */
+  onDelete?: (id: string) => void
   onPublish?: (id: string) => void
+  onUnschedule?: (id: string) => void
+  /** Title of `audience.eventId`, when the page could resolve it. */
+  eventTitle?: string
+}
+
+const ROLE_LABELS: Record<AudienceRole, string> = {
+  guest: 'Everyone',
+  user: 'Signed-in users',
+  member: 'Members+',
+  core: 'Core+',
+  coordinator: 'Coordinators+',
+  founder: 'Founders only',
+}
+
+function formatDisplayDateTime(dateStr?: string | null): string {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  if (isNaN(d.getTime())) return dateStr
+  return d.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  })
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -35,7 +62,12 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
   announcement,
   onDelete,
   onPublish,
+  onUnschedule,
+  eventTitle,
 }) => {
+  const audience = announcement.audience
+  const hasAudienceRule = !!audience && (audience.minRole !== 'guest' || !!audience.eventId)
+  const isBroadcast = announcement.status === 'published' || announcement.status === 'archived'
   const isUrgent = announcement.priority === 'urgent'
   const isImportant = announcement.priority === 'important'
 
@@ -112,6 +144,27 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
           {announcement.body}
         </p>
 
+        {/* Audience & pin window */}
+        {(hasAudienceRule || announcement.pinnedUntil) && (
+          <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs text-gray-600">
+            {audience && hasAudienceRule && (
+              <span>
+                <span className="font-semibold text-black">Audience:</span>{' '}
+                {ROLE_LABELS[audience.minRole] || audience.minRole}
+                {audience.eventId && (
+                  <> · participants of {eventTitle ? `"${eventTitle}"` : `event ${audience.eventId}`}</>
+                )}
+              </span>
+            )}
+            {announcement.pinnedUntil && (
+              <span>
+                <span className="font-semibold text-black">Pinned until:</span>{' '}
+                {formatDisplayDateTime(announcement.pinnedUntil)}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Tags */}
         {announcement.tags && announcement.tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5 pt-2">
@@ -127,6 +180,13 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
         )}
       </div>
 
+      {/* Delivery (read-only, composer view) */}
+      {isBroadcast && announcement.delivery !== undefined && (
+        <div className="pt-3 border-t border-gray-100">
+          <DeliveryStatusSummary delivery={announcement.delivery} />
+        </div>
+      )}
+
       {/* Card Footer */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-3 border-t border-gray-100">
         <div className="text-xs text-gray-500">
@@ -134,7 +194,7 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
             <span>Published on {formatDisplayDate(announcement.publishedAt)}</span>
           )}
           {announcement.status === 'scheduled' && announcement.scheduledFor && (
-            <span>Scheduled for {formatDisplayDate(announcement.scheduledFor)}</span>
+            <span>Scheduled for {formatDisplayDateTime(announcement.scheduledFor)}</span>
           )}
           {announcement.status === 'draft' && (
             <span>Draft created on {formatDisplayDate(announcement.createdAt)}</span>
@@ -163,15 +223,26 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
               Publish Now
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => onDelete(announcement.id)}
-            aria-label="Delete announcement"
-            className="p-1.5 text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-300 rounded transition-colors cursor-pointer flex items-center gap-1"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Delete</span>
-          </button>
+          {announcement.status === 'scheduled' && onUnschedule && (
+            <button
+              type="button"
+              onClick={() => onUnschedule(announcement.id)}
+              className="px-3 py-1 text-xs font-semibold border border-black text-black bg-white hover:bg-black hover:text-white rounded transition-colors cursor-pointer"
+            >
+              Unschedule
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(announcement.id)}
+              aria-label="Delete announcement"
+              className="p-1.5 text-xs text-gray-500 hover:text-red-600 border border-gray-200 hover:border-red-300 rounded transition-colors cursor-pointer flex items-center gap-1"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Delete</span>
+            </button>
+          )}
         </div>
       </div>
     </div>

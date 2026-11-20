@@ -17,13 +17,14 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onViewUser }) => {
             <th className="p-4">Status</th>
             <th className="p-4">Points</th>
             <th className="p-4">Joined Date</th>
+            <th className="p-4">Last Active</th>
             <th className="p-4">Actions</th>
         </tr>
         </thead>
         <tbody>
         {users.length === 0 ? (
             <tr>
-            <td colSpan={6} className="p-4 text-center">No members found matching your criteria.</td>
+            <td colSpan={7} className="p-4 text-center">No members found matching your criteria.</td>
             </tr>
         ) : (
             users.map((user) => (
@@ -36,6 +37,7 @@ export const UserTable: React.FC<UserTableProps> = ({ users, onViewUser }) => {
                 <td className="p-4">{user.status}</td>
                 <td className="p-4">{user.pointsBalance}</td>
                 <td className="p-4">{user.joinDate}</td>
+                <td className="p-4">{user.lastActiveAt ? new Date(user.lastActiveAt).toLocaleDateString() : "—"}</td>
                 <td className="p-4">
                 <button type="button" onClick={() => onViewUser(user)}>
                     View

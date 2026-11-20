@@ -3,6 +3,7 @@ import type { DashboardViewProps, StatItem } from '../types/dashboard'
 import { userService } from '../services/userService'
 import { eventService } from '../services/eventService'
 import { leaderboardService } from '../services/leaderboardService'
+import { rulesFor } from '../types/event'
 
 const PLACEHOLDER_STATS: StatItem[] = [
   {
@@ -58,15 +59,13 @@ export const Dashboard: React.FC<DashboardViewProps> = ({
       const leaderboard =
         leaderboardResult.status === 'fulfilled' ? leaderboardResult.value : []
 
-      const activeEventsCount = events.filter(
-        (e) => e.status !== 'draft' && e.status !== 'cancelled'
-      ).length
+      // "Active" = currently open or running; past/cancelled/draft are not active.
+      const isActive = (status: string) => status === 'upcoming' || status === 'ongoing'
+      const activeEventsCount = events.filter((e) => isActive(e.status)).length
 
+      // Tournaments = active events that have a leaderboard/bracket (every type except DE).
       const tournamentsCount = events.filter(
-        (e) =>
-          e.category === 'leagues' ||
-          (e.category as string) === 'tournament' ||
-          Boolean(e.isTeamed)
+        (e) => isActive(e.status) && rulesFor(e.type).hasLeaderboard
       ).length
 
       const pointsIssuedSum = leaderboard.reduce(
@@ -78,7 +77,9 @@ export const Dashboard: React.FC<DashboardViewProps> = ({
         {
           id: 'stat-members',
           label: 'Total Members',
-          value: users.length.toLocaleString(),
+          // The member list is coordinator-only; a Core admin's request is refused, so show "—"
+          // rather than a misleading 0.
+          value: usersResult.status === 'fulfilled' ? users.length.toLocaleString() : '—',
           change: 'Real-time member registry',
         },
         {

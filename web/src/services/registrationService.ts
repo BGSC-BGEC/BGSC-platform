@@ -35,15 +35,30 @@ export interface EventRegistration {
   userId: string
   username: string
   displayName: string
-  status: 'confirmed' | 'waitlisted' | 'rejected' | 'pending' | 'cancelled'
+  /** Backend SUBMISSION_STATUS. `submitted` = awaiting admin/captain review. */
+  status: 'draft' | 'submitted' | 'confirmed' | 'waitlisted' | 'rejected' | 'cancelled'
   answers: Record<string, unknown>
-  captainApplication?: {
-    applied: boolean
-    status?: 'pending' | 'approved' | 'declined'
+  /** Event role (spec §5.5): solo entrant, team captain, or team member. */
+  role: 'solo' | 'captain' | 'member'
+  /** Auction leagues only: the member's self-declared base price. */
+  basePrice: number | null
+  teamId: string | null
+  captainApplication: {
+    status: 'none' | 'pending' | 'approved' | 'declined'
+    note: string | null
+    reviewedAt: string | null
   }
   attended?: boolean
   createdAt: string
 }
+
+export const REGISTRATION_STATUSES: EventRegistration['status'][] = [
+  'submitted',
+  'confirmed',
+  'waitlisted',
+  'rejected',
+  'cancelled',
+]
 
 const mockFormsByEvent: Record<string, RegistrationForm[]> = {}
 const mockRegistrationsByEvent: Record<string, EventRegistration[]> = {
@@ -56,6 +71,10 @@ const mockRegistrationsByEvent: Record<string, EventRegistration[]> = {
       displayName: 'Arjun Sharma',
       status: 'confirmed',
       answers: { racket_grip: 'G4', skill_level: 'Advanced' },
+      role: 'solo',
+      basePrice: null,
+      teamId: null,
+      captainApplication: { status: 'none', note: null, reviewedAt: null },
       attended: true,
       createdAt: '2026-09-28',
     },
@@ -67,6 +86,10 @@ const mockRegistrationsByEvent: Record<string, EventRegistration[]> = {
       displayName: 'Priya Nair',
       status: 'waitlisted',
       answers: { racket_grip: 'G5', skill_level: 'Intermediate' },
+      role: 'solo',
+      basePrice: null,
+      teamId: null,
+      captainApplication: { status: 'none', note: null, reviewedAt: null },
       attended: false,
       createdAt: '2026-09-29',
     },
@@ -110,29 +133,36 @@ function normalizeForm(raw: Record<string, unknown>): RegistrationForm {
   }
 }
 
+/**
+ * Maps a backend FormSubmission. Event-specific data lives under `context.event` and the user is a
+ * snapshot `{ user_id, display_name }` — reading `raw.captain_application` / `raw.attended` /
+ * `user.id` (as this used to) left captain status empty, attendance always "Absent" and userId blank.
+ */
 function normalizeRegistration(raw: Record<string, unknown>): EventRegistration {
   const userObj = (raw.user as Record<string, unknown>) || {}
   const ownerObj = (raw.owner as Record<string, unknown>) || {}
-  const captainObj = (raw.captain_application as Record<string, unknown>) || undefined
-  const attendanceObj = (raw.attendance as Record<string, unknown>) || undefined
+  const ctx = ((raw.context as Record<string, unknown>)?.event as Record<string, unknown>) || {}
+  const cap = (ctx.captain_application as Record<string, unknown>) || {}
 
   return {
     id: String(raw._id || raw.id || ''),
     ownerId: String(ownerObj.id || raw.owner_id || raw.event_id || ''),
-    userId: String(userObj.id || raw.user_id || ''),
-    username: String(userObj.username || raw.username || 'member'),
+    userId: String(userObj.user_id || userObj.id || raw.user_id || ''),
+    username: String(userObj.username || userObj.display_name || raw.username || 'member'),
     displayName: String(
       userObj.display_name || userObj.full_name || raw.display_name || userObj.username || 'Member'
     ),
     status: (raw.status as EventRegistration['status']) || 'confirmed',
     answers: (raw.answers as Record<string, unknown>) || {},
-    captainApplication: captainObj
-      ? {
-          applied: Boolean(captainObj.applied),
-          status: captainObj.status as 'pending' | 'approved' | 'declined' | undefined,
-        }
-      : undefined,
-    attended: Boolean(attendanceObj?.attended ?? raw.attended),
+    role: (ctx.role as EventRegistration['role']) || 'solo',
+    basePrice: typeof ctx.base_price === 'number' ? ctx.base_price : null,
+    teamId: (ctx.team_id as string) || null,
+    captainApplication: {
+      status: (cap.status as EventRegistration['captainApplication']['status']) || 'none',
+      note: (cap.note as string) || null,
+      reviewedAt: (cap.reviewed_at as string) || null,
+    },
+    attended: Boolean(ctx.attended ?? raw.attended),
     createdAt: raw.created_at
       ? new Date(String(raw.created_at)).toLocaleDateString()
       : new Date().toLocaleDateString(),
@@ -272,8 +302,9 @@ export async function getEventRegistrations(
     const list = Array.isArray(res) ? res : res?.registrations || []
     return list.map(normalizeRegistration)
   } catch (error) {
-    console.warn(`[registrationService] Failed to load registrations for ${eventId}:`, error)
-    return []
+    // Surface it: an empty roster on a failed call (e.g. an invalid status filter) looked like "no one registered".
+    console.warn(`[registrationService] Failed to load registrations for :`, error)
+    throw error
   }
 }
 

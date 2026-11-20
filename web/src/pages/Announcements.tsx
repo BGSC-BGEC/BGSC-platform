@@ -1,15 +1,31 @@
-import React, { useState, useEffect, useMemo } from 'react'
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { Plus, Search, Megaphone, AlertCircle } from 'lucide-react'
 import type { Announcement } from '../types/announcement'
 import { announcementService } from '../services/announcementService'
+import { eventService } from '../services/eventService'
+import { rankOf, useCan } from '../services/permissions'
+import { useAuthStore } from '../stores/authStore'
 import { AnnouncementCard } from '../components/announcements/AnnouncementCard'
+import { AnnouncementHistory } from '../components/announcements/AnnouncementHistory'
 import { CreateAnnouncementModal } from '../components/announcements/CreateAnnouncementModal'
+import { describeAnnouncementError } from '../components/announcements/announcementErrors'
+
+type View = 'feed' | 'history'
 
 export const Announcements: React.FC = () => {
+  const canDelete = useCan('announcements.delete')
+  // GET /announcements/stats is coordinator+ (same floor as delete). permissions.ts has no key for
+  // it yet, so the rank is compared directly.
+  const role = useAuthStore((s) => s.user?.role)
+  const canViewHistory = rankOf(role) >= rankOf('coordinator')
+
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [eventTitles, setEventTitles] = useState<Record<string, string>>({})
 
+  const [view, setView] = useState<View>('feed')
   const [searchTerm, setSearchTerm] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [priorityFilter, setPriorityFilter] = useState('all')
@@ -36,6 +52,16 @@ export const Announcements: React.FC = () => {
         }
       })
 
+    // Titles for event-scoped audiences. Best effort: without them the id is shown.
+    eventService.getEvents().then((events) => {
+      if (ignore) return
+      const map: Record<string, string> = {}
+      events.forEach((ev) => {
+        map[ev.id] = ev.title
+      })
+      setEventTitles(map)
+    })
+
     return () => {
       ignore = true
     }
@@ -55,37 +81,42 @@ export const Announcements: React.FC = () => {
       .finally(() => setIsLoading(false))
   }
 
-  const handleCreate = (newAnnouncement: Announcement) => {
+  const replaceOne = useCallback((updated: Announcement) => {
+    setAnnouncements((prev) => prev.map((a) => (a.id === updated.id ? updated : a)))
+  }, [])
+
+  const handleCreate = (newAnnouncement: Announcement, warning?: string) => {
     setAnnouncements((prev) => [newAnnouncement, ...prev])
+    setActionMessage(warning ?? null)
   }
 
   const handleDelete = async (id: string) => {
     if (!window.confirm('Delete this broadcast?')) return
-
-    const success = await announcementService.deleteAnnouncement(id)
-    if (success) {
+    setActionMessage(null)
+    try {
+      await announcementService.deleteAnnouncement(id)
       setAnnouncements((prev) => prev.filter((a) => a.id !== id))
+    } catch (err) {
+      setActionMessage(`Delete failed: ${describeAnnouncementError(err, 'unknown error')}`)
     }
   }
 
   const handlePublish = async (id: string) => {
-    const updated = await announcementService.publishAnnouncement(id)
-    if (updated) {
-      setAnnouncements((prev) =>
-        prev.map((a) => (a.id === id ? updated : a))
-      )
-    } else {
-      setAnnouncements((prev) =>
-        prev.map((a) =>
-          a.id === id
-            ? {
-                ...a,
-                status: 'published',
-                publishedAt: new Date().toISOString(),
-              }
-            : a
-        )
-      )
+    setActionMessage(null)
+    try {
+      replaceOne(await announcementService.publishAnnouncement(id))
+    } catch (err) {
+      setActionMessage(`Publish failed: ${describeAnnouncementError(err, 'unknown error')}`)
+    }
+  }
+
+  const handleUnschedule = async (id: string) => {
+    if (!window.confirm('Cancel the schedule? The announcement returns to draft.')) return
+    setActionMessage(null)
+    try {
+      replaceOne(await announcementService.unscheduleAnnouncement(id))
+    } catch (err) {
+      setActionMessage(`Unschedule failed: ${describeAnnouncementError(err, 'unknown error')}`)
     }
   }
 
@@ -134,6 +165,8 @@ export const Announcements: React.FC = () => {
     setStatusFilter('all')
   }
 
+  const activeView: View = canViewHistory ? view : 'feed'
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -156,7 +189,45 @@ export const Announcements: React.FC = () => {
         </button>
       </div>
 
+      {/* View switch (History is coordinator+) */}
+      {canViewHistory && (
+        <div className="flex border-b border-gray-200 gap-2">
+          {(['feed', 'history'] as View[]).map((v) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => setView(v)}
+              className={`px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors cursor-pointer ${
+                activeView === v
+                  ? 'border-black text-black'
+                  : 'border-transparent text-gray-500 hover:text-black'
+              }`}
+            >
+              {v === 'feed' ? 'All Announcements' : 'Broadcast History'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Action result (publish / schedule / delete failures) */}
+      {actionMessage && (
+        <div className="p-4 border border-black text-black bg-white rounded flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            <span className="text-sm">{actionMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActionMessage(null)}
+            className="px-3 py-1 text-xs border border-black hover:bg-black hover:text-white transition-colors cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Toolbar / Filters */}
+      {activeView === 'feed' && (
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-55">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -217,6 +288,7 @@ export const Announcements: React.FC = () => {
           Reset
         </button>
       </div>
+      )}
 
       {/* Feed Area */}
       {isLoading && (
@@ -241,7 +313,11 @@ export const Announcements: React.FC = () => {
         </div>
       )}
 
-      {!isLoading && !error && filteredAnnouncements.length === 0 && (
+      {!isLoading && !error && activeView === 'history' && (
+        <AnnouncementHistory announcements={announcements} eventTitles={eventTitles} />
+      )}
+
+      {!isLoading && !error && activeView === 'feed' && filteredAnnouncements.length === 0 && (
         <div className="p-12 text-center border border-gray-200 rounded bg-white space-y-2">
           <Megaphone className="w-8 h-8 text-gray-400 mx-auto" />
           <h3 className="text-base font-bold text-black">No announcements currently</h3>
@@ -251,14 +327,20 @@ export const Announcements: React.FC = () => {
         </div>
       )}
 
-      {!isLoading && !error && filteredAnnouncements.length > 0 && (
+      {!isLoading && !error && activeView === 'feed' && filteredAnnouncements.length > 0 && (
         <div className="space-y-4">
           {filteredAnnouncements.map((announcement) => (
             <AnnouncementCard
               key={announcement.id}
               announcement={announcement}
-              onDelete={handleDelete}
+              onDelete={canDelete ? handleDelete : undefined}
               onPublish={handlePublish}
+              onUnschedule={handleUnschedule}
+              eventTitle={
+                announcement.audience?.eventId
+                  ? eventTitles[announcement.audience.eventId]
+                  : undefined
+              }
             />
           ))}
         </div>

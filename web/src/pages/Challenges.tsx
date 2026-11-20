@@ -7,6 +7,7 @@ import {
   Trash2,
   ClipboardCheck,
   AlertCircle,
+  Pencil,
 } from 'lucide-react'
 import {
   challengeService,
@@ -16,8 +17,12 @@ import {
   type ChallengeDifficulty,
   type ChallengeParticipation,
 } from '../services/challengeService'
+import { useCan } from '../services/permissions'
+import { ChallengeEditModal } from '../components/challenges/ChallengeEditModal'
 
 export const Challenges: React.FC = () => {
+  const canDelete = useCan('challenges.delete')
+
   const [challenges, setChallenges] = useState<ChallengeItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -37,6 +42,9 @@ export const Challenges: React.FC = () => {
   const [grantsHof, setGrantsHof] = useState(false)
   const [autoApprove, setAutoApprove] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Edit modal state
+  const [editingChallenge, setEditingChallenge] = useState<ChallengeItem | null>(null)
 
   // Review Queue Modal state
   const [reviewChallenge, setReviewChallenge] = useState<ChallengeItem | null>(null)
@@ -285,6 +293,14 @@ export const Challenges: React.FC = () => {
                         </button>
                       </>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => setEditingChallenge(c)}
+                      title="Edit"
+                      className="p-1.5 text-gray-600 hover:text-black border border-gray-200 rounded cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
                     {c.status !== 'archived' && (
                       <button
                         type="button"
@@ -295,14 +311,16 @@ export const Challenges: React.FC = () => {
                         <Archive className="w-3.5 h-3.5" />
                       </button>
                     )}
-                    <button
-                      type="button"
-                      onClick={() => handleDelete(c.id)}
-                      title="Delete"
-                      className="p-1.5 text-red-600 hover:bg-red-50 border border-gray-200 rounded cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canDelete && (
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(c.id)}
+                        title="Delete"
+                        className="p-1.5 text-red-600 hover:bg-red-50 border border-gray-200 rounded cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -479,6 +497,19 @@ export const Challenges: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Edit Challenge Modal */}
+      {editingChallenge && (
+        <ChallengeEditModal
+          key={editingChallenge.id}
+          challenge={editingChallenge}
+          onClose={() => setEditingChallenge(null)}
+          onSaved={(saved) => {
+            setChallenges((prev) => prev.map((c) => (c.id === saved.id ? saved : c)))
+            setEditingChallenge(null)
+          }}
+        />
       )}
 
       {/* Review Submissions Modal */}

@@ -6,25 +6,48 @@ import {
   Plus,
   Loader2,
   AlertCircle,
+  CheckCircle2,
+  Clock,
 } from 'lucide-react'
 import type {
   MediaAlbum,
   MediaCategory,
-  MediaType,
   UploadMediaPayload,
 } from '../../types/media'
+import { MEDIA_UPLOAD_LIMITS, validateUploadFile } from '../../types/media'
+
+/** Minimal event shape for the optional event link. */
+export interface MediaEventOption {
+  id: string
+  title: string
+}
 
 export interface UploadMediaModalProps {
   isOpen: boolean
   onClose: () => void
+  /** Uploads ONE file; rejects with an Error whose message is shown on that file's row. */
   onUpload: (payload: UploadMediaPayload) => Promise<void>
   albums?: MediaAlbum[]
+  events?: MediaEventOption[]
 }
 
 interface UploadMediaModalContentProps {
   onClose: () => void
   onUpload: (payload: UploadMediaPayload) => Promise<void>
   albums?: MediaAlbum[]
+  events?: MediaEventOption[]
+}
+
+type UploadStatus = 'queued' | 'uploading' | 'done' | 'failed'
+
+interface UploadEntry {
+  key: string
+  file: File
+  previewUrl: string | null
+  status: UploadStatus
+  error?: string
+  /** Failed the client-side checks: never sent, never retried. */
+  invalid?: boolean
 }
 
 function formatBytes(bytes: number): string {
@@ -34,15 +57,18 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
+let entrySeq = 0
+
 const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
   onClose,
   onUpload,
   albums,
+  events,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const objectUrlsRef = useRef<string[]>([])
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [entries, setEntries] = useState<UploadEntry[]>([])
   const [isDragging, setIsDragging] = useState(false)
 
   const [category, setCategory] = useState<MediaCategory>('event')
@@ -50,53 +76,61 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
   const [tagInput, setTagInput] = useState('')
   const [tags, setTags] = useState<string[]>([])
   const [selectedAlbumId, setSelectedAlbumId] = useState<string>('')
+  const [selectedEventId, setSelectedEventId] = useState<string>('')
 
   const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Escape key listener
+  const requestClose = () => {
+    if (!isUploading) onClose()
+  }
+
+  // Escape key listener (ignored while a batch is in flight)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !isUploading) {
         onClose()
       }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  }, [onClose, isUploading])
 
-  // Revoke object URL on unmount or file replacement
+  // Revoke every preview URL on unmount
   useEffect(() => {
+    const urls = objectUrlsRef.current
     return () => {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl)
-      }
+      urls.forEach((url) => URL.revokeObjectURL(url))
     }
-  }, [previewUrl])
+  }, [])
 
-  const handleFileSelect = (file: File) => {
+  const handleFilesSelect = (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return
     setError(null)
 
-    // Max file limits: 50MB for video, 15MB for image
-    const isVideo = file.type.startsWith('video')
-    const maxBytes = isVideo ? 50 * 1024 * 1024 : 15 * 1024 * 1024
+    const added: UploadEntry[] = Array.from(fileList).map((file) => {
+      const problem = validateUploadFile(file)
+      let previewUrl: string | null = null
+      if (!problem && file.type.startsWith('image/')) {
+        previewUrl = URL.createObjectURL(file)
+        objectUrlsRef.current.push(previewUrl)
+      }
+      entrySeq += 1
+      return {
+        key: `upl-${entrySeq}`,
+        file,
+        previewUrl,
+        status: problem ? 'failed' : 'queued',
+        error: problem ?? undefined,
+        invalid: !!problem,
+      }
+    })
 
-    if (file.size > maxBytes) {
-      setError(
-        `File is too large. Maximum size for ${
-          isVideo ? 'videos is 50MB' : 'images is 15MB'
-        }.`
-      )
-      return
-    }
+    setEntries((prev) => [...prev, ...added])
+  }
 
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl)
-    }
-
-    const objectUrl = URL.createObjectURL(file)
-    setSelectedFile(file)
-    setPreviewUrl(objectUrl)
+  const handleRemoveEntry = (key: string) => {
+    setEntries((prev) => prev.filter((e) => e.key !== key))
   }
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -111,17 +145,25 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileSelect(e.dataTransfer.files[0])
-    }
+    if (!isUploading) handleFilesSelect(e.dataTransfer.files)
   }
 
   const handleAddTag = () => {
-    const trimmed = tagInput.trim().replace(/^#/, '').toLowerCase()
-    if (trimmed && !tags.includes(trimmed)) {
-      setTags([...tags, trimmed])
-      setTagInput('')
+    const trimmed = tagInput
+      .trim()
+      .replace(/^#/, '')
+      .replace(/,/g, '')
+      .toLowerCase()
+      .slice(0, MEDIA_UPLOAD_LIMITS.tagMax)
+    if (!trimmed) return
+    if (tags.length >= MEDIA_UPLOAD_LIMITS.tagsMax) {
+      setError(`At most ${MEDIA_UPLOAD_LIMITS.tagsMax} tags.`)
+      return
     }
+    if (!tags.includes(trimmed)) {
+      setTags([...tags, trimmed])
+    }
+    setTagInput('')
   }
 
   const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -135,40 +177,105 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
     setTags(tags.filter((t) => t !== tagToRemove))
   }
 
+  const setEntryState = (key: string, patch: Partial<UploadEntry>) => {
+    setEntries((prev) => prev.map((e) => (e.key === key ? { ...e, ...patch } : e)))
+  }
+
+  // Queued files, plus failed ones that passed the client checks (a retry)
+  const pending = entries.filter(
+    (e) => e.status === 'queued' || (e.status === 'failed' && !e.invalid)
+  )
+  const doneCount = entries.filter((e) => e.status === 'done').length
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!selectedFile || !previewUrl) {
-      setError('Please select an image or video file to upload.')
+    if (pending.length === 0) {
+      setError('Please select at least one valid image or video file to upload.')
       return
     }
 
     setIsUploading(true)
     setError(null)
 
-    const mediaType: MediaType = selectedFile.type.startsWith('video')
-      ? 'video'
-      : 'image'
+    // The backend takes one file per request: send them one after another.
+    const batch = pending.map((entry) => ({ key: entry.key, file: entry.file }))
+    let failures = 0
+    for (const { key, file } of batch) {
+      setEntryState(key, { status: 'uploading', error: undefined })
+      try {
+        await onUpload({
+          file,
+          category,
+          caption: caption.trim() || undefined,
+          tags,
+          album_id: selectedAlbumId || undefined,
+          event_id: selectedEventId || undefined,
+        })
+        setEntryState(key, { status: 'done' })
+      } catch (err) {
+        failures += 1
+        setEntryState(key, {
+          status: 'failed',
+          error: err instanceof Error ? err.message : 'Upload failed.',
+        })
+      }
+    }
 
-    try {
-      await onUpload({
-        original_filename: selectedFile.name,
-        category,
-        caption: caption.trim() || undefined,
-        tags,
-        event_id: selectedAlbumId || undefined,
-        media_type: mediaType,
-        size_bytes: selectedFile.size,
-        url: previewUrl,
-      })
+    setIsUploading(false)
+    const invalidLeft = entries.some((entry) => entry.invalid)
+    if (failures === 0 && !invalidLeft) {
       onClose()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed.')
-    } finally {
-      setIsUploading(false)
+    } else if (failures > 0) {
+      setError(
+        `${failures} of ${batch.length} file${batch.length === 1 ? '' : 's'} failed. Fix or remove them and upload again.`
+      )
+    }
+  }
+
+  const selectedAlbum = albums?.find((a) => a.id === selectedAlbumId)
+  const albumEventTitle = selectedAlbum?.event_id
+    ? events?.find((ev) => ev.id === selectedAlbum.event_id)?.title
+    : undefined
+
+  const renderStatus = (entry: UploadEntry) => {
+    switch (entry.status) {
+      case 'queued':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-600">
+            <Clock className="w-3 h-3" />
+            Queued
+          </span>
+        )
+      case 'uploading':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-300 bg-white text-black">
+            <Loader2 className="w-3 h-3 animate-spin" />
+            Uploading
+          </span>
+        )
+      case 'done':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-green-300 bg-green-50 text-green-700">
+            <CheckCircle2 className="w-3 h-3 text-green-600" />
+            Done
+          </span>
+        )
+      case 'failed':
+        return (
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-red-300 bg-red-50 text-red-700">
+            <AlertCircle className="w-3 h-3 text-red-600" />
+            Failed
+          </span>
+        )
     }
   }
 
   return (
+    // The backdrop lives here so a click on it cannot close the modal mid-batch.
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-150"
+      onClick={requestClose}
+    >
     <div
       className="bg-white rounded-lg shadow-2xl border border-gray-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in duration-150"
       onClick={(e) => e.stopPropagation()}
@@ -177,17 +284,18 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
       <div className="p-4 sm:p-5 border-b border-gray-200 flex items-center justify-between gap-3 bg-gray-50/50">
         <div>
           <h2 className="text-sm font-bold uppercase tracking-wider text-black">
-            Upload Media Asset
+            Upload Media Assets
           </h2>
           <p className="text-[11px] text-gray-500">
-            Add high-resolution tournament banners, game clips, or sponsor logos.
+            Add high-resolution tournament banners, game clips, or sponsor logos. Select several files to upload them in one batch.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={onClose}
-          className="p-1 rounded text-gray-400 hover:text-black hover:bg-gray-100 transition-colors cursor-pointer"
+          onClick={requestClose}
+          disabled={isUploading}
+          className="p-1 rounded text-gray-400 hover:text-black hover:bg-gray-100 transition-colors cursor-pointer disabled:opacity-50"
         >
           <X className="w-5 h-5" />
         </button>
@@ -210,8 +318,10 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+          onClick={() => !isUploading && fileInputRef.current?.click()}
+          className={`border-2 border-dashed rounded-lg ${
+            entries.length > 0 ? 'p-4' : 'p-6'
+          } text-center cursor-pointer transition-colors ${
             isDragging
               ? 'border-black bg-gray-50'
               : 'border-gray-300 hover:border-black bg-gray-50/50'
@@ -220,63 +330,96 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/*,video/mp4"
+            multiple
+            accept={MEDIA_UPLOAD_LIMITS.acceptedMimeTypes.join(',')}
             className="hidden"
             onChange={(e) => {
-              if (e.target.files && e.target.files[0]) {
-                handleFileSelect(e.target.files[0])
-              }
+              handleFilesSelect(e.target.files)
+              // Allow re-selecting the same file after removing it
+              e.target.value = ''
             }}
           />
 
-          {selectedFile && previewUrl ? (
-            <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
-              <div className="w-24 h-24 mx-auto rounded-lg overflow-hidden border border-gray-300 bg-gray-100 flex items-center justify-center">
-                {selectedFile.type.startsWith('video') ? (
-                  <Film className="w-10 h-10 text-gray-500" />
-                ) : (
-                  <img
-                    src={previewUrl}
-                    alt="Preview"
-                    className="w-full h-full object-cover"
-                  />
-                )}
-              </div>
-
-              <div>
-                <p className="text-xs font-bold text-black font-mono truncate max-w-xs mx-auto">
-                  {selectedFile.name}
-                </p>
-                <p className="text-[11px] text-gray-500 font-mono">
-                  {formatBytes(selectedFile.size)} &bull; {selectedFile.type}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="text-xs font-semibold underline text-black hover:text-gray-700 cursor-pointer"
-              >
-                Change Selected File
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <UploadCloud className="w-10 h-10 text-gray-400 mx-auto" />
-              <div>
-                <span className="text-xs font-bold text-black block">
-                  Click to browse or drag and drop asset
-                </span>
-                <span className="text-[11px] text-gray-500">
-                  Images up to 15MB, Videos up to 50MB (PNG, JPG, WEBP, MP4)
-                </span>
-              </div>
-              <span className="inline-block mt-2 px-3 py-1 text-xs font-semibold rounded border border-gray-300 bg-white text-gray-700 hover:border-black">
-                Select File
+          <div className="space-y-2">
+            <UploadCloud
+              className={`${
+                entries.length > 0 ? 'w-6 h-6' : 'w-10 h-10'
+              } text-gray-400 mx-auto`}
+            />
+            <div>
+              <span className="text-xs font-bold text-black block">
+                {entries.length > 0
+                  ? 'Click or drop to add more files'
+                  : 'Click to browse or drag and drop assets'}
+              </span>
+              <span className="text-[11px] text-gray-500">
+                Images up to 10MB, Videos up to 50MB (JPG, PNG, WEBP, MP4, WEBM)
               </span>
             </div>
-          )}
+            {entries.length === 0 && (
+              <span className="inline-block mt-2 px-3 py-1 text-xs font-semibold rounded border border-gray-300 bg-white text-gray-700 hover:border-black">
+                Select Files
+              </span>
+            )}
+          </div>
         </div>
+
+        {/* Selected files with per-file status */}
+        {entries.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+                Selected Files
+              </label>
+              <span className="text-[10px] text-gray-400 font-mono">
+                {doneCount}/{entries.length} uploaded
+              </span>
+            </div>
+            <ul className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-56 overflow-y-auto">
+              {entries.map((entry) => (
+                <li key={entry.key} className="flex items-center gap-3 p-2">
+                  <div className="w-10 h-10 rounded overflow-hidden border border-gray-200 bg-gray-100 flex items-center justify-center flex-shrink-0">
+                    {entry.previewUrl ? (
+                      <img
+                        src={entry.previewUrl}
+                        alt={entry.file.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <Film className="w-5 h-5 text-gray-500" />
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-bold text-black font-mono truncate">
+                      {entry.file.name}
+                    </p>
+                    <p className="text-[11px] text-gray-500 font-mono truncate">
+                      {formatBytes(entry.file.size)} &bull; {entry.file.type || 'unknown type'}
+                    </p>
+                    {entry.error && (
+                      <p className="text-[11px] text-red-700 truncate" title={entry.error}>
+                        {entry.error}
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {renderStatus(entry)}
+                    {!isUploading && entry.status !== 'done' && (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveEntry(entry.key)}
+                        className="text-gray-400 hover:text-black cursor-pointer"
+                        title="Remove file"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Category & Album Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -287,6 +430,7 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value as MediaCategory)}
+              disabled={isUploading}
               className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
             >
               <option value="event">Tournament / Event</option>
@@ -305,6 +449,7 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
             <select
               value={selectedAlbumId}
               onChange={(e) => setSelectedAlbumId(e.target.value)}
+              disabled={isUploading}
               className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
             >
               <option value="">No Album (Standalone)</option>
@@ -314,7 +459,32 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
                 </option>
               ))}
             </select>
+            {albumEventTitle && (
+              <p className="text-[10px] text-gray-500">
+                Album is linked to event: {albumEventTitle}
+              </p>
+            )}
           </div>
+        </div>
+
+        {/* Event link */}
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+            Linked Event (Optional)
+          </label>
+          <select
+            value={selectedEventId}
+            onChange={(e) => setSelectedEventId(e.target.value)}
+            disabled={isUploading}
+            className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+          >
+            <option value="">No Event</option>
+            {events?.map((ev) => (
+              <option key={ev.id} value={ev.id}>
+                {ev.title}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Caption */}
@@ -324,14 +494,17 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
               Caption / Context
             </label>
             <span className="text-[10px] text-gray-400 font-mono">
-              {caption.length}/500
+              {caption.length}/{MEDIA_UPLOAD_LIMITS.captionMax}
             </span>
           </div>
           <textarea
             value={caption}
-            onChange={(e) => setCaption(e.target.value.slice(0, 500))}
+            onChange={(e) =>
+              setCaption(e.target.value.slice(0, MEDIA_UPLOAD_LIMITS.captionMax))
+            }
+            disabled={isUploading}
             rows={2}
-            placeholder="Brief caption or description for public galleries..."
+            placeholder="Brief caption or description for public galleries (applied to every file)..."
             className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black placeholder-gray-400 focus:outline-none focus:border-black resize-none"
           />
         </div>
@@ -347,12 +520,15 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
               value={tagInput}
               onChange={(e) => setTagInput(e.target.value)}
               onKeyDown={handleTagKeyDown}
+              disabled={isUploading}
+              maxLength={MEDIA_UPLOAD_LIMITS.tagMax + 1}
               placeholder="Add tag and press Enter (e.g. valorant, finals, crowd)..."
               className="flex-1 px-3 py-1.5 text-xs border border-gray-300 rounded text-black placeholder-gray-400 focus:outline-none focus:border-black"
             />
             <button
               type="button"
               onClick={handleAddTag}
+              disabled={isUploading}
               className="px-3 py-1.5 text-xs font-semibold rounded border border-gray-300 bg-gray-50 text-gray-700 hover:text-black hover:border-black cursor-pointer inline-flex items-center gap-1"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -371,6 +547,7 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
                   <button
                     type="button"
                     onClick={() => handleRemoveTag(tag)}
+                    disabled={isUploading}
                     className="text-gray-400 hover:text-black cursor-pointer"
                   >
                     <X className="w-3 h-3" />
@@ -385,32 +562,37 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
         <div className="pt-4 border-t border-gray-200 flex items-center justify-end gap-3">
           <button
             type="button"
-            onClick={onClose}
+            onClick={requestClose}
             disabled={isUploading}
             className="px-4 py-2 rounded text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer"
           >
-            Cancel
+            {doneCount > 0 ? 'Close' : 'Cancel'}
           </button>
 
           <button
             type="submit"
-            disabled={isUploading || !selectedFile}
+            disabled={isUploading || pending.length === 0}
             className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded text-xs font-bold bg-black text-white hover:bg-gray-800 transition-colors disabled:opacity-50 cursor-pointer"
           >
             {isUploading ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Uploading Asset...</span>
+                <span>Uploading Assets...</span>
               </>
             ) : (
               <>
                 <UploadCloud className="w-3.5 h-3.5" />
-                <span>Upload Asset</span>
+                <span>
+                  {pending.length > 1
+                    ? `Upload ${pending.length} Assets`
+                    : 'Upload Asset'}
+                </span>
               </>
             )}
           </button>
         </div>
       </form>
+    </div>
     </div>
   )
 }
@@ -420,20 +602,17 @@ export const UploadMediaModal: React.FC<UploadMediaModalProps> = ({
   onClose,
   onUpload,
   albums,
+  events,
 }) => {
   if (!isOpen) return null
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-150"
-      onClick={onClose}
-    >
-      <UploadMediaModalContent
-        onClose={onClose}
-        onUpload={onUpload}
-        albums={albums}
-      />
-    </div>
+    <UploadMediaModalContent
+      onClose={onClose}
+      onUpload={onUpload}
+      albums={albums}
+      events={events}
+    />
   )
 }
 

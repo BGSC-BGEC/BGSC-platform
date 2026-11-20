@@ -10,6 +10,7 @@ import { Events } from '../pages/Events'
 import { Announcements } from '../pages/Announcements'
 import { Tournaments } from '../pages/Tournaments'
 import { Leaderboard } from '../pages/Leaderboard'
+import { PointsRules } from '../pages/PointsRules'
 import { Auction } from '../pages/Auction'
 import { Feedback } from '../pages/Feedback'
 import { Media } from '../pages/Media'
@@ -38,6 +39,7 @@ export const router = createBrowserRouter([
       { path: 'auction', element: <Auction /> },
       { path: 'media', element: <Media /> },
       { path: 'leaderboard', element: <Leaderboard /> },
+      { path: 'points-rules', element: <PointsRules /> },
       { path: 'feedback', element: <Feedback /> },
       { path: 'challenges', element: <Challenges /> },
       { path: 'hall-of-fame', element: <HallOfFame /> },
