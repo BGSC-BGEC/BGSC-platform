@@ -23,6 +23,20 @@ export function proofError(proofs: Proof[], challenge: Challenge): string | null
   return null;
 }
 
+// Local provider is opt-in. Match its exact origin and OAuth path before opening a browser.
+const demoStravaBase = process.env.EXPO_PUBLIC_FAKE_STRAVA_ORIGIN?.replace(/\/+$/, '');
+export function isStravaAuthorizeUrl(value: string): boolean {
+  const url = new URL(value);
+  if (url.username || url.password || url.pathname !== '/oauth/authorize') return false;
+  return ['https://www.strava.com', 'https://strava.com'].includes(url.origin)
+    || (!!demoStravaBase && ['http:', 'https:'].includes(url.protocol) && url.origin === demoStravaBase);
+}
+
+export function stravaActivityUrl(id: string): string | undefined {
+  const base = id.startsWith('demo-') ? demoStravaBase : 'https://www.strava.com';
+  return base ? `${base}/activities/${encodeURIComponent(id)}` : undefined;
+}
+
 /** OAuth credentials arrive in the fragment so browsers do not send them as referrers. */
 export function stravaCallback(url: string): { code: string; state: string; scope: string } | { error: string } | null {
   try {
