@@ -88,10 +88,10 @@ export const AnnouncementHistory: React.FC<AnnouncementHistoryProps> = ({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-xs text-gray-500 max-w-2xl">
-          <span className="font-semibold text-black">Reach</span> is the number of active accounts
+        <p className="text-xs text-muted-foreground max-w-2xl">
+          <span className="font-semibold text-foreground">Reach</span> is the number of active accounts
           that can see the announcement today (minimum role and event participation applied).{' '}
-          <span className="font-semibold text-black">Reads</span> counts those who opened the
+          <span className="font-semibold text-foreground">Reads</span> counts those who opened the
           Announcements tab after it was published, or opened the card itself — so it measures
           "seen in the feed", not only full opens.
         </p>
@@ -99,22 +99,22 @@ export const AnnouncementHistory: React.FC<AnnouncementHistoryProps> = ({
           type="button"
           onClick={() => setReloadToken((t) => t + 1)}
           disabled={isLoading || broadcasts.length === 0}
-          className="px-4 py-2 text-sm border border-black text-black bg-white hover:bg-black hover:text-white rounded transition-colors cursor-pointer disabled:opacity-50"
+          className="px-4 py-2 text-sm border border-foreground/70 text-foreground bg-card hover:bg-primary hover:text-primary-foreground rounded transition-colors cursor-pointer disabled:opacity-50"
         >
           {isLoading ? 'Loading...' : 'Refresh Stats'}
         </button>
       </div>
 
       {error && (
-        <div className="p-4 border border-black text-black bg-white rounded flex items-center gap-2">
-          <AlertCircle className="w-4 h-4 text-red-600" />
+        <div className="p-4 border border-foreground/70 text-foreground bg-card rounded flex items-center gap-2">
+          <AlertCircle className="w-4 h-4 text-destructive" />
           <span className="text-sm">{error}</span>
         </div>
       )}
 
-      <div className="overflow-x-auto rounded border border-gray-200 bg-white">
-        <table className="w-full text-left text-sm text-black border-collapse">
-          <thead className="border-b border-gray-200 bg-gray-50 text-xs font-bold uppercase text-gray-600 tracking-wider">
+      <div className="overflow-x-auto rounded border border-border bg-card">
+        <table className="w-full text-left text-sm text-foreground border-collapse">
+          <thead className="border-b border-border bg-muted/30 text-xs font-bold uppercase text-muted-foreground tracking-wider">
             <tr>
               <th className="p-4">Broadcast</th>
               <th className="p-4">Audience</th>
@@ -124,12 +124,12 @@ export const AnnouncementHistory: React.FC<AnnouncementHistoryProps> = ({
               <th className="p-4">Delivery</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200">
+          <tbody className="divide-y divide-border/60">
             {broadcasts.length === 0 ? (
               <tr>
                 <td colSpan={6} className="p-12 text-center">
-                  <div className="text-base font-bold text-black">No broadcasts yet</div>
-                  <div className="text-xs text-gray-500 mt-1">
+                  <div className="text-base font-bold text-foreground">No broadcasts yet</div>
+                  <div className="text-xs text-muted-foreground mt-1">
                     Published announcements will appear here with their read statistics.
                   </div>
                 </td>
@@ -139,19 +139,19 @@ export const AnnouncementHistory: React.FC<AnnouncementHistoryProps> = ({
                 const s = stats[a.id]
                 const audience = a.audience
                 return (
-                  <tr key={a.id} className="hover:bg-gray-50 transition-colors align-top">
+                  <tr key={a.id} className="hover:bg-muted/30 transition-colors align-top">
                     <td className="p-4">
-                      <div className="font-bold text-black">{a.title}</div>
-                      <div className="text-xs text-gray-500 mt-0.5">
+                      <div className="font-bold text-foreground">{a.title}</div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
                         {formatDateTime(a.publishedAt)}
                         {a.status === 'archived' && ' · archived'}
                         {a.authorName && ` · ${a.authorName}`}
                       </div>
                     </td>
-                    <td className="p-4 text-xs text-gray-700">
+                    <td className="p-4 text-xs text-foreground">
                       {audience ? ROLE_LABELS[audience.minRole] || audience.minRole : 'Everyone'}
                       {audience?.eventId && (
-                        <div className="text-gray-500 mt-0.5">
+                        <div className="text-muted-foreground mt-0.5">
                           Participants of{' '}
                           {eventTitles[audience.eventId]
                             ? `"${eventTitles[audience.eventId]}"`

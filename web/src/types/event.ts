@@ -153,5 +153,3 @@ export const DEFAULT_POINTS_POOL: EventPointsPool = {
  * accepted by the event model but can never produce a bracket, so they are not offered.
  */
 export const SELECTABLE_LEADERBOARD_FORMATS: LeaderboardFormat[] = ['points_table', 'round_robin', 'single_elim']
-
-export type EventItem = ClubEvent

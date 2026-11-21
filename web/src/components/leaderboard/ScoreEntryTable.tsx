@@ -186,8 +186,8 @@ export const ScoreEntryTable: React.FC<ScoreEntryTableProps> = ({ context, onSav
     <div className="space-y-3">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div>
-          <div className="text-xs font-bold uppercase tracking-wider text-black">Score Entry</div>
-          <p className="text-[11px] text-gray-500 mt-0.5">
+          <div className="text-xs font-bold uppercase tracking-wider text-foreground">Score Entry</div>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
             Each saved row replaces that participant's raw values. Blank cells are left out of the score.
           </p>
         </div>
@@ -200,7 +200,7 @@ export const ScoreEntryTable: React.FC<ScoreEntryTableProps> = ({ context, onSav
                 setSaveError(null)
               }}
               disabled={isSaving}
-              className="px-3 py-2 text-xs border border-gray-300 text-black bg-white hover:bg-gray-100 rounded transition-colors cursor-pointer disabled:opacity-50"
+              className="px-3 py-2 text-xs border border-border text-foreground bg-card hover:bg-muted rounded transition-colors cursor-pointer disabled:opacity-50"
             >
               Discard Changes
             </button>
@@ -209,7 +209,7 @@ export const ScoreEntryTable: React.FC<ScoreEntryTableProps> = ({ context, onSav
             type="button"
             onClick={handleSave}
             disabled={isSaving || dirtyCount === 0 || Boolean(closedReason)}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-bold border border-foreground/70 bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors cursor-pointer disabled:opacity-50"
           >
             <Save className="w-4 h-4" />
             <span>{isSaving ? 'Saving...' : `Save Scores${dirtyCount ? ` (${dirtyCount})` : ''}`}</span>
@@ -218,15 +218,15 @@ export const ScoreEntryTable: React.FC<ScoreEntryTableProps> = ({ context, onSav
       </div>
 
       {closedReason && (
-        <div className="p-3 text-xs text-black bg-gray-50 border border-gray-300 rounded">{closedReason}</div>
+        <div className="p-3 text-xs text-foreground bg-muted/30 border border-border rounded">{closedReason}</div>
       )}
       {params.length === 0 && (
-        <div className="p-3 text-xs text-black bg-gray-50 border border-gray-300 rounded">
+        <div className="p-3 text-xs text-foreground bg-muted/30 border border-border rounded">
           This event has no scoring parameters configured, so there is nothing to score.
         </div>
       )}
       {saveError && (
-        <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded">{saveError}</div>
+        <div className="p-3 text-xs text-destructive bg-destructive/10 border border-destructive/40 rounded">{saveError}</div>
       )}
       {saveMessage && (
         <div className="p-3 text-xs text-green-700 bg-green-50 border border-green-200 rounded">{saveMessage}</div>
@@ -235,24 +235,24 @@ export const ScoreEntryTable: React.FC<ScoreEntryTableProps> = ({ context, onSav
       {params.length > 0 && (
         <>
           <div className="relative max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
               type="text"
               placeholder="Filter participants..."
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              className="w-full pl-9 pr-3 py-2 text-sm border border-border rounded text-foreground bg-card focus:outline-none focus:border-primary"
             />
           </div>
 
           {isLoading ? (
-            <div className="p-8 text-center text-sm text-gray-500 border border-gray-200 rounded bg-gray-50">
+            <div className="p-8 text-center text-sm text-muted-foreground border border-border rounded bg-muted/30">
               Loading participants...
             </div>
           ) : loadError ? (
-            <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded">{loadError}</div>
+            <div className="p-3 text-xs text-destructive bg-destructive/10 border border-destructive/40 rounded">{loadError}</div>
           ) : visibleRows.length === 0 ? (
-            <div className="p-8 text-center text-sm text-gray-500 border border-gray-200 rounded bg-gray-50">
+            <div className="p-8 text-center text-sm text-muted-foreground border border-border rounded bg-muted/30">
               {rows.length === 0
                 ? context.isTeamed
                   ? 'No teams are on this board yet.'
@@ -260,35 +260,35 @@ export const ScoreEntryTable: React.FC<ScoreEntryTableProps> = ({ context, onSav
                 : 'No participants match the filter.'}
             </div>
           ) : (
-            <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+            <div className="bg-card rounded-lg border border-border overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="bg-gray-50 border-b border-gray-200 text-[10px] font-bold uppercase tracking-wider text-black">
+                <thead className="bg-muted/30 border-b border-border text-[10px] font-bold uppercase tracking-wider text-foreground">
                   <tr>
                     <th className="px-4 py-3">Participant</th>
                     {params.map((p) => (
                       <th key={p.key} className="px-3 py-3 whitespace-nowrap" title={`key: ${p.key}`}>
                         {p.label}
-                        <span className="block text-[9px] font-semibold text-gray-500 normal-case tracking-normal">
+                        <span className="block text-[9px] font-semibold text-muted-foreground normal-case tracking-normal">
                           {p.kind} · weight {p.weight}
                         </span>
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-border/60">
                   {visibleRows.map((row) => {
                     const dirty = Boolean(drafts[row.participantId])
                     return (
                       <tr
                         key={row.participantId}
-                        className={`transition-colors ${dirty ? 'bg-gray-50' : 'hover:bg-gray-50'}`}
+                        className={`transition-colors ${dirty ? 'bg-muted/30' : 'hover:bg-muted/30'}`}
                       >
                         <td className="px-4 py-2">
-                          <div className="font-bold text-black text-xs sm:text-sm">
+                          <div className="font-bold text-foreground text-xs sm:text-sm">
                             {row.name}
-                            {dirty && <span className="ml-1 text-[10px] text-gray-500">•</span>}
+                            {dirty && <span className="ml-1 text-[10px] text-muted-foreground">•</span>}
                           </div>
-                          <div className="text-[10px] text-gray-500 uppercase tracking-wider">
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">
                             {row.type}
                             {!row.onBoard && ' · not yet scored'}
                           </div>
@@ -312,7 +312,7 @@ export const ScoreEntryTable: React.FC<ScoreEntryTableProps> = ({ context, onSav
                                   value={String(v)}
                                   disabled={Boolean(closedReason)}
                                   onChange={(e) => setCell(row, p.key, e.target.value)}
-                                  className="w-24 px-2 py-1 text-xs font-mono border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black disabled:bg-gray-50"
+                                  className="w-24 px-2 py-1 text-xs font-mono border border-border rounded text-foreground bg-card focus:outline-none focus:border-primary disabled:bg-muted/30"
                                 />
                               )}
                             </td>

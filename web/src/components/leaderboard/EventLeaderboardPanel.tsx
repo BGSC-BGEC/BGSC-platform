@@ -32,13 +32,13 @@ const fmt = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 
 function RankBadge({ rank }: { rank: number | null }) {
   if (rank === 1)
     return (
-      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-black text-amber-400 font-bold text-xs mx-auto">
+      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary text-amber-400 font-bold text-xs mx-auto">
         <Trophy className="w-3.5 h-3.5" />
       </span>
     )
   if (rank === 2)
     return (
-      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-gray-200 text-gray-800 font-bold text-xs mx-auto">
+      <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-muted text-foreground font-bold text-xs mx-auto">
         <Medal className="w-3.5 h-3.5" />
       </span>
     )
@@ -48,7 +48,7 @@ function RankBadge({ rank }: { rank: number | null }) {
         <Award className="w-3.5 h-3.5" />
       </span>
     )
-  return <span className="font-mono text-xs font-semibold text-gray-600">{rank === null ? '-' : `#${rank}`}</span>
+  return <span className="font-mono text-xs font-semibold text-muted-foreground">{rank === null ? '-' : `#${rank}`}</span>
 }
 
 export const EventLeaderboardPanel: React.FC<EventLeaderboardPanelProps> = ({
@@ -186,7 +186,7 @@ export const EventLeaderboardPanel: React.FC<EventLeaderboardPanelProps> = ({
           value={eventId}
           onChange={(e) => handleSelectEvent(e.target.value)}
           disabled={eventsLoading}
-          className="flex-1 min-w-55 px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+          className="flex-1 min-w-55 px-3 py-2 text-sm border border-border rounded text-foreground bg-card focus:outline-none focus:border-primary"
         >
           <option value="">
             {eventsLoading ? 'Loading events...' : events.length ? 'Select an event...' : 'No events with a leaderboard'}
@@ -199,7 +199,7 @@ export const EventLeaderboardPanel: React.FC<EventLeaderboardPanelProps> = ({
         </select>
 
         <div className="relative flex-1 min-w-55">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
             placeholder="Search participant name..."
@@ -207,7 +207,7 @@ export const EventLeaderboardPanel: React.FC<EventLeaderboardPanelProps> = ({
             maxLength={64}
             disabled={!eventId}
             onChange={(e) => setSearchInput(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-border rounded text-foreground bg-card focus:outline-none focus:border-primary"
           />
         </div>
 
@@ -215,43 +215,43 @@ export const EventLeaderboardPanel: React.FC<EventLeaderboardPanelProps> = ({
           type="button"
           onClick={handleExport}
           disabled={!board || board.standings.length === 0}
-          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold border border-gray-300 text-black bg-white hover:bg-gray-100 rounded transition-colors cursor-pointer disabled:opacity-50"
+          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold border border-border text-foreground bg-card hover:bg-muted rounded transition-colors cursor-pointer disabled:opacity-50"
         >
-          <Download className="w-4 h-4 text-gray-600" />
+          <Download className="w-4 h-4 text-muted-foreground" />
           <span>Export CSV</span>
         </button>
       </div>
 
       {eventsError && (
-        <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded">{eventsError}</div>
+        <div className="p-3 text-xs text-destructive bg-destructive/10 border border-destructive/40 rounded">{eventsError}</div>
       )}
 
       {!eventId && (
-        <div className="p-12 text-center border border-gray-200 rounded-lg bg-white space-y-2">
-          <Trophy className="w-10 h-10 text-gray-400 mx-auto" />
-          <h3 className="text-base font-bold text-black">Select an event to view its leaderboard</h3>
-          <p className="text-sm text-gray-500 max-w-sm mx-auto">
+        <div className="p-12 text-center border border-border rounded-lg bg-card space-y-2">
+          <Trophy className="w-10 h-10 text-muted-foreground mx-auto" />
+          <h3 className="text-base font-bold text-foreground">Select an event to view its leaderboard</h3>
+          <p className="text-sm text-muted-foreground max-w-sm mx-auto">
             Only published events with a leaderboard (LE, DLL, ALL) are listed.
           </p>
         </div>
       )}
 
       {eventId && isLoading && !board && (
-        <div className="p-12 text-center text-sm text-gray-500 border border-gray-200 rounded bg-gray-50">
+        <div className="p-12 text-center text-sm text-muted-foreground border border-border rounded bg-muted/30">
           Loading event standings...
         </div>
       )}
 
       {eventId && error && (
-        <div className="p-4 border border-black text-black bg-white rounded flex items-center justify-between">
+        <div className="p-4 border border-foreground/70 text-foreground bg-card rounded flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-red-600" />
+            <AlertCircle className="w-4 h-4 text-destructive" />
             <span className="text-sm">{error}</span>
           </div>
           <button
             type="button"
             onClick={reload}
-            className="px-3 py-1 text-xs border border-black hover:bg-black hover:text-white transition-colors cursor-pointer"
+            className="px-3 py-1 text-xs border border-foreground/70 hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
           >
             Retry
           </button>
@@ -262,43 +262,43 @@ export const EventLeaderboardPanel: React.FC<EventLeaderboardPanelProps> = ({
         <div className="space-y-6">
           {/* Board meta */}
           <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700">
+            <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-border bg-muted/30 text-foreground">
               {LEADERBOARD_FORMAT_LABELS[board.format as LeaderboardFormat] ?? board.format}
             </span>
             <span
               className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
-                board.thresholdMet ? 'border-black bg-black text-white' : 'border-gray-300 bg-white text-gray-700'
+                board.thresholdMet ? 'border-foreground/70 bg-primary text-primary-foreground' : 'border-border bg-card text-foreground'
               }`}
             >
               {board.thresholdMet
                 ? 'Threshold met'
                 : `Below threshold (min ${board.minParticipants} active)`}
             </span>
-            <span className="text-gray-500">{board.total} participant(s)</span>
+            <span className="text-muted-foreground">{board.total} participant(s)</span>
           </div>
 
           {/* Podium */}
           {podiumEntries.length > 0 && !search && page === 1 && (
             <div className="space-y-2">
-              <div className="text-xs font-bold uppercase tracking-wider text-black">Event Podium</div>
+              <div className="text-xs font-bold uppercase tracking-wider text-foreground">Event Podium</div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {podiumEntries.map((e) => (
                   <div
                     key={e.id}
-                    className={`bg-white rounded-lg p-4 space-y-2 ${
-                      e.rank === 1 ? 'border-2 border-black shadow-md' : 'border border-gray-300 shadow-xs'
+                    className={`bg-card rounded-lg p-4 space-y-2 ${
+                      e.rank === 1 ? 'border-2 border-foreground/70 shadow-md' : 'border border-border shadow-xs'
                     }`}
                   >
                     <div className="flex items-center justify-between">
                       <RankBadge rank={e.rank} />
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                         {e.participant.type}
                       </span>
                     </div>
-                    <h3 className="text-base font-bold text-black truncate">{e.participant.displayName}</h3>
-                    <div className="text-2xl font-black text-black">
+                    <h3 className="text-base font-bold text-foreground truncate">{e.participant.displayName}</h3>
+                    <div className="text-2xl font-black text-foreground">
                       {fmt(e.finalScore)}
-                      <span className="text-xs font-semibold text-gray-500 ml-1">final</span>
+                      <span className="text-xs font-semibold text-muted-foreground ml-1">final</span>
                     </div>
                   </div>
                 ))}
@@ -308,17 +308,17 @@ export const EventLeaderboardPanel: React.FC<EventLeaderboardPanelProps> = ({
 
           {/* Standings */}
           <div className="space-y-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-black">
+            <div className="text-xs font-bold uppercase tracking-wider text-foreground">
               Event Standings ({board.total} Participants)
             </div>
             {board.standings.length === 0 ? (
-              <div className="p-8 text-center text-sm text-gray-500 border border-gray-200 rounded bg-gray-50">
+              <div className="p-8 text-center text-sm text-muted-foreground border border-border rounded bg-muted/30">
                 {search ? 'No participants match your search.' : 'No entries on this leaderboard yet.'}
               </div>
             ) : (
-              <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+              <div className="bg-card rounded-lg border border-border overflow-x-auto">
                 <table className="w-full text-left text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200 text-[10px] font-bold uppercase tracking-wider text-black">
+                  <thead className="bg-muted/30 border-b border-border text-[10px] font-bold uppercase tracking-wider text-foreground">
                     <tr>
                       <th className="px-4 py-3 text-center w-16">Rank</th>
                       <th className="px-4 py-3">Participant</th>
@@ -328,24 +328,24 @@ export const EventLeaderboardPanel: React.FC<EventLeaderboardPanelProps> = ({
                       <th className="px-4 py-3 text-right">Final Score</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody className="divide-y divide-border/60">
                     {board.standings.map((e) => (
-                      <tr key={e.id} className="hover:bg-gray-50 transition-colors">
+                      <tr key={e.id} className="hover:bg-muted/30 transition-colors">
                         <td className="px-4 py-3 text-center">
                           <RankBadge rank={e.rank} />
                         </td>
                         <td className="px-4 py-3">
-                          <div className="font-bold text-black text-xs sm:text-sm">{e.participant.displayName}</div>
-                          <div className="text-[10px] text-gray-500 uppercase tracking-wider">
+                          <div className="font-bold text-foreground text-xs sm:text-sm">{e.participant.displayName}</div>
+                          <div className="text-[10px] text-muted-foreground uppercase tracking-wider">
                             {e.participant.type}
                             {e.eliminated && ' · eliminated'}
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-right font-mono text-xs text-gray-700">{fmt(e.rawScore)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-xs text-gray-700">{fmt(e.normalizedScore)}</td>
-                        <td className="px-4 py-3 text-right font-mono text-xs text-gray-700">{fmt(e.investedPoints)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(e.rawScore)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(e.normalizedScore)}</td>
+                        <td className="px-4 py-3 text-right font-mono text-xs text-foreground">{fmt(e.investedPoints)}</td>
                         <td className="px-4 py-3 text-right">
-                          <span className="font-mono font-bold text-black text-xs sm:text-sm">{fmt(e.finalScore)}</span>
+                          <span className="font-mono font-bold text-foreground text-xs sm:text-sm">{fmt(e.finalScore)}</span>
                         </td>
                       </tr>
                     ))}
@@ -363,11 +363,11 @@ export const EventLeaderboardPanel: React.FC<EventLeaderboardPanelProps> = ({
                     setIsLoading(true)
                     setPage((p) => p - 1)
                   }}
-                  className="px-3 py-1 border border-gray-300 text-black bg-white hover:bg-gray-100 rounded transition-colors cursor-pointer disabled:opacity-50"
+                  className="px-3 py-1 border border-border text-foreground bg-card hover:bg-muted rounded transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Previous
                 </button>
-                <span className="text-gray-600">
+                <span className="text-muted-foreground">
                   Page {board.page} of {board.totalPages}
                 </span>
                 <button
@@ -377,7 +377,7 @@ export const EventLeaderboardPanel: React.FC<EventLeaderboardPanelProps> = ({
                     setIsLoading(true)
                     setPage((p) => p + 1)
                   }}
-                  className="px-3 py-1 border border-gray-300 text-black bg-white hover:bg-gray-100 rounded transition-colors cursor-pointer disabled:opacity-50"
+                  className="px-3 py-1 border border-border text-foreground bg-card hover:bg-muted rounded transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Next
                 </button>
@@ -389,17 +389,17 @@ export const EventLeaderboardPanel: React.FC<EventLeaderboardPanelProps> = ({
 
       {/* Score entry: LE events, event admins only */}
       {eventId && mayScoreType && (
-        <div className="pt-4 border-t border-gray-200">
+        <div className="pt-4 border-t border-border">
           {scoringError ? (
-            <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded">{scoringError}</div>
+            <div className="p-3 text-xs text-destructive bg-destructive/10 border border-destructive/40 rounded">{scoringError}</div>
           ) : !scoring ? (
-            <div className="p-4 text-center text-xs text-gray-500 border border-gray-200 rounded bg-gray-50">
+            <div className="p-4 text-center text-xs text-muted-foreground border border-border rounded bg-muted/30">
               Loading score entry...
             </div>
           ) : isEventAdmin ? (
             <ScoreEntryTable key={scoring.id} context={scoring} onSaved={reload} />
           ) : (
-            <div className="p-3 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded">
+            <div className="p-3 text-xs text-muted-foreground bg-muted/30 border border-border rounded">
               Score entry is limited to this event's creator, its listed core admins, and coordinators.
             </div>
           )}

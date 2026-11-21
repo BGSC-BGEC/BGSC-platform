@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import type {
   ClubEvent,
   EventCategory,
@@ -15,6 +15,9 @@ import {
   rulesFor,
 } from '../../types/event'
 import { eventService } from '../../services/eventService'
+import { X, Trophy, AlertTriangle, Loader2 } from 'lucide-react'
+import { Modal } from '../ui/modal'
+import { Button } from '../ui/button'
 
 export interface CreateEventModalProps {
   isOpen: boolean
@@ -23,10 +26,10 @@ export interface CreateEventModalProps {
 }
 
 const INPUT =
-  'w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black'
-const LABEL = 'block text-xs font-bold uppercase text-black mb-1'
-const SECTION = 'space-y-3 p-3 border border-gray-200 rounded bg-gray-50'
-const SECTION_TITLE = 'text-xs font-bold uppercase tracking-wider text-black'
+  'w-full px-3.5 py-2.5 text-sm rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all'
+const LABEL = 'block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5'
+const SECTION = 'space-y-3 p-4 border border-border rounded-xl bg-muted/20'
+const SECTION_TITLE = 'text-xs font-bold uppercase tracking-wider text-foreground'
 
 /** `datetime-local` value for a Date, in local time. */
 function toLocalInput(d: Date): string {
@@ -102,18 +105,6 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
   const teamed = rules.forcesTeams || isTeamed
   const capacity = capacityEnabled ? maxParticipants : null
   const canGoLive = canPublishWithoutForm(type, teamed, capacity)
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    if (isOpen) {
-      window.addEventListener('keydown', handleKeyDown)
-    }
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isOpen, onClose])
 
   if (!isOpen) return null
 
@@ -214,34 +205,41 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-2xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-black">
-            {rules.isLeague ? 'Create New League' : 'Create New Event'}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-2 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-white cursor-pointer"
-          >
-            X
-          </button>
-        </div>
-
-        {error && (
-          <div className="p-2 border border-black text-xs text-black bg-gray-50">
-            {error}
+    <Modal isOpen={isOpen} onClose={onClose} className="max-w-2xl">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
+            <Trophy className="w-4 h-4" />
           </div>
-        )}
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
+              {rules.isLeague ? 'Create New League' : 'Create New Event'}
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Set the event type, schedule, registration and points
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close modal"
+          className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 text-left">
+      <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden text-left">
+        <div className="p-6 space-y-4 overflow-y-auto flex-1">
+          {error && (
+            <div className="flex items-center gap-2 p-3 text-xs rounded-xl border border-destructive/40 bg-destructive/10 text-destructive">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
           {/* Type first: it decides which sections exist below. */}
           <div>
             <label className={LABEL}>Event Type</label>
@@ -256,7 +254,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                 </option>
               ))}
             </select>
-            <p className="text-[11px] text-gray-500 mt-1">{rules.description}</p>
+            <p className="text-[11px] text-muted-foreground mt-1">{rules.description}</p>
           </div>
 
           <div>
@@ -339,7 +337,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
 
           {/* Capacity */}
           <div className="space-y-2">
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-black">
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground">
               <input
                 type="checkbox"
                 checked={capacityEnabled}
@@ -347,7 +345,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                   setCapacityEnabled(e.target.checked)
                   if (e.target.checked) setStatus('draft')
                 }}
-                className="rounded border-gray-300 text-black focus:ring-black"
+                className="rounded border-border text-foreground focus:ring-primary"
               />
               <span>Limit capacity</span>
             </label>
@@ -357,12 +355,12 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                   <label className={LABEL}>Max Participants</label>
                   <input type="number" min={1} value={maxParticipants} onChange={(e) => setMaxParticipants(Number(e.target.value))} className={INPUT} />
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-black pb-2">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground pb-2">
                   <input
                     type="checkbox"
                     checked={waitlistEnabled}
                     onChange={(e) => setWaitlistEnabled(e.target.checked)}
-                    className="rounded border-gray-300 text-black focus:ring-black"
+                    className="rounded border-border text-foreground focus:ring-primary"
                   />
                   <span>Waitlist when full</span>
                 </label>
@@ -372,7 +370,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
 
           {/* Teams — leagues, or any event the admin makes teamed */}
           <div className={SECTION}>
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-black">
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground">
               <input
                 type="checkbox"
                 checked={teamed}
@@ -381,7 +379,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                   setIsTeamed(e.target.checked)
                   if (e.target.checked) setStatus('draft')
                 }}
-                className="rounded border-gray-300 text-black focus:ring-black"
+                className="rounded border-border text-foreground focus:ring-primary"
               />
               <span>Team event{rules.forcesTeams ? ' (required for auction leagues)' : ''}</span>
             </label>
@@ -404,18 +402,18 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                 <div>
                   <label className={LABEL}>Roster Lock (optional)</label>
                   <input type="datetime-local" value={rosterFinalizesAt} onChange={(e) => setRosterFinalizesAt(e.target.value)} className={INPUT} />
-                  <p className="text-[11px] text-gray-500 mt-1">Between registration close and the event start.</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Between registration close and the event start.</p>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-black">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground">
                   <input
                     type="checkbox"
                     checked={captainApplicationRequired}
                     onChange={(e) => setCaptainApplicationRequired(e.target.checked)}
-                    className="rounded border-gray-300 text-black focus:ring-black"
+                    className="rounded border-border text-foreground focus:ring-primary"
                   />
                   <span>Captains must be approved by admins</span>
                 </label>
-                <p className="text-[11px] text-gray-500">
+                <p className="text-[11px] text-muted-foreground">
                   {captainApplicationRequired
                     ? 'Users apply as captain at registration; core admins review them under "Captain Applications".'
                     : 'Anyone registering as captain is approved automatically.'}
@@ -476,12 +474,12 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
               </div>
               {rules.hasLeaderboard && (
                 <div className="space-y-2">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-black pt-5">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground pt-5">
                     <input
                       type="checkbox"
                       checked={investmentEnabled}
                       onChange={(e) => setInvestmentEnabled(e.target.checked)}
-                      className="rounded border-gray-300 text-black focus:ring-black"
+                      className="rounded border-border text-foreground focus:ring-primary"
                     />
                     <span>Allow points investment</span>
                   </label>
@@ -508,7 +506,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                 <div>
                   <label className={LABEL}>K Multiplier</label>
                   <input type="number" min={0.1} step={0.1} value={kMultiplier} onChange={(e) => setKMultiplier(Number(e.target.value))} className={INPUT} />
-                  <p className="text-[11px] text-gray-500 mt-1">Purse pool = K × Σ player base prices</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Purse pool = K × Σ player base prices</p>
                 </div>
                 <div>
                   <label className={LABEL}>Purse Per Team (optional)</label>
@@ -530,7 +528,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                   <input type="number" min={5} max={60} value={bidTimerSeconds} onChange={(e) => setBidTimerSeconds(Number(e.target.value))} className={INPUT} />
                 </div>
               </div>
-              <p className="text-[11px] text-gray-500">
+              <p className="text-[11px] text-muted-foreground">
                 The 3/7ths OC override quota is applied by the backend. Captains and lots are managed on the Auction page.
               </p>
             </div>
@@ -550,41 +548,49 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
                 </option>
               </select>
             </div>
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-black pb-2">
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground pb-2">
               <input
                 type="checkbox"
                 checked={requiresApproval}
                 onChange={(e) => setRequiresApproval(e.target.checked)}
-                className="rounded border-gray-300 text-black focus:ring-black"
+                className="rounded border-border text-foreground focus:ring-primary"
               />
               <span>Admin approval for registrations</span>
             </label>
           </div>
           {!canGoLive && (
-            <p className="text-[11px] text-gray-500">
+            <p className="text-[11px] text-muted-foreground">
               This event is saved as a draft. Open it, publish a registration form, then set it to Upcoming.
             </p>
           )}
 
-          <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs border border-gray-300 text-black hover:bg-gray-100 rounded transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-4 py-2 text-xs border border-black bg-black text-white hover:bg-gray-800 rounded font-bold transition-colors disabled:opacity-50 cursor-pointer"
-            >
-              {isSubmitting ? 'Creating...' : rules.isLeague ? 'Create League' : 'Create Event'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border bg-muted/20 shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="text-xs font-medium"
+          >
+            Cancel
+          </Button>
+          <Button type="submit" disabled={isSubmitting} className="text-xs font-semibold gap-1.5">
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Creating...
+              </>
+            ) : (
+              rules.isLeague ? 'Create League' : 'Create Event'
+            )}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 

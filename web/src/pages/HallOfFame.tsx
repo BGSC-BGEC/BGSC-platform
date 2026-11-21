@@ -96,20 +96,20 @@ export const HallOfFame: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-gray-200">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-border">
         <div>
-          <h1 className="text-xl font-bold uppercase tracking-wider text-black flex items-center gap-2">
+          <h1 className="text-xl font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
             <Crown className="w-5 h-5" />
             Hall of Fame
           </h1>
-          <p className="text-sm text-gray-600 mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Celebrate championship winners, endurance legends, and historic club milestones.
           </p>
         </div>
         <button
           type="button"
           onClick={openCreate}
-          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer self-start sm:self-auto"
+          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold border border-foreground/70 bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors cursor-pointer self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           Induct Honoree
@@ -119,21 +119,21 @@ export const HallOfFame: React.FC = () => {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[220px]">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             placeholder="Search honoree or achievement title..."
             value={searchTerm}
             maxLength={64}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+            className="w-full pl-9 pr-3 py-2 text-sm border border-border rounded text-foreground bg-card focus:outline-none focus:border-primary"
           />
         </div>
 
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+          className="px-3 py-2 text-sm border border-border rounded text-foreground bg-card focus:outline-none focus:border-primary"
         >
           <option value="all">All Categories</option>
           <option value="event_winner">Event Winners</option>
@@ -144,7 +144,7 @@ export const HallOfFame: React.FC = () => {
       </div>
 
       {error && (
-        <div className="p-4 border border-black bg-white text-black rounded flex items-center justify-between text-xs">
+        <div className="p-4 border border-foreground/70 bg-card text-foreground rounded flex items-center justify-between text-xs">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
@@ -152,7 +152,7 @@ export const HallOfFame: React.FC = () => {
           <button
             type="button"
             onClick={loadEntries}
-            className="px-3 py-1 border border-black rounded font-bold hover:bg-black hover:text-white cursor-pointer"
+            className="px-3 py-1 border border-foreground/70 rounded font-bold hover:bg-primary hover:text-primary-foreground cursor-pointer"
           >
             Retry
           </button>
@@ -160,11 +160,11 @@ export const HallOfFame: React.FC = () => {
       )}
 
       {isLoading ? (
-        <div className="p-8 text-center text-sm text-gray-500 border border-gray-200 rounded bg-gray-50">
+        <div className="p-8 text-center text-sm text-muted-foreground border border-border rounded bg-muted/30">
           Loading Hall of Fame inductees...
         </div>
       ) : entries.length === 0 ? (
-        <div className="p-8 text-center text-sm text-gray-500 border border-gray-200 rounded bg-white">
+        <div className="p-8 text-center text-sm text-muted-foreground border border-border rounded bg-card">
           No Hall of Fame entries found.
         </div>
       ) : (
@@ -172,15 +172,15 @@ export const HallOfFame: React.FC = () => {
           {entries.map((entry) => (
             <div
               key={entry.id}
-              className="p-5 bg-white border border-gray-200 rounded flex flex-col justify-between space-y-4"
+              className="p-5 bg-card border border-border rounded flex flex-col justify-between space-y-4"
             >
               <div className="space-y-2 text-left">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-black rounded">
+                  <span className="px-2 py-0.5 text-[10px] font-bold uppercase border border-foreground/70 rounded">
                     {entry.category.replace('_', ' ')} &bull; {entry.achievement.year}
                   </span>
                   {entry.featured && (
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold uppercase bg-black text-white rounded">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold uppercase bg-primary text-primary-foreground rounded">
                       <Star className="w-3 h-3" />
                       Featured
                     </span>
@@ -188,44 +188,44 @@ export const HallOfFame: React.FC = () => {
                 </div>
 
                 <div>
-                  <h3 className="text-base font-bold text-black">
+                  <h3 className="text-base font-bold text-foreground">
                     {entry.honoree.displayName || 'Unknown honoree'}
                   </h3>
-                  <p className="text-xs font-semibold text-gray-700">{entry.title}</p>
+                  <p className="text-xs font-semibold text-foreground">{entry.title}</p>
                 </div>
 
                 {entry.description && (
-                  <p className="text-xs text-gray-600">{entry.description}</p>
+                  <p className="text-xs text-muted-foreground">{entry.description}</p>
                 )}
 
                 {entry.quote && (
-                  <blockquote className="text-xs italic text-gray-500 border-l-2 border-black pl-2.5">
+                  <blockquote className="text-xs italic text-muted-foreground border-l-2 border-foreground/70 pl-2.5">
                     "{entry.quote}"
                   </blockquote>
                 )}
 
-                <p className="text-[11px] text-gray-500">
+                <p className="text-[11px] text-muted-foreground">
                   Source: {SOURCE_LABEL[entry.source.type]}
                   {entry.source.title ? ` — ${entry.source.title}` : ''}
                 </p>
               </div>
 
-              <div className="flex items-center justify-between pt-3 border-t border-gray-100">
-                <span className="text-[11px] uppercase font-bold text-gray-500">
+              <div className="flex items-center justify-between pt-3 border-t border-border">
+                <span className="text-[11px] uppercase font-bold text-muted-foreground">
                   Domain: {entry.achievement.domain || '—'}
                 </span>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => handleToggleFeatured(entry)}
-                    className="px-2.5 py-1 text-xs font-bold border border-gray-300 hover:border-black rounded cursor-pointer"
+                    className="px-2.5 py-1 text-xs font-bold border border-border hover:border-primary/50 rounded cursor-pointer"
                   >
                     {entry.featured ? 'Unfeature' : 'Feature'}
                   </button>
                   <button
                     type="button"
                     onClick={() => openEdit(entry)}
-                    className="p-1.5 text-gray-600 hover:text-black border border-gray-200 rounded cursor-pointer"
+                    className="p-1.5 text-muted-foreground hover:text-foreground border border-border rounded cursor-pointer"
                     title="Edit entry"
                   >
                     <Pencil className="w-3.5 h-3.5" />
@@ -234,7 +234,7 @@ export const HallOfFame: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handleDelete(entry.id)}
-                      className="p-1.5 text-red-600 hover:bg-red-50 border border-gray-200 rounded cursor-pointer"
+                      className="p-1.5 text-destructive hover:bg-destructive/10 border border-border rounded cursor-pointer"
                       title="Delete entry"
                     >
                       <Trash2 className="w-3.5 h-3.5" />

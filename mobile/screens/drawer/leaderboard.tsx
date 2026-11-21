@@ -44,92 +44,6 @@ const DOMAINS: Array<{ label: string; value: LeaderboardDomain }> = [
   { label: 'General', value: 'general' },
 ];
 
-/** Fallback standings when backend is offline */
-function getMockStandings(myId?: string): GlobalStanding[] {
-  return [
-    {
-      user_id: 'user-001',
-      rank: 1,
-      username: 'maverick',
-      display_name: 'Maverick',
-      points: 3444,
-      avatar_url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&q=80',
-    },
-    {
-      user_id: 'user-002',
-      rank: 2,
-      username: 'coolcat',
-      display_name: 'CoolCat',
-      points: 2412,
-      avatar_url: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=120&q=80',
-    },
-    {
-      user_id: 'user-003',
-      rank: 3,
-      username: 'sunshine',
-      display_name: 'Sunshine',
-      points: 2299,
-      avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&q=80',
-    },
-    {
-      user_id: 'user-004',
-      rank: 4,
-      username: 'quirky',
-      display_name: 'Quirky',
-      points: 1241,
-      avatar_url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=120&q=80',
-    },
-    {
-      user_id: 'user-005',
-      rank: 5,
-      username: 'sneaky',
-      display_name: 'Sneaky',
-      points: 1104,
-      avatar_url: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=120&q=80',
-    },
-    {
-      user_id: 'user-006',
-      rank: 6,
-      username: 'starryeyed',
-      display_name: 'StarryEyed',
-      points: 974,
-      avatar_url: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=120&q=80',
-    },
-    {
-      user_id: 'user-007',
-      rank: 7,
-      username: 'shadowfax',
-      display_name: 'Shadowfax',
-      points: 890,
-      avatar_url: null,
-    },
-    {
-      user_id: 'user-008',
-      rank: 8,
-      username: 'blaze',
-      display_name: 'Blaze',
-      points: 810,
-      avatar_url: null,
-    },
-    {
-      user_id: 'user-009',
-      rank: 9,
-      username: 'storm',
-      display_name: 'Storm',
-      points: 740,
-      avatar_url: null,
-    },
-    {
-      user_id: myId || 'dev-user-001',
-      rank: 10,
-      username: 'zenodev',
-      display_name: 'Zeno Developer',
-      points: 680,
-      avatar_url: null,
-    },
-  ];
-}
-
 function toRow(s: GlobalStanding, myId?: string): RankedRow {
   return {
     key: s.user_id,
@@ -139,7 +53,6 @@ function toRow(s: GlobalStanding, myId?: string): RankedRow {
     avatarUrl: s.avatar_url,
     score: s.points,
     isMe: s.user_id === myId,
-    delta: s.rank === 1 ? 24 : s.rank === 2 ? 15 : s.rank === 3 ? -1 : (s.rank % 2 === 0 ? 12 : -4),
   };
 }
 
@@ -199,16 +112,7 @@ export default function Leaderboard() {
         }
       } catch (err) {
         if (id !== requestId.current) return;
-        // Offline dev fallback
-        if (standings.length === 0) {
-          const fallback = getMockStandings(user?.id);
-          setStandings(fallback);
-          setTotal(fallback.length);
-          setMe(fallback.find((s) => s.user_id === (user?.id || 'dev-user-001')) || fallback[fallback.length - 1]);
-          setError(null);
-        } else {
-          setError(getErrorMessage(err));
-        }
+        setError(getErrorMessage(err));
       } finally {
         if (id === requestId.current) {
           setLoading(false);
@@ -217,21 +121,21 @@ export default function Leaderboard() {
         }
       }
     },
-    [tab, period, activeDomain, source, user, standings.length],
+    [tab, period, activeDomain, source, user],
   );
 
   useFocusEffect(useCallback(() => {
     void load('initial');
   }, [load]));
 
-  const rows = useMemo(() => standings.map((s) => toRow(s, user?.id || 'dev-user-001')), [standings, user?.id]);
+  const rows = useMemo(() => standings.map((s) => toRow(s, user?.id)), [standings, user?.id]);
   const podium = rows.slice(0, 3);
   const rest = rows.slice(3);
 
   const myRow = useMemo(() => {
     const found = rows.find((r) => r.isMe);
     if (found) return found;
-    if (me) return toRow(me, user?.id || 'dev-user-001');
+    if (me) return toRow(me, user?.id);
     return null;
   }, [rows, me, user?.id]);
 
@@ -271,8 +175,8 @@ export default function Leaderboard() {
   const contentStyle = [
     styles.content,
     {
-      paddingHorizontal: gutter,
-      paddingTop: gutter,
+      paddingHorizontal: Math.min(gutter, 14),
+      paddingTop: 8,
       paddingBottom: Math.max(90, insets.bottom + 80),
     },
   ];
@@ -383,6 +287,8 @@ export default function Leaderboard() {
     </View>
   );
 
+  const bottomPillOffset = Math.max(insets.bottom, 12) + 76;
+
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
       <AppHeader title="Leaderboard" />
@@ -393,7 +299,7 @@ export default function Leaderboard() {
         keyExtractor={(item) => item.key}
         renderItem={({ item }) => <StandingRow row={item} onPress={() => navigation.navigate('Profile', { ref: item.key })} />}
         ListHeaderComponent={header}
-        contentContainerStyle={contentStyle}
+        contentContainerStyle={[contentStyle, { paddingBottom: bottomPillOffset + 48 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} tintColor={colors.primary} />}
         onEndReachedThreshold={0.4}
         onEndReached={() => {
@@ -406,26 +312,26 @@ export default function Leaderboard() {
       />
 
       {/* Floating Sticky "You" Pill at Bottom */}
-      <MyPositionPill me={myRow} onPress={scrollToMe} />
+      <MyPositionPill me={myRow} onPress={scrollToMe} bottomOffset={bottomPillOffset} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
-  content: { padding: 16, gap: 12, width: '100%', maxWidth: 720, alignSelf: 'center' },
-  header: { gap: 14, marginBottom: 8 },
+  content: { padding: 13, gap: 8, width: '100%', maxWidth: 720, alignSelf: 'center' },
+  header: { gap: 8, marginBottom: 4 },
   timerBanner: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderRadius: 12,
+    paddingVertical: 4.5,
+    paddingHorizontal: 11,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'center',
   },
   sectionHeaderRow: {
-    marginTop: 8,
-    marginBottom: 4,
+    marginTop: 4,
+    marginBottom: 2,
   },
   footer: { paddingVertical: 16 },
 });

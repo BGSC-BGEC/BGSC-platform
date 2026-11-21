@@ -30,10 +30,11 @@ export class LeaderboardRepository {
    */
   async findMyGlobalRank(userId: string, query: GlobalQuery = {}, maxPages = 5) {
     for (let page = 1; page <= maxPages; page += 1) {
-      const res = await this.global({ ...query, page, limit: 100 });
+      const res = await this.global({ ...query, page, limit: 100 }).catch(() => null);
+      if (!res || !Array.isArray(res.standings)) break;
       const mine = res.standings.find((s) => s.user_id === userId);
       if (mine) return mine;
-      if (page >= res.total_pages) break;
+      if (page >= (res.total_pages ?? 1)) break;
     }
     return null;
   }

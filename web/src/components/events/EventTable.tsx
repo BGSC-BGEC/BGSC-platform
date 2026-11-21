@@ -46,7 +46,7 @@ wider">
 
                 <td className="p-4 text-xs font-semibold uppercase text-black" title={rulesFor(event.type).description}>
                     {rulesFor(event.type).label}
-                    <div className="text-[10px] text-gray-500 mt-0.5">{event.isTeamed ? 'Team' : 'Solo'}</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">{event.isTeamed ? 'Team' : 'Solo'}</div>
                 </td>
 
                 <td className="p-4 text-xs text-gray-600">

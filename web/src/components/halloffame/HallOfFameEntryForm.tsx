@@ -41,8 +41,8 @@ interface SourceOption {
   label: string
 }
 
-const inputClass = 'w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white'
-const labelClass = 'block text-xs font-bold uppercase text-black mb-1'
+const inputClass = 'w-full px-3 py-2 text-sm border border-border rounded text-foreground bg-card'
+const labelClass = 'block text-xs font-bold uppercase text-foreground mb-1'
 
 /** A user's avatar becomes the snapshot's only if the backend `Link` rule would accept it. */
 const safeAvatar = (url: string | null | undefined): string | null =>
@@ -366,24 +366,24 @@ export const HallOfFameEntryForm: React.FC<HallOfFameEntryFormProps> = ({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-2xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+        className="bg-card rounded-lg border border-border shadow-xl max-w-2xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-black">
+        <div className="flex items-center justify-between border-b border-border pb-3">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
             {isEdit ? 'Edit Hall of Fame Entry' : 'Induct into Hall of Fame'}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="px-2 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-white cursor-pointer"
+            className="px-2 py-1 text-xs font-bold border border-foreground/70 text-foreground hover:bg-primary hover:text-primary-foreground cursor-pointer"
           >
             X
           </button>
         </div>
 
         {formError && (
-          <div className="p-3 border border-black bg-white text-black rounded flex items-center gap-2 text-xs">
+          <div className="p-3 border border-foreground/70 bg-card text-foreground rounded flex items-center gap-2 text-xs">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{formError}</span>
           </div>
@@ -394,15 +394,15 @@ export const HallOfFameEntryForm: React.FC<HallOfFameEntryFormProps> = ({
           <div className="space-y-2">
             <label className={labelClass}>Honoree</label>
             {honoree ? (
-              <div className="p-3 border border-gray-200 rounded space-y-2">
+              <div className="p-3 border border-border rounded space-y-2">
                 <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="font-mono text-gray-500 truncate">
+                  <span className="font-mono text-muted-foreground truncate">
                     {honoree.type === 'team' ? 'Team' : 'User'} &bull; {honoree.id}
                   </span>
                   <button
                     type="button"
                     onClick={() => setHonoree(null)}
-                    className="px-2 py-0.5 text-xs font-bold border border-gray-300 hover:border-black rounded cursor-pointer shrink-0"
+                    className="px-2 py-0.5 text-xs font-bold border border-border hover:border-primary/50 rounded cursor-pointer shrink-0"
                   >
                     Change
                   </button>
@@ -423,7 +423,7 @@ export const HallOfFameEntryForm: React.FC<HallOfFameEntryFormProps> = ({
               <UserSearchPicker onSelect={handleHonoreePick} />
             )}
             {honoree?.type === 'team' && (
-              <p className="text-[11px] text-gray-500">
+              <p className="text-[11px] text-muted-foreground">
                 Team honorees can be kept and renamed here; picking a new honoree selects a user.
               </p>
             )}
@@ -511,7 +511,7 @@ export const HallOfFameEntryForm: React.FC<HallOfFameEntryFormProps> = ({
                 </select>
               )}
             </div>
-            {sourceLoadError && <p className="text-[11px] text-black">{sourceLoadError}</p>}
+            {sourceLoadError && <p className="text-[11px] text-foreground">{sourceLoadError}</p>}
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -608,13 +608,13 @@ export const HallOfFameEntryForm: React.FC<HallOfFameEntryFormProps> = ({
                 {members.map((m) => (
                   <span
                     key={m.userId}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs border border-gray-300 rounded"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs border border-border rounded"
                   >
                     {m.displayName}
                     <button
                       type="button"
                       onClick={() => setMembers((prev) => prev.filter((x) => x.userId !== m.userId))}
-                      className="text-gray-500 hover:text-black cursor-pointer"
+                      className="text-muted-foreground hover:text-foreground cursor-pointer"
                       title="Remove member"
                     >
                       <X className="w-3 h-3" />
@@ -680,7 +680,7 @@ export const HallOfFameEntryForm: React.FC<HallOfFameEntryFormProps> = ({
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-xs font-bold uppercase text-black cursor-pointer">
+          <label className="flex items-center gap-2 text-xs font-bold uppercase text-foreground cursor-pointer">
             <input
               type="checkbox"
               checked={featured}
@@ -689,18 +689,18 @@ export const HallOfFameEntryForm: React.FC<HallOfFameEntryFormProps> = ({
             <span>Feature on Club Hall of Fame Spotlight</span>
           </label>
 
-          <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs border border-gray-300 rounded text-black cursor-pointer"
+              className="px-4 py-2 text-xs border border-border rounded text-foreground cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-2 text-xs font-bold border border-black bg-black text-white rounded cursor-pointer"
+              className="px-4 py-2 text-xs font-bold border border-foreground/70 bg-primary text-primary-foreground rounded cursor-pointer"
             >
               {isSubmitting
                 ? isEdit

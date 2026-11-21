@@ -28,11 +28,11 @@ function pillClass(status: DeliveryStatus): string {
       return 'border-green-600/30 text-green-700 bg-green-50'
     case 'failed':
     case 'outcome_unknown':
-      return 'border-red-600/30 text-red-700 bg-red-50'
+      return 'border-red-600/30 text-destructive bg-destructive/10'
     case 'rate_limited':
       return 'border-yellow-600/30 text-yellow-800 bg-yellow-50'
     default:
-      return 'border-gray-300 text-gray-600 bg-gray-100'
+      return 'border-border text-muted-foreground bg-muted'
   }
 }
 
@@ -59,7 +59,7 @@ export const DeliveryStatusSummary: React.FC<{
   compact?: boolean
 }> = ({ delivery, compact }) => {
   if (!delivery) {
-    return <span className="text-xs text-gray-500">No delivery data</span>
+    return <span className="text-xs text-muted-foreground">No delivery data</span>
   }
 
   const { whatsapp, push } = delivery
@@ -67,11 +67,11 @@ export const DeliveryStatusSummary: React.FC<{
   return (
     <div className={compact ? 'space-y-1' : 'space-y-1.5'}>
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-gray-600 w-20 shrink-0">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground w-20 shrink-0">
           WhatsApp
         </span>
         {!whatsapp.requested ? (
-          <span className="text-xs text-gray-500">Not requested</span>
+          <span className="text-xs text-muted-foreground">Not requested</span>
         ) : whatsapp.perCategory.length === 0 ? (
           <DeliveryPill status="pending" />
         ) : (
@@ -95,21 +95,21 @@ export const DeliveryStatusSummary: React.FC<{
         whatsapp.perCategory
           .filter((row) => row.error)
           .map((row) => (
-            <div key={`${row.category}-err`} className="text-[11px] text-red-600 pl-21.5">
+            <div key={`${row.category}-err`} className="text-[11px] text-destructive pl-21.5">
               {CATEGORY_LABELS[row.category] || row.category}: {row.error}
             </div>
           ))}
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="text-[11px] font-bold uppercase tracking-wider text-gray-600 w-20 shrink-0">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground w-20 shrink-0">
           Push
         </span>
         {!push.requested ? (
-          <span className="text-xs text-gray-500">Not requested</span>
+          <span className="text-xs text-muted-foreground">Not requested</span>
         ) : (
           <>
             <DeliveryPill status={push.status} />
             {push.sentCount !== null && (
-              <span className="text-xs text-gray-600">{push.sentCount} sent</span>
+              <span className="text-xs text-muted-foreground">{push.sentCount} sent</span>
             )}
           </>
         )}

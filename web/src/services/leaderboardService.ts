@@ -18,7 +18,10 @@ import type {
   ScoringParameter,
   UserSearchResult,
 } from '../types/leaderboard'
-import { DEFAULT_LEADERBOARD_DATA } from '../data/leaderboardData'
+import {
+  DEFAULT_LEADERBOARD_DATA,
+  DEFAULT_POINTS_TRANSACTIONS,
+} from '../data/leaderboardData'
 
 const isMock = import.meta.env.VITE_USE_MOCK === 'true'
 
@@ -454,6 +457,27 @@ export async function adjustPoints(
   }
 }
 
+/**
+ * One member's points history (admin endpoint). The backend has no all-members ledger, and
+ * /points/me/transactions would be the signed-in admin's own history, not the member's.
+ */
+export async function getPointsTransactions(
+  userId: string,
+  userName = 'Member'
+): Promise<PointsTransaction[]> {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    return DEFAULT_POINTS_TRANSACTIONS.filter((tx) => tx.userId === userId)
+  }
+
+  const res = await apiClient.get<
+    { transactions?: RawBackendTransaction[] } | RawBackendTransaction[]
+  >(`/points/users/${encodeURIComponent(userId)}/transactions?limit=50`)
+
+  const list = Array.isArray(res) ? res : res?.transactions || []
+  return list.map((raw) => ({ ...mapBackendTransaction(raw), userName }))
+}
+
 export const leaderboardService = {
   getGlobalLeaderboard,
   getGlobalLeaderboardPage,
@@ -468,6 +492,7 @@ export const leaderboardService = {
   getEventLedger,
   searchUsers,
   adjustPoints,
+  getPointsTransactions,
   mapBackendStanding,
   mapBackendTransaction,
 }

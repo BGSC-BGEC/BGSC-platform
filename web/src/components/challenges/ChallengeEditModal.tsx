@@ -15,8 +15,8 @@ interface ChallengeEditModalProps {
   onSaved: (challenge: ChallengeItem) => void
 }
 
-const inputClass = 'w-full px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white'
-const labelClass = 'block text-xs font-bold uppercase text-black mb-1'
+const inputClass = 'w-full px-3 py-2 text-sm border border-border rounded text-foreground bg-card'
+const labelClass = 'block text-xs font-bold uppercase text-foreground mb-1'
 
 /**
  * PATCH /challenges/:id with only the changed fields (UpdateChallengeBody: all optional, nested
@@ -106,24 +106,24 @@ export const ChallengeEditModal: React.FC<ChallengeEditModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
+        className="bg-card rounded-lg border border-border shadow-xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-gray-200 pb-3">
-          <h2 className="text-sm font-bold uppercase tracking-wider text-black">
+        <div className="flex items-center justify-between border-b border-border pb-3">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
             Edit Challenge
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="px-2 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-white cursor-pointer"
+            className="px-2 py-1 text-xs font-bold border border-foreground/70 text-foreground hover:bg-primary hover:text-primary-foreground cursor-pointer"
           >
             X
           </button>
         </div>
 
         {formError && (
-          <div className="p-3 border border-black bg-white text-black rounded flex items-center gap-2 text-xs">
+          <div className="p-3 border border-foreground/70 bg-card text-foreground rounded flex items-center gap-2 text-xs">
             <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{formError}</span>
           </div>
@@ -206,7 +206,7 @@ export const ChallengeEditModal: React.FC<ChallengeEditModalProps> = ({
               className={inputClass}
             />
             {challenge.participantsCount > 0 && (
-              <p className="text-[11px] text-gray-500 mt-1">
+              <p className="text-[11px] text-muted-foreground mt-1">
                 Members have already joined; the server will refuse a change to award points.
               </p>
             )}
@@ -230,7 +230,7 @@ export const ChallengeEditModal: React.FC<ChallengeEditModalProps> = ({
           <div className="space-y-2 pt-1">
             <label
               className={`flex items-center gap-2 text-xs font-bold uppercase cursor-pointer ${
-                challenge.requiresProof ? 'text-black' : 'text-gray-400'
+                challenge.requiresProof ? 'text-foreground' : 'text-muted-foreground'
               }`}
             >
               <input
@@ -241,7 +241,7 @@ export const ChallengeEditModal: React.FC<ChallengeEditModalProps> = ({
               />
               <span>Auto-Approve Submissions (Instant Points)</span>
             </label>
-            <label className="flex items-center gap-2 text-xs font-bold uppercase text-black cursor-pointer">
+            <label className="flex items-center gap-2 text-xs font-bold uppercase text-foreground cursor-pointer">
               <input
                 type="checkbox"
                 checked={grantsHof}
@@ -252,24 +252,24 @@ export const ChallengeEditModal: React.FC<ChallengeEditModalProps> = ({
             {difficulty === 'legend' &&
               challenge.difficulty !== 'legend' &&
               grantsHof === challenge.grantsHallOfFame && (
-                <p className="text-[11px] text-gray-500">
+                <p className="text-[11px] text-muted-foreground">
                   Promoting to Legend turns Hall of Fame eligibility on unless you change it here.
                 </p>
               )}
           </div>
 
-          <div className="flex justify-end gap-2 pt-3 border-t border-gray-200">
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs border border-gray-300 rounded text-black cursor-pointer"
+              className="px-4 py-2 text-xs border border-border rounded text-foreground cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-2 text-xs font-bold border border-black bg-black text-white rounded cursor-pointer"
+              className="px-4 py-2 text-xs font-bold border border-foreground/70 bg-primary text-primary-foreground rounded cursor-pointer"
             >
               {isSubmitting ? 'Saving...' : 'Save Changes'}
             </button>

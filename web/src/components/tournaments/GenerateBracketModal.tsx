@@ -1,6 +1,10 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
+import { X, GitBranch, AlertTriangle, Loader2 } from 'lucide-react'
 import type { Bracket, BracketSeeding } from '../../types/bracket'
 import { bracketService } from '../../services/bracketService'
+import { Modal } from '../ui/modal'
+import { Button } from '../ui/button'
+import { cn } from '../../lib/utils'
 
 export interface GenerateBracketModalProps {
   eventId: string
@@ -43,24 +47,6 @@ export const GenerateBracketModal: React.FC<GenerateBracketModalProps> = ({
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose()
-      }
-    }
-
-    if (isOpen) {
-      window.addEventListener('keydown', handleKeyDown)
-    }
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isOpen, onClose])
-
-  if (!isOpen) return null
-
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsGenerating(true)
@@ -80,71 +66,73 @@ export const GenerateBracketModal: React.FC<GenerateBracketModalProps> = ({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-lg border border-gray-200 shadow-xl max-w-lg w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-200 pb-3">
+    <Modal isOpen={isOpen} onClose={onClose} className="max-w-lg">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
+            <GitBranch className="w-4 h-4" />
+          </div>
           <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-black">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
               Generate Tournament Draw
             </h2>
-            <p className="text-xs text-gray-600 mt-0.5 truncate max-w-sm">
+            <p className="text-xs text-muted-foreground truncate max-w-xs sm:max-w-sm">
               Event: {eventTitle}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-2 py-1 text-xs font-bold border border-black text-black hover:bg-black hover:text-white cursor-pointer"
-          >
-            X
-          </button>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close modal"
+          className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
 
-        {/* Error Alert */}
-        {error && (
-          <div className="p-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded">
-            {error}
-          </div>
-        )}
+      <form onSubmit={handleGenerate} className="flex flex-col flex-1 overflow-hidden">
+        <div className="p-6 space-y-4 overflow-y-auto flex-1">
+          {/* Error Alert */}
+          {error && (
+            <div className="p-3 text-xs text-destructive bg-destructive/10 border border-destructive/30 rounded-xl flex items-center gap-2 animate-in fade-in">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
-        <form onSubmit={handleGenerate} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-black mb-2">
+            <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-2">
               Select Seeding Strategy
             </label>
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               {SEEDING_OPTIONS.map((option) => {
                 const isSelected = seeding === option.id
                 return (
                   <label
                     key={option.id}
-                    className={`block p-3 border rounded cursor-pointer transition-colors ${
+                    className={cn(
+                      'block p-3.5 border rounded-xl cursor-pointer transition-all',
                       isSelected
-                        ? 'border-black bg-gray-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
+                        ? 'border-primary bg-primary/10 ring-1 ring-primary/20 shadow-xs'
+                        : 'border-border bg-card hover:bg-muted/30'
+                    )}
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2.5">
                       <input
                         type="radio"
                         name="seeding"
                         value={option.id}
                         checked={isSelected}
                         onChange={() => setSeeding(option.id)}
-                        className="accent-black"
+                        className="accent-primary"
                       />
-                      <span className="text-xs font-bold text-black">
+                      <span className="text-xs font-bold text-foreground">
                         {option.title}
                       </span>
                     </div>
-                    <p className="text-[11px] text-gray-600 pl-5 mt-1 leading-relaxed">
+                    <p className="text-[11px] text-muted-foreground pl-6 mt-1 leading-relaxed">
                       {option.description}
                     </p>
                   </label>
@@ -153,30 +141,40 @@ export const GenerateBracketModal: React.FC<GenerateBracketModalProps> = ({
             </div>
           </div>
 
-          <div className="p-3 border border-gray-200 bg-gray-50 rounded text-xs text-gray-700">
+          <div className="p-3.5 border border-border bg-muted/20 rounded-xl text-xs text-muted-foreground leading-relaxed">
             Generating the bracket establishes official match fixtures. You will be able to report scores, schedule match times, and advance teams.
           </div>
+        </div>
 
-          <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-200">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={isGenerating}
-              className="px-4 py-2 text-xs border border-gray-300 text-black hover:bg-gray-100 rounded transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={isGenerating}
-              className="px-4 py-2 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {isGenerating ? 'Generating Draw...' : 'Generate Bracket'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div className="flex items-center justify-end gap-2.5 px-6 py-4 border-t border-border bg-muted/20 shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onClose}
+            disabled={isGenerating}
+            className="text-xs font-semibold"
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            disabled={isGenerating}
+            size="sm"
+            className="text-xs font-semibold gap-1.5"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Generating Draw...
+              </>
+            ) : (
+              'Generate Bracket'
+            )}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 

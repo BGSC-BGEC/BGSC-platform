@@ -57,24 +57,24 @@ export const UserSearchPicker: React.FC<UserSearchPickerProps> = ({
   return (
     <div className="space-y-1">
       <div className="relative">
-        <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
         <input
           type="text"
           value={query}
           maxLength={80}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={placeholder}
-          className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+          className="w-full pl-9 pr-3 py-2 text-sm border border-border rounded text-foreground bg-card focus:outline-none focus:border-primary"
         />
       </div>
       {query.trim() && (
-        <div className="border border-gray-200 rounded bg-white max-h-48 overflow-y-auto divide-y divide-gray-100">
+        <div className="border border-border rounded bg-card max-h-48 overflow-y-auto divide-y divide-border/60">
           {isSearching ? (
-            <div className="px-3 py-2 text-xs text-gray-500">Searching...</div>
+            <div className="px-3 py-2 text-xs text-muted-foreground">Searching...</div>
           ) : searchError ? (
-            <div className="px-3 py-2 text-xs text-black">{searchError}</div>
+            <div className="px-3 py-2 text-xs text-foreground">{searchError}</div>
           ) : results.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-gray-500">No matching members.</div>
+            <div className="px-3 py-2 text-xs text-muted-foreground">No matching members.</div>
           ) : (
             results.map((u) => {
               const taken = excludeIds.includes(u.id)
@@ -84,11 +84,11 @@ export const UserSearchPicker: React.FC<UserSearchPickerProps> = ({
                   type="button"
                   disabled={taken}
                   onClick={() => pick(u)}
-                  className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 cursor-pointer disabled:cursor-not-allowed disabled:text-gray-400"
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-muted/30 cursor-pointer disabled:cursor-not-allowed disabled:text-muted-foreground"
                 >
-                  <span className="font-bold text-black">{u.fullName || u.username}</span>{' '}
-                  <span className="text-gray-500">@{u.username}</span>
-                  {taken && <span className="ml-1 text-gray-400">(added)</span>}
+                  <span className="font-bold text-foreground">{u.fullName || u.username}</span>{' '}
+                  <span className="text-muted-foreground">@{u.username}</span>
+                  {taken && <span className="ml-1 text-muted-foreground">(added)</span>}
                 </button>
               )
             })

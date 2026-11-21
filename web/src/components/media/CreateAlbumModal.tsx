@@ -66,16 +66,16 @@ const CreateAlbumModalContent: React.FC<CreateAlbumModalContentProps> = ({
       onClick={requestClose}
     >
       <div
-        className="bg-white rounded-lg shadow-2xl border border-gray-200 w-full max-w-md overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in duration-150"
+        className="bg-card rounded-lg shadow-2xl border border-border w-full max-w-md overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="p-4 sm:p-5 border-b border-gray-200 flex items-center justify-between gap-3 bg-gray-50/50">
+        <div className="p-4 sm:p-5 border-b border-border flex items-center justify-between gap-3 bg-muted/30">
           <div>
-            <h2 className="text-sm font-bold uppercase tracking-wider text-black">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
               New Album
             </h2>
-            <p className="text-[11px] text-gray-500">
+            <p className="text-[11px] text-muted-foreground">
               Group assets into a collection, optionally linked to an event.
             </p>
           </div>
@@ -84,7 +84,7 @@ const CreateAlbumModalContent: React.FC<CreateAlbumModalContentProps> = ({
             type="button"
             onClick={requestClose}
             disabled={isSubmitting}
-            className="p-1 rounded text-gray-400 hover:text-black hover:bg-gray-100 transition-colors cursor-pointer disabled:opacity-50"
+            className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-50"
           >
             <X className="w-5 h-5" />
           </button>
@@ -93,7 +93,7 @@ const CreateAlbumModalContent: React.FC<CreateAlbumModalContentProps> = ({
         {/* Body */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
           {error && (
-            <div className="p-3 rounded bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
+            <div className="p-3 rounded bg-destructive/10 border border-destructive/40 text-xs text-destructive flex items-center gap-2">
               <AlertCircle className="w-4 h-4 flex-shrink-0" />
               <span>{error}</span>
             </div>
@@ -101,10 +101,10 @@ const CreateAlbumModalContent: React.FC<CreateAlbumModalContentProps> = ({
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-foreground">
                 Album Title *
               </label>
-              <span className="text-[10px] text-gray-400 font-mono">
+              <span className="text-[10px] text-muted-foreground font-mono">
                 {title.length}/{MEDIA_UPLOAD_LIMITS.albumTitleMax}
               </span>
             </div>
@@ -116,21 +116,21 @@ const CreateAlbumModalContent: React.FC<CreateAlbumModalContentProps> = ({
               }
               placeholder="e.g. Valorant Spring Finals 2026"
               autoFocus
-              className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black placeholder-gray-400 focus:outline-none focus:border-black"
+              className="w-full px-3 py-2 text-xs border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
             />
-            <p className="text-[10px] text-gray-500">
+            <p className="text-[10px] text-muted-foreground">
               Use at least one latin letter or digit; the album link is derived from the title.
             </p>
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-foreground">
               Linked Event (Optional)
             </label>
             <select
               value={eventId}
               onChange={(e) => setEventId(e.target.value)}
-              className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              className="w-full px-3 py-2 text-xs border border-border rounded text-foreground bg-card focus:outline-none focus:border-primary"
             >
               <option value="">No Event</option>
               {events?.map((ev) => (
@@ -141,19 +141,19 @@ const CreateAlbumModalContent: React.FC<CreateAlbumModalContentProps> = ({
             </select>
           </div>
 
-          <div className="pt-4 border-t border-gray-200 flex items-center justify-end gap-3">
+          <div className="pt-4 border-t border-border flex items-center justify-end gap-3">
             <button
               type="button"
               onClick={requestClose}
               disabled={isSubmitting}
-              className="px-4 py-2 rounded text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer"
+              className="px-4 py-2 rounded text-xs font-semibold border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-50 cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting || !title.trim()}
-              className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded text-xs font-bold bg-black text-white hover:bg-gray-800 transition-colors disabled:opacity-50 cursor-pointer"
+              className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 cursor-pointer"
             >
               {isSubmitting ? (
                 <>

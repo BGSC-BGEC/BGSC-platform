@@ -140,15 +140,15 @@ export const PointsRules: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-gray-200">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-border">
         <div>
-          <h1 className="text-xl font-bold uppercase tracking-wider text-black">Points Rules</h1>
-          <p className="text-sm text-gray-600 mt-1">
+          <h1 className="text-xl font-bold uppercase tracking-wider text-foreground">Points Rules</h1>
+          <p className="text-sm text-muted-foreground mt-1">
             What each activity awards by default. Changes apply to new transactions only; history is never rewritten.
           </p>
         </div>
         {!canEdit && (
-          <span className="self-start sm:self-auto text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border border-gray-300 bg-gray-50 text-gray-700">
+          <span className="self-start sm:self-auto text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded border border-border bg-muted/30 text-foreground">
             Read only — coordinators can edit
           </span>
         )}
@@ -159,7 +159,7 @@ export const PointsRules: React.FC = () => {
         <select
           value={sourceFilter}
           onChange={(e) => setSourceFilter(e.target.value)}
-          className="px-3 py-2 text-sm border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+          className="px-3 py-2 text-sm border border-border rounded text-foreground bg-card focus:outline-none focus:border-primary"
         >
           <option value="all">All Sources</option>
           {sources.map((s) => (
@@ -168,21 +168,21 @@ export const PointsRules: React.FC = () => {
             </option>
           ))}
         </select>
-        <p className="text-[11px] text-gray-500">
+        <p className="text-[11px] text-muted-foreground">
           Amount 0 means the trigger (event or challenge) always supplies the amount. Blank expiry = never expires.
         </p>
       </div>
 
       {isLoading && (
-        <div className="p-12 text-center text-sm text-gray-500 border border-gray-200 rounded bg-gray-50">
+        <div className="p-12 text-center text-sm text-muted-foreground border border-border rounded bg-muted/30">
           Loading point rules...
         </div>
       )}
 
       {!isLoading && error && (
-        <div className="p-4 border border-black text-black bg-white rounded flex items-center justify-between">
+        <div className="p-4 border border-foreground/70 text-foreground bg-card rounded flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-red-600" />
+            <AlertCircle className="w-4 h-4 text-destructive" />
             <span className="text-sm">{error}</span>
           </div>
           <button
@@ -192,7 +192,7 @@ export const PointsRules: React.FC = () => {
               setError(null)
               setReloadKey((k) => k + 1)
             }}
-            className="px-3 py-1 text-xs border border-black hover:bg-black hover:text-white transition-colors cursor-pointer"
+            className="px-3 py-1 text-xs border border-foreground/70 hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
           >
             Retry
           </button>
@@ -200,16 +200,16 @@ export const PointsRules: React.FC = () => {
       )}
 
       {!isLoading && !error && visibleRules.length === 0 && (
-        <div className="p-12 text-center border border-gray-200 rounded-lg bg-white space-y-2">
-          <SlidersHorizontal className="w-10 h-10 text-gray-400 mx-auto" />
-          <h3 className="text-base font-bold text-black">No point rules found</h3>
+        <div className="p-12 text-center border border-border rounded-lg bg-card space-y-2">
+          <SlidersHorizontal className="w-10 h-10 text-muted-foreground mx-auto" />
+          <h3 className="text-base font-bold text-foreground">No point rules found</h3>
         </div>
       )}
 
       {!isLoading && !error && visibleRules.length > 0 && (
-        <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+        <div className="bg-card rounded-lg border border-border overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200 text-[10px] font-bold uppercase tracking-wider text-black">
+            <thead className="bg-muted/30 border-b border-border text-[10px] font-bold uppercase tracking-wider text-foreground">
               <tr>
                 <th className="px-4 py-3">Rule</th>
                 <th className="px-4 py-3">Source</th>
@@ -220,24 +220,24 @@ export const PointsRules: React.FC = () => {
                 {canEdit && <th className="px-4 py-3 text-right">Action</th>}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-border/60">
               {visibleRules.map((r) => {
                 const d = draftOf(r)
                 const dirty = Boolean(drafts[r.id])
                 const saving = savingId === r.id
                 return (
                   <React.Fragment key={r.id}>
-                    <tr className={`transition-colors ${dirty ? 'bg-gray-50' : 'hover:bg-gray-50'}`}>
+                    <tr className={`transition-colors ${dirty ? 'bg-muted/30' : 'hover:bg-muted/30'}`}>
                       <td className="px-4 py-3">
-                        <div className="font-bold text-black text-xs sm:text-sm">{r.label}</div>
-                        <div className="text-[11px] text-gray-500 font-mono">{r.id}</div>
+                        <div className="font-bold text-foreground text-xs sm:text-sm">{r.label}</div>
+                        <div className="text-[11px] text-muted-foreground font-mono">{r.id}</div>
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-700">
+                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-border bg-muted/30 text-foreground">
                           {r.source}
                         </span>
                         {r.overridableBy && (
-                          <div className="text-[10px] text-gray-500 mt-1">overridable by {r.overridableBy}</div>
+                          <div className="text-[10px] text-muted-foreground mt-1">overridable by {r.overridableBy}</div>
                         )}
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -252,7 +252,7 @@ export const PointsRules: React.FC = () => {
                         ) : (
                           <span
                             className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
-                              r.enabled ? 'border-black bg-black text-white' : 'border-gray-300 bg-white text-gray-500'
+                              r.enabled ? 'border-foreground/70 bg-primary text-primary-foreground' : 'border-border bg-card text-muted-foreground'
                             }`}
                           >
                             {r.enabled ? 'On' : 'Off'}
@@ -269,10 +269,10 @@ export const PointsRules: React.FC = () => {
                             value={d.defaultAmount}
                             disabled={saving}
                             onChange={(e) => updateDraft(r, { defaultAmount: e.target.value })}
-                            className="w-24 px-2 py-1 text-xs font-mono text-right border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+                            className="w-24 px-2 py-1 text-xs font-mono text-right border border-border rounded text-foreground bg-card focus:outline-none focus:border-primary"
                           />
                         ) : (
-                          <span className="font-mono font-bold text-black text-xs sm:text-sm">
+                          <span className="font-mono font-bold text-foreground text-xs sm:text-sm">
                             {r.defaultAmount.toLocaleString()}
                           </span>
                         )}
@@ -288,15 +288,15 @@ export const PointsRules: React.FC = () => {
                             value={d.expiresAfterDays}
                             disabled={saving}
                             onChange={(e) => updateDraft(r, { expiresAfterDays: e.target.value })}
-                            className="w-24 px-2 py-1 text-xs font-mono text-right border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+                            className="w-24 px-2 py-1 text-xs font-mono text-right border border-border rounded text-foreground bg-card focus:outline-none focus:border-primary"
                           />
                         ) : (
-                          <span className="font-mono text-xs text-gray-700">
+                          <span className="font-mono text-xs text-foreground">
                             {r.expiresAfterDays === null ? 'never' : r.expiresAfterDays}
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-[11px] text-gray-500 whitespace-nowrap">
+                      <td className="px-4 py-3 text-[11px] text-muted-foreground whitespace-nowrap">
                         <div className="font-mono">{formatDate(r.updatedAt)}</div>
                         {r.updatedBy && (
                           <div className="font-mono" title={r.updatedBy}>
@@ -312,7 +312,7 @@ export const PointsRules: React.FC = () => {
                                 type="button"
                                 onClick={() => discard(r.id)}
                                 disabled={saving}
-                                className="px-3 py-1 text-xs border border-gray-300 text-black hover:bg-gray-100 rounded transition-colors cursor-pointer disabled:opacity-50"
+                                className="px-3 py-1 text-xs border border-border text-foreground hover:bg-muted rounded transition-colors cursor-pointer disabled:opacity-50"
                               >
                                 Cancel
                               </button>
@@ -320,13 +320,13 @@ export const PointsRules: React.FC = () => {
                                 type="button"
                                 onClick={() => save(r)}
                                 disabled={saving}
-                                className="px-3 py-1 text-xs font-bold border border-black bg-black text-white hover:bg-gray-800 rounded transition-colors cursor-pointer disabled:opacity-50"
+                                className="px-3 py-1 text-xs font-bold border border-foreground/70 bg-primary text-primary-foreground hover:bg-primary/90 rounded transition-colors cursor-pointer disabled:opacity-50"
                               >
                                 {saving ? 'Saving...' : 'Save'}
                               </button>
                             </div>
                           ) : (
-                            <span className="text-[11px] text-gray-400">-</span>
+                            <span className="text-[11px] text-muted-foreground">-</span>
                           )}
                         </td>
                       )}
@@ -334,7 +334,7 @@ export const PointsRules: React.FC = () => {
                     {rowErrors[r.id] && (
                       <tr>
                         <td colSpan={canEdit ? 7 : 6} className="px-4 pb-3">
-                          <div className="p-2 text-xs text-red-600 bg-red-50 border border-red-200 rounded">
+                          <div className="p-2 text-xs text-destructive bg-destructive/10 border border-destructive/40 rounded">
                             {rowErrors[r.id]}
                           </div>
                         </td>

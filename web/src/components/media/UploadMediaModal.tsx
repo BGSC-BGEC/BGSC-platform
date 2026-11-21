@@ -9,12 +9,9 @@ import {
   CheckCircle2,
   Clock,
 } from 'lucide-react'
-import type {
-  MediaAlbum,
-  MediaCategory,
-  UploadMediaPayload,
-} from '../../types/media'
+import type { MediaAlbum, MediaCategory, UploadMediaPayload } from '../../types/media'
 import { MEDIA_UPLOAD_LIMITS, validateUploadFile } from '../../types/media'
+import { Modal } from '../ui/modal'
 
 /** Minimal event shape for the optional event link. */
 export interface MediaEventOption {
@@ -138,7 +135,8 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
     setIsDragging(true)
   }
 
-  const handleDragLeave = () => {
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
     setIsDragging(false)
   }
 
@@ -166,8 +164,8 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
     setTagInput('')
   }
 
-  const handleTagKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' || e.key === ',') {
+  const handleTagKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
       e.preventDefault()
       handleAddTag()
     }
@@ -241,29 +239,29 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
     switch (entry.status) {
       case 'queued':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-200 bg-gray-50 text-gray-600">
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-border bg-muted/50 text-muted-foreground">
             <Clock className="w-3 h-3" />
             Queued
           </span>
         )
       case 'uploading':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-gray-300 bg-white text-black">
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-border bg-card text-foreground">
             <Loader2 className="w-3 h-3 animate-spin" />
             Uploading
           </span>
         )
       case 'done':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-green-300 bg-green-50 text-green-700">
-            <CheckCircle2 className="w-3 h-3 text-green-600" />
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+            <CheckCircle2 className="w-3 h-3" />
             Done
           </span>
         )
       case 'failed':
         return (
-          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-red-300 bg-red-50 text-red-700">
-            <AlertCircle className="w-3 h-3 text-red-600" />
+          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-destructive/30 bg-destructive/10 text-destructive">
+            <AlertCircle className="w-3 h-3" />
             Failed
           </span>
         )
@@ -271,23 +269,16 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
   }
 
   return (
-    // The backdrop lives here so a click on it cannot close the modal mid-batch.
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs animate-in fade-in duration-150"
-      onClick={requestClose}
-    >
-    <div
-      className="bg-white rounded-lg shadow-2xl border border-gray-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in duration-150"
-      onClick={(e) => e.stopPropagation()}
-    >
+    <>
       {/* 1. Modal Header */}
-      <div className="p-4 sm:p-5 border-b border-gray-200 flex items-center justify-between gap-3 bg-gray-50/50">
+      <div className="p-4 sm:p-5 border-b border-border flex items-center justify-between gap-3 bg-muted/40">
         <div>
-          <h2 className="text-sm font-bold uppercase tracking-wider text-black">
+          <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
             Upload Media Assets
           </h2>
-          <p className="text-[11px] text-gray-500">
-            Add high-resolution tournament banners, game clips, or sponsor logos. Select several files to upload them in one batch.
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Add high-resolution tournament banners, game clips, or sponsor logos. Select
+            several files to upload them in one batch.
           </p>
         </div>
 
@@ -295,19 +286,16 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
           type="button"
           onClick={requestClose}
           disabled={isUploading}
-          className="p-1 rounded text-gray-400 hover:text-black hover:bg-gray-100 transition-colors cursor-pointer disabled:opacity-50"
+          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer disabled:opacity-50"
         >
           <X className="w-5 h-5" />
         </button>
       </div>
 
       {/* 2. Modal Body & Form */}
-      <form
-        onSubmit={handleSubmit}
-        className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4"
-      >
+      <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
         {error && (
-          <div className="p-3 rounded bg-red-50 border border-red-200 text-xs text-red-700 flex items-center gap-2">
+          <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/30 text-xs text-destructive flex items-center gap-2">
             <AlertCircle className="w-4 h-4 flex-shrink-0" />
             <span>{error}</span>
           </div>
@@ -319,12 +307,12 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           onClick={() => !isUploading && fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-lg ${
+          className={`border-2 border-dashed rounded-xl ${
             entries.length > 0 ? 'p-4' : 'p-6'
           } text-center cursor-pointer transition-colors ${
             isDragging
-              ? 'border-black bg-gray-50'
-              : 'border-gray-300 hover:border-black bg-gray-50/50'
+              ? 'border-primary bg-primary/5'
+              : 'border-border hover:border-primary/50 bg-muted/20'
           }`}
         >
           <input
@@ -344,20 +332,20 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
             <UploadCloud
               className={`${
                 entries.length > 0 ? 'w-6 h-6' : 'w-10 h-10'
-              } text-gray-400 mx-auto`}
+              } text-muted-foreground mx-auto`}
             />
             <div>
-              <span className="text-xs font-bold text-black block">
+              <span className="text-xs font-bold text-foreground block">
                 {entries.length > 0
                   ? 'Click or drop to add more files'
                   : 'Click to browse or drag and drop assets'}
               </span>
-              <span className="text-[11px] text-gray-500">
+              <span className="text-[11px] text-muted-foreground">
                 Images up to 10MB, Videos up to 50MB (JPG, PNG, WEBP, MP4, WEBM)
               </span>
             </div>
             {entries.length === 0 && (
-              <span className="inline-block mt-2 px-3 py-1 text-xs font-semibold rounded border border-gray-300 bg-white text-gray-700 hover:border-black">
+              <span className="inline-block mt-2 px-3 py-1 text-xs font-semibold rounded-lg border border-border bg-card text-foreground hover:border-primary/40">
                 Select Files
               </span>
             )}
@@ -368,17 +356,17 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
         {entries.length > 0 && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                 Selected Files
               </label>
-              <span className="text-[10px] text-gray-400 font-mono">
+              <span className="text-[10px] text-muted-foreground font-mono">
                 {doneCount}/{entries.length} uploaded
               </span>
             </div>
-            <ul className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-56 overflow-y-auto">
+            <ul className="border border-border rounded-xl divide-y divide-border max-h-56 overflow-y-auto">
               {entries.map((entry) => (
                 <li key={entry.key} className="flex items-center gap-3 p-2">
-                  <div className="w-10 h-10 rounded overflow-hidden border border-gray-200 bg-gray-100 flex items-center justify-center flex-shrink-0">
+                  <div className="w-10 h-10 rounded-lg overflow-hidden border border-border bg-muted flex items-center justify-center flex-shrink-0">
                     {entry.previewUrl ? (
                       <img
                         src={entry.previewUrl}
@@ -386,18 +374,18 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
                         className="w-full h-full object-cover"
                       />
                     ) : (
-                      <Film className="w-5 h-5 text-gray-500" />
+                      <Film className="w-5 h-5 text-muted-foreground" />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-black font-mono truncate">
+                    <p className="text-xs font-bold text-foreground font-mono truncate">
                       {entry.file.name}
                     </p>
-                    <p className="text-[11px] text-gray-500 font-mono truncate">
+                    <p className="text-[11px] text-muted-foreground font-mono truncate">
                       {formatBytes(entry.file.size)} &bull; {entry.file.type || 'unknown type'}
                     </p>
                     {entry.error && (
-                      <p className="text-[11px] text-red-700 truncate" title={entry.error}>
+                      <p className="text-[11px] text-destructive truncate" title={entry.error}>
                         {entry.error}
                       </p>
                     )}
@@ -408,7 +396,7 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
                       <button
                         type="button"
                         onClick={() => handleRemoveEntry(entry.key)}
-                        className="text-gray-400 hover:text-black cursor-pointer"
+                        className="text-muted-foreground hover:text-foreground cursor-pointer"
                         title="Remove file"
                       >
                         <X className="w-3.5 h-3.5" />
@@ -424,14 +412,14 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
         {/* Category & Album Row */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
               Asset Category *
             </label>
             <select
               value={category}
               onChange={(e) => setCategory(e.target.value as MediaCategory)}
               disabled={isUploading}
-              className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              className="w-full px-3 py-2 text-xs border border-border rounded-lg text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all disabled:opacity-50"
             >
               <option value="event">Tournament / Event</option>
               <option value="community">Community & Campus</option>
@@ -443,14 +431,14 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
               Album Collection (Optional)
             </label>
             <select
               value={selectedAlbumId}
               onChange={(e) => setSelectedAlbumId(e.target.value)}
               disabled={isUploading}
-              className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+              className="w-full px-3 py-2 text-xs border border-border rounded-lg text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all disabled:opacity-50"
             >
               <option value="">No Album (Standalone)</option>
               {albums?.map((alb) => (
@@ -460,7 +448,7 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
               ))}
             </select>
             {albumEventTitle && (
-              <p className="text-[10px] text-gray-500">
+              <p className="text-[10px] text-muted-foreground">
                 Album is linked to event: {albumEventTitle}
               </p>
             )}
@@ -469,14 +457,14 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
 
         {/* Event link */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             Linked Event (Optional)
           </label>
           <select
             value={selectedEventId}
             onChange={(e) => setSelectedEventId(e.target.value)}
             disabled={isUploading}
-            className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black bg-white focus:outline-none focus:border-black"
+            className="w-full px-3 py-2 text-xs border border-border rounded-lg text-foreground bg-card focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all disabled:opacity-50"
           >
             <option value="">No Event</option>
             {events?.map((ev) => (
@@ -490,28 +478,26 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
         {/* Caption */}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
-            <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+            <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
               Caption / Context
             </label>
-            <span className="text-[10px] text-gray-400 font-mono">
+            <span className="text-[10px] text-muted-foreground font-mono">
               {caption.length}/{MEDIA_UPLOAD_LIMITS.captionMax}
             </span>
           </div>
           <textarea
             value={caption}
-            onChange={(e) =>
-              setCaption(e.target.value.slice(0, MEDIA_UPLOAD_LIMITS.captionMax))
-            }
+            onChange={(e) => setCaption(e.target.value.slice(0, MEDIA_UPLOAD_LIMITS.captionMax))}
             disabled={isUploading}
             rows={2}
             placeholder="Brief caption or description for public galleries (applied to every file)..."
-            className="w-full px-3 py-2 text-xs border border-gray-300 rounded text-black placeholder-gray-400 focus:outline-none focus:border-black resize-none"
+            className="w-full px-3 py-2 text-xs border border-border rounded-lg text-foreground bg-card placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none transition-all disabled:opacity-50"
           />
         </div>
 
         {/* Tags Chip Input */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-gray-700">
+          <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             Tags & Keywords
           </label>
           <div className="flex items-center gap-2">
@@ -523,13 +509,13 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
               disabled={isUploading}
               maxLength={MEDIA_UPLOAD_LIMITS.tagMax + 1}
               placeholder="Add tag and press Enter (e.g. valorant, finals, crowd)..."
-              className="flex-1 px-3 py-1.5 text-xs border border-gray-300 rounded text-black placeholder-gray-400 focus:outline-none focus:border-black"
+              className="flex-1 px-3 py-1.5 text-xs border border-border rounded-lg text-foreground bg-card placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all disabled:opacity-50"
             />
             <button
               type="button"
               onClick={handleAddTag}
               disabled={isUploading}
-              className="px-3 py-1.5 text-xs font-semibold rounded border border-gray-300 bg-gray-50 text-gray-700 hover:text-black hover:border-black cursor-pointer inline-flex items-center gap-1"
+              className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-border bg-card text-foreground hover:bg-muted cursor-pointer inline-flex items-center gap-1 disabled:opacity-50"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add</span>
@@ -541,14 +527,14 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
               {tags.map((tag) => (
                 <span
                   key={tag}
-                  className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded bg-gray-100 border border-gray-200 text-gray-700"
+                  className="inline-flex items-center gap-1 text-[11px] font-mono px-2 py-0.5 rounded-md bg-muted border border-border text-foreground"
                 >
                   #{tag}
                   <button
                     type="button"
                     onClick={() => handleRemoveTag(tag)}
                     disabled={isUploading}
-                    className="text-gray-400 hover:text-black cursor-pointer"
+                    className="text-muted-foreground hover:text-foreground cursor-pointer disabled:opacity-50"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -559,12 +545,12 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
         </div>
 
         {/* Modal Footer / Actions */}
-        <div className="pt-4 border-t border-gray-200 flex items-center justify-end gap-3">
+        <div className="pt-4 border-t border-border flex items-center justify-end gap-3">
           <button
             type="button"
             onClick={requestClose}
             disabled={isUploading}
-            className="px-4 py-2 rounded text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50 cursor-pointer"
+            className="px-4 py-2 rounded-lg text-xs font-semibold border border-border text-foreground hover:bg-muted transition-colors disabled:opacity-50 cursor-pointer"
           >
             {doneCount > 0 ? 'Close' : 'Cancel'}
           </button>
@@ -572,7 +558,7 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
           <button
             type="submit"
             disabled={isUploading || pending.length === 0}
-            className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded text-xs font-bold bg-black text-white hover:bg-gray-800 transition-colors disabled:opacity-50 cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded-lg text-xs font-bold bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-50 cursor-pointer shadow-sm"
           >
             {isUploading ? (
               <>
@@ -583,17 +569,14 @@ const UploadMediaModalContent: React.FC<UploadMediaModalContentProps> = ({
               <>
                 <UploadCloud className="w-3.5 h-3.5" />
                 <span>
-                  {pending.length > 1
-                    ? `Upload ${pending.length} Assets`
-                    : 'Upload Asset'}
+                  {pending.length > 1 ? `Upload ${pending.length} Assets` : 'Upload Asset'}
                 </span>
               </>
             )}
           </button>
         </div>
       </form>
-    </div>
-    </div>
+    </>
   )
 }
 
@@ -604,15 +587,15 @@ export const UploadMediaModal: React.FC<UploadMediaModalProps> = ({
   albums,
   events,
 }) => {
-  if (!isOpen) return null
-
   return (
-    <UploadMediaModalContent
-      onClose={onClose}
-      onUpload={onUpload}
-      albums={albums}
-      events={events}
-    />
+    <Modal isOpen={isOpen} onClose={onClose} className="max-w-2xl max-h-[92vh]">
+      <UploadMediaModalContent
+        onClose={onClose}
+        onUpload={onUpload}
+        albums={albums}
+        events={events}
+      />
+    </Modal>
   )
 }
 

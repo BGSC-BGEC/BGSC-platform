@@ -204,7 +204,17 @@ export function mapBackendEvent(raw: RawBackendEvent): ClubEvent {
 export function buildCreateEventBody(input: CreateEventInput) {
   const rules = rulesFor(input.type)
   const isTeamed = rules.forcesTeams || input.isTeamed
-  const iso = (local: string) => new Date(local).toISOString()
+  /**
+   * Accepts both `datetime-local` values and date-only `YYYY-MM-DD` values. A bare date means the
+   * start of that day for a start and the end of that day for an end, so a one-day event
+   * (start date == end date) still satisfies the backend rule start_at < end_at.
+   */
+  const iso = (local: string, endOfDay = false) => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(local)) {
+      return new Date(`${local}T${endOfDay ? '23:59:59' : '00:00:00'}`).toISOString()
+    }
+    return new Date(local).toISOString()
+  }
   const status =
     input.status === 'upcoming' && canPublishWithoutForm(input.type, isTeamed, input.maxParticipants)
       ? 'upcoming'
@@ -218,11 +228,12 @@ export function buildCreateEventBody(input: CreateEventInput) {
     domain: input.domain,
     status,
     start_at: iso(input.startAt),
-    end_at: iso(input.endAt),
+    end_at: iso(input.endAt, true),
     venue: input.venue,
     registration: {
       // The deadline, not the event end: the backend refuses closes_at after start_at.
-      closes_at: iso(input.registrationClosesAt),
+      closes_at: iso(input.registrationClosesAt, true),
+
       roster_finalizes_at: isTeamed && input.rosterFinalizesAt ? iso(input.rosterFinalizesAt) : null,
       max_participants: input.maxParticipants,
       waitlist_enabled: input.waitlistEnabled,
