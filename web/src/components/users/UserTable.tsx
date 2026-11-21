@@ -93,18 +93,13 @@ const STATUS_BADGES: Record<
     dotClass: "bg-emerald-500",
     badgeClass: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
   },
-  pending: {
-    label: "Pending",
-    dotClass: "bg-amber-500",
-    badgeClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
-  },
   suspended: {
     label: "Suspended",
     dotClass: "bg-rose-500",
     badgeClass: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30",
   },
-  inactive: {
-    label: "Inactive",
+  deleted: {
+    label: "Deleted",
     dotClass: "bg-slate-400",
     badgeClass: "bg-slate-500/15 text-muted-foreground border-border",
   },
@@ -268,6 +263,27 @@ export const UserTable: React.FC<UserTableProps> = ({
             {row.getValue("joinDate") || "—"}
           </div>
         ),
+        size: 120,
+      },
+      {
+        id: "lastActiveAt",
+        accessorKey: "lastActiveAt",
+        header: "Last Active",
+        cell: ({ row }) => {
+          const lastActive = row.original.lastActiveAt
+          if (!lastActive) {
+            return <div className="text-xs text-muted-foreground">—</div>
+          }
+          const when = new Date(lastActive)
+          return (
+            <div
+              className="text-xs text-muted-foreground tabular-nums"
+              title={when.toLocaleString()}
+            >
+              {when.toLocaleDateString()}
+            </div>
+          )
+        },
         size: 120,
       },
       {

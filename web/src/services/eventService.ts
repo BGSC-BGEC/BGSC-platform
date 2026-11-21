@@ -1,5 +1,13 @@
 import { apiClient } from './apiClient'
-import type { ClubEvent } from '../types/event'
+import type {
+  ClubEvent,
+  EventCategory,
+  EventDomain,
+  EventType,
+  LeaderboardFormat,
+} from '../types/event'
+import { DEFAULT_POINTS_POOL, canPublishWithoutForm, rulesFor } from '../types/event'
+import type { EventPointsPool } from '../types/event'
 import { DEFAULT_EVENTS_DATA } from '../data/eventsData'
 
 const isMock = import.meta.env.VITE_USE_MOCK === 'true'
@@ -29,14 +37,93 @@ interface RawBackendEvent {
   }
   teaming?: {
     is_teamed?: boolean
+    team_size_min?: number | null
+    team_size_max?: number | null
+    max_teams?: number | null
+    captain_application_required?: boolean
   }
+  leaderboard?: {
+    format: LeaderboardFormat
+    elim_after_n?: number | null
+    min_participants?: number
+  } | null
+  auction?: {
+    k_multiplier: number
+    min_bid_increment: number
+    bid_timer_seconds: number
+    purse_per_team?: number | null
+    status: 'not_started' | 'live' | 'paused' | 'finished'
+    captain_user_ids?: string[]
+  } | null
   media?: {
     banner_url?: string | null
   }
+  cover_media_url?: string | null
+  logo_url?: string | null
+  points_pool?: {
+    participation?: number
+    podium_multipliers?: number[]
+    sponsor_bonus?: number
+    investment_enabled?: boolean
+    investment_cap?: number | null
+  }
+}
+
+function toPointsPoolBody(p: EventPointsPool) {
+  return {
+    participation: p.participation,
+    podium_multipliers: p.podiumMultipliers,
+    sponsor_bonus: p.sponsorBonus,
+    investment_enabled: p.investmentEnabled,
+    investment_cap: p.investmentEnabled ? p.investmentCap : null,
+  }
+}
+
+/** What the create form collects. Type-specific blocks are only sent for types that use them. */
+export interface CreateEventInput {
+  title: string
+  description: string
+  category: EventCategory
+  type: EventType
+  domain: EventDomain
+  status: 'draft' | 'upcoming'
+  venue: string | null
+  /** datetime-local strings (local time) */
+  startAt: string
+  endAt: string
+  registrationClosesAt: string
+  /** Team events only: roster lock, between registration close and start. */
+  rosterFinalizesAt: string | null
+  maxParticipants: number | null
+  waitlistEnabled: boolean
+  requiresApproval: boolean
+  isTeamed: boolean
+  teamSizeMin: number | null
+  teamSizeMax: number | null
+  maxTeams: number | null
+  captainApplicationRequired: boolean
+  leaderboardFormat: LeaderboardFormat
+  elimAfterN: number | null
+  minParticipants: number
+  auction: {
+    kMultiplier: number
+    minBidIncrement: number
+    bidTimerSeconds: number
+    pursePerTeam: number | null
+  }
+  pointsPool: EventPointsPool
 }
 
 interface BackendEventsResponse {
   events?: RawBackendEvent[]
+  total_pages?: number
+}
+
+/** A league's captain pool (GET /events/:ref/captains). Approved captain applications land here. */
+export interface EventCaptain {
+  userId: string
+  displayName: string
+  avatarUrl: string | null
 }
 
 export interface AttendanceRecord {
@@ -70,9 +157,129 @@ export function mapBackendEvent(raw: RawBackendEvent): ClubEvent {
     isTeamed: Boolean(raw.teaming?.is_teamed),
     bannerUrl: raw.media?.banner_url || null,
     registrationFormId: raw.registration?.form_id || null,
+    registrationClosesAt: raw.registration?.closes_at
+      ? new Date(raw.registration.closes_at).toISOString()
+      : null,
     waitlistEnabled: Boolean(raw.registration?.waitlist_enabled),
     requiresApproval: Boolean(raw.registration?.requires_approval),
+    teaming: {
+      teamSizeMin: raw.teaming?.team_size_min ?? null,
+      teamSizeMax: raw.teaming?.team_size_max ?? null,
+      maxTeams: raw.teaming?.max_teams ?? null,
+      captainApplicationRequired: Boolean(raw.teaming?.captain_application_required),
+    },
+    leaderboard: raw.leaderboard
+      ? {
+          format: raw.leaderboard.format,
+          elimAfterN: raw.leaderboard.elim_after_n ?? null,
+          minParticipants: raw.leaderboard.min_participants ?? 2,
+        }
+      : null,
+    auction: raw.auction
+      ? {
+          kMultiplier: raw.auction.k_multiplier,
+          minBidIncrement: raw.auction.min_bid_increment,
+          bidTimerSeconds: raw.auction.bid_timer_seconds,
+          pursePerTeam: raw.auction.purse_per_team ?? null,
+          status: raw.auction.status,
+          captainUserIds: raw.auction.captain_user_ids ?? [],
+        }
+      : null,
+    coverMediaUrl: raw.cover_media_url ?? raw.media?.banner_url ?? null,
+    logoUrl: raw.logo_url ?? null,
+    pointsPool: {
+      participation: raw.points_pool?.participation ?? DEFAULT_POINTS_POOL.participation,
+      podiumMultipliers: raw.points_pool?.podium_multipliers ?? DEFAULT_POINTS_POOL.podiumMultipliers,
+      sponsorBonus: raw.points_pool?.sponsor_bonus ?? DEFAULT_POINTS_POOL.sponsorBonus,
+      investmentEnabled: raw.points_pool?.investment_enabled ?? DEFAULT_POINTS_POOL.investmentEnabled,
+      investmentCap: raw.points_pool?.investment_cap ?? DEFAULT_POINTS_POOL.investmentCap,
+    },
   }
+}
+
+/**
+ * Builds the POST /events body for a type (spec §4/§5.15). Only the blocks the type uses are sent:
+ * DE gets no leaderboard, only ALL gets an auction, leagues are always teamed.
+ */
+export function buildCreateEventBody(input: CreateEventInput) {
+  const rules = rulesFor(input.type)
+  const isTeamed = rules.forcesTeams || input.isTeamed
+  /**
+   * Accepts both `datetime-local` values and date-only `YYYY-MM-DD` values. A bare date means the
+   * start of that day for a start and the end of that day for an end, so a one-day event
+   * (start date == end date) still satisfies the backend rule start_at < end_at.
+   */
+  const iso = (local: string, endOfDay = false) => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(local)) {
+      return new Date(`${local}T${endOfDay ? '23:59:59' : '00:00:00'}`).toISOString()
+    }
+    return new Date(local).toISOString()
+  }
+  const status =
+    input.status === 'upcoming' && canPublishWithoutForm(input.type, isTeamed, input.maxParticipants)
+      ? 'upcoming'
+      : 'draft'
+
+  return {
+    title: input.title,
+    description: input.description,
+    category: input.category,
+    type: input.type,
+    domain: input.domain,
+    status,
+    start_at: iso(input.startAt),
+    end_at: iso(input.endAt, true),
+    venue: input.venue,
+    registration: {
+      // The deadline, not the event end: the backend refuses closes_at after start_at.
+      closes_at: iso(input.registrationClosesAt, true),
+
+      roster_finalizes_at: isTeamed && input.rosterFinalizesAt ? iso(input.rosterFinalizesAt) : null,
+      max_participants: input.maxParticipants,
+      waitlist_enabled: input.waitlistEnabled,
+      requires_approval: input.requiresApproval,
+    },
+    teaming: {
+      is_teamed: isTeamed,
+      team_size_min: isTeamed ? input.teamSizeMin : null,
+      team_size_max: isTeamed ? input.teamSizeMax : null,
+      max_teams: isTeamed ? input.maxTeams : null,
+      // Spec §5.5: leagues review captains; elsewhere a captain is approved by registering.
+      captain_application_required: isTeamed && input.captainApplicationRequired,
+    },
+    leaderboard: rules.hasLeaderboard
+      ? {
+          format: input.leaderboardFormat,
+          elim_after_n: input.leaderboardFormat === 'elim_after_n' ? input.elimAfterN : null,
+          min_participants: input.minParticipants,
+        }
+      : null,
+    auction: rules.isAuction
+      ? {
+          k_multiplier: input.auction.kMultiplier,
+          min_bid_increment: input.auction.minBidIncrement,
+          bid_timer_seconds: input.auction.bidTimerSeconds,
+          purse_per_team: input.auction.pursePerTeam,
+        }
+      : null,
+    points_pool: toPointsPoolBody(input.pointsPool),
+  }
+}
+
+/** Update only the event's points settings (PATCH merges nested objects). */
+export async function updatePointsPool(id: string, pool: EventPointsPool): Promise<ClubEvent> {
+  return updateEvent(id, { points_pool: toPointsPoolBody(pool) })
+}
+
+/**
+ * Upload the event cover/poster or logo: POST /events/:id/media?type=cover|logo with the raw
+ * image bytes (JPEG/PNG/WebP, max 10 MB; event admins only, not for past/cancelled events).
+ * Returns the stored `/uploads/...` URL.
+ */
+export async function uploadEventImage(id: string, kind: 'cover' | 'logo', file: File): Promise<string> {
+  if (isMock) return URL.createObjectURL(file)
+  const res = await apiClient.post<{ url: string }>(`/events/${id}/media?type=${kind}`, file)
+  return res.url
 }
 
 export async function getEvents(): Promise<ClubEvent[]> {
@@ -82,86 +289,33 @@ export async function getEvents(): Promise<ClubEvent[]> {
   }
 
   try {
-    const res = await apiClient.get<BackendEventsResponse | RawBackendEvent[]>('/events')
-    const list = Array.isArray(res) ? res : res?.events || []
-    return list.map(mapBackendEvent)
+    // The API pages (default 20). An admin console needs every event, so walk the pages.
+    const all: RawBackendEvent[] = []
+    for (let page = 1; page <= 50; page++) {
+      const res = await apiClient.get<BackendEventsResponse | RawBackendEvent[]>(
+        `/events?page=${page}&limit=100&sort=date_desc`
+      )
+      if (Array.isArray(res)) return res.map(mapBackendEvent)
+      all.push(...(res?.events || []))
+      if (!res?.total_pages || page >= res.total_pages) break
+    }
+    return all.map(mapBackendEvent)
   } catch (error) {
     console.warn('[eventService] Failed to fetch events from backend:', error)
     return isMock ? DEFAULT_EVENTS_DATA : []
   }
 }
 
-export async function createEvent(
-  payload: Partial<ClubEvent> & Record<string, unknown>
-): Promise<ClubEvent> {
-  // The form sends date-only values (YYYY-MM-DD). Read them as local times: the start is the
-  // beginning of its day and the end is the end of its day, so a one-day event (start date ==
-  // end date) still satisfies the backend rule start_at < end_at.
-  const toIso = (value: unknown, endOfDay: boolean): string => {
-    const raw = String(value || '')
-    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-      return new Date(`${raw}T${endOfDay ? '23:59:59' : '00:00:00'}`).toISOString()
-    }
-    return new Date(raw || Date.now()).toISOString()
-  }
-  const startIso = toIso(payload.startAt || payload.start_at, false)
-  const endIso = toIso(payload.endAt || payload.end_at, true)
-  // Backend rule: registration must close at or before the event starts. A closing date on the
-  // start date itself means "when the event starts"; an earlier date means the end of that day.
-  const closesDate = String(payload.registrationClosesAt || payload.startAt || payload.start_at || '')
-  const closesIso =
-    closesDate && closesDate !== String(payload.startAt || payload.start_at)
-      ? toIso(closesDate, true)
-      : startIso
-
-  const isTeamed = Boolean(payload.type === 'ALL' || payload.isTeamed)
-  const formId = (payload.registrationFormId || (payload.registration as Record<string, unknown> | undefined)?.form_id) as string | undefined
-  const hasForm = Boolean(formId)
-  const canBeUpcoming = hasForm || (payload.type === 'DE' && !isTeamed && !payload.maxParticipants)
-  const status = (payload.status === 'upcoming' && canBeUpcoming) ? 'upcoming' : 'draft'
-
-  const requestBody = {
-    title: payload.title,
-    description: payload.description || '',
-    category: payload.category || 'leagues',
-    type: payload.type || 'LE',
-    domain: payload.domain || 'sports',
-    status,
-    start_at: startIso,
-    end_at: endIso,
-    venue: payload.venue || null,
-    registration: {
-      closes_at: closesIso,
-      form_id: formId || null,
-      max_participants: payload.maxParticipants ?? null,
-      waitlist_enabled: Boolean(payload.waitlistEnabled),
-      requires_approval: Boolean(payload.requiresApproval),
-    },
-    teaming: {
-      is_teamed: isTeamed,
-      team_size_min: isTeamed ? (Number(payload.teamSizeMin) || 2) : null,
-      team_size_max: isTeamed ? (Number(payload.teamSizeMax) || 5) : null,
-      max_teams: isTeamed ? (Number(payload.maxTeams) || 16) : null,
-    },
-    auction:
-      payload.type === 'ALL'
-        ? {
-            k_multiplier: 1.0,
-            min_bid_increment: 100,
-            bid_timer_seconds: 15,
-            purse_per_team: 10000,
-          }
-        : null,
-  }
+export async function createEvent(input: CreateEventInput): Promise<ClubEvent> {
+  const requestBody = buildCreateEventBody(input)
 
   if (isMock) {
     await new Promise((resolve) => setTimeout(resolve, 250))
     const mockCreated = mapBackendEvent({
       ...requestBody,
       id: `evt-${Date.now()}`,
-      title: String(payload.title || 'Untitled Event'),
-      category: (payload.category as ClubEvent['category']) || 'general',
-    } as RawBackendEvent)
+      registration: { ...requestBody.registration, closes_at: requestBody.registration.closes_at },
+    } as unknown as RawBackendEvent)
     DEFAULT_EVENTS_DATA.unshift(mockCreated)
     return mockCreated
   }
@@ -267,7 +421,28 @@ export async function promoteWaitlist(
   return true
 }
 
+export async function getCaptains(eventId: string): Promise<EventCaptain[]> {
+  if (isMock) return []
+  const res = await apiClient.get<{
+    captains?: { user_id: string; display_name: string; avatar_url: string | null }[]
+  }>(`/events/${eventId}/captains`)
+  return (res?.captains || []).map((c) => ({
+    userId: c.user_id,
+    displayName: c.display_name,
+    avatarUrl: c.avatar_url,
+  }))
+}
+
+export async function removeCaptain(eventId: string, userId: string): Promise<void> {
+  if (isMock) return
+  await apiClient.delete(`/events/${eventId}/captains/${userId}`)
+}
+
 export const eventService = {
+  updatePointsPool,
+  uploadEventImage,
+  getCaptains,
+  removeCaptain,
   getEvents,
   createEvent,
   updateEvent,

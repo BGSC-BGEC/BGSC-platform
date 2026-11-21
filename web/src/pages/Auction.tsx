@@ -23,7 +23,7 @@ import { LotQueueTable } from '../components/auction/LotQueueTable'
 
 export const Auction: React.FC = () => {
   const [events, setEvents] = useState<ClubEvent[]>([])
-  const [selectedEventId, setSelectedEventId] = useState<string>('evt-002')
+  const [selectedEventId, setSelectedEventId] = useState<string>('')
 
   const [auctionState, setAuctionState] = useState<LiveAuctionState | null>(null)
   const [lots, setLots] = useState<AuctionLot[]>([])
@@ -47,13 +47,13 @@ export const Auction: React.FC = () => {
     eventService
       .getEvents()
       .then((list) => {
-        setEvents(list)
+        // Only ALL (Auction Leaderboard League) events have an auction; any other type is refused
+        // by the API (event_is_not_an_auction_league), so they are not offered here.
         const auctionEvents = list.filter((e) => e.type === 'ALL')
-        if (auctionEvents.length > 0) {
-          setSelectedEventId(auctionEvents[0].id)
-        } else if (list.length > 0) {
-          setSelectedEventId(list[0].id)
-        }
+        setEvents(auctionEvents)
+        const requested = new URLSearchParams(window.location.search).get('event')
+        const preferred = auctionEvents.find((e) => e.id === requested) ?? auctionEvents[0]
+        if (preferred) setSelectedEventId(preferred.id)
       })
       .catch(() => {})
   }, [])
@@ -61,6 +61,8 @@ export const Auction: React.FC = () => {
   // Initial data load when selectedEventId changes
   useEffect(() => {
     let ignore = false
+    // No auction league selected (or none exist yet): nothing to load; the empty state renders.
+    if (!selectedEventId) return
     setIsLoading(true)
 
     Promise.all([
@@ -340,7 +342,7 @@ export const Auction: React.FC = () => {
             >
               {events.map((ev) => (
                 <option key={ev.id} value={ev.id}>
-                  {ev.title} {ev.type === 'ALL' ? '(ALL)' : ''}
+                  {ev.title}
                 </option>
               ))}
             </select>
@@ -422,8 +424,17 @@ export const Auction: React.FC = () => {
         </div>
       )}
 
+      {!isLoading && events.length === 0 && (
+        <div className="py-20 text-center space-y-2 border border-border rounded">
+          <p className="text-sm font-bold text-foreground">No auction leagues yet</p>
+          <p className="text-xs text-muted-foreground">
+            Auctions exist only for ALL (Auction Leaderboard League) events. Create one on the Events page.
+          </p>
+        </div>
+      )}
+
       {/* 3. Loading State */}
-      {isLoading ? (
+      {events.length === 0 ? null : isLoading ? (
         <div className="py-20 text-center space-y-3">
           <RefreshCw className="w-8 h-8 text-primary animate-spin mx-auto" />
           <p className="text-xs uppercase font-bold tracking-wider text-muted-foreground">

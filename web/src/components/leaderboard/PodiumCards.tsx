@@ -5,7 +5,8 @@ import { Button } from '../ui/button'
 
 export interface PodiumCardsProps {
   topThree: LeaderboardEntry[]
-  onAdjustPoints: (entry: LeaderboardEntry) => void
+  /** Omit to hide the Adjust Points buttons (role below `points.adjust`). */
+  onAdjustPoints?: (entry: LeaderboardEntry) => void
 }
 
 export const PodiumCards: React.FC<PodiumCardsProps> = ({
@@ -29,9 +30,11 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
                 <Medal className="w-3.5 h-3.5" />
                 #2 Silver
               </span>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-border bg-muted/40 text-muted-foreground">
-                {second.domain}
-              </span>
+              {second.domain && (
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-border bg-muted/40 text-muted-foreground">
+                  {second.domain}
+                </span>
+              )}
             </div>
 
             <div>
@@ -49,19 +52,21 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
             </div>
           </div>
 
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              onAdjustPoints(second)
-            }}
-            className="w-full mt-2 text-xs font-semibold"
-          >
-            Adjust Points
-          </Button>
+          {onAdjustPoints && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onAdjustPoints?.(second)
+              }}
+              className="w-full mt-2 text-xs font-semibold"
+            >
+              Adjust Points
+            </Button>
+          )}
         </div>
       )}
 
@@ -74,9 +79,11 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
                 <Trophy className="w-4 h-4 text-amber-300" />
                 #1 Champion
               </span>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-primary/30 bg-primary/10 text-primary">
-                {first.domain}
-              </span>
+              {first.domain && (
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-primary/30 bg-primary/10 text-primary">
+                  {first.domain}
+                </span>
+              )}
             </div>
 
             <div>
@@ -94,19 +101,21 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
             </div>
           </div>
 
-          <Button
-            type="button"
-            variant="default"
-            size="sm"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              onAdjustPoints(first)
-            }}
-            className="w-full mt-2 text-xs font-bold"
-          >
-            Adjust Points
-          </Button>
+          {onAdjustPoints && (
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onAdjustPoints?.(first)
+              }}
+              className="w-full mt-2 text-xs font-bold"
+            >
+              Adjust Points
+            </Button>
+          )}
         </div>
       )}
 
@@ -119,9 +128,11 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
                 <Award className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                 #3 Bronze
               </span>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-border bg-muted/40 text-muted-foreground">
-                {third.domain}
-              </span>
+              {third.domain && (
+                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-border bg-muted/40 text-muted-foreground">
+                  {third.domain}
+                </span>
+              )}
             </div>
 
             <div>
@@ -139,19 +150,21 @@ export const PodiumCards: React.FC<PodiumCardsProps> = ({
             </div>
           </div>
 
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={(e) => {
-              e.preventDefault()
-              e.stopPropagation()
-              onAdjustPoints(third)
-            }}
-            className="w-full mt-2 text-xs font-semibold"
-          >
-            Adjust Points
-          </Button>
+          {onAdjustPoints && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onAdjustPoints?.(third)
+              }}
+              className="w-full mt-2 text-xs font-semibold"
+            >
+              Adjust Points
+            </Button>
+          )}
         </div>
       )}
     </div>

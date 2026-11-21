@@ -12,19 +12,25 @@ import {
   FolderArchive,
   AlertCircle,
   X,
+  FolderPlus,
 } from 'lucide-react'
 import type {
+  CreateAlbumPayload,
   MediaAlbum,
   MediaCategory,
   MediaItem,
   MediaStatus,
   MediaType,
+  UpdateMediaPayload,
   UploadMediaPayload,
 } from '../types/media'
 import { mediaService } from '../services/mediaService'
 import { MediaGrid } from '../components/media/MediaGrid'
 import { MediaPreviewModal } from '../components/media/MediaPreviewModal'
 import { UploadMediaModal } from '../components/media/UploadMediaModal'
+import type { MediaEventOption } from '../components/media/UploadMediaModal'
+import { CreateAlbumModal } from '../components/media/CreateAlbumModal'
+import { getEvents } from '../services/eventService'
 
 function formatBytes(bytes: number): string {
   if (!bytes) return '0 MB'
@@ -43,6 +49,24 @@ export const Media: React.FC = () => {
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null)
   const [isPreviewOpen, setIsPreviewOpen] = useState(false)
   const [isUploadOpen, setIsUploadOpen] = useState(false)
+  const [isAlbumOpen, setIsAlbumOpen] = useState(false)
+
+  // Events for the optional event link on uploads and albums (loaded once)
+  const [events, setEvents] = useState<MediaEventOption[]>([])
+
+  useEffect(() => {
+    let ignore = false
+    getEvents()
+      .then((list) => {
+        if (!ignore) setEvents(list.map((ev) => ({ id: ev.id, title: ev.title })))
+      })
+      .catch(() => {
+        // The event link is optional; uploads still work without the list
+      })
+    return () => {
+      ignore = true
+    }
+  }, [])
 
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshing, setIsRefreshing] = useState(false)
@@ -154,6 +178,39 @@ export const Media: React.FC = () => {
     setAllMediaItems((prev) => [newItem, ...prev])
   }
 
+  const handleUpdate = async (id: string, payload: UpdateMediaPayload) => {
+    const updated = await mediaService.updateMedia(id, payload)
+    setSelectedItem(updated)
+    setMediaItems((prev) => prev.map((m) => (m.id === id ? updated : m)))
+    setAllMediaItems((prev) => prev.map((m) => (m.id === id ? updated : m)))
+  }
+
+  const handleCreateAlbum = async (payload: CreateAlbumPayload) => {
+    const album = await mediaService.createAlbum(payload)
+    setAlbums((prev) => [album, ...prev])
+  }
+
+  // The backend sends ids only; resolve event and album titles for display
+  const withTitles = useCallback(
+    (item: MediaItem): MediaItem => ({
+      ...item,
+      event_title:
+        item.event_title ??
+        (item.event_id ? events.find((ev) => ev.id === item.event_id)?.title : undefined) ??
+        null,
+      album_title:
+        item.album_title ??
+        (item.album_id ? albums.find((a) => a.id === item.album_id)?.title : undefined) ??
+        null,
+    }),
+    [events, albums]
+  )
+  const displayItems = useMemo(() => mediaItems.map(withTitles), [mediaItems, withTitles])
+  const displaySelectedItem = useMemo(
+    () => (selectedItem ? withTitles(selectedItem) : null),
+    [selectedItem, withTitles]
+  )
+
   const handleModerate = async (
     id: string,
     status: MediaStatus,
@@ -221,6 +278,15 @@ export const Media: React.FC = () => {
           >
             <RotateCcw className="w-3.5 h-3.5 text-muted-foreground" />
             <span>Reset Demo</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsAlbumOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded border border-border bg-card text-foreground hover:text-foreground hover:border-primary/50 transition-colors cursor-pointer"
+          >
+            <FolderPlus className="w-3.5 h-3.5 text-muted-foreground" />
+            <span>New Album</span>
           </button>
 
           <button
@@ -450,7 +516,7 @@ export const Media: React.FC = () => {
         </div>
       ) : (
         <MediaGrid
-          items={mediaItems}
+          items={displayItems}
           viewMode={viewMode}
           onSelectItem={handleSelectItem}
           onDeleteItem={handleDelete}
@@ -459,11 +525,12 @@ export const Media: React.FC = () => {
 
       {/* 6. Modals */}
       <MediaPreviewModal
-        item={selectedItem}
+        item={displaySelectedItem}
         isOpen={isPreviewOpen}
         onClose={handleClosePreview}
         onModerate={handleModerate}
         onDelete={handleDelete}
+        onUpdate={handleUpdate}
       />
 
       <UploadMediaModal
@@ -471,6 +538,14 @@ export const Media: React.FC = () => {
         onClose={handleCloseUpload}
         onUpload={handleUpload}
         albums={albums}
+        events={events}
+      />
+
+      <CreateAlbumModal
+        isOpen={isAlbumOpen}
+        onClose={() => setIsAlbumOpen(false)}
+        onCreate={handleCreateAlbum}
+        events={events}
       />
     </div>
   )

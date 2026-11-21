@@ -1,11 +1,12 @@
 import React from 'react'
-import { Trophy, Medal, Award, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { Trophy, Medal, Award } from 'lucide-react'
 import type { LeaderboardEntry } from '../../types/leaderboard'
 import { Button } from '../ui/button'
 
 export interface LeaderboardTableProps {
   entries: LeaderboardEntry[]
-  onAdjustPoints: (entry: LeaderboardEntry) => void
+  /** Omit to hide the Action column (role below `points.adjust`). */
+  onAdjustPoints?: (entry: LeaderboardEntry) => void
 }
 
 export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
@@ -20,10 +21,8 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
             <tr>
               <th className="px-4 py-3 text-center w-16">Rank</th>
               <th className="px-4 py-3">Athlete / Member</th>
-              <th className="px-4 py-3">Domain</th>
-              <th className="px-4 py-3 text-center">Movement</th>
-              <th className="px-4 py-3 text-right">Points Balance</th>
-              <th className="px-4 py-3 text-right">Action</th>
+              <th className="px-4 py-3 text-right">Points Earned</th>
+              {onAdjustPoints && <th className="px-4 py-3 text-right">Action</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-border/60">
@@ -63,38 +62,14 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                     <div className="font-semibold text-foreground text-xs sm:text-sm">
                       {entry.name}
                     </div>
-                    <div className="text-[11px] text-muted-foreground font-mono">
-                      @{entry.username}
-                    </div>
-                  </td>
-
-                  {/* Domain Badge */}
-                  <td className="px-4 py-3">
-                    <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border border-border bg-muted/40 text-muted-foreground">
-                      {entry.domain}
-                    </span>
-                  </td>
-
-                  {/* Movement / Change */}
-                  <td className="px-4 py-3 text-center">
-                    {entry.change > 0 ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 px-2 py-0.5 rounded-md">
-                        <TrendingUp className="w-3 h-3" />
-                        +{entry.change}
-                      </span>
-                    ) : entry.change < 0 ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400 bg-rose-500/15 border border-rose-500/30 px-2 py-0.5 rounded-md">
-                        <TrendingDown className="w-3 h-3" />
-                        {entry.change}
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center text-muted-foreground text-xs">
-                        <Minus className="w-3 h-3" />
-                      </span>
+                    {entry.username && (
+                      <div className="text-[11px] text-muted-foreground font-mono">
+                        @{entry.username}
+                      </div>
                     )}
                   </td>
 
-                  {/* Points Balance */}
+                  {/* Points Earned */}
                   <td className="px-4 py-3 text-right">
                     <span className="font-mono font-bold text-foreground text-xs sm:text-sm">
                       {entry.points.toLocaleString()}
@@ -103,21 +78,23 @@ export const LeaderboardTable: React.FC<LeaderboardTableProps> = ({
                   </td>
 
                   {/* Action */}
-                  <td className="px-4 py-3 text-right">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={(e) => {
-                        e.preventDefault()
-                        e.stopPropagation()
-                        onAdjustPoints(entry)
-                      }}
-                      className="h-8 px-3 text-xs font-semibold"
-                    >
-                      Adjust
-                    </Button>
-                  </td>
+                  {onAdjustPoints && (
+                    <td className="px-4 py-3 text-right">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          onAdjustPoints(entry)
+                        }}
+                        className="h-8 px-3 text-xs font-semibold"
+                      >
+                        Adjust
+                      </Button>
+                    </td>
+                  )}
                 </tr>
               )
             })}

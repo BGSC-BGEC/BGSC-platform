@@ -1,7 +1,21 @@
-import React, { useState, useEffect } from 'react'
-import { X, Trophy, AlertTriangle, Loader2 } from 'lucide-react'
-import type { ClubEvent, EventCategory, EventDomain, EventType } from '../../types/event'
+import React, { useState } from 'react'
+import type {
+  ClubEvent,
+  EventCategory,
+  EventDomain,
+  EventType,
+  LeaderboardFormat,
+} from '../../types/event'
+import {
+  DEFAULT_POINTS_POOL,
+  EVENT_TYPE_RULES,
+  LEADERBOARD_FORMAT_LABELS,
+  SELECTABLE_LEADERBOARD_FORMATS,
+  canPublishWithoutForm,
+  rulesFor,
+} from '../../types/event'
 import { eventService } from '../../services/eventService'
+import { X, Trophy, AlertTriangle, Loader2 } from 'lucide-react'
 import { Modal } from '../ui/modal'
 import { Button } from '../ui/button'
 
@@ -11,52 +25,131 @@ export interface CreateEventModalProps {
   onEventCreated: (newEvent: ClubEvent) => void
 }
 
+const INPUT =
+  'w-full px-3.5 py-2.5 text-sm rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all'
+const LABEL = 'block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5'
+const SECTION = 'space-y-3 p-4 border border-border rounded-xl bg-muted/20'
+const SECTION_TITLE = 'text-xs font-bold uppercase tracking-wider text-foreground'
+
+/** `datetime-local` value for a Date, in local time. */
+function toLocalInput(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+function defaults() {
+  const start = new Date()
+  start.setDate(start.getDate() + 7)
+  start.setHours(10, 0, 0, 0)
+  const end = new Date(start)
+  end.setHours(18)
+  const closes = new Date(start)
+  closes.setDate(closes.getDate() - 1)
+  closes.setHours(23, 59, 0, 0)
+  return { start: toLocalInput(start), end: toLocalInput(end), closes: toLocalInput(closes) }
+}
+
 export const CreateEventModal: React.FC<CreateEventModalProps> = ({
   isOpen,
   onClose,
   onEventCreated,
 }) => {
-  const today = new Date().toISOString().split('T')[0]
+  const initial = defaults()
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [category, setCategory] = useState<EventCategory>('leagues')
-  const [type, setType] = useState<EventType>('LE')
+  const [category, setCategory] = useState<EventCategory>('general')
+  const [type, setType] = useState<EventType>('DE')
   const [domain, setDomain] = useState<EventDomain>('sports')
   const [venue, setVenue] = useState('')
-  const [startAt, setStartAt] = useState(today)
-  const [endAt, setEndAt] = useState(today)
-  const [registrationClosesAt, setRegistrationClosesAt] = useState(today)
+  const [startAt, setStartAt] = useState(initial.start)
+  const [endAt, setEndAt] = useState(initial.end)
+  const [closesAt, setClosesAt] = useState(initial.closes)
+  const [rosterFinalizesAt, setRosterFinalizesAt] = useState('')
+  const [capacityEnabled, setCapacityEnabled] = useState(false)
   const [maxParticipants, setMaxParticipants] = useState<number>(32)
-  const [isTeamed, setIsTeamed] = useState(false)
   const [waitlistEnabled, setWaitlistEnabled] = useState(true)
   const [requiresApproval, setRequiresApproval] = useState(false)
   const [status, setStatus] = useState<'draft' | 'upcoming'>('draft')
+
+  // Teams (leagues default on; ALL forces it)
+  const [isTeamed, setIsTeamed] = useState(false)
+  const [teamSizeMin, setTeamSizeMin] = useState(2)
+  const [teamSizeMax, setTeamSizeMax] = useState(5)
+  const [maxTeams, setMaxTeams] = useState(8)
+  const [captainApplicationRequired, setCaptainApplicationRequired] = useState(false)
+
+  // Leaderboard (every type except DE)
+  const [leaderboardFormat, setLeaderboardFormat] = useState<LeaderboardFormat>('points_table')
+  // elim_after_n is not offered (no bracket generator for it); kept only to satisfy the input type.
+  const elimAfterN = 2
+  const [minParticipants, setMinParticipants] = useState(2)
+
+  // Auction (ALL only) — spec §5.15.4 defaults: 5 s timer
+  const [kMultiplier, setKMultiplier] = useState(1.0)
+  const [minBidIncrement, setMinBidIncrement] = useState(100)
+  const [bidTimerSeconds, setBidTimerSeconds] = useState(5)
+  const [pursePerTeam, setPursePerTeam] = useState<number | ''>('')
+
+  // Points (event.points_pool) — backend defaults
+  const [participationPoints, setParticipationPoints] = useState(DEFAULT_POINTS_POOL.participation)
+  const [podiumMultipliers, setPodiumMultipliers] = useState(DEFAULT_POINTS_POOL.podiumMultipliers.join(', '))
+  const [sponsorBonus, setSponsorBonus] = useState(DEFAULT_POINTS_POOL.sponsorBonus)
+  const [investmentEnabled, setInvestmentEnabled] = useState(false)
+  const [investmentCap, setInvestmentCap] = useState<number | ''>('')
+
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+  const rules = rulesFor(type)
+  const teamed = rules.forcesTeams || isTeamed
+  const capacity = capacityEnabled ? maxParticipants : null
+  const canGoLive = canPublishWithoutForm(type, teamed, capacity)
+
+  if (!isOpen) return null
+
+  /** Changing the type re-shapes the form to that type's defaults (spec §5.5 / §5.15). */
+  const handleTypeChange = (next: EventType) => {
+    const r = rulesFor(next)
+    setType(next)
+    setIsTeamed(r.isLeague)
+    setCaptainApplicationRequired(r.isLeague)
+    if (r.isLeague) setCategory('leagues')
+    if (r.isLeague) setLeaderboardFormat(r.isAuction ? 'single_elim' : 'round_robin')
+    else setLeaderboardFormat('points_table')
+    if (!canPublishWithoutForm(next, r.isLeague, capacity)) setStatus('draft')
+  }
+
+  const validate = (): string | null => {
+    const s = new Date(startAt)
+    const e = new Date(endAt)
+    const c = new Date(closesAt)
+    if (!(s < e)) return 'The event must end after it starts.'
+    if (c > s) return 'Registration must close at or before the event start.'
+    if (teamed) {
+      if (teamSizeMin < 1 || teamSizeMin > teamSizeMax) return 'Team size: 1 ≤ min ≤ max.'
+      if (rosterFinalizesAt) {
+        const r = new Date(rosterFinalizesAt)
+        if (r < c || r > s) return 'Roster lock must fall between registration close and the event start.'
+      }
     }
-    if (isOpen) {
-      window.addEventListener('keydown', handleKeyDown)
+    const multipliers = podiumMultipliers.split(',').map((s) => Number(s.trim()))
+    if (multipliers.some((m) => !(m > 0))) return 'Podium multipliers must be positive numbers, e.g. 3, 2, 1.5.'
+    if (participationPoints < 0 || sponsorBonus < 0) return 'Points cannot be negative.'
+    if (rules.isAuction) {
+      if (!(kMultiplier > 0)) return 'K multiplier must be greater than 0.'
+      if (minBidIncrement < 1) return 'Minimum bid increment must be at least 1.'
+      if (bidTimerSeconds < 5 || bidTimerSeconds > 60) return 'Bid timer must be 5–60 seconds.'
     }
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [isOpen, onClose])
+    return null
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!title.trim()) return
-
-    if (endAt < startAt) {
-      setError('The end date cannot be before the start date.')
-      return
-    }
-    if (registrationClosesAt > startAt) {
-      setError('Registration must close on or before the start date.')
+    const problem = validate()
+    if (problem) {
+      setError(problem)
       return
     }
 
@@ -70,15 +163,36 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
         category,
         type,
         domain,
+        status,
         venue: venue.trim() || null,
         startAt,
         endAt,
-        registrationClosesAt,
-        maxParticipants: maxParticipants > 0 ? maxParticipants : null,
-        isTeamed: type === 'ALL' ? true : isTeamed,
-        waitlistEnabled,
+        registrationClosesAt: closesAt,
+        rosterFinalizesAt: rosterFinalizesAt || null,
+        maxParticipants: capacity,
+        waitlistEnabled: capacityEnabled && waitlistEnabled,
         requiresApproval,
-        status,
+        isTeamed: teamed,
+        teamSizeMin,
+        teamSizeMax,
+        maxTeams,
+        captainApplicationRequired,
+        leaderboardFormat,
+        elimAfterN,
+        minParticipants,
+        auction: {
+          kMultiplier,
+          minBidIncrement,
+          bidTimerSeconds,
+          pursePerTeam: pursePerTeam === '' ? null : Number(pursePerTeam),
+        },
+        pointsPool: {
+          participation: participationPoints,
+          podiumMultipliers: podiumMultipliers.split(',').map((s) => Number(s.trim())),
+          sponsorBonus,
+          investmentEnabled: rules.hasLeaderboard && investmentEnabled,
+          investmentCap: investmentCap === '' ? null : Number(investmentCap),
+        },
       })
 
       onEventCreated(createdEvent)
@@ -91,7 +205,7 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
   }
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} className="max-w-xl">
+    <Modal isOpen={isOpen} onClose={onClose} className="max-w-2xl">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30 shrink-0">
         <div className="flex items-center gap-2.5">
@@ -100,10 +214,10 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
           </div>
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">
-              Create New Tournament
+              {rules.isLeague ? 'Create New League' : 'Create New Event'}
             </h2>
             <p className="text-xs text-muted-foreground">
-              Set tournament format, registration dates, and participant quotas
+              Set the event type, schedule, registration and points
             </p>
           </div>
         </div>
@@ -117,51 +231,62 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
         </button>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden">
+      <form onSubmit={handleSubmit} className="flex flex-col flex-1 overflow-hidden text-left">
         <div className="p-6 space-y-4 overflow-y-auto flex-1">
           {error && (
-            <div className="flex items-center gap-2 p-3 text-xs rounded-xl border border-destructive/40 bg-destructive/10 text-destructive animate-in fade-in">
+            <div className="flex items-center gap-2 p-3 text-xs rounded-xl border border-destructive/40 bg-destructive/10 text-destructive">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               <span>{error}</span>
             </div>
           )}
 
+          {/* Type first: it decides which sections exist below. */}
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-              Event Title <span className="text-destructive">*</span>
-            </label>
+            <label className={LABEL}>Event Type</label>
+            <select
+              value={type}
+              onChange={(e) => handleTypeChange(e.target.value as EventType)}
+              className={INPUT}
+            >
+              {(Object.keys(EVENT_TYPE_RULES) as EventType[]).map((t) => (
+                <option key={t} value={t}>
+                  {EVENT_TYPE_RULES[t].label}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-muted-foreground mt-1">{rules.description}</p>
+          </div>
+
+          <div>
+            <label className={LABEL}>Event Title</label>
             <input
               type="text"
               required
               placeholder="e.g. BGSC Badminton Smash Open"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+              className={INPUT}
             />
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-              Description
-            </label>
+            <label className={LABEL}>Description</label>
             <textarea
               rows={2}
               placeholder="Brief overview of rules, format, and prizes..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all resize-y"
+              className={INPUT}
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-                Category
-              </label>
+              <label className={LABEL}>Category</label>
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value as EventCategory)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+                className={INPUT}
               >
                 <option value="leagues">Leagues</option>
                 <option value="bgec">BGEC</option>
@@ -170,175 +295,297 @@ export const CreateEventModal: React.FC<CreateEventModalProps> = ({
               </select>
             </div>
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-                Format Type
-              </label>
-              <select
-                value={type}
-                onChange={(e) => setType(e.target.value as EventType)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
-              >
-                <option value="LE">LE (Standard)</option>
-                <option value="DE">DE (Double Elim)</option>
-                <option value="ALL">ALL (Auction League)</option>
-                <option value="DLL">DLL (Dual League)</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-                Domain
-              </label>
+              <label className={LABEL}>Domain</label>
               <select
                 value={domain}
                 onChange={(e) => setDomain(e.target.value as EventDomain)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+                className={INPUT}
               >
                 <option value="sports">Sports</option>
                 <option value="esports">Esports</option>
                 <option value="fitness">Fitness</option>
-                <option value="social">Social</option>
+                <option value="general">General</option>
               </select>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-                Start Date
-              </label>
-              <input
-                type="date"
-                required
-                value={startAt}
-                onChange={(e) => setStartAt(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
-              />
+              <label className={LABEL}>Registration Closes</label>
+              <input type="datetime-local" required value={closesAt} onChange={(e) => setClosesAt(e.target.value)} className={INPUT} />
             </div>
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-                End Date
-              </label>
-              <input
-                type="date"
-                required
-                value={endAt}
-                onChange={(e) => setEndAt(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
-              />
+              <label className={LABEL}>Starts</label>
+              <input type="datetime-local" required value={startAt} onChange={(e) => setStartAt(e.target.value)} className={INPUT} />
             </div>
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-                Registration Closes
-              </label>
-              <input
-                type="date"
-                required
-                value={registrationClosesAt}
-                onChange={(e) => setRegistrationClosesAt(e.target.value)}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
-              />
+              <label className={LABEL}>Ends</label>
+              <input type="datetime-local" required value={endAt} onChange={(e) => setEndAt(e.target.value)} className={INPUT} />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-              Venue / Location
-            </label>
+            <label className={LABEL}>Venue / Location</label>
             <input
               type="text"
               placeholder="e.g. Indoor Badminton Arena, Courts 1-4"
               value={venue}
               onChange={(e) => setVenue(e.target.value)}
-              className="w-full px-3.5 py-2 text-sm rounded-xl border border-border bg-card text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+              className={INPUT}
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-                Max Capacity
-              </label>
+          {/* Capacity */}
+          <div className="space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground">
               <input
-                type="number"
-                min={1}
-                value={maxParticipants}
-                onChange={(e) => setMaxParticipants(Number(e.target.value))}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
+                type="checkbox"
+                checked={capacityEnabled}
+                onChange={(e) => {
+                  setCapacityEnabled(e.target.checked)
+                  if (e.target.checked) setStatus('draft')
+                }}
+                className="rounded border-border text-foreground focus:ring-primary"
               />
+              <span>Limit capacity</span>
+            </label>
+            {capacityEnabled && (
+              <div className="grid grid-cols-2 gap-3 items-end">
+                <div>
+                  <label className={LABEL}>Max Participants</label>
+                  <input type="number" min={1} value={maxParticipants} onChange={(e) => setMaxParticipants(Number(e.target.value))} className={INPUT} />
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground pb-2">
+                  <input
+                    type="checkbox"
+                    checked={waitlistEnabled}
+                    onChange={(e) => setWaitlistEnabled(e.target.checked)}
+                    className="rounded border-border text-foreground focus:ring-primary"
+                  />
+                  <span>Waitlist when full</span>
+                </label>
+              </div>
+            )}
+          </div>
+
+          {/* Teams — leagues, or any event the admin makes teamed */}
+          <div className={SECTION}>
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground">
+              <input
+                type="checkbox"
+                checked={teamed}
+                disabled={rules.forcesTeams}
+                onChange={(e) => {
+                  setIsTeamed(e.target.checked)
+                  if (e.target.checked) setStatus('draft')
+                }}
+                className="rounded border-border text-foreground focus:ring-primary"
+              />
+              <span>Team event{rules.forcesTeams ? ' (required for auction leagues)' : ''}</span>
+            </label>
+            {teamed && (
+              <>
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className={LABEL}>Team Size Min</label>
+                    <input type="number" min={1} value={teamSizeMin} onChange={(e) => setTeamSizeMin(Number(e.target.value))} className={INPUT} />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Team Size Max</label>
+                    <input type="number" min={1} value={teamSizeMax} onChange={(e) => setTeamSizeMax(Number(e.target.value))} className={INPUT} />
+                  </div>
+                  <div>
+                    <label className={LABEL}>Max Teams</label>
+                    <input type="number" min={1} value={maxTeams} onChange={(e) => setMaxTeams(Number(e.target.value))} className={INPUT} />
+                  </div>
+                </div>
+                <div>
+                  <label className={LABEL}>Roster Lock (optional)</label>
+                  <input type="datetime-local" value={rosterFinalizesAt} onChange={(e) => setRosterFinalizesAt(e.target.value)} className={INPUT} />
+                  <p className="text-[11px] text-muted-foreground mt-1">Between registration close and the event start.</p>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={captainApplicationRequired}
+                    onChange={(e) => setCaptainApplicationRequired(e.target.checked)}
+                    className="rounded border-border text-foreground focus:ring-primary"
+                  />
+                  <span>Captains must be approved by admins</span>
+                </label>
+                <p className="text-[11px] text-muted-foreground">
+                  {captainApplicationRequired
+                    ? 'Users apply as captain at registration; core admins review them under "Captain Applications".'
+                    : 'Anyone registering as captain is approved automatically.'}
+                  {rules.isAuction && ' Approved captains join the auction captain pool.'}
+                </p>
+              </>
+            )}
+          </div>
+
+          {/* Leaderboard — every type except DE */}
+          {rules.hasLeaderboard && (
+            <div className={SECTION}>
+              <div className={SECTION_TITLE}>Leaderboard / Bracket</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={LABEL}>Format</label>
+                  <select
+                    value={leaderboardFormat}
+                    onChange={(e) => setLeaderboardFormat(e.target.value as LeaderboardFormat)}
+                    className={INPUT}
+                  >
+                    {SELECTABLE_LEADERBOARD_FORMATS.map((f) => (
+                      <option key={f} value={f}>
+                        {LEADERBOARD_FORMAT_LABELS[f]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={LABEL}>Min Participants to Activate</label>
+                  <input type="number" min={1} value={minParticipants} onChange={(e) => setMinParticipants(Number(e.target.value))} className={INPUT} />
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-                Initial Status
-              </label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as 'draft' | 'upcoming')}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
-              >
-                <option value="upcoming">Upcoming</option>
-                <option value="draft">Draft</option>
-              </select>
+          )}
+
+          {/* Points — per-event points_pool (spec §5.15.3 point award toggles) */}
+          <div className={SECTION}>
+            <div className={SECTION_TITLE}>Points</div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={LABEL}>Participation Points</label>
+                <input type="number" min={0} value={participationPoints} onChange={(e) => setParticipationPoints(Number(e.target.value))} className={INPUT} />
+              </div>
+              <div>
+                <label className={LABEL}>Podium Multipliers (1st, 2nd, 3rd)</label>
+                <input
+                  type="text"
+                  value={podiumMultipliers}
+                  onChange={(e) => setPodiumMultipliers(e.target.value)}
+                  placeholder="3, 2, 1.5"
+                  className={INPUT}
+                />
+              </div>
+              <div>
+                <label className={LABEL}>Sponsor Bonus</label>
+                <input type="number" min={0} value={sponsorBonus} onChange={(e) => setSponsorBonus(Number(e.target.value))} className={INPUT} />
+              </div>
+              {rules.hasLeaderboard && (
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground pt-5">
+                    <input
+                      type="checkbox"
+                      checked={investmentEnabled}
+                      onChange={(e) => setInvestmentEnabled(e.target.checked)}
+                      className="rounded border-border text-foreground focus:ring-primary"
+                    />
+                    <span>Allow points investment</span>
+                  </label>
+                  {investmentEnabled && (
+                    <input
+                      type="number"
+                      min={1}
+                      placeholder="Investment cap (optional)"
+                      value={investmentCap}
+                      onChange={(e) => setInvestmentCap(e.target.value === '' ? '' : Number(e.target.value))}
+                      className={INPUT}
+                    />
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-muted/20 p-4 space-y-2.5">
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-foreground select-none">
-              <input
-                type="checkbox"
-                checked={type === 'ALL' ? true : isTeamed}
-                disabled={type === 'ALL'}
-                onChange={(e) => setIsTeamed(e.target.checked)}
-                className="rounded accent-primary"
-              />
-              <span>Team Tournament (Check if Team vs. Solo)</span>
-            </label>
+          {/* Auction — ALL only (spec §5.15.4) */}
+          {rules.isAuction && (
+            <div className={SECTION}>
+              <div className={SECTION_TITLE}>Auction Setup</div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={LABEL}>K Multiplier</label>
+                  <input type="number" min={0.1} step={0.1} value={kMultiplier} onChange={(e) => setKMultiplier(Number(e.target.value))} className={INPUT} />
+                  <p className="text-[11px] text-muted-foreground mt-1">Purse pool = K × Σ player base prices</p>
+                </div>
+                <div>
+                  <label className={LABEL}>Purse Per Team (optional)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    placeholder="Computed from K"
+                    value={pursePerTeam}
+                    onChange={(e) => setPursePerTeam(e.target.value === '' ? '' : Number(e.target.value))}
+                    className={INPUT}
+                  />
+                </div>
+                <div>
+                  <label className={LABEL}>Min Bid Increment (M)</label>
+                  <input type="number" min={1} value={minBidIncrement} onChange={(e) => setMinBidIncrement(Number(e.target.value))} className={INPUT} />
+                </div>
+                <div>
+                  <label className={LABEL}>Bid Countdown (seconds)</label>
+                  <input type="number" min={5} max={60} value={bidTimerSeconds} onChange={(e) => setBidTimerSeconds(Number(e.target.value))} className={INPUT} />
+                </div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                The 3/7ths OC override quota is applied by the backend. Captains and lots are managed on the Auction page.
+              </p>
+            </div>
+          )}
 
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-foreground select-none">
-              <input
-                type="checkbox"
-                checked={waitlistEnabled}
-                onChange={(e) => setWaitlistEnabled(e.target.checked)}
-                className="rounded accent-primary"
-              />
-              <span>Enable Waitlist when capacity is reached</span>
-            </label>
-
-            <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-foreground select-none">
+          <div className="grid grid-cols-2 gap-3 items-end">
+            <div>
+              <label className={LABEL}>Initial Status</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value as 'draft' | 'upcoming')}
+                className={INPUT}
+              >
+                <option value="draft">Draft</option>
+                <option value="upcoming" disabled={!canGoLive}>
+                  Upcoming{canGoLive ? '' : ' (link a registration form first)'}
+                </option>
+              </select>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer text-xs font-bold uppercase text-foreground pb-2">
               <input
                 type="checkbox"
                 checked={requiresApproval}
                 onChange={(e) => setRequiresApproval(e.target.checked)}
-                className="rounded accent-primary"
+                className="rounded border-border text-foreground focus:ring-primary"
               />
-              <span>Require Admin Approval for Registrations</span>
+              <span>Admin approval for registrations</span>
             </label>
           </div>
+          {!canGoLive && (
+            <p className="text-[11px] text-muted-foreground">
+              This event is saved as a draft. Open it, publish a registration form, then set it to Upcoming.
+            </p>
+          )}
+
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end gap-3 px-6 py-4 border-t border-border bg-muted/20 shrink-0">
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border bg-muted/20 shrink-0">
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={onClose}
             disabled={isSubmitting}
-            className="text-xs"
+            className="text-xs font-medium"
           >
             Cancel
           </Button>
-          <Button
-            type="submit"
-            disabled={isSubmitting}
-            className="text-xs font-semibold gap-1.5"
-          >
+          <Button type="submit" disabled={isSubmitting} className="text-xs font-semibold gap-1.5">
             {isSubmitting ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 Creating...
               </>
             ) : (
-              'Create Tournament'
+              rules.isLeague ? 'Create League' : 'Create Event'
             )}
           </Button>
         </div>

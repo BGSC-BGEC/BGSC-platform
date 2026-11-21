@@ -4,6 +4,7 @@ import type { User } from '../types/user'
 import { userService } from '../services/userService'
 import { UserTable } from '../components/users/UserTable'
 import { UserDetailModal } from '../components/users/UserDetailModal'
+import { useCan } from '../services/permissions'
 import { Button } from '../components/ui/button'
 
 export const Users: React.FC = () => {
@@ -16,9 +17,12 @@ export const Users: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all')
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
+  // GET /users is coordinator+ on the backend, so Core would only ever see a 403.
+  const canViewUsers = useCan('users.view')
 
   useEffect(() => {
     let ignore = false
+    if (!canViewUsers) return
 
     userService
       .getUsers()
@@ -38,7 +42,7 @@ export const Users: React.FC = () => {
     return () => {
       ignore = true
     }
-  }, [])
+  }, [canViewUsers])
 
   const handleRetry = () => {
     setIsLoading(true)
@@ -146,6 +150,17 @@ export const Users: React.FC = () => {
 
   const isFiltered = searchTerm !== '' || roleFilter !== 'all' || statusFilter !== 'all'
 
+  if (!canViewUsers) {
+    return (
+      <div className="p-12 text-center border border-border rounded-xl bg-card">
+        <div className="text-base font-bold text-foreground">Coordinator access required</div>
+        <div className="text-xs text-muted-foreground mt-1">
+          The Users Directory is available to Coordinators and Founders.
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Top Banner / Header */}
@@ -199,6 +214,7 @@ export const Users: React.FC = () => {
           <option value="coordinator">Coordinator</option>
           <option value="core">Core</option>
           <option value="member">Member</option>
+          <option value="user">User</option>
         </select>
 
         <select
@@ -209,9 +225,8 @@ export const Users: React.FC = () => {
         >
           <option value="all">All Statuses</option>
           <option value="active">Active</option>
-          <option value="pending">Pending</option>
           <option value="suspended">Suspended</option>
-          <option value="inactive">Inactive</option>
+          <option value="deleted">Deleted</option>
         </select>
 
         {isFiltered && (

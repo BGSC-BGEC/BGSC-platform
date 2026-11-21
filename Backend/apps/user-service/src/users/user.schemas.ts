@@ -48,11 +48,11 @@ export const UpdateSettingsSchema = z
     .refine((v) => Object.keys(v).length > 0, { message: 'no fields to update' });
 
 /**
- * Spec §5.15.5 requires Founder 2FA/TOTP to promote to coordinator, and 2FA is not built.
- * The enum simply does not contain those roles, so the request is rejected at the boundary
- * rather than reaching a handler that would have to remember to refuse it.
+ * Roles an admin may assign. 2FA is out of MVP scope, so coordinator is assignable directly;
+ * `assertOutranks` in user.service still means only a founder can grant or remove it.
+ * Founder is never assignable.
  */
-export const ASSIGNABLE_ROLES = [UserRole.USER, UserRole.MEMBER, UserRole.CORE] as const;
+export const ASSIGNABLE_ROLES = [UserRole.USER, UserRole.MEMBER, UserRole.CORE, UserRole.COORDINATOR] as const;
 
 export const ChangeRoleSchema = z.object({
     role: z.enum(ASSIGNABLE_ROLES),

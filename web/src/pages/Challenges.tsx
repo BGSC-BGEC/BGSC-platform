@@ -10,6 +10,7 @@ import {
   AlertCircle,
   X,
   Sparkles,
+  Pencil,
 } from 'lucide-react'
 import {
   challengeService,
@@ -19,8 +20,12 @@ import {
   type ChallengeDifficulty,
   type ChallengeParticipation,
 } from '../services/challengeService'
+import { useCan } from '../services/permissions'
+import { ChallengeEditModal } from '../components/challenges/ChallengeEditModal'
 
 export const Challenges: React.FC = () => {
+  const canDelete = useCan('challenges.delete')
+
   const [challenges, setChallenges] = useState<ChallengeItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -42,6 +47,9 @@ export const Challenges: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   // Review Queue Modal state
+  // Edit modal state
+  const [editingChallenge, setEditingChallenge] = useState<ChallengeItem | null>(null)
+
   const [reviewChallenge, setReviewChallenge] = useState<ChallengeItem | null>(null)
   const [participations, setParticipations] = useState<ChallengeParticipation[]>([])
   const [isLoadingQueue, setIsLoadingQueue] = useState(false)
@@ -289,6 +297,14 @@ export const Challenges: React.FC = () => {
                           </button>
                         </>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => setEditingChallenge(c)}
+                        title="Edit"
+                        className="p-1.5 text-muted-foreground hover:text-foreground border border-border hover:bg-muted rounded-lg cursor-pointer transition-colors"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
                       {c.status !== 'archived' && (
                         <button
                           type="button"
@@ -299,14 +315,16 @@ export const Challenges: React.FC = () => {
                           <Archive className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(c.id)}
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(c.id)}
                         title="Delete"
                         className="p-1.5 text-destructive hover:bg-destructive/10 border border-border hover:border-destructive/30 rounded-lg cursor-pointer transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -480,6 +498,19 @@ export const Challenges: React.FC = () => {
           </div>
         </form>
       </Modal>
+
+      {/* Edit Challenge Modal */}
+      {editingChallenge && (
+        <ChallengeEditModal
+          key={editingChallenge.id}
+          challenge={editingChallenge}
+          onClose={() => setEditingChallenge(null)}
+          onSaved={(saved) => {
+            setChallenges((prev) => prev.map((c) => (c.id === saved.id ? saved : c)))
+            setEditingChallenge(null)
+          }}
+        />
+      )}
 
       {/* Review Submissions Modal */}
       <Modal isOpen={!!reviewChallenge} onClose={() => setReviewChallenge(null)} className="max-w-2xl p-6 space-y-4">
