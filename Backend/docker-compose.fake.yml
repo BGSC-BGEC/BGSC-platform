@@ -1,0 +1,43 @@
+# Use alongside docker-compose.yml for local MVP demos.
+services:
+  gateway:
+    ports: !override ["127.0.0.1:3000:3000"]
+  fake-providers:
+    image: bgsc-backend:local
+    command: ["node", "dev/fake-providers/server.cjs"]
+    ports:
+      - "127.0.0.1:3100:3100"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set JWT_ACCESS_SECRET in .env}
+      STRAVA_CALLBACK_URL: ${STRAVA_CALLBACK_URL:-http://localhost:3000/strava/callback}
+      FAKE_BIND: 0.0.0.0
+      FAKE_DATA_DIR: /app/uploads
+    volumes:
+      - ./dev/fake-providers:/app/dev/fake-providers:ro
+      - fake_provider_data:/app/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  challenge-service:
+    depends_on:
+      fake-providers: { condition: service_healthy }
+    environment:
+      STRAVA_CLIENT_ID: demo-strava
+      STRAVA_CLIENT_SECRET: local-strava-secret
+      STRAVA_API_BASE: http://fake-providers:3100
+      STRAVA_PUBLIC_BASE: ${FAKE_STRAVA_PUBLIC_ORIGIN:-http://localhost:3100}
+      STRAVA_APP_RETURN_URL: ${FAKE_STRAVA_APP_RETURN_URL:-bgsc://settings/integrations}
+  notification-service:
+    depends_on:
+      fake-providers: { condition: service_healthy }
+    environment:
+      WHATSAPP_API_BASE: http://fake-providers:3100
+      WHATSAPP_API_VERSION: v21.0
+      WHATSAPP_ACCESS_TOKEN: local-whatsapp-token
+      WHATSAPP_PHONE_NUMBER_ID: demo-phone
+      WHATSAPP_GROUP_MAP: '{"bgec":"demo-bgec","fitsoc":"demo-fitsoc","airball":"demo-airball","offside":"demo-offside","powerplay":"demo-powerplay","around_the_net":"demo-around_the_net","deuce":"demo-deuce","highlight":"demo-highlight","teams":"demo-teams"}'
+volumes:
+  fake_provider_data:

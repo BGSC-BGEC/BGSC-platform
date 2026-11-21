@@ -262,9 +262,27 @@ one Gmail, use `name+anything@gmail.com`: it all lands in the same inbox.
 
 ## 13. Expected "not working" (not bugs)
 
-- Strava connect/sync: *not configured* (no Strava app registered yet).
-- WhatsApp announcement broadcast and push notifications: off for this release.
+- Base configuration: Strava is unconfigured. The local provider overlay below enables simulated linking and sync.
+- Base configuration: WhatsApp and push are off. The overlay captures WhatsApp locally; push stays off.
 - Phone OTP: the code is only in the log; no real SMS is sent.
 - Web admin has no "forgot password" link; password reset is on mobile.
 - Google sign-in on mobile is on the Login screen only.
 - Free tunnel URLs change on every restart and are slower than local; for timing tests use a laptop on the same network.
+
+## 14. Test Strava and WhatsApp with local providers
+
+From `Backend/`, use the normal development `.env` and run:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.fake.yml up -d --build --wait
+curl http://localhost:3100/health
+curl -H 'Authorization: Bearer local-whatsapp-token' http://localhost:3100/outbox
+```
+
+Set `EXPO_PUBLIC_FAKE_STRAVA_ORIGIN=http://localhost:3100` in `mobile/.env` and restart Expo. For an Android emulator use `http://10.0.2.2:3100` for both this setting and `FAKE_STRAVA_PUBLIC_ORIGIN` in the backend environment. Set `STRAVA_CALLBACK_URL` to the gateway address reachable from that same browser (e.g. `http://10.0.2.2:3000/strava/callback`). The overlay returns to `bgsc://settings/integrations` for an installed app with the BGSC scheme.
+
+Connect from the signed-in user's Strava screen. The local consent page offers Connect or Cancel. Each user gets a separate simulated athlete. Sync imports a public run and a private ride. Publishing a public announcement sends its text to the local WhatsApp outbox for each mapped category. Existing audience and rate limits still apply.
+
+Edit sample activities and allowed destinations in `Backend/dev/fake-providers/fixtures/`. The server reads those JSON files on request. A dedicated Docker volume stores simulated grants and the outbox across restarts. For provider contract tests with temporary storage, run `node --test dev/fake-providers/provider.test.cjs` from `Backend/` after `npm ci` (Node 22.13+).
+
+To switch to real providers later, disconnect demo athletes, remove the mobile fake origin, configure the real provider credentials and callback, and start the base Compose file without the fake overlay. Keep demo data in its local database.

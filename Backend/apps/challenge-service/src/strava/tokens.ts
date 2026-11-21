@@ -72,7 +72,6 @@ export function open(sealed: string): string {
 
 /* ------------------------------------------------------------------ */
 
-const STRAVA_API = 'https://www.strava.com';
 /** Refresh inside this margin rather than on expiry: a token that dies mid-request is a 401. */
 const REFRESH_MARGIN_MS = 5 * 60_000;
 
@@ -120,7 +119,7 @@ async function stravaFetch(url: string, init: RequestInit): Promise<Response> {
 
 export async function exchange(body: Record<string, string>): Promise<TokenResponse> {
     assertConfigured();
-    const res = await stravaFetch(`${STRAVA_API}/oauth/token`, {
+    const res = await stravaFetch(`${config.strava.apiBase}/oauth/token`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -193,7 +192,7 @@ export async function freshToken(cred: IStravaCredential): Promise<string> {
  * expected state the client can act on (strava-integration.md §9.2).
  */
 export async function apiGet<T>(path: string, token: string): Promise<T> {
-    const res = await stravaFetch(`${STRAVA_API}/api/v3${path}`, {
+    const res = await stravaFetch(`${config.strava.apiBase}/api/v3${path}`, {
         headers: { Authorization: `Bearer ${token}` },
         signal: AbortSignal.timeout(15_000),
     });
@@ -204,7 +203,7 @@ export async function apiGet<T>(path: string, token: string): Promise<T> {
 /** Best-effort revocation on Strava's side; the local row is gone either way. */
 export async function deauthorize(token: string): Promise<void> {
     try {
-        await fetch(`${STRAVA_API}/oauth/deauthorize`, {
+        await fetch(`${config.strava.apiBase}/oauth/deauthorize`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}` },
             signal: AbortSignal.timeout(10_000),

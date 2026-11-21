@@ -72,12 +72,12 @@ export function authorizeUrl(userId: string): string {
         scope: SCOPES,
         state: signState(userId),
     });
-    return `https://www.strava.com/oauth/authorize?${params.toString()}`;
+    return `${config.strava.publicBase}/oauth/authorize?${params.toString()}`;
 }
 
 /** Where every callback outcome sends the browser. */
 export const settingsUrl = (params: Record<string, string>): string =>
-    `${config.frontendUrl}/settings/integrations?${new URLSearchParams(params).toString()}`;
+    `${config.strava.appReturnUrl || config.frontendUrl + '/settings/integrations'}?${new URLSearchParams(params).toString()}`;
 
 /**
  * The public callback's whole job: check the state is ours and still alive (so a forged or stale

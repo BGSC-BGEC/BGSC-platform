@@ -27,7 +27,7 @@ import { challengesRepository, type ChallengeDetail as Detail, type Proof } from
 import { registrationRepository } from '../../src/repositories/RegistrationRepository';
 import { stravaRepository, type StravaActivity } from '../../src/repositories/StravaRepository';
 import type { Team } from '../../src/api/types';
-import { canSubmit, proofError } from '../../services/challengeLogic';
+import { stravaActivityUrl, canSubmit, proofError } from '../../services/challengeLogic';
 import { useAuth } from '../../store/auth';
 import TargetWatermark from '../../assets/illustrations/challenge-target-watermark.svg';
 
@@ -187,7 +187,8 @@ export default function ChallengeDetail() {
                   <Card variant="inner">
                     <Typography variant="label" color="textMuted">Attach a synced Strava activity</Typography>
                     {stravaActivities.map((actItem) => {
-                      const actUrl = `https://www.strava.com/activities/${actItem._id}`;
+                      const actUrl = stravaActivityUrl(actItem._id);
+                      if (!actUrl || (actItem._id.startsWith('demo-') && actItem.is_private)) return null;
                       const attached = proofs.some((pr) => pr.type === 'url' && pr.value === actUrl);
                       return (
                         <ListRow
