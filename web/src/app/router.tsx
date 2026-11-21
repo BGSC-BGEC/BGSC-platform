@@ -17,6 +17,7 @@ const Feedback = lazy(() => import('../pages/Feedback'))
 const Media = lazy(() => import('../pages/Media'))
 const Challenges = lazy(() => import('../pages/Challenges'))
 const HallOfFame = lazy(() => import('../pages/HallOfFame'))
+const PointsRules = lazy(() => import('../pages/PointsRules'))
 
 const PageLoader = () => (
   <div className="flex h-64 w-full items-center justify-center">
@@ -50,6 +51,7 @@ export const router = createBrowserRouter([
       { path: 'auction', element: withSuspense(Auction) },
       { path: 'media', element: withSuspense(Media) },
       { path: 'leaderboard', element: withSuspense(Leaderboard) },
+      { path: 'points-rules', element: withSuspense(PointsRules) },
       { path: 'feedback', element: withSuspense(Feedback) },
       { path: 'challenges', element: withSuspense(Challenges) },
       { path: 'hall-of-fame', element: withSuspense(HallOfFame) },

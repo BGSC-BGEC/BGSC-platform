@@ -1,20 +1,29 @@
 import React, { useEffect, useState } from 'react'
 import { FileText, X, AlertTriangle, Loader2 } from 'lucide-react'
-import type { LeaderboardEntry, PointsTransaction } from '../../types/leaderboard'
-import { leaderboardService } from '../../services/leaderboardService'
+import type { PointsTransaction, UserSearchResult } from '../../types/leaderboard'
+import type { ClubEvent } from '../../types/event'
+import {
+  getEventLedger,
+  getUserPointsSummary,
+  getUserTransactions,
+} from '../../services/leaderboardService'
+import type { UserPointsSummary } from '../../services/leaderboardService'
+import { UserSearchPicker } from './UserSearchPicker'
 import { Modal } from '../ui/modal'
 import { Button } from '../ui/button'
 
 export interface PointsLedgerModalProps {
   isOpen: boolean
   onClose: () => void
-  members: LeaderboardEntry[]
-  initialUserId?: string | null
+  /** Events offered for the per-event ledger. */
+  events: ClubEvent[]
 }
+
+type LedgerMode = 'member' | 'event'
 
 function formatTxDate(dateStr: string): string {
   const d = new Date(dateStr)
-  if (isNaN(d.getTime())) return dateStr
+  if (isNaN(d.getTime())) return dateStr || '-'
   return d.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -24,43 +33,60 @@ function formatTxDate(dateStr: string): string {
   })
 }
 
-export const PointsLedgerModal: React.FC<PointsLedgerModalProps> = ({
-  isOpen,
-  onClose,
-  members,
-  initialUserId,
-}) => {
-  const [selectedUserId, setSelectedUserId] = useState('')
+const shortId = (id: string | null | undefined) => (id ? `${id.slice(0, 8)}…` : '-')
+
+function actorLabel(tx: PointsTransaction): string {
+  if (!tx.actor) return '-'
+  if (tx.actor.type === 'system') return 'system'
+  return `${tx.actor.type} ${shortId(tx.actor.userId)}`
+}
+
+const LedgerContent: React.FC<Omit<PointsLedgerModalProps, 'isOpen'>> = ({ onClose, events }) => {
+  const [mode, setMode] = useState<LedgerMode>('member')
+  const [selectedUser, setSelectedUser] = useState<UserSearchResult | null>(null)
+  const [selectedEventId, setSelectedEventId] = useState('')
+
   const [transactions, setTransactions] = useState<PointsTransaction[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [podiumConflicts, setPodiumConflicts] = useState(0)
+  const [summary, setSummary] = useState<UserPointsSummary | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Each time the modal opens, start on requested member (or the first one).
-  useEffect(() => {
-    if (isOpen) {
-      setSelectedUserId(initialUserId || members[0]?.userId || '')
-    }
-  }, [isOpen, initialUserId, members])
+  const targetId = mode === 'member' ? selectedUser?.id ?? '' : selectedEventId
+
+  const resetResults = () => {
+    setTransactions([])
+    setNextCursor(null)
+    setPodiumConflicts(0)
+    setSummary(null)
+    setError(null)
+  }
 
   useEffect(() => {
-    if (!isOpen || !selectedUserId) {
-      setTransactions([])
-      return
-    }
+    if (!targetId) return
     let ignore = false
-    const member = members.find((m) => m.userId === selectedUserId)
-    setIsLoading(true)
-    setError(null)
-    leaderboardService
-      .getPointsTransactions(selectedUserId, member?.name)
-      .then((txs) => {
-        if (!ignore) setTransactions(txs)
+    if (mode === 'member') {
+      getUserPointsSummary(targetId)
+        .then((s) => {
+          if (!ignore) setSummary(s)
+        })
+        .catch(() => undefined)
+    }
+    const load =
+      mode === 'member'
+        ? getUserTransactions(targetId).then((p) => ({ ...p, podiumConflicts: [] as unknown[] }))
+        : getEventLedger(targetId)
+    load
+      .then((page) => {
+        if (ignore) return
+        setTransactions(page.transactions)
+        setNextCursor(page.nextCursor)
+        setPodiumConflicts(page.podiumConflicts.length)
+        setError(null)
       })
       .catch((err) => {
-        if (!ignore) {
-          setTransactions([])
-          setError(err instanceof Error ? err.message : 'Failed to load points history')
-        }
+        if (!ignore) setError(err instanceof Error ? err.message : 'Failed to load ledger')
       })
       .finally(() => {
         if (!ignore) setIsLoading(false)
@@ -68,10 +94,39 @@ export const PointsLedgerModal: React.FC<PointsLedgerModalProps> = ({
     return () => {
       ignore = true
     }
-  }, [isOpen, selectedUserId, members])
+  }, [mode, targetId])
+
+  const handleLoadMore = async () => {
+    if (!nextCursor || !targetId) return
+    setIsLoading(true)
+    try {
+      const page =
+        mode === 'member'
+          ? await getUserTransactions(targetId, { cursor: nextCursor })
+          : await getEventLedger(targetId, { cursor: nextCursor })
+      setTransactions((prev) => [...prev, ...page.transactions])
+      setNextCursor(page.nextCursor)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load more rows')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const switchMode = (next: LedgerMode) => {
+    if (next === mode) return
+    resetResults()
+    setIsLoading(false)
+    setMode(next)
+  }
+
+  const tabClass = (active: boolean) =>
+    `px-4 py-2 text-xs font-bold uppercase border-b-2 transition-colors cursor-pointer ${
+      active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+    }`
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} className="max-w-2xl">
+    <>
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/30 shrink-0">
         <div className="flex items-center gap-2.5">
@@ -83,7 +138,7 @@ export const PointsLedgerModal: React.FC<PointsLedgerModalProps> = ({
               Points Ledger & Audit History
             </h2>
             <p className="text-xs text-muted-foreground">
-              Append-only compliance audit trail for point adjustments
+              Append-only ledger, per member or per event. There is no club-wide ledger view.
             </p>
           </div>
         </div>
@@ -99,52 +154,106 @@ export const PointsLedgerModal: React.FC<PointsLedgerModalProps> = ({
 
       {/* Body */}
       <div className="p-6 space-y-4 overflow-y-auto flex-1">
-        {/* Member picker */}
-        <div>
-          <label className="block text-xs font-bold uppercase tracking-wider text-foreground mb-1.5">
-            Filter by Member
-          </label>
+        {/* Mode tabs */}
+        <div className="flex border-b border-border gap-2">
+          <button type="button" onClick={() => switchMode('member')} className={tabClass(mode === 'member')}>
+            By Member
+          </button>
+          <button type="button" onClick={() => switchMode('event')} className={tabClass(mode === 'event')}>
+            By Event
+          </button>
+        </div>
+
+        {/* Target selection */}
+        {mode === 'member' ? (
+          <UserSearchPicker
+            selected={selectedUser}
+            onSelect={(u) => {
+              resetResults()
+              setIsLoading(Boolean(u))
+              setSelectedUser(u)
+            }}
+          />
+        ) : (
           <select
-            value={selectedUserId}
-            onChange={(e) => setSelectedUserId(e.target.value)}
+            value={selectedEventId}
+            onChange={(e) => {
+              resetResults()
+              setIsLoading(Boolean(e.target.value))
+              setSelectedEventId(e.target.value)
+            }}
             className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-border bg-card text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
           >
-            {members.map((m) => (
-              <option key={m.userId} value={m.userId}>
-                {m.name} (@{m.username})
+            <option value="">Select an event...</option>
+            {events.map((ev) => (
+              <option key={ev.id} value={ev.id}>
+                {ev.title} ({ev.status})
               </option>
             ))}
           </select>
-        </div>
+        )}
 
-        {/* Ledger Table */}
-        {error ? (
+        {error && (
           <div className="flex items-center gap-2 p-3 text-xs rounded-xl border border-destructive/40 bg-destructive/10 text-destructive">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
           </div>
-        ) : isLoading ? (
-          <div className="p-12 text-center text-xs text-muted-foreground flex flex-col items-center justify-center gap-2">
-            <Loader2 className="w-5 h-5 animate-spin text-primary" />
-            <span>Loading points history ledger...</span>
+        )}
+
+        {mode === 'member' && summary && (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            {[
+              ['Balance', `${summary.balance.toLocaleString()} pts`],
+              ['Lifetime Earned', `${summary.lifetimeEarned.toLocaleString()} pts`],
+              ['Lifetime Spent', `${summary.lifetimeSpent.toLocaleString()} pts`],
+              ['Ledger Synced', summary.ledgerSynced ? 'Yes' : 'NO - drift'],
+            ].map(([label, value]) => (
+              <div key={label} className="p-2.5 rounded-xl border border-border bg-muted/20">
+                <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">{label}</div>
+                <div className="font-mono font-bold text-foreground">{value}</div>
+              </div>
+            ))}
           </div>
-        ) : transactions.length === 0 ? (
+        )}
+
+        {mode === 'event' && podiumConflicts > 0 && (
+          <div className="p-3 text-xs rounded-xl border border-border bg-muted/20 text-foreground">
+            {podiumConflicts} podium conflict audit record(s) exist for this event.
+          </div>
+        )}
+
+        {/* Ledger Table */}
+        {!targetId ? (
           <div className="p-10 text-center border border-dashed border-border rounded-xl bg-muted/10 space-y-2">
             <FileText className="w-8 h-8 text-muted-foreground/50 mx-auto" />
             <p className="text-xs text-muted-foreground font-semibold">
-              No points transactions recorded yet for this member.
+              {mode === 'member'
+                ? 'Search and select a member to view their points history.'
+                : 'Select an event to view the points it issued.'}
             </p>
           </div>
-        ) : (
+        ) : isLoading && transactions.length === 0 ? (
+          <div className="p-12 text-center text-xs text-muted-foreground flex flex-col items-center justify-center gap-2">
+            <Loader2 className="w-5 h-5 animate-spin text-primary" />
+            <span>Loading ledger...</span>
+          </div>
+        ) : transactions.length === 0 && !error ? (
+          <div className="p-10 text-center border border-dashed border-border rounded-xl bg-muted/10 space-y-2">
+            <FileText className="w-8 h-8 text-muted-foreground/50 mx-auto" />
+            <p className="text-xs text-muted-foreground font-semibold">No points transactions recorded.</p>
+          </div>
+        ) : transactions.length > 0 ? (
           <div className="border border-border rounded-xl overflow-hidden bg-card shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-muted/40 border-b border-border text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   <tr>
                     <th className="px-3.5 py-2.5">Date & Time</th>
-                    <th className="px-3.5 py-2.5">Member</th>
-                    <th className="px-3.5 py-2.5 text-right">Adjustment</th>
-                    <th className="px-3.5 py-2.5">Audit Justification</th>
+                    {mode === 'event' && <th className="px-3.5 py-2.5">Member ID</th>}
+                    <th className="px-3.5 py-2.5">Type / Reason</th>
+                    <th className="px-3.5 py-2.5 text-right">Amount</th>
+                    <th className="px-3.5 py-2.5">Note</th>
+                    <th className="px-3.5 py-2.5">Actor</th>
                     <th className="px-3.5 py-2.5 text-right">Balance After</th>
                   </tr>
                 </thead>
@@ -156,8 +265,17 @@ export const PointsLedgerModal: React.FC<PointsLedgerModalProps> = ({
                         <td className="px-3.5 py-2.5 text-muted-foreground whitespace-nowrap font-mono text-[11px]">
                           {formatTxDate(tx.createdAt)}
                         </td>
-                        <td className="px-3.5 py-2.5 font-semibold text-foreground whitespace-nowrap">
-                          {tx.userName}
+                        {mode === 'event' && (
+                          <td className="px-3.5 py-2.5 font-mono text-[11px] text-foreground whitespace-nowrap" title={tx.userId}>
+                            {shortId(tx.userId)}
+                          </td>
+                        )}
+                        <td className="px-3.5 py-2.5 whitespace-nowrap">
+                          <div className="text-[10px] font-bold uppercase tracking-wider text-foreground">
+                            {tx.type || '-'}
+                            {tx.source ? ` · ${tx.source}` : ''}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground font-mono">{tx.reason || '-'}</div>
                         </td>
                         <td className="px-3.5 py-2.5 text-right whitespace-nowrap font-mono font-bold">
                           <span
@@ -170,13 +288,15 @@ export const PointsLedgerModal: React.FC<PointsLedgerModalProps> = ({
                             {isPositive ? `+${tx.amount.toLocaleString()}` : tx.amount.toLocaleString()} pts
                           </span>
                         </td>
-                        <td className="px-3.5 py-2.5 text-muted-foreground max-w-xs break-words">
-                          {tx.note}
+                        <td className="px-3.5 py-2.5 text-muted-foreground max-w-xs break-words">{tx.note || '-'}</td>
+                        <td
+                          className="px-3.5 py-2.5 text-muted-foreground font-mono text-[11px] whitespace-nowrap"
+                          title={tx.actor?.userId ?? undefined}
+                        >
+                          {actorLabel(tx)}
                         </td>
                         <td className="px-3.5 py-2.5 text-right font-mono text-muted-foreground whitespace-nowrap">
-                          {tx.balanceAfter !== undefined
-                            ? `${tx.balanceAfter.toLocaleString()} pts`
-                            : '—'}
+                          {tx.balanceAfter !== undefined ? `${tx.balanceAfter.toLocaleString()} pts` : '-'}
                         </td>
                       </tr>
                     )
@@ -185,23 +305,37 @@ export const PointsLedgerModal: React.FC<PointsLedgerModalProps> = ({
               </table>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
 
       {/* Action Footer */}
-      <div className="flex justify-end px-6 py-4 border-t border-border bg-muted/20 shrink-0">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={onClose}
-          className="text-xs px-4"
-        >
+      <div className="flex items-center justify-between px-6 py-4 border-t border-border bg-muted/20 shrink-0">
+        <div>
+          {nextCursor && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleLoadMore}
+              disabled={isLoading}
+              className="text-xs px-4"
+            >
+              {isLoading ? 'Loading...' : 'Load More'}
+            </Button>
+          )}
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={onClose} className="text-xs px-4">
           Close
         </Button>
       </div>
-    </Modal>
+    </>
   )
 }
+
+export const PointsLedgerModal: React.FC<PointsLedgerModalProps> = ({ isOpen, onClose, events }) => (
+  <Modal isOpen={isOpen} onClose={onClose} className="max-w-4xl">
+    <LedgerContent onClose={onClose} events={events} />
+  </Modal>
+)
 
 export default PointsLedgerModal

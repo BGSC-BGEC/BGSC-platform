@@ -117,6 +117,9 @@ export const config = {
    * a predictable key on a third-party bearer token is not a dev convenience worth shipping.
    */
   strava: {
+    apiBase: (process.env.STRAVA_API_BASE || 'https://www.strava.com').replace(/\/+$/, ''),
+    publicBase: (process.env.STRAVA_PUBLIC_BASE || 'https://www.strava.com').replace(/\/+$/, ''),
+    appReturnUrl: process.env.STRAVA_APP_RETURN_URL || '',
     clientId: process.env.STRAVA_CLIENT_ID || '',
     clientSecret: process.env.STRAVA_CLIENT_SECRET || '',
     callbackUrl:

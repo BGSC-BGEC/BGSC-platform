@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
-const { canSubmit, participationGroup, proofError, stravaCallback } = require('../services/challengeLogic.ts');
+process.env.EXPO_PUBLIC_FAKE_STRAVA_ORIGIN = 'http://localhost:3100';
+const { isStravaAuthorizeUrl, stravaActivityUrl, canSubmit, participationGroup, proofError, stravaCallback } = require('../services/challengeLogic.ts');
 
 const now = Date.parse('2026-10-24T12:00:00Z');
 for (const status of ['accepted', 'submitted', 'under_review', 'rejected']) {
@@ -34,3 +35,10 @@ assert.match(stravaCallback('bgsc://settings/integrations?strava=denied').error,
 assert.match(stravaCallback('bgsc://settings/integrations?strava=authorized&code=secret&state=secret&scope=read').error, /incomplete/);
 assert.match(stravaCallback('bgsc://settings/integrations?strava=invalid_oauth_state').error, /expired or failed/);
 console.log('Slice E selfcheck passed: participation states, deadlines, proof validation and OAuth fragment parsing.');
+
+assert.equal(isStravaAuthorizeUrl('http://localhost:3100/oauth/authorize?state=test'), true);
+assert.equal(isStravaAuthorizeUrl('https://www.strava.com/oauth/authorize'), true);
+assert.equal(isStravaAuthorizeUrl('http://localhost:3101/oauth/authorize'), false);
+assert.equal(isStravaAuthorizeUrl('http://localhost:3100/other'), false);
+assert.equal(stravaActivityUrl('demo-1-run'), 'http://localhost:3100/activities/demo-1-run');
+assert.equal(stravaActivityUrl('123'), 'https://www.strava.com/activities/123');

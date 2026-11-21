@@ -99,8 +99,11 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   const normalizedEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`
   const url = `${BASE_URL.replace(/\/+$/, '')}${normalizedEndpoint}`
 
+  // A File/Blob body is sent as raw bytes with its own MIME type (the media and event-poster
+  // endpoints read the request body directly); everything else is JSON.
+  const isBinary = typeof Blob !== 'undefined' && body instanceof Blob
   const defaultHeaders: Record<string, string> = {
-    'Content-Type': 'application/json',
+    'Content-Type': isBinary ? (body as Blob).type || 'application/octet-stream' : 'application/json',
   }
 
   const token = localStorage.getItem('auth_token') || localStorage.getItem('token')
@@ -118,7 +121,7 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   }
 
   if (body !== undefined) {
-    config.body = typeof body === 'string' ? body : JSON.stringify(body)
+    config.body = isBinary ? (body as Blob) : typeof body === 'string' ? body : JSON.stringify(body)
   }
 
   const response = await fetch(url, config)

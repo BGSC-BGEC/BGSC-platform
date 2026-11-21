@@ -2,74 +2,202 @@ import { apiClient } from './apiClient'
 
 const isMock = import.meta.env.VITE_USE_MOCK === 'true'
 
+/** Mirrors HALL_OF_FAME_CATEGORY in @bgsc/shared (models/HallOfFame.ts). */
 export type HofCategory =
   | 'event_winner'
   | 'challenge_legend'
   | 'sponsor_champion'
   | 'custom'
 
+export type HofHonoreeType = 'user' | 'team'
+export type HofSourceType = 'event' | 'challenge' | 'manual'
+
+export interface HofHonoree {
+  type: HofHonoreeType
+  id: string
+  displayName: string
+  avatarUrl: string | null
+  deleted: boolean
+}
+
+export interface HofMember {
+  userId: string
+  displayName: string
+  avatarUrl: string | null
+  deleted: boolean
+}
+
+export interface HofSource {
+  type: HofSourceType
+  id: string | null
+  title: string | null
+}
+
+export interface HofAchievement {
+  domain: string
+  season: string
+  year: number
+  difficulty: string
+  awardPoints: number | null
+}
+
 export interface HallOfFameEntry {
   id: string
+  slug: string
   category: HofCategory
   title: string
   description: string
   quote: string
-  honoreeId: string
-  honoreeName: string
-  honoreeType: 'user' | 'team'
-  domain: string
-  year: number
-  season: string
+  honoree: HofHonoree
+  members: HofMember[]
+  source: HofSource
+  achievement: HofAchievement
+  mediaUrl: string | null
+  coverUrl: string | null
+  tags: string[]
   featured: boolean
+  featuredOrder: number | null
+}
+
+/**
+ * Wire shapes, field for field with CreateHallOfFameEntrySchema / UpdateHallOfFameEntrySchema
+ * (leaderboard-service/src/hall-of-fame/hallOfFame.schemas.ts).
+ */
+export interface HofHonoreeBody {
+  type: HofHonoreeType
+  id: string
+  display_name: string
+  avatar_url?: string | null
+}
+
+export interface HofMemberBody {
+  user_id: string
+  display_name: string
+  avatar_url?: string | null
+}
+
+export interface HofSourceBody {
+  type: HofSourceType
+  id?: string | null
+  title?: string | null
+}
+
+export interface HofAchievementBody {
+  domain?: string
+  season?: string
+  year: number
+  difficulty?: string
+  award_points?: number
+}
+
+export interface CreateHofEntryBody {
+  category: HofCategory
+  title: string
+  description?: string | null
+  quote?: string | null
+  honoree: HofHonoreeBody
+  members?: HofMemberBody[]
+  source: HofSourceBody
+  achievement: HofAchievementBody
+  media_url?: string | null
+  cover_url?: string | null
+  tags?: string[]
+  featured?: boolean
+  featured_order?: number | null
+}
+
+/** PATCH: every field optional, nested groups partial (the service merges them). */
+export type UpdateHofEntryBody = Partial<
+  Omit<CreateHofEntryBody, 'honoree' | 'source' | 'achievement'>
+> & {
+  honoree?: Partial<HofHonoreeBody>
+  source?: Partial<HofSourceBody>
+  achievement?: Partial<HofAchievementBody>
+}
+
+/** Same rule as the backend `Link`: http(s) URL or an /uploads/ path, max 2048 chars. */
+export const HOF_LINK_PATTERN = /^(https?:\/\/[^\s]+|\/uploads\/[^\s]+)$/i
+
+export function isValidHofLink(value: string): boolean {
+  const v = value.trim()
+  return v.length <= 2048 && HOF_LINK_PATTERN.test(v)
 }
 
 const mockHofEntries: HallOfFameEntry[] = [
   {
     id: 'hof-001',
+    slug: 'bgsc-badminton-smash-open-s2-champion-2026',
     category: 'event_winner',
     title: 'BGSC Badminton Smash Open S2 Champion',
     description: 'Undefeated singles run across 6 rounds without dropping a set.',
     quote: 'Consistency on the court beats raw power every single day.',
-    honoreeId: '00000000-0000-4000-8000-000000000001',
-    honoreeName: 'Arjun Sharma',
-    honoreeType: 'user',
-    domain: 'sports',
-    year: 2026,
-    season: '2026',
+    honoree: {
+      type: 'user',
+      id: '00000000-0000-4000-8000-000000000001',
+      displayName: 'Arjun Sharma',
+      avatarUrl: null,
+      deleted: false,
+    },
+    members: [],
+    source: { type: 'manual', id: null, title: null },
+    achievement: { domain: 'sports', season: '2026', year: 2026, difficulty: '', awardPoints: null },
+    mediaUrl: null,
+    coverUrl: null,
+    tags: [],
     featured: true,
-  },
-  {
-    id: 'hof-002',
-    category: 'challenge_legend',
-    title: 'Ironman Campus Endurance Legend',
-    description: 'First club athlete to complete the 100km monthly running streak 3 months in a row.',
-    quote: 'Every mile counts.',
-    honoreeId: '00000000-0000-4000-8000-000000000002',
-    honoreeName: 'Priya Nair',
-    honoreeType: 'user',
-    domain: 'fitness',
-    year: 2026,
-    season: '2026',
-    featured: true,
+    featuredOrder: null,
   },
 ]
 
+const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+const strOrNull = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
+const numOrNull = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isFinite(v) ? v : null
+
 function normalizeEntry(raw: Record<string, unknown>): HallOfFameEntry {
   const honoree = (raw.honoree as Record<string, unknown>) || {}
+  const source = (raw.source as Record<string, unknown>) || {}
   const achievement = (raw.achievement as Record<string, unknown>) || {}
+  const members = Array.isArray(raw.members) ? (raw.members as Record<string, unknown>[]) : []
+  const sourceType = str(source.type)
   return {
     id: String(raw._id || raw.id || ''),
-    category: (raw.category as HofCategory) || 'event_winner',
-    title: String(raw.title || 'Hall of Fame Inductee'),
-    description: String(raw.description || ''),
-    quote: String(raw.quote || ''),
-    honoreeId: String(honoree.id || raw.honoreeId || ''),
-    honoreeName: String(honoree.display_name || raw.honoreeName || 'Club Legend'),
-    honoreeType: (honoree.type as 'user' | 'team') || 'user',
-    domain: String(achievement.domain || raw.domain || 'sports'),
-    year: Number(achievement.year || raw.year || new Date().getFullYear()),
-    season: String(achievement.season || raw.season || '2026'),
+    slug: str(raw.slug),
+    category: (raw.category as HofCategory) || 'custom',
+    title: str(raw.title),
+    description: str(raw.description),
+    quote: str(raw.quote),
+    honoree: {
+      type: honoree.type === 'team' ? 'team' : 'user',
+      id: str(honoree.id),
+      displayName: str(honoree.display_name),
+      avatarUrl: strOrNull(honoree.avatar_url),
+      deleted: Boolean(honoree.deleted),
+    },
+    members: members.map((m) => ({
+      userId: str(m.user_id),
+      displayName: str(m.display_name),
+      avatarUrl: strOrNull(m.avatar_url),
+      deleted: Boolean(m.deleted),
+    })),
+    source: {
+      type:
+        sourceType === 'event' || sourceType === 'challenge' ? sourceType : 'manual',
+      id: strOrNull(source.id),
+      title: strOrNull(source.title),
+    },
+    achievement: {
+      domain: str(achievement.domain),
+      season: str(achievement.season),
+      year: Number(achievement.year) || new Date().getFullYear(),
+      difficulty: str(achievement.difficulty),
+      awardPoints: numOrNull(achievement.award_points),
+    },
+    mediaUrl: strOrNull(raw.media_url),
+    coverUrl: strOrNull(raw.cover_url),
+    tags: Array.isArray(raw.tags) ? (raw.tags as unknown[]).map(String) : [],
     featured: Boolean(raw.featured),
+    featuredOrder: numOrNull(raw.featured_order),
   }
 }
 
@@ -88,7 +216,7 @@ export async function getEntries(filters?: {
       const term = (filters?.search || '').toLowerCase().trim()
       const matchSearch =
         !term ||
-        e.honoreeName.toLowerCase().includes(term) ||
+        e.honoree.displayName.toLowerCase().includes(term) ||
         e.title.toLowerCase().includes(term)
       return matchCat && matchSearch
     })
@@ -100,11 +228,13 @@ export async function getEntries(filters?: {
       params.set('category', filters.category)
     }
     if (filters?.search?.trim()) {
-      params.set('search', filters.search.trim())
+      // HallOfFameQuerySchema: search max 64 chars.
+      params.set('search', filters.search.trim().slice(0, 64))
     }
     if (filters?.featured !== undefined) {
       params.set('featured', String(filters.featured))
     }
+    params.set('limit', '100')
     const qs = params.toString()
     const res = await apiClient.get<
       { items?: Record<string, unknown>[]; entries?: Record<string, unknown>[] } | Record<string, unknown>[]
@@ -117,82 +247,35 @@ export async function getEntries(filters?: {
   }
 }
 
-export async function createEntry(payload: {
-  category: HofCategory
-  title: string
-  description?: string
-  quote?: string
-  honoreeType?: 'user' | 'team'
-  honoreeId: string
-  honoreeName: string
-  sourceTitle?: string
-  domain?: string
-  year: number
-  season?: string
-  awardPoints?: number
-  featured?: boolean
-}): Promise<HallOfFameEntry> {
-  const body = {
-    category: payload.category,
-    title: payload.title,
-    description: payload.description || '',
-    quote: payload.quote || '',
-    honoree: {
-      type: payload.honoreeType || 'user',
-      id: payload.honoreeId,
-      display_name: payload.honoreeName,
-    },
-    source: {
-      type: 'manual',
-      title: payload.sourceTitle || 'Club Induction',
-    },
-    achievement: {
-      domain: payload.domain || 'sports',
-      year: Number(payload.year),
-      season: payload.season || String(payload.year),
-      award_points: Number(payload.awardPoints || 0),
-    },
-    featured: Boolean(payload.featured),
-  }
-
+export async function createEntry(body: CreateHofEntryBody): Promise<HallOfFameEntry> {
   if (isMock) {
     await new Promise((resolve) => setTimeout(resolve, 150))
-    const created = normalizeEntry({
-      ...body,
-      id: `hof-${Date.now()}`,
-    })
+    const created = normalizeEntry({ ...body, id: `hof-${Date.now()}` } as unknown as Record<string, unknown>)
     mockHofEntries.unshift(created)
     return created
   }
 
-  const res = await apiClient.post<
-    Record<string, unknown> | { entry?: Record<string, unknown>; item?: Record<string, unknown> }
-  >('/hall-of-fame', body)
-  const raw =
-    res && typeof res === 'object' && ('entry' in res || 'item' in res)
-      ? ((res as { entry?: Record<string, unknown>; item?: Record<string, unknown> }).entry ||
-          (res as { entry?: Record<string, unknown>; item?: Record<string, unknown> }).item ||
-          (res as Record<string, unknown>))
-      : (res as Record<string, unknown>)
-  return normalizeEntry(raw)
+  // The controller answers 201 with the entry document itself.
+  const res = await apiClient.post<Record<string, unknown>>('/hall-of-fame', body)
+  return normalizeEntry(res)
 }
 
 export async function updateEntry(
   id: string,
-  payload: Record<string, unknown>
+  body: UpdateHofEntryBody
 ): Promise<HallOfFameEntry> {
   if (isMock) {
     await new Promise((resolve) => setTimeout(resolve, 150))
     const item = mockHofEntries.find((e) => e.id === id)
     if (item) {
-      if (typeof payload.featured === 'boolean') item.featured = payload.featured
-      if (typeof payload.title === 'string') item.title = payload.title
+      if (typeof body.featured === 'boolean') item.featured = body.featured
+      if (typeof body.title === 'string') item.title = body.title
       return { ...item }
     }
     throw new Error('Hall of Fame entry not found')
   }
 
-  const res = await apiClient.patch<Record<string, unknown>>(`/hall-of-fame/${id}`, payload)
+  const res = await apiClient.patch<Record<string, unknown>>(`/hall-of-fame/${id}`, body)
   return normalizeEntry(res)
 }
 
@@ -208,11 +291,41 @@ export async function deleteEntry(id: string): Promise<boolean> {
   return true
 }
 
+/** A user as the honoree / member picker needs it. */
+export interface HofUserOption {
+  id: string
+  username: string
+  fullName: string
+  avatarUrl: string | null
+}
+
+/**
+ * GET /users/search?q=&limit= (user-service SearchQuery: q 1..80 chars, limit 1..20).
+ * Answers `{ users: SerializedUser[] }`; a private profile comes back minimal (no full_name).
+ */
+export async function searchUsers(q: string, limit = 10): Promise<HofUserOption[]> {
+  const term = q.trim().slice(0, 80)
+  if (!term) return []
+  const params = new URLSearchParams({ q: term, limit: String(Math.min(Math.max(limit, 1), 20)) })
+  const res = await apiClient.get<{ users?: Record<string, unknown>[] }>(`/users/search?${params}`)
+  const list = Array.isArray(res?.users) ? res.users : []
+  return list.map((u) => {
+    const profile = (u.profile as Record<string, unknown>) || {}
+    return {
+      id: str(u.id || u._id),
+      username: str(u.username),
+      fullName: str(profile.full_name),
+      avatarUrl: strOrNull(profile.avatar_url),
+    }
+  })
+}
+
 export const hallOfFameService = {
   getEntries,
   createEntry,
   updateEntry,
   deleteEntry,
+  searchUsers,
 }
 
 export default hallOfFameService

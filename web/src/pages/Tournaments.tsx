@@ -10,6 +10,7 @@ import {
 import type { Bracket, Match } from '../types/bracket'
 import { bracketService } from '../services/bracketService'
 import type { ClubEvent } from '../types/event'
+import { rulesFor } from '../types/event'
 import { eventService } from '../services/eventService'
 import { BracketTree } from '../components/tournaments/BracketTree'
 import { MatchScoreModal } from '../components/tournaments/MatchScoreModal'
@@ -17,7 +18,7 @@ import { GenerateBracketModal } from '../components/tournaments/GenerateBracketM
 
 export const Tournaments: React.FC = () => {
   const [events, setEvents] = useState<ClubEvent[]>([])
-  const [selectedEventId, setSelectedEventId] = useState<string>('evt-002')
+  const [selectedEventId, setSelectedEventId] = useState<string>('')
   const [bracket, setBracket] = useState<Bracket | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -33,14 +34,19 @@ export const Tournaments: React.FC = () => {
 
     eventService
       .getEvents()
-      .then((data) => {
+      .then((all) => {
         if (!ignore) {
+          // DE (Direct Event) has no leaderboard or bracket (leaderboard == null on the backend).
+          const data = all.filter((e) => rulesFor(e.type).hasLeaderboard)
           setEvents(data)
+          if (data.length === 0) setIsLoading(false)
+          const requested = new URLSearchParams(window.location.search).get('event')
           setSelectedEventId((prev) => {
+            if (requested && data.some((e) => e.id === requested)) return requested
             if (data.length > 0 && !data.some((e) => e.id === prev)) {
               return data[0].id
             }
-            return prev
+            return data.length === 0 ? '' : prev
           })
         }
       })

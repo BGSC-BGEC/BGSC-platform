@@ -18,7 +18,27 @@ export interface ChallengeItem {
   status: ChallengeStatus
   grantsHallOfFame: boolean
   autoApprove: boolean
+  /** `submission.requires_proof`; auto-approve is refused (422) when this is false. */
+  requiresProof: boolean
+  /** `location` is null for a digital challenge; required (422) for a physical one. */
+  location: { name: string; details: string | null } | null
   participantsCount: number
+}
+
+/**
+ * PATCH /challenges/:id body (challenge-service UpdateChallengeBody). Only the fields the console
+ * edits are typed here; every one is optional and at least one must be present.
+ */
+export interface UpdateChallengeBody {
+  title?: string
+  description?: string
+  domain?: ChallengeDomain
+  kind?: ChallengeKind
+  difficulty?: ChallengeDifficulty
+  award_points?: number
+  grants_hall_of_fame?: boolean
+  location?: { name: string; details: string | null } | null
+  submission?: { auto_approve?: boolean }
 }
 
 export interface ChallengeParticipation {
@@ -45,6 +65,8 @@ const mockChallenges: ChallengeItem[] = [
     status: 'active',
     grantsHallOfFame: false,
     autoApprove: false,
+    requiresProof: true,
+    location: { name: 'Campus Track', details: null },
     participantsCount: 18,
   },
   {
@@ -58,6 +80,8 @@ const mockChallenges: ChallengeItem[] = [
     status: 'active',
     grantsHallOfFame: false,
     autoApprove: false,
+    requiresProof: true,
+    location: null,
     participantsCount: 24,
   },
   {
@@ -71,6 +95,8 @@ const mockChallenges: ChallengeItem[] = [
     status: 'draft',
     grantsHallOfFame: true,
     autoApprove: false,
+    requiresProof: true,
+    location: { name: 'Campus Ground', details: null },
     participantsCount: 0,
   },
 ]
@@ -92,6 +118,7 @@ const mockParticipations: ChallengeParticipation[] = [
 function normalizeChallenge(raw: Record<string, unknown>): ChallengeItem {
   const submission = (raw.submission as Record<string, unknown>) || {}
   const counts = (raw.counts as Record<string, unknown>) || {}
+  const location = raw.location as Record<string, unknown> | null | undefined
   return {
     id: String(raw._id || raw.id || ''),
     title: String(raw.title || 'Untitled Challenge'),
@@ -103,7 +130,17 @@ function normalizeChallenge(raw: Record<string, unknown>): ChallengeItem {
     status: (raw.status as ChallengeStatus) || 'active',
     grantsHallOfFame: Boolean(raw.grants_hall_of_fame ?? raw.grantsHallOfFame),
     autoApprove: Boolean(submission.auto_approve ?? raw.autoApprove),
-    participantsCount: Number(counts.participants ?? raw.participantsCount ?? 0),
+    requiresProof:
+      submission.requires_proof === undefined ? true : Boolean(submission.requires_proof),
+    location:
+      location && typeof location.name === 'string'
+        ? {
+            name: location.name,
+            details: typeof location.details === 'string' ? location.details : null,
+          }
+        : null,
+    // The model's counters are { accepted, submitted, approved }; there is no `participants`.
+    participantsCount: Number(counts.accepted ?? raw.participantsCount ?? 0),
   }
 }
 
@@ -204,6 +241,8 @@ export async function createChallenge(payload: {
       status: 'draft',
       grantsHallOfFame: body.grants_hall_of_fame,
       autoApprove: Boolean(payload.autoApprove),
+      requiresProof: true,
+      location: body.location,
       participantsCount: 0,
     }
     mockChallenges.unshift(created)
@@ -247,6 +286,61 @@ export async function transitionChallenge(
       ? (res.challenge as Record<string, unknown>)
       : (res as Record<string, unknown>)
   return normalizeChallenge(raw)
+}
+
+export async function updateChallenge(
+  id: string,
+  body: UpdateChallengeBody
+): Promise<ChallengeItem> {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    const item = mockChallenges.find((c) => c.id === id)
+    if (!item) throw new Error('Challenge not found')
+    if (body.title !== undefined) item.title = body.title
+    if (body.description !== undefined) item.description = body.description
+    if (body.domain !== undefined) item.domain = body.domain
+    if (body.kind !== undefined) item.kind = body.kind
+    if (body.difficulty !== undefined) item.difficulty = body.difficulty
+    if (body.award_points !== undefined) item.awardPoints = body.award_points
+    if (body.grants_hall_of_fame !== undefined) item.grantsHallOfFame = body.grants_hall_of_fame
+    if (body.location !== undefined) item.location = body.location
+    if (body.submission?.auto_approve !== undefined) item.autoApprove = body.submission.auto_approve
+    return { ...item }
+  }
+
+  // The controller answers with the updated challenge document itself.
+  const res = await apiClient.patch<Record<string, unknown>>(`/challenges/${id}`, body)
+  return normalizeChallenge(res)
+}
+
+/**
+ * Every challenge in every status, for pickers (e.g. a Hall of Fame source). The list route takes
+ * one status at a time and pages by cursor (limit max 50).
+ */
+export async function getAllChallenges(): Promise<ChallengeItem[]> {
+  if (isMock) {
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    return [...mockChallenges]
+  }
+
+  const statuses: ChallengeStatus[] = ['active', 'draft', 'completed', 'archived']
+  const perStatus = await Promise.all(
+    statuses.map(async (status) => {
+      const rows: Record<string, unknown>[] = []
+      let cursor: string | null = null
+      for (let page = 0; page < 20; page++) {
+        const params = new URLSearchParams({ status, limit: '50' })
+        if (cursor) params.set('cursor', cursor)
+        const res: { challenges?: Record<string, unknown>[]; next_cursor?: string | null } | null =
+          await apiClient.get(`/challenges?${params}`)
+        rows.push(...(res?.challenges || []))
+        cursor = res?.next_cursor || null
+        if (!cursor) break
+      }
+      return rows
+    })
+  )
+  return perStatus.flat().map(normalizeChallenge)
 }
 
 export async function deleteChallenge(id: string): Promise<boolean> {
@@ -318,6 +412,8 @@ export const challengeService = {
   getChallenges,
   createChallenge,
   transitionChallenge,
+  updateChallenge,
+  getAllChallenges,
   deleteChallenge,
   getReviewQueue,
   reviewParticipation,

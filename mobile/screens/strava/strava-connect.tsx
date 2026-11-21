@@ -19,7 +19,7 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 import { useResponsive } from '../../src/responsive/useResponsive';
 import { ApiError, getErrorMessage } from '../../src/api/client';
 import { stravaRepository, type StravaPage, type StravaStatus } from '../../src/repositories/StravaRepository';
-import { stravaCallback } from '../../services/challengeLogic';
+import { isStravaAuthorizeUrl, stravaActivityUrl, stravaCallback } from '../../services/challengeLogic';
 import { useAuth } from '../../store/auth';
 import { usePopup } from '../../src/popups/PopupProvider';
 import ConnectionDots from '../../assets/illustrations/connection-dots.svg';
@@ -93,13 +93,20 @@ export default function StravaConnect() {
     return () => subscription.remove();
   }, [handleCallback]);
   useEffect(() => { if (route.params?.callbackUrl) void handleCallback(route.params.callbackUrl); }, [route.params?.callbackUrl, handleCallback]);
+  const openActivity = (id: string, isPrivate: boolean) => {
+    const url = stravaActivityUrl(id);
+    if (!url || (id.startsWith('demo-') && isPrivate)) {
+      setNotice('This demo activity has no public link.');
+      return;
+    }
+    void Linking.openURL(url).catch(err => setError(getErrorMessage(err)));
+  };
   const connect = async () => {
     if (mutation.current) return;
     mutation.current = true; setBusy(true); setError(null);
     try {
       const { url } = await stravaRepository.connect();
-      const parsed = new URL(url);
-      if (parsed.protocol !== 'https:' || !['www.strava.com', 'strava.com'].includes(parsed.hostname)) throw new Error('The Strava authorization address was invalid.');
+      if (!isStravaAuthorizeUrl(url)) throw new Error('The Strava authorization address was invalid.');
       await Linking.openURL(url);
       setNotice('Finish authorization in your browser, then return to BGSC.');
     } catch (err) { setError(stravaError(err)); }
@@ -159,7 +166,7 @@ export default function StravaConnect() {
           <Typography variant="caption" align="center" color="textMuted">Opens Strava to authorize access. Disconnect here at any time.</Typography>
         </>}
       </View>}
-      renderItem={({ item }) => <Card style={styles.activity}><ListRow icon="activity" title={item.name} subtitle={`${item.type} · ${(item.distance_meters / 1000).toFixed(1)} km · ${Math.floor(item.moving_time_seconds / 60)} min`} onPress={() => { void Linking.openURL(`https://www.strava.com/activities/${encodeURIComponent(item._id)}`).catch(err => setError(getErrorMessage(err))); }} /><View style={styles.row}><Typography variant="caption" color="textMuted">{new Date(item.start_date).toLocaleDateString()}</Typography>{item.is_private && <Badge label="Private" variant="muted" />}</View></Card>}
+      renderItem={({ item }) => <Card style={styles.activity}><ListRow icon="activity" title={item.name} subtitle={`${item.type} · ${(item.distance_meters / 1000).toFixed(1)} km · ${Math.floor(item.moving_time_seconds / 60)} min`} onPress={() => openActivity(item._id, item.is_private)} /><View style={styles.row}><Typography variant="caption" color="textMuted">{new Date(item.start_date).toLocaleDateString()}</Typography>{item.is_private && <Badge label="Private" variant="muted" />}</View></Card>}
       ListFooterComponent={!loading && status?.connected ? <View style={styles.footer}>{page.next_cursor && <Button label="Load more activities" variant="outline" loading={more} disabled={busy} onPress={() => void loadMore()} />}<Button label="Disconnect Strava" variant="ghost" labelColor={colors.dangerText} disabled={busy} onPress={() => void disconnect()} /></View> : undefined}
     />
   </View>;

@@ -57,19 +57,67 @@ export interface MediaAlbum {
   description?: string | null
   category: MediaCategory
   cover_media_url?: string | null
+  cover_media_id?: string | null
+  /** The event this album is filed under, if any. */
+  event_id?: string | null
+  is_public?: boolean
   media_count: number
   created_at: string
 }
 
+/**
+ * One file for POST /media/upload. The backend takes the raw bytes as the body and the rest as
+ * query parameters (media-service media.schemas.ts UploadMediaQuerySchema).
+ */
 export interface UploadMediaPayload {
-  original_filename: string
+  file: File
   category: MediaCategory
   caption?: string
   tags?: string[]
   event_id?: string
-  media_type: MediaType
-  size_bytes: number
-  url: string
+  album_id?: string
+}
+
+/** PATCH /media/:id accepts only these two fields (UpdateMediaSchema). */
+export interface UpdateMediaPayload {
+  caption?: string
+  tags?: string[]
+}
+
+/** POST /media/albums (CreateAlbumSchema); category and is_public default server-side. */
+export interface CreateAlbumPayload {
+  title: string
+  event_id?: string
+}
+
+/**
+ * Client mirror of the media-service upload limits (storage.ts, media.schemas.ts). The backend
+ * re-checks everything against the sniffed bytes.
+ */
+export const MEDIA_UPLOAD_LIMITS = {
+  acceptedMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/webm'],
+  imageMaxBytes: 10 * 1024 * 1024,
+  videoMaxBytes: 50 * 1024 * 1024,
+  captionMax: 500,
+  tagMax: 40,
+  tagsMax: 20,
+  filenameMax: 255,
+  albumTitleMax: 120,
+} as const
+
+/** Why a file cannot be uploaded, or null if it passes the client-side checks. */
+export function validateUploadFile(file: File): string | null {
+  const accepted: readonly string[] = MEDIA_UPLOAD_LIMITS.acceptedMimeTypes
+  if (!accepted.includes(file.type)) {
+    return `Unsupported file type${file.type ? ` (${file.type})` : ''}. Use JPG, PNG, WEBP, MP4 or WEBM.`
+  }
+  if (file.size === 0) return 'File is empty.'
+  const isVideo = file.type.startsWith('video/')
+  const max = isVideo ? MEDIA_UPLOAD_LIMITS.videoMaxBytes : MEDIA_UPLOAD_LIMITS.imageMaxBytes
+  if (file.size > max) {
+    return `File is too large. Maximum size for ${isVideo ? 'videos is 50MB' : 'images is 10MB'}.`
+  }
+  return null
 }
 
 export interface ModerateMediaPayload {

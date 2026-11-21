@@ -347,8 +347,7 @@ function assertOutranks(actor: Actor, role: UserRole): void {
 
 /**
  * Spec §5.15.5: role changes are audited, and an admin cannot demote their own active session.
- * Promotion to coordinator/founder is refused at the schema (ASSIGNABLE_ROLES) because it requires
- * Founder 2FA that does not exist yet.
+ * Founder is not assignable (ASSIGNABLE_ROLES); coordinator is, by a founder only (assertOutranks).
  *
  * Claim-then-audit-with-rollback (auditedTransition), with the claim conditional on the role that
  * was read: two admins racing on one user produce one change and one audit row whose
@@ -361,13 +360,10 @@ export async function changeRole(
     reason: string
 ): Promise<IUser> {
     if (target._id === actor.id) throw new ServiceError(409, 'cannot_change_own_role');
+    // Only someone who strictly outranks both the current and the new role may change it, so
+    // granting or removing coordinator is founder-only. (A founder target never gets here.)
     assertOutranks(actor, target.role);
     assertOutranks(actor, newRole);
-    // Guard the other direction too: a coordinator must not be demoted by the assignable-role list.
-    // (A founder target never gets here: nobody outranks one.)
-    if (target.role === UserRole.COORDINATOR) {
-        throw new ServiceError(501, 'requires_2fa');
-    }
     if (target.role === newRole) throw new ServiceError(409, 'no_change');
 
     const previous = target.role;
