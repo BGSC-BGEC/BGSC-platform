@@ -135,7 +135,7 @@ export default function EventDetails() {
           </View>
         ) : (
           <View style={styles.pad}>
-            <ErrorState title="Couldn’t load this event" message={error ?? undefined} onRetry={() => reload()} />
+            <ErrorState variant="screen" title="Couldn’t load this event" message={error ?? undefined} onRetry={() => reload()} />
           </View>
         )}
       </View>
@@ -579,7 +579,7 @@ function Hero({ event, registered }: { event: ApiEvent; registered: boolean }) {
             <Defs>
               <LinearGradient id="event-hero" x1="0" y1="0" x2="0" y2="1">
                 <Stop offset="0" stopColor={tone.cover} />
-                <Stop offset="1" stopColor="#2B3036" />
+                <Stop offset="1" stopColor="#141821" />
               </LinearGradient>
             </Defs>
             <Rect width="100%" height="100%" fill="url(#event-hero)" />

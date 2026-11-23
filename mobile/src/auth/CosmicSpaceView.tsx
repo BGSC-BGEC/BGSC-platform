@@ -33,7 +33,7 @@ interface StarData {
   group: 1 | 2;
 }
 
-const STAR_COLORS = ['#ffffff', '#e0f2fe', '#fdf4ff', '#fbcfe8', '#bae6fd', '#fed7aa'];
+const STAR_COLORS = ['#ffffff', '#e0f2fe', '#fdf4ff', '#fbcfe8', '#bae6fd', '#F6C8B9'];
 
 interface SubtleShootingStarProps {
   id: string;
@@ -128,7 +128,7 @@ export function SubtleShootingStar({
         <Defs>
           <LinearGradient id={`subtleStreak-${id}`} x1="0%" y1="0%" x2="100%" y2="0%">
             <Stop offset="0%" stopColor="#FFFFFF" stopOpacity={0} />
-            <Stop offset="60%" stopColor="#FED7AA" stopOpacity={0.35} />
+            <Stop offset="60%" stopColor="#F6C8B9" stopOpacity={0.35} />
             <Stop offset="90%" stopColor="#FFFFFF" stopOpacity={0.85} />
             <Stop offset="100%" stopColor="#FFFFFF" stopOpacity={1} />
           </LinearGradient>
@@ -394,8 +394,8 @@ export function CosmicSpaceBackground({
       <Svg style={StyleSheet.absoluteFill} width="100%" height="100%" viewBox="0 0 390 844" preserveAspectRatio="none">
         <Defs>
           <RadialGradient id="horizon-glow" cx="195" cy="844" rx="260" ry="240" gradientUnits="userSpaceOnUse">
-            <Stop offset="0%" stopColor="#f97316" stopOpacity="0.85" />
-            <Stop offset="0.3" stopColor="#ea580c" stopOpacity="0.6" />
+            <Stop offset="0%" stopColor="#DF7A5E" stopOpacity="0.85" />
+            <Stop offset="0.3" stopColor="#B4553C" stopOpacity="0.6" />
             <Stop offset="0.6" stopColor="#0891b2" stopOpacity="0.15" />
             <Stop offset="1" stopColor="#03060f" stopOpacity="0" />
           </RadialGradient>

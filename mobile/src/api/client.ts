@@ -2,7 +2,6 @@ import axios, { AxiosError, type AxiosRequestConfig, type InternalAxiosRequestCo
 
 import { API_BASE_URL } from './config';
 import { tokenStorage } from './tokenStorage';
-import { handleMockRequest, isMockModeActive } from '../mock';
 
 /**
  * Error thrown by every repository call. Mirrors the backend error body:
@@ -113,6 +112,23 @@ function describeErrorCode(code: string, body?: Record<string, unknown>): string
   return FRIENDLY_MESSAGES[code] ?? 'Something went wrong. Please try again.';
 }
 
+// Friendly texts of the "doesn't exist" codes. invite_code_not_found is a typo in user input, not a
+// missing resource, so it stays a regular error.
+const NOT_FOUND_MESSAGES = new Set(
+  Object.entries(FRIENDLY_MESSAGES)
+    .filter(([code]) => code.endsWith('not_found') && code !== 'invite_code_not_found')
+    .map(([, message]) => message),
+);
+
+/**
+ * True when an already-formatted error message means "this doesn't exist" (a `*_not_found` code,
+ * or a backend message such as "Event not found"), so screens can show it as an empty state.
+ */
+export function isNotFoundMessage(message?: string | null): boolean {
+  if (!message) return false;
+  return NOT_FOUND_MESSAGES.has(message) || /\bnot[\s_-]?found\b/i.test(message);
+}
+
 /** Human-readable message for any thrown value. */
 export function getErrorMessage(err: unknown): string {
   if (err instanceof ApiError) return err.message;
@@ -148,20 +164,6 @@ http.interceptors.request.use(async (config) => {
   if (accessToken && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${accessToken}`;
   }
-
-  // Fast-path: When mock mode is active (e.g. testing with Expo tunnel or EXPO_PUBLIC_USE_MOCK=true)
-  if (isMockModeActive()) {
-    try {
-      const mockRes = await handleMockRequest(config);
-      if (mockRes) {
-        config.adapter = () => Promise.resolve(mockRes);
-        return config;
-      }
-    } catch {
-      // Fall through to network
-    }
-  }
-
   return config;
 });
 
@@ -245,21 +247,6 @@ http.interceptors.response.use(
     }
 
     if (!error.response) {
-      if (config) {
-        try {
-          const fallback = await handleMockRequest(config);
-          if (fallback) {
-            console.log(`[Mock Fallback] Auto-served mock response for ${config.method?.toUpperCase()} ${config.url}`);
-            const body = fallback.data;
-            if (body && typeof body === 'object' && body.success === true && 'data' in body) {
-              fallback.data = body.data;
-            }
-            return fallback;
-          }
-        } catch {
-          // Continue to network error
-        }
-      }
       const code = error.code === 'ECONNABORTED' ? 'timeout' : 'network_error';
       return Promise.reject(new ApiError(0, code));
     }

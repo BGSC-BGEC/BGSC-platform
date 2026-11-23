@@ -1,12 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   View,
 } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import {
   StackActions,
   useFocusEffect,
@@ -69,11 +67,10 @@ export default function LoginScreen() {
       {/* Cosmic Canvas / Starfield Background */}
       <CosmicSpaceBackground showAstronaut astronautTop={insets.top + 20} astronautRight={16} />
 
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.keyboardView}
-      >
-        <ScrollView
+      {/* Scrolls the focused field above the keyboard on both platforms. */}
+      <KeyboardAwareScrollView
+          style={styles.keyboardView}
+          bottomOffset={24}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
@@ -189,8 +186,7 @@ export default function LoginScreen() {
           <Typography variant="bodySmall" color="textMuted" align="center" style={styles.footerNotice}>
             BGSC Platform &bull; BITS Goa Sports & Esports Community
           </Typography>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
     </View>
   );
 }

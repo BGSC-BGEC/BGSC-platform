@@ -1,0 +1,18 @@
+{
+  "enabledPlugins": {
+    "design@anthropic-plugin-directory": true,
+    "data@anthropic-plugin-directory": true,
+    "feature-dev@anthropic-plugin-directory": true,
+    "image-generation@anthropic-plugin-directory": true,
+    "claude-security@anthropic-plugin-directory": true,
+    "figma@anthropic-plugin-directory": true,
+    "website-design@anthropic-plugin-directory": true,
+    "superdesign@anthropic-plugin-directory": true,
+    "ui-design-review@anthropic-plugin-directory": true,
+    "code-simplifier@anthropic-plugin-directory": true,
+    "ui-consistency@anthropic-plugin-directory": true,
+    "backend-design@anthropic-plugin-directory": true,
+    "dashboard-design@anthropic-plugin-directory": true,
+    "securitymaxxing@anthropic-plugin-directory": true
+  }
+}

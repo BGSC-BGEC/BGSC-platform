@@ -7,7 +7,6 @@ import {
   Archive,
   Trash2,
   ClipboardCheck,
-  AlertCircle,
   X,
   Sparkles,
   Pencil,
@@ -22,6 +21,7 @@ import {
 } from '../services/challengeService'
 import { useCan } from '../services/permissions'
 import { ChallengeEditModal } from '../components/challenges/ChallengeEditModal'
+import { PageError } from '../components/ui/page-error'
 
 export const Challenges: React.FC = () => {
   const canDelete = useCan('challenges.delete')
@@ -204,21 +204,7 @@ export const Challenges: React.FC = () => {
         </select>
       </div>
 
-      {error && (
-        <div className="p-4 border border-destructive/40 bg-destructive/10 text-foreground rounded-xl flex items-center justify-between text-xs">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 text-destructive" />
-            <span>{error}</span>
-          </div>
-          <button
-            type="button"
-            onClick={fetchChallenges}
-            className="px-3 py-1 border border-border rounded-lg font-bold hover:bg-muted cursor-pointer transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      )}
+      {error && <PageError message={error} onRetry={fetchChallenges} />}
 
       {isLoading ? (
         <div className="p-12 text-center text-sm text-muted-foreground border border-border rounded-2xl bg-card">

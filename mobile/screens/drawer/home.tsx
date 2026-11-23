@@ -1,6 +1,5 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
-  Animated,
   Linking,
   Platform,
   Pressable,
@@ -8,23 +7,29 @@ import {
   ScrollView,
   StyleSheet,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import {
   DrawerActions,
   useFocusEffect,
+  useIsFocused,
   useNavigation,
   type NavigationProp,
   type ParamListBase,
 } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
 
 import { Avatar } from '../../src/components/Avatar';
-import { authorColor } from '../../src/components/AnnouncementCard';
 import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
+import { authorColor } from '../../src/components/AnnouncementCard';
 import { EventCard, eventCardData } from '../../src/components/EventCard';
 import { SectionHeader } from '../../src/components/SectionHeader';
 import { GamingBackdrop } from '../../src/components/GamingBackdrop';
+import { AnimatedScrollView } from '../../src/components/reacticx/templates/parallax-header';
+import { HeroIllustration, HERO_ILLUSTRATION_ASPECT } from '../../src/components/HeroIllustration';
+import { FrostedRim, FrostedSheen } from '../../src/components/FrostedSheen';
 import { SkeletonEventCard, Skeleton } from '../../src/feedback/Skeleton';
 import { ErrorState } from '../../src/feedback/ErrorState';
 import { Icon, type IconName } from '../../src/icons/Icon';
@@ -51,7 +56,28 @@ import {
 } from '../../src/utils/format';
 
 const WHATSAPP_URL = 'https://www.whatsapp.com/';
+
 const WEEK_MS = 7 * 24 * 3600 * 1000;
+
+/** Collapsed (frosted) top bar height below the status bar. (Hero height: see heroArtLayout.) */
+const TOP_BAR_BODY_HEIGHT = 52;
+/** Height of the menu button and action capsule in the top bar. */
+const TOP_BAR_CONTROL_SIZE = 40;
+/** How far the rounded content sheet rides up over the hero. */
+const SHEET_OVERLAP = 24;
+
+/** Hero text sits on the orange doodle backdrop in both themes, so it is always white. */
+const HERO_INK = '#FFFFFF';
+const HERO_INK_SOFT = 'rgba(255, 255, 255, 0.88)';
+const HERO_AVATAR_SIZE = 64;
+const HERO_AVATAR_GAP = 8;
+/** Avatar fallback fill: deep burnt orange, so initials don't vanish into the hero. */
+const HERO_AVATAR_BG = '#7A2E06';
+const HERO_TEXT_SHADOW = {
+  textShadowColor: 'rgba(80, 30, 0, 0.28)',
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 6,
+} as const;
 
 export type FinderCategory = 'general' | 'gaming' | 'sports';
 
@@ -198,6 +224,69 @@ async function loadHome(userId: string | undefined): Promise<HomeData> {
   };
 }
 
+/**
+ * Player-card name size from the width available beside the illustration:
+ * Inter Black averages ~0.62em per character, so pick the largest size that fits,
+ * between a floor and a cap. Longer names still get an ellipsis at the floor.
+ */
+const HERO_NAME_MAX = 40;
+const HERO_NAME_MIN = 24;
+function heroNameSize(name: string, maxWidth: number) {
+  const fit = Math.floor(maxWidth / (Math.max(1, name.length) * 0.62));
+  const fontSize = Math.max(HERO_NAME_MIN, Math.min(HERO_NAME_MAX, fit));
+  return { fontSize, lineHeight: Math.round(fontSize * 1.15) };
+}
+
+/**
+ * Hero geometry. One row: greeting column on the left, illustration on the right.
+ * The illustration is large (72% of the width, original aspect ratio), runs ~18% of its
+ * width off the right edge, and sits behind the greeting. Its base rests on the content
+ * sheet's top edge (not tucked under). To use the empty space at the top instead of
+ * adding height, the row starts HERO_ROW_RAISE px up into the (transparent) top bar.
+ *
+ * Row height = the taller of the illustration and the greeting column (+ its clearance
+ * above the sheet and below the top bar), so a big avatar never meets the top bar buttons.
+ * Hero body height = top bar - raise + row + bottom padding.
+ */
+const HERO_SIDE_PADDING = 16;
+const HERO_ROW_RAISE = 12;
+const HERO_BLOCK_PADDING_BOTTOM = SHEET_OVERLAP;
+/** Space between the greeting column and the content sheet's top edge. */
+const HERO_TEXT_ABOVE_SHEET = 12;
+const HERO_IDENTITY_PADDING_BOTTOM = SHEET_OVERLAP + HERO_TEXT_ABOVE_SHEET - HERO_BLOCK_PADDING_BOTTOM;
+const HERO_ART_WIDTH_RATIO = 0.72;
+const HERO_ART_OVERFLOW_RATIO = 0.18;
+/** Toned down so the illustration supports the greeting instead of grabbing attention. */
+const HERO_ART_OPACITY = 0.78;
+/** How far the greeting column may reach over the art's (mostly empty) left edge. */
+const HERO_TEXT_OVER_ART = 14;
+function heroArtLayout(screenWidth: number) {
+  const width = Math.round(Math.min(screenWidth, 600) * HERO_ART_WIDTH_RATIO);
+  const height = Math.round(width / HERO_ILLUSTRATION_ASPECT);
+  const overflow = Math.round(width * HERO_ART_OVERFLOW_RATIO);
+  const left = screenWidth + overflow - width; // art's left edge on screen
+  // Greeting column: ringed avatar + gap + greeting + name (max line height) + subline.
+  const identityHeight =
+    HERO_AVATAR_SIZE + 9 + HERO_AVATAR_GAP + 18 + Math.round(HERO_NAME_MAX * 1.15) + 22;
+  const rowHeight = Math.max(height, identityHeight + HERO_IDENTITY_PADDING_BOTTOM + HERO_ROW_RAISE);
+  return {
+    width,
+    height,
+    rowHeight,
+    /** Offset from the row's right edge (the row sits inside the side padding). */
+    right: -(HERO_SIDE_PADDING + overflow),
+    identityWidth: Math.round(left - HERO_SIDE_PADDING + HERO_TEXT_OVER_ART),
+    bodyHeight: TOP_BAR_BODY_HEIGHT - HERO_ROW_RAISE + rowHeight + HERO_BLOCK_PADDING_BOTTOM,
+    /** The art's box in hero (backdrop) coordinates, for keeping doodles out of it. */
+    rect: (heroHeight: number) => ({
+      x: left,
+      y: heroHeight - HERO_BLOCK_PADDING_BOTTOM - height,
+      width,
+      height,
+    }),
+  };
+}
+
 function greeting(now = new Date()): string {
   const h = Number(now.toLocaleString('en-GB', { hour: '2-digit', hourCycle: 'h23', timeZone: 'Asia/Kolkata' }));
   return h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : 'Evening';
@@ -207,9 +296,10 @@ function greeting(now = new Date()): string {
  * Home screen displaying featured events, announcements, and quick actions.
  */
 export default function Home() {
-  const { colors, shadow } = useTheme();
+  const { colors, shadow, isDark } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
+  const isFocused = useIsFocused();
   const { user } = useAuth();
   const { data, loading, refreshing, error, reload } = useAsyncResource(() => loadHome(user?.id), [user?.id]);
   const [searchTab, setSearchTab] = useState<FinderCategory>('gaming');
@@ -236,8 +326,6 @@ export default function Home() {
     }
     return all;
   }, [data?.events, searchTab]);
-
-  const scrollY = useRef(new Animated.Value(0)).current;
 
   // Poll notifications for top bar
   useFocusEffect(
@@ -292,76 +380,96 @@ export default function Home() {
     );
   };
 
-  const heroOpacity = scrollY.interpolate({
-    inputRange: [0, 110],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
+  const { width: screenWidth } = useWindowDimensions();
+  const heroArt = useMemo(() => heroArtLayout(screenWidth), [screenWidth]);
+  const heroHeight = insets.top + heroArt.bodyHeight;
+  const topBarHeight = insets.top + TOP_BAR_BODY_HEIGHT;
 
-  const heroScale = scrollY.interpolate({
-    inputRange: [0, 110],
-    outputRange: [1, 0.9],
-    extrapolate: 'clamp',
-  });
-
-  const heroTranslateY = scrollY.interpolate({
-    inputRange: [0, 110],
-    outputRange: [0, -26],
-    extrapolate: 'clamp',
-  });
-
-  const heroHeight = insets.top + 200;
-  const spacerHeight = insets.top + 138;
+  // Shared frosted-glass tone for the top bar's menu button and action capsule.
+  const glassTone = {
+    backgroundColor: withAlpha(colors.surface, isDark ? 0.62 : 0.8),
+    borderColor: isDark ? withAlpha('#FFFFFF', 0.12) : withAlpha(colors.border, 0.7),
+    borderTopColor: withAlpha('#FFFFFF', isDark ? 0.22 : 0.9),
+  };
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <View style={[styles.heroFixedLayer, { height: heroHeight }]} pointerEvents="none">
-        <GamingBackdrop height={heroHeight} />
-      </View>
-
-      <Animated.View
-        style={[
-          styles.heroTextBlock,
-          {
-            paddingTop: insets.top + 52,
-            opacity: heroOpacity,
-            transform: [{ translateY: heroTranslateY }, { scale: heroScale }],
-          },
-        ]}
-        pointerEvents="none"
-      >
-        <Typography variant="bodySmall" color="textMuted" style={styles.greetingText}>
-          Good {greeting()}{firstName ? `, ${firstName}` : ''}
-        </Typography>
-
-        <Typography color="text" style={styles.headline}>
-          Where Are You Competing?
-        </Typography>
-
-        {data ? (
-          <View
-            style={[
-              styles.statusPill,
-              {
-                backgroundColor: withAlpha(colors.primary, 0.15),
-                borderColor: withAlpha(colors.primary, 0.4),
-              },
-            ]}
-          >
-            <Icon name="trophy" size={12} color="primary" />
-            <Typography variant="caption" color="primary" style={styles.statusPillText}>
-              {openEvents.length === 0
-                ? 'No tournaments open today · Browse upcoming'
-                : `${openEvents.length} tournament${openEvents.length === 1 ? '' : 's'} open for entry`}
-            </Typography>
-          </View>
-        ) : null}
-      </Animated.View>
-
-      <Animated.ScrollView
+      <AnimatedScrollView
         showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}
+        headerMaxHeight={heroHeight}
+        topBarHeight={topBarHeight}
+        // Frosted bar that fades in behind the fixed top buttons once the hero scrolls away.
+        renderTopNavBarComponent={() => (
+          <View
+            pointerEvents="none"
+            style={[styles.collapsedBar, { borderBottomColor: withAlpha(colors.border, 0.7) }]}
+          >
+            <BlurView intensity={isDark ? 45 : 70} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
+            <View
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: withAlpha(colors.background, Platform.OS === 'ios' ? 0.55 : 0.92) },
+              ]}
+            />
+          </View>
+        )}
+        // Parallax layer: drifts down at half scroll speed, fades, and stretches on pull-down.
+        renderHeaderComponent={() => (
+          <View pointerEvents="none" style={[styles.heroLayer, { backgroundColor: colors.background }]}>
+            <GamingBackdrop
+              height={heroHeight}
+              topInset={topBarHeight}
+              // Doodles behind the greeting and stat strip are drawn fainter.
+              bottomInset={heroHeight - topBarHeight}
+              // No fade: the content sheet's rounded corners sit straight on the orange
+              // (a fade into the dark background read as a muddy band).
+              fadeHeight={0}
+              // No doodles behind the illustration (it has its own).
+              clearRects={[heroArt.rect(heroHeight)]}
+              paused={!isFocused}
+            />
+          </View>
+        )}
+        // Player card on the orange hero; fades out as you scroll.
+        renderOveralComponent={() => (
+          <View
+            pointerEvents="box-none"
+            // Fills the orange area below the top bar, starting HERO_ROW_RAISE px up into it.
+            style={[styles.heroTextBlock, { height: heroHeight - topBarHeight + HERO_ROW_RAISE }]}
+          >
+            {/* Greeting on the left, large illustration behind it on the right (running
+                slightly off-screen), both above the strip. */}
+            <View style={[styles.heroRow, { height: heroArt.rowHeight }]}>
+              <HeroIllustration
+                width={heroArt.width}
+                opacity={HERO_ART_OPACITY}
+                style={[styles.heroArt, { right: heroArt.right }]}
+              />
+              <View style={[styles.identity, { width: heroArt.identityWidth }]}>
+                <View style={styles.avatarRing}>
+                  <Avatar
+                    name={user?.fullName || user?.username}
+                    uri={user?.avatar_url}
+                    size={HERO_AVATAR_SIZE}
+                    color={HERO_AVATAR_BG}
+                  />
+                </View>
+                <Typography style={styles.greetingText} numberOfLines={1}>
+                  Good {greeting().toLowerCase()}
+                </Typography>
+                <Typography
+                  style={[styles.heroName, heroNameSize(firstName || 'Player', heroArt.identityWidth)]}
+                  numberOfLines={1}
+                >
+                  {firstName || 'Player'}
+                </Typography>
+                <Typography style={styles.heroSubline} numberOfLines={1}>
+                  Ready to play?
+                </Typography>
+              </View>
+            </View>
+          </View>
+        )}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -375,8 +483,6 @@ export default function Home() {
           { paddingBottom: Math.max(110, insets.bottom + 90) },
         ]}
       >
-        <View style={{ height: spacerHeight }} />
-
         <View
           style={[
             styles.contentSheet,
@@ -391,11 +497,12 @@ export default function Home() {
           {/* Feed Error Alert */}
           {error && !data ? <ErrorState title="Couldn’t load your home feed" message={error} onRetry={() => reload()} /> : null}
 
-          {/* Credits / Points Pass Card (Visible on Top) */}
+          {/* Member Pass: points balance, weekly gain, rank and activity stats. */}
           {loading ? (
             <Skeleton height={210} borderRadius={24} />
           ) : data?.points ? (
             <View style={[styles.card, styles.pointsPass, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('raised')]}>
+              <FrostedSheen radius={18} />
               <View style={[styles.passRibbon, { borderBottomColor: colors.border }]}>
                 <View style={styles.passType}>
                   <Icon name="zap" size={14} color="primary" />
@@ -406,11 +513,11 @@ export default function Home() {
                 {data.rank ? <Badge label={`Top ${data.rank.topPercent}%`} variant="success" /> : null}
               </View>
 
-              {/* Point Balance */}
+              {/* Points */}
               <View style={styles.balanceRow}>
                 <View>
                   <Typography variant="caption" color="textMuted">
-                    TOTAL BALANCE
+                    TOTAL POINTS
                   </Typography>
                   <Typography color="text" style={styles.balance}>
                     {formatNumber(data.points.balance)}
@@ -443,6 +550,7 @@ export default function Home() {
                 <Button label="History" variant="outline" onPress={() => navigation.navigate('Points')} containerStyle={styles.flex} />
                 <Button label="Leaderboard" onPress={() => navigation.navigate('Leaderboard')} containerStyle={styles.flex} />
               </View>
+              <FrostedRim radius={18} />
             </View>
           ) : null}
 
@@ -458,6 +566,7 @@ export default function Home() {
                 pressed && styles.pressed,
               ]}
             >
+              <FrostedSheen radius={14} />
               <View style={[styles.iconTile, { backgroundColor: colors.primarySolid }]}>
                 <Icon name="megaphone" size={20} color="white" />
               </View>
@@ -484,6 +593,7 @@ export default function Home() {
               },
             ]}
           >
+            <FrostedSheen radius={16} />
             <View
               style={[
                 styles.finderTabs,
@@ -625,6 +735,7 @@ export default function Home() {
             <View style={styles.section}>
               <SectionHeader title="Recent Activity" actionLabel="History" onAction={() => navigation.navigate('Points')} />
               <View style={[styles.card, styles.list, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('flat')]}>
+                <FrostedSheen radius={16} />
                 {data.activity.map((t, i) => (
                   <View
                     key={t.id}
@@ -647,6 +758,7 @@ export default function Home() {
                     </Typography>
                   </View>
                 ))}
+                <FrostedRim radius={16} />
               </View>
             </View>
           ) : null}
@@ -662,6 +774,7 @@ export default function Home() {
               pressed && styles.pressed,
             ]}
           >
+            <FrostedSheen radius={16} />
             <View style={[styles.iconTile, { backgroundColor: colors.success }]}>
               <Icon name="message" size={20} color="white" />
             </View>
@@ -676,89 +789,70 @@ export default function Home() {
             <Icon name="chevron-right" size={18} color="success" />
           </Pressable>
         </View>
-      </Animated.ScrollView>
+      </AnimatedScrollView>
 
+      {/* Fixed top bar. Same height as the frosted collapsed bar so they line up. */}
       <View
         pointerEvents="box-none"
-        style={[
-          styles.topBar,
-          {
-            paddingTop: insets.top + 4,
-          },
-        ]}
+        style={[styles.topBar, { paddingTop: insets.top, height: topBarHeight }]}
       >
         <Pressable
           onPress={() => navigation.dispatch(DrawerActions.openDrawer())}
           accessibilityRole="button"
           accessibilityLabel="Open menu"
-          hitSlop={10}
-          style={({ pressed }) => [
-            styles.menuButton,
-            {
-              backgroundColor: withAlpha(colors.surface, 0.72),
-              borderColor: withAlpha(colors.border, 0.5),
-            },
-            shadow('flat'),
-            pressed && styles.pressed,
-          ]}
+          hitSlop={8}
+          style={({ pressed }) => [styles.glass, styles.menuButton, glassTone, pressed && styles.pressed]}
         >
           <Icon name="menu" size={20} color="text" />
         </Pressable>
 
-        <View style={styles.brandCenterWrap} pointerEvents="none">
-          <Typography variant="h3" color="text" style={styles.brandTitle}>
+        <View
+          style={[styles.brandCenterWrap, { top: insets.top }]}
+          pointerEvents="none"
+          accessible
+          accessibilityRole="header"
+          accessibilityLabel="BGSC"
+        >
+          <Typography color="text" style={styles.brandWordmark}>
             BGSC
           </Typography>
-          <View style={[styles.brandDot, { backgroundColor: colors.primary }]} />
         </View>
 
-        <View
-          style={[
-            styles.actionsCapsule,
-            {
-              backgroundColor: withAlpha(colors.surface, 0.72),
-              borderColor: withAlpha(colors.border, 0.5),
-            },
-            shadow('flat'),
-          ]}
-        >
+        <View style={[styles.glass, styles.actionsCapsule, glassTone]}>
           <Pressable
             onPress={() => navigation.navigate('Notifications', undefined, { pop: true })}
             accessibilityRole="button"
             accessibilityLabel={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
-            hitSlop={8}
+            hitSlop={4}
             style={({ pressed }) => [styles.capsuleBtn, pressed && styles.pressed]}
           >
-            <Icon name="bell" size={18} color="text" />
+            <Icon name="bell" size={19} color="text" />
             {unread > 0 ? (
-              <View
-                style={[
-                  styles.unreadDot,
-                  {
-                    backgroundColor: colors.primary,
-                    borderColor: colors.surface,
-                  },
-                ]}
-              />
+              <View style={[styles.unreadBadge, { backgroundColor: colors.primarySolid, borderColor: colors.surface }]}>
+                <Typography style={styles.unreadText} numberOfLines={1}>
+                  {unread > 9 ? '9+' : unread}
+                </Typography>
+              </View>
             ) : null}
           </Pressable>
 
-          <View style={[styles.capsuleDivider, { backgroundColor: withAlpha(colors.border, 0.6) }]} />
+          <View style={[styles.capsuleDivider, { backgroundColor: withAlpha(colors.border, 0.7) }]} />
 
           <Pressable
             onPress={() => navigation.navigate('Profile', undefined, { pop: true })}
             accessibilityRole="button"
             accessibilityLabel="Your profile"
-            hitSlop={6}
-            style={({ pressed }) => [styles.avatarPressable, pressed && styles.pressed]}
+            hitSlop={4}
+            style={({ pressed }) => [styles.capsuleBtn, pressed && styles.pressed]}
           >
-            <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={28} ring={false} />
+            <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={30} ring={false} />
           </Pressable>
         </View>
       </View>
     </View>
   );
 }
+
 
 function Stat({ value, label, onPress }: { value: string; label: string; onPress?: () => void }) {
   return (
@@ -792,6 +886,7 @@ function QuickAction({ icon, title, meta, onPress }: { icon: IconName; title: st
         pressed && styles.pressed,
       ]}
     >
+      <FrostedSheen radius={14} />
       <View style={[styles.iconTile, { backgroundColor: withAlpha(colors.primary, 0.15) }]}>
         <Icon name={icon} size={20} color="primary" />
       </View>
@@ -847,47 +942,72 @@ const styles = StyleSheet.create({
   small: { fontSize: 13 },
   tiny: { fontSize: 11, lineHeight: 16 },
 
-  heroFixedLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
+  heroLayer: {
+    flex: 1,
     overflow: 'hidden',
+  },
+  collapsedBar: {
+    flex: 1,
+    overflow: 'hidden',
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
 
   heroTextBlock: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 18,
-    gap: 2,
+    paddingHorizontal: HERO_SIDE_PADDING,
+    // Small on purpose: the illustration's base tucks under the content sheet; the
+    // greeting column keeps its own clearance (HERO_IDENTITY_PADDING_BOTTOM).
+    paddingBottom: HERO_BLOCK_PADDING_BOTTOM,
+    justifyContent: 'flex-end',
   },
-  greetingText: {
-    fontFamily: FONT_FAMILIES.bodyMedium,
-    fontSize: 12,
-    letterSpacing: 0.2,
-    marginBottom: 0,
-  },
-  headline: {
-    fontFamily: FONT_FAMILIES.bodyBold,
-    fontSize: 21,
-    lineHeight: 26,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-    marginBottom: 4,
-  },
-  statusPill: {
+  heroRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignSelf: 'flex-start',
   },
-  statusPillText: { fontSize: 10.5, fontWeight: '600' },
+  // Absolutely placed so it can run off the right edge; drawn before the greeting
+  // so the text sits on top.
+  heroArt: {
+    position: 'absolute',
+    bottom: 0,
+  },
+  // Vertically centred beside the illustration.
+  // Fills the row's height and sits toward the bottom, so the avatar has room above
+  // and the text lines up with the lower half of the illustration.
+  identity: {
+    alignSelf: 'stretch',
+    paddingHorizontal: 2,
+    paddingBottom: HERO_IDENTITY_PADDING_BOTTOM,
+    justifyContent: 'flex-end',
+  },
+  avatarRing: {
+    alignSelf: 'flex-start',
+    marginBottom: HERO_AVATAR_GAP,
+    padding: 2.5,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.9)',
+  },
+  heroSubline: {
+    fontFamily: FONT_FAMILIES.bodySemiBold,
+    fontSize: 14,
+    lineHeight: 18,
+    marginTop: 4,
+    color: HERO_INK_SOFT,
+    ...HERO_TEXT_SHADOW,
+  },
+  greetingText: {
+    fontFamily: FONT_FAMILIES.bodySemiBold,
+    fontSize: 14,
+    lineHeight: 18,
+    color: HERO_INK_SOFT,
+    ...HERO_TEXT_SHADOW,
+  },
+  // Plain bold white; size comes from heroNameSize() so long names fit on one line.
+  heroName: {
+    fontFamily: FONT_FAMILIES.bodyBlack,
+    letterSpacing: -1,
+    color: HERO_INK,
+    ...HERO_TEXT_SHADOW,
+  },
 
   topBar: {
     position: 'absolute',
@@ -898,81 +1018,84 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 14,
-    paddingBottom: 6,
     zIndex: 10,
-    backgroundColor: 'transparent',
-    elevation: 0,
-    borderWidth: 0,
-    borderBottomWidth: 0,
-    shadowOpacity: 0,
   },
-  menuButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+  // Frosted glass pill shared by the menu button and the action capsule.
+  // Soft iOS shadow only: Android elevation draws grey artifacts on translucent views.
+  glass: {
+    height: TOP_BAR_CONTROL_SIZE,
+    borderRadius: TOP_BAR_CONTROL_SIZE / 2,
+    borderWidth: StyleSheet.hairlineWidth * 2,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
     zIndex: 2,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.14,
+        shadowRadius: 8,
+      },
+      default: {},
+    }),
   },
+  menuButton: {
+    width: TOP_BAR_CONTROL_SIZE,
+  },
+  // Spans the row below the status bar, so the wordmark is centred on the buttons.
   brandCenterWrap: {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 6,
-    flexDirection: 'row',
+    bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
   },
-  brandTitle: {
-    fontFamily: FONT_FAMILIES.hero,
-    fontSize: 19,
-    letterSpacing: 1.1,
-  },
-  brandDot: {
-    width: 4.5,
-    height: 4.5,
-    borderRadius: 2.25,
-    marginBottom: 5,
+  // Plain bold wordmark: theme text colour reads on both the orange hero and the
+  // frosted collapsed bar.
+  brandWordmark: {
+    fontFamily: FONT_FAMILIES.brand,
+    fontSize: 24,
+    lineHeight: 30,
+    letterSpacing: 2,
   },
   actionsCapsule: {
     flexDirection: 'row',
-    alignItems: 'center',
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1,
-    paddingLeft: 4,
-    paddingRight: 4,
-    gap: 1,
-    zIndex: 2,
+    paddingHorizontal: 3,
+    gap: 2,
   },
   capsuleBtn: {
-    width: 28,
-    height: 28,
+    width: TOP_BAR_CONTROL_SIZE - 6,
+    height: TOP_BAR_CONTROL_SIZE - 6,
+    borderRadius: (TOP_BAR_CONTROL_SIZE - 6) / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    position: 'relative',
   },
   capsuleDivider: {
-    width: 1,
-    height: 14,
-    marginHorizontal: 2,
+    width: StyleSheet.hairlineWidth * 2,
+    height: 16,
   },
-  avatarPressable: {
-    borderRadius: 14,
-  },
-  unreadDot: {
+  unreadBadge: {
     position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 6.5,
-    height: 6.5,
-    borderRadius: 3.25,
+    top: 1,
+    right: -1,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 3,
+    borderRadius: 8,
     borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unreadText: {
+    color: '#FFFFFF',
+    fontFamily: FONT_FAMILIES.bodyBold,
+    fontSize: 9,
+    lineHeight: 11,
   },
 
   contentSheet: {
+    marginTop: -SHEET_OVERLAP,
     maxWidth: 600,
     width: '100%',
     alignSelf: 'center',

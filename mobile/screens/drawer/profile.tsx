@@ -1,44 +1,75 @@
-import { useCallback, useState } from 'react';
-import { Pressable, Share, StyleSheet, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { ProfileLayout } from '../profile/profile-layout';
 import { usersRepository } from '../../src/repositories/UsersRepository';
 import { pointsRepository } from '../../src/repositories/PointsRepository';
-import { eventsRepository } from '../../src/repositories/EventsRepository';
 import { registrationRepository } from '../../src/repositories/RegistrationRepository';
 import { useAsyncResource } from '../../src/hooks/useAsyncResource';
 import { useAuth } from '../../store/auth';
 import { useConfirmLogout } from '../../src/hooks/useConfirmLogout';
-import { Avatar } from '../../src/components/Avatar';
 import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
 import { BottomSheet } from '../../src/components/BottomSheet';
+import { PlayerCardShareSheet } from '../../src/components/playercard/PlayerCardShareSheet';
+import {
+  PLAYER_CARD_HEIGHT,
+  PLAYER_CARD_WIDTH,
+  PlayerCardView,
+  type PlayerCardViewProps,
+} from '../../src/components/playercard/PlayerCardView';
+import { useResponsive } from '../../src/responsive';
 import { ListRow } from '../../src/components/ListRow';
 import { SectionHeader } from '../../src/components/SectionHeader';
-import { GlobePattern } from '../../src/components/GlobePattern';
 import { Typography } from '../../src/typography/Typography';
-import { Icon } from '../../src/icons/Icon';
+import { Icon, type IconName } from '../../src/icons/Icon';
 import { Skeleton } from '../../src/feedback/Skeleton';
 import { ErrorState } from '../../src/feedback/ErrorState';
 import { formatNumber, formatDate, REGISTRATION_STATUS } from '../../src/utils/format';
 import { usePopup } from '../../src/popups/PopupProvider';
 import { useTheme } from '../../src/theme/ThemeProvider';
-import { getErrorMessage } from '../../src/api/client';
+
+const ROLE_LABELS: Record<string, string> = {
+  guest: 'Guest',
+  user: 'Member',
+  member: 'Member',
+  core: 'Core Team',
+  coordinator: 'Coordinator',
+  founder: 'Founder',
+};
+
+// 'actions' opens the Account Management sheet; anything else is a route name.
+const ACCOUNT_ROWS: Array<{ title: string; subtitle: string; icon: IconName; target: string }> = [
+  { title: 'Personal Information', subtitle: 'Profile, handle and verification', icon: 'user', target: 'actions' },
+  { title: 'Settings & Privacy', subtitle: 'Theme, notifications and security', icon: 'settings', target: 'Settings' },
+  { title: 'Help & Feedback', subtitle: 'FAQ, tickets and community support', icon: 'message', target: 'Feedback' },
+];
+
+const REG_ROLE_LABELS: Record<string, string> = {
+  solo: 'Solo entry',
+  captain: 'Team captain',
+  member: 'Team member',
+};
 
 /**
- * Centered user hero, signature 4-column flight stat counter bar,
- * boarding-pass tier card, and structured account list groups.
+ * The player card (tier-styled, BDome backdrop) up top, a strip for role/points/bio with
+ * edit and share actions, then interests, registrations and account list groups.
  */
 export default function Profile() {
   const { colors, shadow } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
+  const { gutter } = useResponsive();
   const { user } = useAuth();
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
   const popup = usePopup();
   const confirmLogout = useConfirmLogout();
   const [actions, setActions] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const ref = route.params?.ref ?? user?.id;
   const isSelf = !route.params?.ref || ref === user?.id || ref === user?.username;
+  // Opened from the bottom tab bar there is nothing to go back to: show the menu button instead.
+  const isTabRoot = route.name === 'ProfileTab';
 
   const profile = useAsyncResource(async () => {
     if (!ref) throw new Error('Sign in to see your player card.');
@@ -52,7 +83,6 @@ export default function Profile() {
 
   const activity = useAsyncResource(() => pointsRepository.transactions({ limit: 3 }), [ref], { enabled: isSelf && !!user });
   const registrations = useAsyncResource(() => registrationRepository.mine({ limit: 10 }), [ref], { enabled: isSelf && !!user });
-  const picks = useAsyncResource(() => eventsRepository.list({ status: ['upcoming'], limit: 3 }), [], { enabled: isSelf });
 
   useFocusEffect(
     useCallback(() => {
@@ -69,7 +99,6 @@ export default function Profile() {
     if (isSelf) {
       void activity.reload();
       void registrations.reload();
-      void picks.reload();
     }
   };
 
@@ -80,113 +109,64 @@ export default function Profile() {
   const go = (name: string) => navigation.navigate(name);
 
   const fullName = person?.profile?.full_name || person?.username || 'Player';
+  const roleLabel = ROLE_LABELS[person?.role ?? ''] ?? 'Member';
+  const memberSince = person?.created_at ? formatDate(person.created_at, { day: undefined }) : null;
+
+  const cardProps: PlayerCardViewProps = {
+    fullName,
+    username: person?.username ?? '',
+    avatarUrl: card?.avatar_url,
+    tier: card?.card_tier ?? 'Rookie',
+    rating: card?.rating ?? 0,
+    events: inputs?.participations ?? 0,
+    podiums: inputs?.podiums ?? 0,
+    challenges: inputs?.challenges ?? 0,
+    interests: card?.interests ?? [],
+  };
+  // The card has a fixed design size; shrink it on phones narrower than card + gutters.
+  const cardScale = Math.min(1, (windowWidth - gutter * 2) / PLAYER_CARD_WIDTH);
 
   return (
-    <ProfileLayout title="Profile" refreshing={profile.refreshing} onRefresh={refresh}>
+    <ProfileLayout title="Profile" refreshing={profile.refreshing} onRefresh={refresh} isRoot={isTabRoot}>
       {profile.loading && !card && <Skeleton.Card />}
       {profile.error && <ErrorState message={profile.error} onRetry={() => void profile.reload()} />}
 
       {person && card && (
         <>
-          {/* Profile Hero Card */}
-          <View style={[styles.heroCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('raised')]}>
-            <GlobePattern height={140} />
-            <View style={styles.heroCenter}>
-              <Avatar name={fullName} uri={card.avatar_url} size={84} ring />
-
-              <View style={styles.nameBlock}>
-                <Typography variant="h1" color="text" style={styles.heroName} numberOfLines={1}>
-                  {fullName}
-                </Typography>
-                <Typography variant="caption" color="textMuted">
-                  @{person.username} · {person.role || 'Member'}
-                </Typography>
+          {/* Player card */}
+          <View style={styles.cardStage}>
+            <View
+              style={{
+                width: PLAYER_CARD_WIDTH * cardScale,
+                height: PLAYER_CARD_HEIGHT * cardScale,
+              }}
+            >
+              <View
+                style={{
+                  width: PLAYER_CARD_WIDTH,
+                  height: PLAYER_CARD_HEIGHT,
+                  transform: [{ scale: cardScale }],
+                  marginLeft: -(PLAYER_CARD_WIDTH * (1 - cardScale)) / 2,
+                  marginTop: -(PLAYER_CARD_HEIGHT * (1 - cardScale)) / 2,
+                }}
+              >
+                <PlayerCardView {...cardProps} />
               </View>
-
-              <View style={styles.locationTag}>
-                <Icon name="map-pin" size={13} color="primary" />
-                <Typography variant="caption" color="textMuted">
-                  Competes in BGSC · Bangalore
-                </Typography>
-              </View>
-
-              {isSelf && (
-                <Pressable
-                  onPress={() => go('EditProfile')}
-                  accessibilityRole="button"
-                  accessibilityLabel="Edit profile"
-                  style={({ pressed }) => [
-                    styles.editPill,
-                    { backgroundColor: colors.surfaceInner, borderColor: colors.border },
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Icon name="edit" size={13} color="text" />
-                  <Typography variant="bodySmall" color="text" style={styles.editLabel}>
-                    Edit profile
-                  </Typography>
-                </Pressable>
-              )}
             </View>
           </View>
 
-          {/* Stats Row */}
-          {inputs && (
-            <View style={[styles.statStrip, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('flat')]}>
-              <View style={styles.statCol}>
-                <Typography variant="h2" color="text" style={styles.statNumber}>
-                  {inputs.participations}
-                </Typography>
-                <Typography variant="caption" color="textMuted" style={styles.statCaption}>
-                  Events
-                </Typography>
-              </View>
-
-              <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-
-              <View style={styles.statCol}>
-                <Typography variant="h2" color="text" style={styles.statNumber}>
-                  {inputs.podiums}
-                </Typography>
-                <Typography variant="caption" color="textMuted" style={styles.statCaption}>
-                  Podiums
+          {/* What the card doesn't show: role, tenure, points, bio — and the actions */}
+          <View style={styles.metaBlock}>
+            <View style={styles.metaRow}>
+              <View style={styles.metaItem}>
+                <Icon name="user" size={13} color="primary" />
+                <Typography variant="caption" color="textMuted">
+                  {roleLabel}
+                  {memberSince ? ` · since ${memberSince}` : ''}
                 </Typography>
               </View>
-
-              <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-
-              <View style={styles.statCol}>
-                <Typography variant="h2" color="primary" style={styles.statNumber}>
-                  {formatNumber(summary?.balance ?? inputs.points_balance)}
-                </Typography>
-                <Typography variant="caption" color="textMuted" style={styles.statCaption}>
-                  Points
-                </Typography>
-              </View>
-
-              <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-
-              <View style={styles.statCol}>
-                <Typography variant="h2" color="text" style={styles.statNumber}>
-                  {card.rating}
-                </Typography>
-                <Typography variant="caption" color="textMuted" style={styles.statCaption}>
-                  Rating
-                </Typography>
-              </View>
-            </View>
-          )}
-
-          <View style={[styles.passCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('raised')]}>
-            <View style={styles.passHeader}>
-              <View style={styles.tierBadgeGroup}>
-                <Badge label={card.card_tier.toUpperCase()} variant="primary" />
-                <Typography variant="caption" color="textMuted" style={styles.tierCode}>
-                  TIER RANK
-                </Typography>
-              </View>
-              <Typography variant="mono" color="textMuted" style={styles.tierCode}>
-                RATING {card.rating}
+              <Typography variant="bodySmall" color="primary" style={styles.metaPoints}>
+                {formatNumber(summary?.balance ?? inputs?.points_balance ?? 0)} pts
               </Typography>
             </View>
 
@@ -196,17 +176,26 @@ export default function Profile() {
               </Typography>
             )}
 
-            <Button
-              label="Share Player Pass"
-              variant="outline"
-              leftIcon="share"
-              onPress={() => {
-                void Share.share({
-                  message: `${fullName} (@${person.username}) · ${card.card_tier} · BGSC rating ${card.rating}`,
-                }).catch((err) => popup.error('Could not share', getErrorMessage(err)));
-              }}
-            />
+            <View style={styles.actionRow}>
+              {isSelf && (
+                <Button
+                  label="Edit profile"
+                  variant="outline"
+                  leftIcon="edit"
+                  onPress={() => go('EditProfile')}
+                  containerStyle={styles.flex}
+                />
+              )}
+              <Button
+                label="Share card"
+                leftIcon="share"
+                onPress={() => setShareOpen(true)}
+                containerStyle={styles.flex}
+              />
+            </View>
           </View>
+
+          <PlayerCardShareSheet visible={shareOpen} onClose={() => setShareOpen(false)} card={cardProps} />
 
           <SectionHeader title="Interests & Disciplines" actionLabel={isSelf ? 'Edit' : undefined} onAction={() => go('EditProfile')} />
           <View style={styles.interestsRow}>
@@ -234,14 +223,18 @@ export default function Profile() {
                   {registrations.data.length ? (
                     registrations.data.slice(0, 4).map((reg) => {
                       const statusPill = REGISTRATION_STATUS[reg.status] ?? { label: reg.status, variant: 'muted' as const };
+                      const role = reg.context?.event?.role;
+                      // Only event registrations have an event to open; owner.id can be null.
+                      const eventId = reg.owner?.type === 'event' ? reg.owner.id : null;
                       return (
                         <ListRow
                           key={reg._id}
+                          style={styles.menuRow}
                           icon="calendar"
-                          title={`Match Pass · ${reg.context?.event?.role ?? 'Participant'}`}
-                          subtitle={formatDate(reg.submitted_at || reg.created_at)}
+                          title={`Event registration · ${role ? REG_ROLE_LABELS[role] ?? role : 'Participant'}`}
+                          subtitle={`Registered ${formatDate(reg.submitted_at || reg.created_at)}`}
                           trailing={<Badge label={statusPill.label} variant={statusPill.variant} />}
-                          onPress={() => navigation.navigate('EventDetails', { ref: reg.owner.id })}
+                          onPress={eventId ? () => navigation.navigate('EventDetails', { ref: eventId }) : undefined}
                         />
                       );
                     })
@@ -255,25 +248,20 @@ export default function Profile() {
 
               {/* Account & Preferences */}
               <SectionHeader title="Account & Preferences" />
-              <View style={[styles.menuCard, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('flat')]}>
-                <ListRow
-                  title="Personal Information"
-                  subtitle="Profile, handle and verification"
-                  icon="user"
-                  onPress={() => setActions(true)}
-                />
-                <ListRow
-                  title="Settings & Privacy"
-                  subtitle="Theme, notifications and security"
-                  icon="settings"
-                  onPress={() => go('Settings')}
-                />
-                <ListRow
-                  title="Help & Feedback"
-                  subtitle="FAQ, tickets and community support"
-                  icon="message"
-                  onPress={() => go('Feedback')}
-                />
+              <View style={[styles.menuCard, { backgroundColor: colors.surfaceInner, borderColor: colors.border }, shadow('flat')]}>
+                {ACCOUNT_ROWS.map((row, i) => (
+                  <React.Fragment key={row.title}>
+                    {i > 0 && <View style={[styles.menuDivider, { backgroundColor: colors.border }]} />}
+                    <ListRow
+                      title={row.title}
+                      subtitle={row.subtitle}
+                      icon={row.icon}
+                      accent
+                      style={styles.menuRow}
+                      onPress={() => (row.target === 'actions' ? setActions(true) : go(row.target))}
+                    />
+                  </React.Fragment>
+                ))}
               </View>
 
               {/* Actions Bottom Sheet */}
@@ -315,96 +303,36 @@ export default function Profile() {
 }
 
 const styles = StyleSheet.create({
-  heroCard: {
-    borderRadius: 24,
-    borderWidth: 1,
-    paddingVertical: 24,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  heroCenter: {
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-  },
-  nameBlock: {
-    alignItems: 'center',
-    gap: 2,
-    marginTop: 6,
-  },
-  heroName: {
-    fontSize: 26,
-    lineHeight: 32,
-    textAlign: 'center',
-  },
-  locationTag: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 2,
-  },
-  editPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    marginTop: 8,
-  },
-  editLabel: {
-    fontWeight: '600',
-    fontSize: 13,
-  },
-  statStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 20,
-    borderWidth: 1,
-    paddingVertical: 14,
-    paddingHorizontal: 8,
-  },
-  statCol: {
+  flex: {
     flex: 1,
+  },
+  cardStage: {
     alignItems: 'center',
-    gap: 2,
+    paddingTop: 4,
   },
-  statNumber: {
-    fontSize: 20,
-    lineHeight: 24,
-    fontWeight: '700',
-  },
-  statCaption: {
-    fontSize: 11,
-    fontWeight: '500',
-    letterSpacing: 0.3,
-  },
-  statDivider: {
-    width: 1,
-    height: 32,
-  },
-  passCard: {
-    borderRadius: 22,
-    borderWidth: 1,
-    padding: 16,
+  // No surrounding card: role/points/bio and the two buttons sit directly on the page.
+  metaBlock: {
     gap: 12,
+    paddingHorizontal: 4,
   },
-  passHeader: {
+  metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-  },
-  tierBadgeGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 8,
   },
-  tierCode: {
-    fontSize: 10,
-    letterSpacing: 1,
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 1,
+  },
+  metaPoints: {
+    fontWeight: '700',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
   },
   bioText: {
     fontSize: 14,
@@ -429,6 +357,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
   },
+  menuRow: {
+    paddingHorizontal: 14,
+  },
+  // Hairline between rows, inset to start under the text (14 padding + 36 tile + 12 gap).
+  menuDivider: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 62,
+  },
   emptyWrap: {
     padding: 16,
     alignItems: 'center',
@@ -438,9 +374,5 @@ const styles = StyleSheet.create({
   },
   logoutWrap: {
     marginTop: 16,
-  },
-  pressed: {
-    opacity: 0.8,
-    transform: [{ scale: 0.98 }],
   },
 });

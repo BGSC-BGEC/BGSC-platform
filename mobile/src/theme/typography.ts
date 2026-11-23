@@ -2,6 +2,8 @@ import type { TextStyle } from 'react-native';
 
 export const FONT_FAMILIES = {
   hero: 'DMSerifDisplay_400Regular',
+  /** Varsity block letters for the BGSC wordmark. */
+  brand: 'Graduate_400Regular',
 
   headingBold: 'DMSerifDisplay_400Regular',
   headingHeavy: 'DMSerifDisplay_400Regular',

@@ -20,6 +20,7 @@ import { CurrentLotCard } from '../components/auction/CurrentLotCard'
 import { AuctionControlPanel } from '../components/auction/AuctionControlPanel'
 import { TeamPurseGrid } from '../components/auction/TeamPurseGrid'
 import { LotQueueTable } from '../components/auction/LotQueueTable'
+import { PageError } from '../components/ui/page-error'
 
 export const Auction: React.FC = () => {
   const [events, setEvents] = useState<ClubEvent[]>([])
@@ -408,21 +409,7 @@ export const Auction: React.FC = () => {
       </div>
 
       {/* 2. Error Banner */}
-      {error && (
-        <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 text-xs text-destructive flex items-start justify-between gap-3 animate-in fade-in">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
-            <span>{error}</span>
-          </div>
-          <button
-            type="button"
-            onClick={handleRefresh}
-            className="font-bold underline hover:no-underline text-destructive cursor-pointer flex-shrink-0"
-          >
-            Retry
-          </button>
-        </div>
-      )}
+      {error && <PageError message={error} onRetry={handleRefresh} />}
 
       {!isLoading && events.length === 0 && (
         <div className="py-20 text-center space-y-2 border border-border rounded">

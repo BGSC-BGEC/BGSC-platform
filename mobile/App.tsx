@@ -1,8 +1,10 @@
 import React, { useEffect } from 'react';
 import { Platform, StatusBar } from 'react-native';
 import { useFonts } from 'expo-font';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, Inter_900Black } from '@expo-google-fonts/inter';
 import { DMSerifDisplay_400Regular } from '@expo-google-fonts/dm-serif-display';
+import { Graduate_400Regular } from '@expo-google-fonts/graduate';
 import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
 import DrawerLayout from './screens/drawer/layout';
 import { AuthProvider, useAuth } from './store/auth';
@@ -50,20 +52,25 @@ export default function App() {
     Inter_900Black,
     DMSerifDisplay_400Regular,
     JetBrainsMono_500Medium,
+    Graduate_400Regular,
   });
   // On a load error render anyway with system fonts rather than hanging on a blank screen.
   if (!fontsLoaded && !fontError) return null;
 
   return (
     <ErrorBoundary fallbackTitle="Application encountered an error">
-      <AuthProvider>
-        <ThemeProvider initialMode="dark">
-          <AccountAppearance />
-          <PopupProvider>
-            <DrawerLayout />
-          </PopupProvider>
-        </ThemeProvider>
-      </AuthProvider>
+      {/* Tracks the soft keyboard so forms (KeyboardAwareScrollView) can scroll the focused
+          field above it. Needed on Android, where edge-to-edge stops the window resizing. */}
+      <KeyboardProvider statusBarTranslucent navigationBarTranslucent>
+        <AuthProvider>
+          <ThemeProvider initialMode="dark">
+            <AccountAppearance />
+            <PopupProvider>
+              <DrawerLayout />
+            </PopupProvider>
+          </ThemeProvider>
+        </AuthProvider>
+      </KeyboardProvider>
     </ErrorBoundary>
   );
 }

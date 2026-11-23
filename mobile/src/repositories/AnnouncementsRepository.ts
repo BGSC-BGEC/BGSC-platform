@@ -4,6 +4,8 @@ import type { Announcement, AnnouncementCategory, AnnouncementHead, Announcement
 export interface AnnouncementQuery {
   category?: AnnouncementCategory;
   pinned?: boolean;
+  /** Full-text search over title and body (backend `$text` index), 1–100 chars. */
+  q?: string;
   limit?: number;
   cursor?: string | null;
 }

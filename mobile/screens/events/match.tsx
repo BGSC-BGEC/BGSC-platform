@@ -43,7 +43,7 @@ export default function MatchScreen() {
   return <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['left', 'right', 'bottom']}>
     <AppHeader title="Match" showBackButton showMenuButton={false} />
     <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: gutter, paddingTop: gutter }]} refreshControl={<RefreshControl refreshing={match.refreshing} onRefresh={() => { void match.reload(); if (m?.advances_to) void next.reload(); }} tintColor={colors.accent} />}>
-      {match.loading ? <><Skeleton.Card /><Skeleton.Card /></> : match.error ? <ErrorState title="Could not load the match" message={match.error} onRetry={() => void match.reload()} /> : m && <>
+      {match.loading ? <><Skeleton.Card /><Skeleton.Card /></> : match.error ? <ErrorState variant="screen" title="Could not load the match" message={match.error} onRetry={() => void match.reload()} /> : m && <>
         <Card style={{ borderWidth: 1, borderColor: m.status === 'ongoing' ? colors.danger : colors.border }}>
           <View style={{ alignItems: 'center' }}><Badge label={m.status === 'ongoing' ? 'Live' : m.status} variant={m.status === 'ongoing' ? 'danger' : m.status === 'completed' ? 'success' : 'muted'} /></View>
           <View style={styles.scoreboard}>

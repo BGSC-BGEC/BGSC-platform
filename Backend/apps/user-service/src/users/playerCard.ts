@@ -27,6 +27,28 @@ export const RATING_WEIGHTS = {
 /** How long a cached rating is served before recomputing. */
 export const RATING_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * Card tier ladder, lowest first: a tier applies from its `min` rating up. The single source of
+ * truth — clients style the card by tier name and never re-derive it. Thresholds are a first
+ * guess like the weights above; retune here (a participation is 2, a podium 15).
+ */
+export const CARD_TIERS = [
+    { tier: 'Rookie', min: 0 },
+    { tier: 'Bronze', min: 50 },
+    { tier: 'Silver', min: 150 },
+    { tier: 'Gold', min: 300 },
+    { tier: 'Legend', min: 600 },
+] as const;
+
+export type CardTier = (typeof CARD_TIERS)[number]['tier'];
+
+/** Pure: the highest tier whose threshold the rating reaches. */
+export function tierForRating(rating: number): CardTier {
+    let tier: CardTier = CARD_TIERS[0].tier;
+    for (const t of CARD_TIERS) if (rating >= t.min) tier = t.tier;
+    return tier;
+}
+
 export interface RatingInputs {
     participations: number;
     podiums: number;
@@ -96,8 +118,14 @@ export async function ratingFor(user: IUser, force = false, now: Date = new Date
     // fields a concurrent PATCH had just changed.
     try {
         const stats = { ...(user.player_card?.stats ?? {}), ...result };
-        await User.updateOne({ _id: user._id }, { $set: { 'player_card.stats': stats } });
-        user.player_card = { ...(user.player_card ?? {}), stats };
+        // The tier is stored next to the rating it came from, so anything reading the stored
+        // `player_card.card_tier` (the user serializer) agrees with the card endpoint.
+        const card_tier = tierForRating(result.rating);
+        await User.updateOne(
+            { _id: user._id },
+            { $set: { 'player_card.stats': stats, 'player_card.card_tier': card_tier } },
+        );
+        user.player_card = { ...(user.player_card ?? {}), stats, card_tier };
     } catch (err) {
         console.error('Failed to cache player card rating:', err);
     }
@@ -135,7 +163,7 @@ export async function playerCardFor(user: IUser, stubOnly = false): Promise<Play
             avatar_url: p.avatar_url ?? null,
             bio: '',
             interests: [],
-            card_tier: user.player_card?.card_tier ?? 'Rookie',
+            card_tier: tierForRating(rating),
             rating,
             formula_version,
             social_links: {},
@@ -149,7 +177,7 @@ export async function playerCardFor(user: IUser, stubOnly = false): Promise<Play
         avatar_url: p.avatar_url ?? null,
         bio: p.bio ?? '',
         interests: p.interests ?? [],
-        card_tier: user.player_card?.card_tier ?? 'Rookie',
+        card_tier: tierForRating(rating),
         rating,
         formula_version,
         social_links: (p.social_links ?? {}) as Record<string, string | null>,

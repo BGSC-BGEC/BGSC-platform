@@ -65,7 +65,7 @@ export default function AnnouncementDetailScreen() {
         </View>
       ) : !post ? (
         <View style={styles.pad}>
-          <ErrorState title="Couldn’t open this announcement" message={error ?? undefined} onRetry={() => reload()} />
+          <ErrorState variant="screen" title="Couldn’t open this announcement" message={error ?? undefined} onRetry={() => reload()} />
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -77,8 +77,8 @@ export default function AnnouncementDetailScreen() {
                 <Svg style={StyleSheet.absoluteFill} preserveAspectRatio="none">
                   <Defs>
                     <LinearGradient id="announcement-cover" x1="0" y1="0" x2="0" y2="1">
-                      <Stop offset="0" stopColor="#E07A40" />
-                      <Stop offset="1" stopColor="#2B3036" />
+                      <Stop offset="0" stopColor="#DF7A5E" />
+                      <Stop offset="1" stopColor="#141821" />
                     </LinearGradient>
                   </Defs>
                   <Rect width="100%" height="100%" fill="url(#announcement-cover)" />

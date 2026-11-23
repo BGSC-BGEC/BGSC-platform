@@ -70,7 +70,7 @@ export default function InvestmentSheet({ visible, onClose, onInvested, eventId,
         catch { /* Keep the same request if durable cleanup fails. */ }
       }
       const messages: Record<string, string> = {
-        insufficient_points: 'Your balance has changed. Refresh and try a smaller amount.',
+        insufficient_points: 'Your points have changed. Refresh and try a smaller amount.',
         investment_cap_exceeded: 'This entry has reached its investment cap.',
         leaderboard_frozen: 'Results are frozen. This board no longer accepts points.',
         event_not_ongoing: 'Investments are only open while the event is ongoing.',
@@ -85,10 +85,10 @@ export default function InvestmentSheet({ visible, onClose, onInvested, eventId,
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: 16, paddingBottom: 8 }}>
       <Typography variant="caption" color="textMuted">INVEST IN {title.toUpperCase()}</Typography>
       <Typography variant="displayTitle">How many points?</Typography>
-      {wallet.loading ? <Skeleton.Card /> : wallet.error ? <Alert variant="error" title="Could not load your balance" description={wallet.error} /> : <>
+      {wallet.loading ? <Skeleton.Card /> : wallet.error ? <Alert variant="error" title="Could not load your points" description={wallet.error} /> : <>
         <TextInput label="Points" value={amount} onChangeText={setAmount} keyboardType="number-pad" maxLength={6} disabled={busy || !!pending}
-          helperText={pending ? 'Your previous request is saved. Retry to confirm its result.' : `Minimum 10 · maximum ${maximum} · balance ${wallet.data?.balance ?? 0}`}
-          error={!pending && !valid ? (maximum < 10 ? 'Not enough balance or investment allowance.' : `Enter a whole number from 10 to ${maximum}.`) : undefined} />
+          helperText={pending ? 'Your previous request is saved. Retry to confirm its result.' : `Minimum 10 · maximum ${maximum} · you have ${wallet.data?.balance ?? 0} points`}
+          error={!pending && !valid ? (maximum < 10 ? 'Not enough points or investment allowance.' : `Enter a whole number from 10 to ${maximum}.`) : undefined} />
         {!pending && maximum >= 10 && (
           <View style={styles.sliderSection}>
             <View style={styles.stepperRow}>
@@ -123,7 +123,7 @@ export default function InvestmentSheet({ visible, onClose, onInvested, eventId,
             <Typography variant="displayTitle" numberOfLines={1}>
               {projection.data?.current_rank ? `#${projection.data.current_rank}` : '—'} → {projection.data?.projected_rank ? `#${projection.data.projected_rank}` : 'Unranked'}
             </Typography>
-            <Typography variant="caption">Balance after: {(wallet.data?.balance ?? 0) - Number(amount)} points</Typography>
+            <Typography variant="caption">Points after: {(wallet.data?.balance ?? 0) - Number(amount)}</Typography>
             <Typography variant="caption" color="textMuted">Projection is an estimate. Final ranks can change.</Typography>
           </>}
         </Card>}

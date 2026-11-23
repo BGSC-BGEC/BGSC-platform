@@ -23,7 +23,7 @@ export const neumorphicRaised = {
     elevation: 4,
   },
   dark: {
-    shadowColor: '#1E2226', // Dark shadow (bottom-right)
+    shadowColor: '#0B0E13', // Dark shadow (bottom-right)
     shadowOffset: { width: 8, height: 8 },
     shadowOpacity: 1,
     shadowRadius: 16,
@@ -43,7 +43,7 @@ export const neumorphicPressed = {
     elevation: 0,
   },
   dark: {
-    shadowColor: '#1E2226',
+    shadowColor: '#0B0E13',
     shadowOffset: { width: 4, height: 4 },
     shadowOpacity: 1,
     shadowRadius: 8,
@@ -63,7 +63,7 @@ export const neumorphicFlat = {
     elevation: 2,
   },
   dark: {
-    shadowColor: '#1E2226',
+    shadowColor: '#0B0E13',
     shadowOffset: { width: 4, height: 4 },
     shadowOpacity: 0.8,
     shadowRadius: 8,
@@ -83,7 +83,7 @@ export const neumorphicElevated = {
     elevation: 8,
   },
   dark: {
-    shadowColor: '#1E2226',
+    shadowColor: '#0B0E13',
     shadowOffset: { width: 12, height: 12 },
     shadowOpacity: 1,
     shadowRadius: 24,
@@ -103,7 +103,7 @@ export const neumorphicInner = {
     elevation: 0,
   },
   dark: {
-    shadowColor: '#1E2226',
+    shadowColor: '#0B0E13',
     shadowOffset: { width: -2, height: -2 },
     shadowOpacity: 0.6,
     shadowRadius: 4,

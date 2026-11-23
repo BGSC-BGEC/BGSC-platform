@@ -9,6 +9,7 @@ import { AnnouncementCard } from '../components/announcements/AnnouncementCard'
 import { AnnouncementHistory } from '../components/announcements/AnnouncementHistory'
 import { CreateAnnouncementModal } from '../components/announcements/CreateAnnouncementModal'
 import { describeAnnouncementError } from '../components/announcements/announcementErrors'
+import { PageError } from '../components/ui/page-error'
 
 type View = 'feed' | 'history'
 
@@ -297,21 +298,7 @@ export const Announcements: React.FC = () => {
         </div>
       )}
 
-      {!isLoading && error && (
-        <div className="p-4 border border-rose-500/30 text-foreground bg-rose-500/5 rounded-xl flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-500" />
-            <span className="text-sm">{error}</span>
-          </div>
-          <button
-            type="button"
-            onClick={handleRetry}
-            className="px-3 py-1 text-xs border border-border hover:border-foreground rounded-lg transition-colors cursor-pointer"
-          >
-            Retry
-          </button>
-        </div>
-      )}
+      {!isLoading && error && <PageError message={error} onRetry={handleRetry} />}
 
       {!isLoading && !error && activeView === 'history' && (
         <AnnouncementHistory announcements={announcements} eventTitles={eventTitles} />

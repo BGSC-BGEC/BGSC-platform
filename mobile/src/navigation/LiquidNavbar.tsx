@@ -193,10 +193,10 @@ export function LiquidNavbar({
             <Defs>
               {/* Translucent Liquid Glass Body */}
               <LinearGradient id="liquidGlassBody" x1="0%" y1="0%" x2="100%" y2="100%">
-                <Stop offset="0%" stopColor="#FDBA74" stopOpacity={0.84} />
-                <Stop offset="30%" stopColor="#FB923C" stopOpacity={0.72} />
-                <Stop offset="75%" stopColor="#F97316" stopOpacity={0.76} />
-                <Stop offset="100%" stopColor="#C2410C" stopOpacity={0.88} />
+                <Stop offset="0%" stopColor="#F0A48E" stopOpacity={0.84} />
+                <Stop offset="30%" stopColor="#E68A70" stopOpacity={0.72} />
+                <Stop offset="75%" stopColor="#DF7A5E" stopOpacity={0.76} />
+                <Stop offset="100%" stopColor="#B4553C" stopOpacity={0.88} />
               </LinearGradient>
               {/* Glass Curvature Specular Sheen (top 55%) */}
               <LinearGradient id="glassCurvatureSheen" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -206,8 +206,8 @@ export function LiquidNavbar({
               </LinearGradient>
               {/* Bottom Refractive Caustic */}
               <LinearGradient id="glassBottomCaustic" x1="0%" y1="100%" x2="0%" y2="0%">
-                <Stop offset="0%" stopColor="#FED7AA" stopOpacity={0.35} />
-                <Stop offset="100%" stopColor="#FED7AA" stopOpacity={0.0} />
+                <Stop offset="0%" stopColor="#F6C8B9" stopOpacity={0.35} />
+                <Stop offset="100%" stopColor="#F6C8B9" stopOpacity={0.0} />
               </LinearGradient>
             </Defs>
             {/* Base Translucent Liquid Glass */}
@@ -249,7 +249,7 @@ export function LiquidNavbar({
                   <Icon
                     name={it.iconName ?? 'home'}
                     size={19}
-                    color={isCurrent ? '#FFFFFF' : isDark ? withAlpha('#FFFFFF', 0.65) : withAlpha('#0F172A', 0.65)}
+                    color={isCurrent ? '#141821' : isDark ? withAlpha('#FFFFFF', 0.65) : withAlpha('#0F172A', 0.65)}
                   />
                 )}
               </Animated.View>
@@ -260,7 +260,7 @@ export function LiquidNavbar({
                   styles.label,
                   {
                     color: isCurrent
-                      ? '#FFFFFF'
+                      ? '#141821'
                       : isDark
                       ? withAlpha('#FFFFFF', 0.65)
                       : withAlpha('#0F172A', 0.65),
@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(154, 52, 18, 0.50)',
     borderLeftColor: 'rgba(255, 255, 255, 0.28)',
     borderRightColor: 'rgba(255, 255, 255, 0.20)',
-    shadowColor: '#f97316',
+    shadowColor: '#DF7A5E',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.50,
     shadowRadius: 10,

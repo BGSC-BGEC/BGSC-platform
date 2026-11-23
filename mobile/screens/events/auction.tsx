@@ -800,7 +800,7 @@ function ResultReveal({
               <Defs>
                 <LinearGradient id="reveal" x1="0" y1="0" x2="0" y2="1">
                   <Stop offset="0" stopColor="#6B3D24" />
-                  <Stop offset="0.55" stopColor="#2B3036" />
+                  <Stop offset="0.55" stopColor="#141821" />
                   <Stop offset="1" stopColor={colors.background} />
                 </LinearGradient>
               </Defs>

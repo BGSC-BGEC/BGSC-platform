@@ -6,6 +6,8 @@ import { withAlpha } from '../theme/colors';
 import { Icon } from '../icons/Icon';
 import { Typography } from '../typography/Typography';
 import { FONT_FAMILIES } from '../theme/typography';
+import { RetroTvError } from '../components/RetroTvError';
+import { isNotFoundMessage } from '../api/client';
 
 export interface ErrorStateProps {
   title?: string;
@@ -13,17 +15,69 @@ export interface ErrorStateProps {
   onRetry?: () => void;
   retryLabel?: string;
   style?: ViewStyle;
+  /**
+   * Where the error sits. 'inline' (default) is a section of a screen; 'screen' means the whole
+   * screen's subject failed to load, so a not-found error shows the retro TV.
+   */
+  variant?: 'inline' | 'screen';
+  /** Force the quiet not-found presentation; detected from `message` when omitted. */
+  notFound?: boolean;
 }
 
-/** v2 error banner — red-tinted card, icon tile, title, hint and a "Retry" link. */
+// RetroTvError's natural height (padding + antenna + cabinet + stand) — used to collapse the
+// layout box to the scaled size, since a transform alone leaves the full-size gap around it.
+const TV_HEIGHT = 306;
+const TV_SCALE = 0.75;
+
+/**
+ * v2 error banner — red-tinted card, icon tile, title, hint and a "Retry" link.
+ * "Not found" errors are not failures, so they render quietly instead: a muted line (inline) or the
+ * retro TV (screen), with no red card.
+ */
 export function ErrorState({
   title = 'Something went wrong',
   message = 'Check your connection. Pull down to refresh or retry.',
   onRetry,
   retryLabel = 'Retry',
   style,
+  variant = 'inline',
+  notFound,
 }: ErrorStateProps) {
   const { colors } = useTheme();
+
+  if (notFound ?? isNotFoundMessage(message)) {
+    const retry = onRetry ? (
+      <Pressable onPress={onRetry} hitSlop={8} accessibilityRole="button" accessibilityLabel="Try again">
+        <Typography variant="bodySmall" color="textMuted" style={styles.quietRetry}>
+          Try again
+        </Typography>
+      </Pressable>
+    ) : null;
+
+    if (variant === 'screen') {
+      return (
+        <View style={[styles.screen, style]}>
+          <View style={styles.tvBox}>
+            <RetroTvError errorCode="404" errorMessage="NOT FOUND" scale={TV_SCALE} />
+          </View>
+          <Typography variant="bodySmall" color="textMuted" style={styles.quietText}>
+            {message}
+          </Typography>
+          {retry}
+        </View>
+      );
+    }
+
+    return (
+      <View style={[styles.quiet, style]}>
+        <Typography variant="bodySmall" color="textMuted" style={styles.quietText}>
+          {message}
+        </Typography>
+        {retry}
+      </View>
+    );
+  }
+
   return (
     <View
       accessibilityRole="alert"
@@ -57,4 +111,9 @@ const styles = StyleSheet.create({
   text: { flex: 1, gap: 8 },
   title: { fontFamily: FONT_FAMILIES.bodySemiBold },
   retry: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 13 },
+  quiet: { alignItems: 'center', gap: 6, paddingVertical: 24, paddingHorizontal: 16 },
+  quietText: { textAlign: 'center', maxWidth: 320 },
+  quietRetry: { textDecorationLine: 'underline' },
+  screen: { alignItems: 'center', gap: 6, paddingVertical: 16 },
+  tvBox: { height: TV_HEIGHT * TV_SCALE, justifyContent: 'center', alignItems: 'center', marginBottom: 8 },
 });

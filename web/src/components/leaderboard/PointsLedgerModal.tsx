@@ -203,7 +203,7 @@ const LedgerContent: React.FC<Omit<PointsLedgerModalProps, 'isOpen'>> = ({ onClo
         {mode === 'member' && summary && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
             {[
-              ['Balance', `${summary.balance.toLocaleString()} pts`],
+              ['Points', `${summary.balance.toLocaleString()} pts`],
               ['Lifetime Earned', `${summary.lifetimeEarned.toLocaleString()} pts`],
               ['Lifetime Spent', `${summary.lifetimeSpent.toLocaleString()} pts`],
               ['Ledger Synced', summary.ledgerSynced ? 'Yes' : 'NO - drift'],
@@ -254,7 +254,7 @@ const LedgerContent: React.FC<Omit<PointsLedgerModalProps, 'isOpen'>> = ({ onClo
                     <th className="px-3.5 py-2.5 text-right">Amount</th>
                     <th className="px-3.5 py-2.5">Note</th>
                     <th className="px-3.5 py-2.5">Actor</th>
-                    <th className="px-3.5 py-2.5 text-right">Balance After</th>
+                    <th className="px-3.5 py-2.5 text-right">Points After</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">

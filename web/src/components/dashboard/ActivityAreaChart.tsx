@@ -33,7 +33,10 @@ export const ActivityAreaChart: React.FC<ActivityAreaChartProps> = ({
   const chartH = height - paddingTop - paddingBottom
 
   const values = data.map((d) => d.value)
-  const maxVal = Math.max(...values, 100)
+  // Scale to the data (with headroom) rather than a fixed floor: a floor of 100 flattened small
+  // series against the baseline and left the plot area empty.
+  const peak = Math.max(...values, 0)
+  const maxVal = peak > 0 ? peak * 1.15 : 1
   const minVal = Math.min(...values, 0)
   const range = maxVal - minVal || 1
 
@@ -55,9 +58,14 @@ export const ActivityAreaChart: React.FC<ActivityAreaChartProps> = ({
       const p3 = i < pts.length - 2 ? pts[i + 2] : p2
 
       const cp1x = p1.x + (p2.x - p0.x) / 6
-      const cp1y = p1.y + (p2.y - p0.y) / 6
+      // Keep control points within the segment's own y-range so the curve never overshoots —
+      // otherwise a flat run followed by a rise dips below the zero baseline.
+      const lo = Math.min(p1.y, p2.y)
+      const hi = Math.max(p1.y, p2.y)
+      const clampY = (y: number) => Math.min(hi, Math.max(lo, y))
+      const cp1y = clampY(p1.y + (p2.y - p0.y) / 6)
       const cp2x = p2.x - (p3.x - p1.x) / 6
-      const cp2y = p2.y - (p3.y - p1.y) / 6
+      const cp2y = clampY(p2.y - (p3.y - p1.y) / 6)
 
       d += ` C ${cp1x.toFixed(1)} ${cp1y.toFixed(1)}, ${cp2x.toFixed(1)} ${cp2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
     }

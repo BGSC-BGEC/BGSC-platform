@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Plus, Search, AlertCircle } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import type { ClubEvent } from '../types/event'
 import { eventService } from '../services/eventService'
 import { EventTable } from '../components/events/EventTable'
 import { CreateEventModal } from '../components/events/CreateEventModal'
 import { EventDetailModal } from '../components/events/EventDetailModal'
+import { PageError } from '../components/ui/page-error'
 
 export const Events: React.FC = () => {
   const [events, setEvents] = useState<ClubEvent[]>([])
@@ -158,21 +159,7 @@ export const Events: React.FC = () => {
         </button>
       </div>
 
-      {!isLoading && error && (
-        <div className="p-4 border border-rose-500/30 text-foreground bg-rose-500/5 rounded-xl flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm">
-            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-            <span>{error}</span>
-          </div>
-          <button
-            type="button"
-            onClick={handleRetry}
-            className="px-3 py-1 text-xs border border-border hover:border-foreground rounded-lg transition-colors cursor-pointer"
-          >
-            Retry
-          </button>
-        </div>
-      )}
+      {!isLoading && error && <PageError message={error} onRetry={handleRetry} />}
       {isLoading && (
         <div className="p-8 text-center text-sm text-muted-foreground border border-border rounded-xl bg-card dark:bg-transparent">
           Loading events & tournaments...

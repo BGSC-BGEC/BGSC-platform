@@ -1,5 +1,6 @@
 import React from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
+import { StatusBar, StyleSheet, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { Image } from 'expo-image';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,20 +48,21 @@ function Body({ children, onBack, gap = 20, centered }: AuthScaffoldProps) {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <StatusBar barStyle="dark-content" />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.screen}>
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={[
-            styles.content,
-            { gap, paddingBottom: insets.bottom + 40 },
-            centered && styles.centered,
-          ]}
-        >
-          <Hero />
-          {children}
-        </ScrollView>
-      </KeyboardAvoidingView>
+      {/* Scrolls the focused field above the keyboard on both platforms. */}
+      <KeyboardAwareScrollView
+        style={styles.screen}
+        bottomOffset={24}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.content,
+          { gap, paddingBottom: insets.bottom + 40 },
+          centered && styles.centered,
+        ]}
+      >
+        <Hero />
+        {children}
+      </KeyboardAwareScrollView>
       {onBack ? <AuthBackButton onPress={onBack} style={{ position: 'absolute', left: 20, top: insets.top + 12 }} /> : null}
     </View>
   );

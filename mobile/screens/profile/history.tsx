@@ -85,7 +85,7 @@ export default function Points() {
         {loading ? <><SkeletonCard /><SkeletonCard /></> : wallet && <>
           <Card>
             <View style={styles.balanceRow}>
-              <View style={styles.balanceText}><Typography variant="label" color="textMuted">Balance</Typography><Typography variant="displayHero" numberOfLines={1}>{formatNumber(wallet.summary.balance)}</Typography><Typography variant="caption" color="success">{formatNumber(wallet.summary.lifetime_earned)} earned overall</Typography><Typography variant="caption" color="textMuted">{formatNumber(Math.abs(wallet.summary.lifetime_spent))} spent overall</Typography></View>
+              <View style={styles.balanceText}><Typography variant="label" color="textMuted">Points</Typography><Typography variant="displayHero" numberOfLines={1}>{formatNumber(wallet.summary.balance)}</Typography><Typography variant="caption" color="success">{formatNumber(wallet.summary.lifetime_earned)} earned overall</Typography><Typography variant="caption" color="textMuted">{formatNumber(Math.abs(wallet.summary.lifetime_spent))} spent overall</Typography></View>
               <Svg width={104} height={104} viewBox="0 0 104 104" accessibilityLabel="Positive net points by source" accessibilityRole="image">
                 <Circle cx={52} cy={52} r={43} fill="none" stroke={colors.surfaceInner} strokeWidth={13} />
                 {donutSegments.map((seg) =>
@@ -109,7 +109,7 @@ export default function Points() {
             </View>
           </Card>
           <View style={styles.legend}>{wallet.sources.map((source, index) => <View key={source.source} style={[styles.legendItem, { backgroundColor: colors.surface, borderColor: colors.border }]}><View style={[styles.dot, { backgroundColor: tones[index % tones.length] }]} /><Typography variant="caption" numberOfLines={1} style={styles.flex}>{humanizeReason(source.source)}</Typography><Typography variant="mono" color={source.total < 0 ? 'danger' : 'textMuted'}>{formatNumber(source.total)}</Typography></View>)}</View>
-          {wallet.sources.length > 0 && <Typography variant="caption" color="textMuted">Net points by source. The ring shows positive balances; deductions appear in the legend.</Typography>}
+          {wallet.sources.length > 0 && <Typography variant="caption" color="textMuted">Net points by source. The ring shows sources that added points; deductions appear in the legend.</Typography>}
           <SectionHeader title="Ways to earn" />
           {wallet.opportunities.length === 0 ? <Typography color="textMuted">New opportunities will appear here.</Typography> : <View style={styles.opportunities}>{wallet.opportunities.map(op => <View style={styles.opportunity} key={op.reason}><Card onPress={op.source === 'challenge' || op.source === 'event' ? () => navigation.navigate(op.source === 'challenge' ? 'Challenges' : 'Events') : undefined}>
             <Icon name={sourceIcons[op.source] ?? 'sparkles'} color="primary" size={22} />
@@ -128,7 +128,7 @@ export default function Points() {
         return <View>{day !== previousDay && <Typography variant="label" color="textMuted" style={styles.date}>{day}</Typography>}<View style={[styles.transaction, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <Icon name={sourceIcons[item.source] ?? 'coins'} size={20} color={item.amount >= 0 ? 'success' : 'textMuted'} />
           <View style={styles.flex}><Typography variant="button">{humanizeReason(item.reason)}</Typography><View style={styles.meta}><Badge size="sm" label={item.type} variant={item.amount >= 0 ? 'success' : 'muted'} /><Typography variant="caption" color="textMuted">{item.source}</Typography></View></View>
-          <View style={styles.amount}><Typography variant="mono" color={item.amount >= 0 ? 'success' : 'danger'}>{item.amount > 0 ? '+' : ''}{formatNumber(item.amount)}</Typography><Typography variant="caption" color="textMuted">bal {formatNumber(item.balance_after)}</Typography></View>
+          <View style={styles.amount}><Typography variant="mono" color={item.amount >= 0 ? 'success' : 'danger'}>{item.amount > 0 ? '+' : ''}{formatNumber(item.amount)}</Typography><Typography variant="caption" color="textMuted">{formatNumber(item.balance_after)} pts after</Typography></View>
         </View></View>;
       }}
       ListFooterComponent={page.next_cursor && !loading ? <Button label="Load more history" variant="outline" loading={more} onPress={() => void loadMore()} containerStyle={{ marginTop: 20 }} /> : undefined}

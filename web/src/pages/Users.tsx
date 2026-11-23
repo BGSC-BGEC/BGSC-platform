@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react'
-import { Download, Search, RotateCcw, AlertCircle, Loader2 } from 'lucide-react'
+import { Download, Search, RotateCcw, Loader2 } from 'lucide-react'
 import type { User } from '../types/user'
 import { userService } from '../services/userService'
 import { UserTable } from '../components/users/UserTable'
 import { UserDetailModal } from '../components/users/UserDetailModal'
 import { useCan } from '../services/permissions'
 import { Button } from '../components/ui/button'
+import { PageError } from '../components/ui/page-error'
 
 export const Users: React.FC = () => {
   const [users, setUsers] = useState<User[]>([])
@@ -109,7 +110,7 @@ export const Users: React.FC = () => {
       'Phone',
       'Role',
       'Status',
-      'Points Balance',
+      'Points',
       'Join Date',
     ]
 
@@ -253,22 +254,7 @@ export const Users: React.FC = () => {
       )}
 
       {/* Error State */}
-      {!isLoading && error && (
-        <div className="p-4 border border-destructive/40 bg-destructive/10 text-foreground rounded-xl flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2 text-sm">
-            <AlertCircle className="w-4 h-4 text-destructive" />
-            <span>{error}</span>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleRetry}
-            className="text-xs"
-          >
-            Retry
-          </Button>
-        </div>
-      )}
+      {!isLoading && error && <PageError message={error} onRetry={handleRetry} />}
 
       {/* TanStack Table UI */}
       {!isLoading && !error && (

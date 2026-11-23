@@ -1,14 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   StyleSheet,
   View,
   type ViewStyle,
 } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '../theme/ThemeProvider';
@@ -77,9 +76,10 @@ export function BottomSheet({
           accessibilityLabel="Close"
         />
       </Animated.View>
-      {/* Lifts the sheet above the keyboard when it holds a field (e.g. team name). */}
+      {/* Lifts the sheet above the keyboard when it holds a field (e.g. team name).
+          keyboard-controller's version behaves the same on Android (edge-to-edge) and iOS. */}
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior="padding"
         style={styles.keyboard}
         pointerEvents="box-none"
       >

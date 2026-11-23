@@ -118,16 +118,18 @@ const styles = StyleSheet.create({
   authorRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   who: { flex: 1, gap: 2 },
   author: { fontFamily: FONT_FAMILIES.bodySemiBold },
+  // Same height and shape as the Badge pills next to it (priority / category).
   unreadPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    minHeight: 21,
     paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 8,
+    borderRadius: 999,
   },
   dot: { width: 6, height: 6, borderRadius: 3 },
-  unreadText: { fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+  // Bold via the font family: fontWeight on a custom font is unreliable on Android.
+  unreadText: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.5, includeFontPadding: false, textAlignVertical: 'center' },
   title: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 16, lineHeight: 22 },
   bodyText: { fontSize: 13, lineHeight: 19 },
   footerWrap: { gap: 10, marginTop: 4 },
