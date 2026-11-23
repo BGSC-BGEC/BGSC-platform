@@ -49,7 +49,7 @@ export function FilterChips<T extends string>({ options, value, onChange, style 
                 : { backgroundColor: colors.surfaceInner, borderColor: colors.border },
             ]}
           >
-            <Typography variant="caption" color={selected ? 'primaryText' : 'text'} style={styles.label}>
+            <Typography variant="caption" color={selected ? 'primaryText' : 'text'} style={styles.label} numberOfLines={1}>
               {option.label}
             </Typography>
           </Pressable>
@@ -60,8 +60,11 @@ export function FilterChips<T extends string>({ options, value, onChange, style 
 }
 
 const styles = StyleSheet.create({
-  row: { gap: 6, paddingVertical: 1 },
-  chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4.5 },
+  // alignItems: a taller chip can't stretch its neighbours.
+  row: { gap: 6, paddingVertical: 1, alignItems: 'center' },
+  // flexShrink 0: chips keep their natural width and the row scrolls, instead of squeezing a long
+  // label ("Around the Net") onto two lines.
+  chip: { flexShrink: 0, borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4.5 },
   // includeFontPadding off so the label sits centred in the chip on Android.
   label: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11.5, lineHeight: 14, includeFontPadding: false, textAlignVertical: 'center' },
 });

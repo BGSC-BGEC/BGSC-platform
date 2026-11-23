@@ -15,6 +15,14 @@ export const FONT_FAMILIES = {
   bodyBlack: 'Inter_900Black',
 
   mono: 'JetBrainsMono_500Medium',
+
+  /** Condensed caps for the Valorant player card. */
+  condensed: 'BarlowCondensed_600SemiBold',
+  condensedHeavy: 'BarlowCondensed_800ExtraBold',
+
+  /** Blocky pixel type for the Minecraft player card. */
+  pixel: 'PixelifySans_500Medium',
+  pixelBold: 'PixelifySans_700Bold',
 } as const;
 
 export type TypographyVariant =

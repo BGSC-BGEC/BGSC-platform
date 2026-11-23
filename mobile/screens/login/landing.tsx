@@ -1,5 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
+  Image,
+  Pressable,
   ScrollView,
   StyleSheet,
   View,
@@ -7,7 +12,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
-import Svg, { Circle, Defs, Ellipse, LinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Defs, Ellipse, RadialGradient, Stop } from 'react-native-svg';
 import { useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -16,7 +21,7 @@ import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
 import { CountdownRing } from '../../src/components/CountdownRing';
 import { Doodle, type DoodleName } from '../../src/components/doodles/Doodles';
-import { BDOME_ASPECT, BDomeArt } from '../../src/components/playercard/BDomeArt';
+import { cardTierStyle } from '../../src/components/playercard/cardTiers';
 import {
   PLAYER_CARD_HEIGHT,
   PLAYER_CARD_WIDTH,
@@ -24,58 +29,180 @@ import {
 } from '../../src/components/playercard/PlayerCardView';
 import { Typography } from '../../src/typography/Typography';
 import { FONT_FAMILIES } from '../../src/theme/typography';
-import { PALETTE, withAlpha } from '../../src/theme/colors';
+import { withAlpha } from '../../src/theme/colors';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { useAuth } from '../../store/auth';
 import { CosmicSpaceBackground, GlassCard } from '../../src/auth/CosmicSpaceView';
 
-type ArtName = 'campus' | 'auction' | 'card';
+/** The campus illustration with its cream background cut away, so it stands in space. */
+const CAMPUS = require('../../assets/images/landing-campus.png');
+const CAMPUS_ASPECT = 792 / 572;
 
-const SLIDES: { art: ArtName; title: string; body: string }[] = [
+const PADDING = 24;
+/** The cosmic backdrop's base colour (CosmicSpaceBackground), for the tickets' punched notches. */
+const SPACE = '#03060f';
+/** Artwork is drawn on a 280-tall stage, then scaled to whatever height the screen can spare. */
+const DESIGN_H = 280;
+/** How long each slide stays before the tour moves on. */
+const INTERVAL = 4500;
+/** Art height bounds; between them the art takes whatever the screen leaves. */
+const ART_MIN = 130;
+const ART_MAX = 340;
+const CONTROLS_H = 36;
+const SLIDE_TEXT_H = 164;
+/**
+ * Everything on screen except the art: vertical padding 12 + 24, brand 34, three 18px gaps,
+ * slide text (16 margin + SLIDE_TEXT_H), the controls row, and three 48px buttons with 10px gaps.
+ */
+/** The slide text block under the art: its 16px margin plus SLIDE_TEXT_H. */
+const TEXT_BLOCK = 16 + SLIDE_TEXT_H;
+const CHROME = 36 + 34 + 3 * 18 + (16 + SLIDE_TEXT_H) + CONTROLS_H + (3 * 48 + 2 * 10);
+
+type ArtName = 'campus' | 'ticket' | 'auction' | 'podium' | 'card' | 'more';
+
+/** The whole app in six slides — every feature is on the first screen, nothing to scroll for. */
+const SLIDES: { art: ArtName; kicker: string; title: string; body: string }[] = [
   {
-    art: 'card',
+    art: 'campus',
+    kicker: 'WELCOME TO BGSC',
     title: 'Every game on campus, in one universe.',
-    body: 'Register for events, bid in live auctions, climb the leaderboard and get your name in the Hall of Fame.',
+    body: 'Sign up for events, bid in live auctions, earn points and build a player card worth showing off.',
+  },
+  {
+    art: 'ticket',
+    kicker: 'EVENTS',
+    title: 'Every event on campus, one tap away.',
+    body: 'Tournaments, matches and meets across every sport and esport. Register solo or with your team.',
   },
   {
     art: 'auction',
-    title: 'Bid live. Build your squad.',
-    body: 'Captains run the auction in real time — every lot, every purse, every last-second bid.',
+    kicker: 'LIVE AUCTIONS',
+    title: 'Captains build squads, live.',
+    body: 'Every lot, every purse, every last-second bid, in real time.',
+  },
+  {
+    art: 'podium',
+    kicker: 'LEADERBOARD',
+    title: 'Points from every game add up.',
+    body: 'Climb the season leaderboard. The best seasons are written into the Hall of Fame.',
   },
   {
     art: 'card',
-    title: 'Win, climb, get remembered.',
-    body: 'Points from every event and challenge add up. The best seasons end up in the Hall of Fame.',
+    kicker: 'PLAYER CARD',
+    title: 'A card that levels up with you.',
+    body: 'Your rating grows with every event, podium and challenge, from Rookie to Legend. Share it anywhere.',
+  },
+  {
+    art: 'more',
+    kicker: 'ALSO INSIDE',
+    title: 'Challenges, Strava and more.',
+    body: 'Team challenges, Strava-linked fitness goals, event photos and announcements the moment they drop.',
   },
 ];
-const PADDING = 24;
-/** The cosmic backdrop's base colour (CosmicSpaceBackground), for fades into it. */
-const SPACE = '#03060f';
-/** Every slide's artwork gets the same stage, so swiping never shifts the text below. */
-const ART_HEIGHT = 290;
 
-/** v2 Cosmic Landing · tour — first screen for signed-out members. */
+/** v2 Cosmic Landing — a self-playing tour of the app for signed-out members. */
 export default function LandingScreen() {
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const { devLogin } = useAuth();
-  const [page, setPage] = useState(0);
-  const slideWidth = width - PADDING * 2;
 
-  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) =>
-    setPage(Math.round(e.nativeEvent.contentOffset.x / slideWidth));
+  const slideWidth = width - PADDING * 2;
+  // The tour takes whatever height the brand, controls and buttons leave (measured, so it
+  // stays right at any font size); the art gets that minus the slide text. CHROME is only the
+  // first-frame estimate before the measurement arrives.
+  const [tourHeight, setTourHeight] = useState<number | null>(null);
+  const artHeight = Math.max(
+    ART_MIN,
+    Math.min(
+      ART_MAX,
+      tourHeight !== null ? tourHeight - TEXT_BLOCK : height - insets.top - insets.bottom - CHROME,
+    ),
+  );
+
+  const pager = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  /** Slide an auto-advance or dot tap is scrolling to; scroll events are ignored until it lands. */
+  const target = useRef<number | null>(null);
+  const [page, setPage] = useState(0);
+  const [touching, setTouching] = useState(false);
+  const [paused, setPaused] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const [screenReader, setScreenReader] = useState(false);
+  const progress = useRef(new Animated.Value(0)).current;
+  // Never moves under a finger, a screen reader, reduced motion, or once the member pauses it.
+  const autoplay = !touching && !paused && !reduceMotion && !screenReader;
+
+  useEffect(() => {
+    void AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion);
+    void AccessibilityInfo.isScreenReaderEnabled().then(setScreenReader);
+    const subs = [
+      AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion),
+      AccessibilityInfo.addEventListener('screenReaderChanged', setScreenReader),
+    ];
+    return () => subs.forEach((s) => s.remove());
+  }, []);
+
+  // Keep the current slide aligned if the width changes (web resize, split screen).
+  useEffect(() => {
+    pager.current?.scrollTo({ x: page * slideWidth, animated: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slideWidth]);
+
+  // Each page change restarts the clock; anything that stops autoplay stops it.
+  useEffect(() => {
+    progress.stopAnimation();
+    progress.setValue(autoplay ? 0 : 1);
+    if (!autoplay) return;
+    const fill = Animated.timing(progress, {
+      toValue: 1,
+      duration: INTERVAL,
+      easing: Easing.linear,
+      useNativeDriver: false,
+    });
+    fill.start();
+    const timer = setTimeout(() => goTo((page + 1) % SLIDES.length), INTERVAL);
+    return () => {
+      clearTimeout(timer);
+      fill.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, autoplay, slideWidth]);
+
+  const goTo = (i: number) => {
+    target.current = i;
+    pager.current?.scrollTo({ x: i * slideWidth, animated: !reduceMotion });
+    setPage(i);
+  };
+
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // Only once the pager has settled on a slide, so a scroll in flight never flips the page back.
+    const x = e.nativeEvent.contentOffset.x;
+    const i = Math.round(x / slideWidth);
+    if (Math.abs(x - i * slideWidth) > 2) return;
+    if (target.current !== null) {
+      if (i !== target.current) return;
+      target.current = null;
+    }
+    if (i !== page && i >= 0 && i < SLIDES.length) setPage(i);
+  };
+
+  // Touch events fire on native and web alike (web never calls onScrollBeginDrag).
+  const hold = () => {
+    target.current = null;
+    setTouching(true);
+  };
+  const release = () => setTouching(false);
 
   return (
     <View style={styles.screen}>
-      <CosmicSpaceBackground showAstronaut astronautTop={insets.top + 8} astronautRight={14} astronautScale={0.8} />
+      <CosmicSpaceBackground showAstronaut astronautTop={insets.top + 4} astronautRight={14} astronautScale={0.7} />
 
       <ScrollView
-        style={styles.scrollView}
+        style={styles.flex}
         contentContainerStyle={[
           styles.content,
-          { paddingTop: insets.top + 16, paddingBottom: insets.bottom + 40 },
+          { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 24 },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -83,177 +210,264 @@ export default function LandingScreen() {
           <BrandMark size="sm" />
         </View>
 
-        {/* Tour: each slide's artwork swipes with the line it illustrates */}
-        <ScrollView
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          onMomentumScrollEnd={onScroll}
-          style={{ width: slideWidth }}
-        >
-          {SLIDES.map((s) => (
-            <View key={s.title} style={[styles.slide, { width: slideWidth }]}>
-              <View
-                style={styles.art}
-                accessibilityElementsHidden
-                importantForAccessibility="no-hide-descendants"
-              >
-                {s.art === 'campus' && <CampusPlanet width={slideWidth} />}
-                {s.art === 'auction' && <LiveLot width={slideWidth} />}
-                {s.art === 'card' && <CardShowcase />}
+        {/* Tour */}
+        <View style={styles.tour} onLayout={(e) => setTourHeight(e.nativeEvent.layout.height)}>
+          <ScrollView
+            ref={pager}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            onScroll={onScroll}
+            scrollEventThrottle={32}
+            onTouchStart={hold}
+            onTouchEnd={release}
+            onTouchCancel={release}
+            style={{ width: slideWidth }}
+          >
+            {SLIDES.map((s) => (
+              <View key={s.kicker} style={{ width: slideWidth }}>
+                <ArtStage width={slideWidth} height={artHeight}>
+                  {(w) => (
+                    <>
+                      {s.art === 'campus' && <Campus width={w} />}
+                      {s.art === 'ticket' && <EventTickets width={w} />}
+                      {s.art === 'auction' && <LiveLot width={w} />}
+                      {s.art === 'podium' && <Podium width={w} />}
+                      {s.art === 'card' && <CardShowcase />}
+                      {s.art === 'more' && <AlsoInside width={w} />}
+                    </>
+                  )}
+                </ArtStage>
+                <View style={styles.slideText}>
+                  <Typography variant="labelSmall" color="primary">
+                    {s.kicker}
+                  </Typography>
+                  <Typography variant="h1" color="text" style={styles.title} numberOfLines={2}>
+                    {s.title}
+                  </Typography>
+                  <Typography variant="body" color="textMuted" numberOfLines={3}>
+                    {s.body}
+                  </Typography>
+                </View>
               </View>
-              <Typography variant="displayHero" color="text" style={styles.title}>
-                {s.title}
-              </Typography>
-              <Typography variant="body" color="textMuted" style={styles.subtitle}>
-                {s.body}
-              </Typography>
-            </View>
-          ))}
-        </ScrollView>
+            ))}
+          </ScrollView>
+        </View>
 
-        <View style={styles.dots} accessibilityLabel={`Slide ${page + 1} of ${SLIDES.length}`}>
-          {SLIDES.map((s, i) => (
-            <View
-              key={s.title}
-              style={[
-                styles.dot,
-                i === page
-                  ? { width: 26, backgroundColor: colors.primary }
-                  : { backgroundColor: withAlpha(colors.white, 0.2) },
-              ]}
-            />
-          ))}
+        {/* Progress dots: the active one fills while its slide plays; tap any to jump (which
+            hands control to the member and stops autoplay). Pause/play on the right. */}
+        <View style={styles.controls}>
+          <View style={styles.dots}>
+            {SLIDES.map((s, i) => {
+              const active = i === page;
+              return (
+                <Pressable
+                  key={s.kicker}
+                  onPress={() => {
+                    setPaused(true);
+                    goTo(i);
+                  }}
+                  hitSlop={{ top: 18, bottom: 18, left: 4, right: 4 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Show ${s.kicker.toLowerCase()}, slide ${i + 1} of ${SLIDES.length}`}
+                  accessibilityState={{ selected: active }}
+                >
+                  <View
+                    style={[
+                      styles.dot,
+                      { backgroundColor: withAlpha(colors.white, 0.2) },
+                      active && styles.dotActive,
+                    ]}
+                  >
+                    {active && (
+                      <Animated.View
+                        style={[
+                          styles.dotFill,
+                          {
+                            backgroundColor: colors.primary,
+                            width: progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+                          },
+                        ]}
+                      />
+                    )}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+          {!reduceMotion && !screenReader && (
+            <Pressable
+              onPress={() => setPaused((p) => !p)}
+              style={[styles.playPause, { borderColor: withAlpha(colors.white, 0.18) }]}
+              accessibilityRole="button"
+              accessibilityLabel={paused ? 'Play the tour' : 'Pause the tour'}
+            >
+              <Typography color="textMuted" style={styles.playPauseGlyph}>
+                {paused ? '▶' : '❚❚'}
+              </Typography>
+            </Pressable>
+          )}
         </View>
 
         <View style={styles.actions}>
           <Button label="Get started" fullWidth onPress={() => navigation.navigate('Register')} />
-          <Button
-            label="I have an account"
-            variant="outline"
-            fullWidth
-            onPress={() => navigation.navigate('Login')}
-          />
-          <Button
-            label="⚡ Dev: Skip to Main App"
-            variant="ghost"
-            fullWidth
-            onPress={devLogin}
-          />
+          <Button label="I have an account" variant="outline" fullWidth onPress={() => navigation.navigate('Login')} />
+          <Button label="⚡ Dev: Skip to Main App" variant="ghost" fullWidth onPress={devLogin} />
         </View>
       </ScrollView>
     </View>
   );
 }
 
-/* ---------- Slide 1: the campus as a planet, sports in orbit ---------- */
-
-const ORBIT: { name: DoodleName; angle: number }[] = [
-  { name: 'football', angle: 186 },
-  { name: 'controller', angle: 238 },
-  { name: 'trophy', angle: 302 },
-  { name: 'headphones', angle: 354 },
-];
-const MOON = 44;
-
-function CampusPlanet({ width }: { width: number }) {
-  const { colors } = useTheme();
-  const cx = width / 2;
-  // Planet: its top cap is the ground the BDome stands on; narrower than the slide so its curve
-  // shows on both sides, and it fades into space at the bottom of the stage.
-  const planetR = width * 0.6;
-  const planetTop = ART_HEIGHT - 80;
-  const planetCy = planetTop + planetR;
-  // Orbit behind the dome.
-  const orbit = { cy: 118, rx: width / 2 - MOON / 2 - 2, ry: 50 };
-  const domeW = Math.min(220, width * 0.62);
-  const domeH = domeW / BDOME_ASPECT;
-
+/**
+ * Decorative stage: lays the art out on a DESIGN_H-tall canvas and scales it to fit `height`,
+ * so every slide's art keeps its proportions on short phones. Hidden from screen readers.
+ */
+function ArtStage({
+  width,
+  height,
+  children,
+}: {
+  width: number;
+  height: number;
+  children: (designWidth: number) => React.ReactNode;
+}) {
+  const s = height / DESIGN_H;
+  const designWidth = width / s;
   return (
-    <View style={{ width, height: ART_HEIGHT }}>
-      <Svg width={width} height={ART_HEIGHT} style={StyleSheet.absoluteFill}>
-        <Defs>
-          <RadialGradient id="landing-planet" cx="50%" cy="0%" r="70%" fx="50%" fy="0%">
-            <Stop offset="0" stopColor={PALETTE.orangeLight} />
-            <Stop offset="0.35" stopColor={colors.primary} />
-            <Stop offset="1" stopColor={colors.primarySolid} />
-          </RadialGradient>
-          <LinearGradient id="landing-planet-fade" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={SPACE} stopOpacity={0} />
-            <Stop offset="1" stopColor={SPACE} stopOpacity={1} />
-          </LinearGradient>
-        </Defs>
-        {/* Atmosphere, then the planet */}
-        <Circle cx={cx} cy={planetCy} r={planetR + 16} fill={withAlpha(colors.primary, 0.16)} />
-        <Circle cx={cx} cy={planetCy} r={planetR + 6} fill={withAlpha(colors.primary, 0.22)} />
-        <Circle cx={cx} cy={planetCy} r={planetR} fill="url(#landing-planet)" />
-        <Rect x={0} y={ART_HEIGHT - 56} width={width} height={56} fill="url(#landing-planet-fade)" />
-        {/* Orbit path */}
-        <Ellipse
-          cx={cx}
-          cy={orbit.cy}
-          rx={orbit.rx}
-          ry={orbit.ry}
-          fill="none"
-          stroke={withAlpha(colors.white, 0.22)}
-          strokeWidth={1.2}
-          strokeDasharray="4 6"
-        />
-      </Svg>
-
-      {/* Moons: one sport each, riding the orbit */}
-      {ORBIT.map(({ name, angle }) => {
-        const a = (angle * Math.PI) / 180;
-        const x = cx + orbit.rx * Math.cos(a);
-        const y = orbit.cy + orbit.ry * Math.sin(a);
-        return (
-          <View
-            key={name}
-            style={[
-              styles.moon,
-              {
-                left: x - MOON / 2,
-                top: y - MOON / 2,
-                borderColor: withAlpha(colors.white, 0.22),
-                backgroundColor: withAlpha(colors.surface, 0.85),
-              },
-            ]}
-          >
-            <Doodle name={name} size={24} color={colors.primary} strokeWidth={2} />
-          </View>
-        );
-      })}
-
-      {/* The BDome, standing on the planet's horizon */}
-      <View style={{ position: 'absolute', left: cx - domeW / 2, top: planetTop - domeH + 10 }}>
-        <BDomeArt width={domeW} />
+    <View
+      style={{ width, height, overflow: 'visible' }}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+    >
+      <View
+        style={[
+          styles.artCanvas,
+          {
+            width: designWidth,
+            left: (width - designWidth) / 2,
+            top: (height - DESIGN_H) / 2,
+            transform: [{ scale: s }],
+          },
+        ]}
+      >
+        {children(designWidth)}
       </View>
     </View>
   );
 }
 
-/* ---------- Slide 2: one live auction lot ---------- */
+/* ---------- Welcome: the campus illustration ---------- */
+
+function Campus({ width }: { width: number }) {
+  const { colors } = useTheme();
+  const imgW = Math.min(width, DESIGN_H * CAMPUS_ASPECT);
+  const imgH = imgW / CAMPUS_ASPECT;
+  return (
+    <View style={styles.centerStage}>
+      {/* Warm glow so the illustration's dark outlines read against space */}
+      <Svg width={width} height={DESIGN_H} style={StyleSheet.absoluteFill}>
+        <Defs>
+          <RadialGradient id="landing-campus-glow" cx="50%" cy="55%" r="50%">
+            <Stop offset="0" stopColor={colors.primary} stopOpacity={0.32} />
+            <Stop offset="1" stopColor={colors.primary} stopOpacity={0} />
+          </RadialGradient>
+        </Defs>
+        <Ellipse cx={width / 2} cy={DESIGN_H * 0.55} rx={width / 2} ry={DESIGN_H / 2} fill="url(#landing-campus-glow)" />
+      </Svg>
+      <Image source={CAMPUS} style={{ width: imgW, height: imgH }} resizeMode="contain" />
+    </View>
+  );
+}
+
+/* ---------- Events: tickets ---------- */
+
+function EventTickets({ width }: { width: number }) {
+  const ticketW = Math.min(width - 48, 320);
+  return (
+    <View style={styles.centerStage}>
+      <View style={[styles.ticketBehind, { width: ticketW }]}>
+        <Ticket day="21" month="DEC" weekday="SAT" sport="FOOTBALL" name="Inter-hostel Cup" place="Main Ground · 4 PM" filled={14} total={16} muted />
+      </View>
+      <View style={[styles.ticketFront, { width: ticketW }]}>
+        <Ticket day="14" month="DEC" weekday="SAT" sport="ESPORTS" name="Valorant Cup" place="LT-1 Campus Arena · 6 PM" filled={32} total={48} />
+      </View>
+    </View>
+  );
+}
+
+function Ticket(p: {
+  day: string;
+  month: string;
+  weekday: string;
+  sport: string;
+  name: string;
+  place: string;
+  filled: number;
+  total: number;
+  muted?: boolean;
+}) {
+  const { colors } = useTheme();
+  const stubBg = p.muted ? colors.surfaceInner : colors.primarySolid;
+  return (
+    <View style={[styles.ticket, { backgroundColor: colors.surface, borderColor: withAlpha(colors.white, 0.12) }]}>
+      <View style={[styles.stub, { backgroundColor: stubBg }]}>
+        <Typography variant="labelSmall" color="primaryText">
+          {p.weekday}
+        </Typography>
+        <Typography color="primaryText" style={styles.stubDay}>
+          {p.day}
+        </Typography>
+        <Typography variant="labelSmall" color="primaryText">
+          {p.month}
+        </Typography>
+      </View>
+
+      {/* Perforation, with notches punched out of top and bottom */}
+      <View style={[styles.perforation, { borderColor: withAlpha(colors.white, 0.2) }]} />
+      <View style={[styles.notch, styles.notchTop, { backgroundColor: SPACE }]} />
+      <View style={[styles.notch, styles.notchBottom, { backgroundColor: SPACE }]} />
+
+      <View style={styles.ticketBody}>
+        <View style={styles.rowBetween}>
+          <Badge label="Open" variant="success" />
+          <Typography variant="labelSmall" color="textMuted">
+            {p.sport}
+          </Typography>
+        </View>
+        <Typography variant="h3" color="text" numberOfLines={1}>
+          {p.name}
+        </Typography>
+        <Typography variant="bodySmall" color="textMuted" numberOfLines={1}>
+          {p.place}
+        </Typography>
+        <View style={[styles.spotsTrack, { backgroundColor: withAlpha(colors.white, 0.1) }]}>
+          <View style={[styles.spotsFill, { width: `${(p.filled / p.total) * 100}%`, backgroundColor: colors.primary }]} />
+        </View>
+        <Typography variant="caption" color="textMuted">
+          {p.filled} / {p.total} spots taken
+        </Typography>
+      </View>
+    </View>
+  );
+}
+
+/* ---------- Live auctions: one lot ---------- */
 
 function LiveLot({ width }: { width: number }) {
   const { colors } = useTheme();
   const cardW = Math.min(width - 16, 320);
 
   return (
-    <View style={[styles.lotStage, { width }]}>
-      {/* The next lot, waiting behind */}
+    <View style={styles.centerStage}>
       <View
         style={[
           styles.lotGhost,
-          {
-            width: cardW - 36,
-            borderColor: withAlpha(colors.white, 0.14),
-            backgroundColor: withAlpha(colors.surface, 0.5),
-          },
+          { width: cardW - 36, borderColor: withAlpha(colors.white, 0.14), backgroundColor: withAlpha(colors.surface, 0.5) },
         ]}
       />
-
       <GlassCard style={{ width: cardW }}>
-        <View style={styles.lotHeader}>
+        <View style={styles.rowBetween}>
           <Badge label="● Live" variant="danger" />
           <Typography variant="mono" color="textMuted" style={styles.monoSmall}>
             LOT 07 / 24
@@ -261,8 +475,8 @@ function LiveLot({ width }: { width: number }) {
         </View>
 
         <View style={styles.lotPlayer}>
-          <View style={[styles.lotAvatar, { backgroundColor: colors.primarySolid }]}>
-            <Typography color="primaryText" style={styles.lotInitials}>
+          <View style={[styles.initialsDisc, { backgroundColor: colors.primarySolid }]}>
+            <Typography color="primaryText" style={styles.initials}>
               RK
             </Typography>
           </View>
@@ -276,12 +490,12 @@ function LiveLot({ width }: { width: number }) {
           </View>
         </View>
 
-        <View style={[styles.lotDivider, { backgroundColor: withAlpha(colors.white, 0.1) }]} />
+        <View style={[styles.divider, { backgroundColor: withAlpha(colors.white, 0.1) }]} />
 
         <View style={styles.lotBidRow}>
           <View style={styles.flex}>
-            <Typography color="textMuted" style={styles.kicker}>
-              CURRENT BID
+            <Typography variant="labelSmall" color="textMuted">
+              Current bid
             </Typography>
             <Typography variant="displayHero" color="text" style={styles.bid}>
               1,450
@@ -290,7 +504,7 @@ function LiveLot({ width }: { width: number }) {
               Team Comets leads
             </Typography>
           </View>
-          <CountdownRing seconds={8} total={15} size={68} stroke={5} />
+          <CountdownRing seconds={8} total={15} size={64} stroke={5} />
         </View>
 
         <View style={styles.lotSteps}>
@@ -299,9 +513,7 @@ function LiveLot({ width }: { width: number }) {
               key={step}
               style={[
                 styles.lotStep,
-                i === 1
-                  ? { backgroundColor: colors.primary }
-                  : { borderColor: withAlpha(colors.white, 0.18), borderWidth: 1 },
+                i === 1 ? { backgroundColor: colors.primary } : { borderColor: withAlpha(colors.white, 0.18), borderWidth: 1 },
               ]}
             >
               <Typography color={i === 1 ? 'onPrimary' : 'text'} style={styles.lotStepText}>
@@ -315,9 +527,53 @@ function LiveLot({ width }: { width: number }) {
   );
 }
 
-/* ---------- Slide 3: the player card ---------- */
+/* ---------- Leaderboard: the podium, in the card tiers' metals ---------- */
 
-const SHOWCASE_SCALE = 0.58;
+const PODIUM = [
+  { rank: 2, initials: 'MD', name: 'Meera D.', pts: '2,120', height: 92, tier: 'Silver' },
+  { rank: 1, initials: 'AS', name: 'Aarav S.', pts: '2,480', height: 128, tier: 'Gold' },
+  { rank: 3, initials: 'KN', name: 'Kabir N.', pts: '1,980', height: 68, tier: 'Bronze' },
+];
+
+function Podium({ width }: { width: number }) {
+  const { colors } = useTheme();
+  return (
+    <View style={styles.centerStage}>
+      <View style={[styles.podium, { width: Math.min(width, 340) }]}>
+        {PODIUM.map((p) => {
+          const t = cardTierStyle(p.tier, 'dark');
+          return (
+            <View key={p.rank} style={styles.podiumCol}>
+              {p.rank === 1 && <Doodle name="star" size={20} color={t.foil[1]} strokeWidth={2} />}
+              <View style={[styles.initialsDisc, styles.podiumAvatar, { borderColor: t.foil[1], backgroundColor: t.avatarBg }]}>
+                <Typography style={[styles.initials, { color: t.ink }]}>{p.initials}</Typography>
+              </View>
+              <Typography variant="bodySmall" color="text" numberOfLines={1}>
+                {p.name}
+              </Typography>
+              <Typography variant="mono" color="textMuted" style={styles.monoSmall}>
+                {p.pts} pts
+              </Typography>
+              <View
+                style={[
+                  styles.podiumBlock,
+                  { height: p.height, backgroundColor: withAlpha(t.foil[0], 0.3), borderTopColor: t.foil[1] },
+                ]}
+              >
+                <Typography style={[styles.podiumRank, { color: t.foil[1] }]}>{p.rank}</Typography>
+              </View>
+            </View>
+          );
+        })}
+        <View style={[styles.podiumFloor, { backgroundColor: withAlpha(colors.white, 0.14) }]} />
+      </View>
+    </View>
+  );
+}
+
+/* ---------- Player card ---------- */
+
+const SHOWCASE_SCALE = 0.56;
 
 function CardShowcase() {
   const { colors } = useTheme();
@@ -325,16 +581,15 @@ function CardShowcase() {
   const h = PLAYER_CARD_HEIGHT * SHOWCASE_SCALE;
 
   return (
-    <View style={styles.cardStage}>
-      {/* Glow behind the card */}
-      <Svg width={w * 2} height={ART_HEIGHT} style={styles.cardGlow}>
+    <View style={styles.centerStage}>
+      <Svg width={w * 2} height={DESIGN_H} style={styles.cardGlow}>
         <Defs>
           <RadialGradient id="landing-card-glow" cx="50%" cy="50%" r="50%">
             <Stop offset="0" stopColor={colors.warning} stopOpacity={0.35} />
             <Stop offset="1" stopColor={colors.warning} stopOpacity={0} />
           </RadialGradient>
         </Defs>
-        <Ellipse cx={w} cy={ART_HEIGHT / 2} rx={w} ry={ART_HEIGHT / 2} fill="url(#landing-card-glow)" />
+        <Ellipse cx={w} cy={DESIGN_H / 2} rx={w} ry={DESIGN_H / 2} fill="url(#landing-card-glow)" />
       </Svg>
 
       <View style={[styles.cardTilt, { width: w, height: h }]}>
@@ -364,93 +619,214 @@ function CardShowcase() {
   );
 }
 
+/* ---------- Also inside: four features as tiles ---------- */
+
+const ALSO_INSIDE: { icon: DoodleName; title: string }[] = [
+  { icon: 'bolt', title: 'Challenges' },
+  { icon: 'sneaker', title: 'Strava' },
+  { icon: 'monitor', title: 'Media' },
+  { icon: 'megaphone', title: 'Announcements' },
+];
+
+function AlsoInside({ width }: { width: number }) {
+  const { colors } = useTheme();
+  const gridW = Math.min(width, 340);
+  return (
+    <View style={styles.centerStage}>
+      <View style={[styles.grid, { width: gridW }]}>
+        {ALSO_INSIDE.map((f, i) => (
+          <GlassCard key={f.title} style={[styles.tile, { transform: [{ rotate: i % 2 ? '2deg' : '-2deg' }] }]}>
+            <View style={[styles.tileIcon, { backgroundColor: withAlpha(colors.primary, 0.14) }]}>
+              <Doodle name={f.icon} size={26} color={colors.primary} strokeWidth={2} />
+            </View>
+            <Typography variant="h4" color="text" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+              {f.title}
+            </Typography>
+          </GlassCard>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: SPACE,
   },
-  scrollView: {
+  flex: {
     flex: 1,
   },
   content: {
+    flexGrow: 1,
     paddingHorizontal: PADDING,
-    gap: 22,
+    gap: 18,
+  },
+  tour: {
+    flex: 1,
+    minHeight: ART_MIN + TEXT_BLOCK,
+    justifyContent: 'center',
   },
   brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  slide: {
-    gap: 10,
+  artCanvas: {
+    position: 'absolute',
+    height: DESIGN_H,
   },
-  art: {
-    height: ART_HEIGHT,
-    marginBottom: 8,
+  centerStage: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  title: {
-    fontSize: 36,
-    lineHeight: 46,
+  slideText: {
+    gap: 8,
+    marginTop: 16,
+    // Room for a two-line title and three-line body, so the dots and buttons never jump.
+    minHeight: SLIDE_TEXT_H,
   },
-  subtitle: {
-    fontSize: 14,
-    lineHeight: 22,
+  title: {
+    fontSize: 28,
+    lineHeight: 34,
+  },
+  controls: {
+    height: CONTROLS_H,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  playPause: {
+    width: CONTROLS_H,
+    height: CONTROLS_H,
+    borderRadius: CONTROLS_H / 2,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playPauseGlyph: {
+    fontSize: 11,
+    lineHeight: 14,
+    letterSpacing: -1,
   },
   dots: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
   dot: {
     width: 8,
     height: 8,
-    borderRadius: 999,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  dotActive: {
+    width: 28,
+  },
+  dotFill: {
+    height: '100%',
+    borderRadius: 4,
   },
   actions: {
-    gap: 12,
-    marginTop: 6,
+    gap: 10,
+    marginTop: 'auto',
   },
-  flex: {
-    flex: 1,
-  },
-  kicker: {
-    fontFamily: FONT_FAMILIES.bodySemiBold,
-    fontSize: 10,
-    lineHeight: 14,
-    letterSpacing: 1,
+  rowBetween: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   monoSmall: {
     fontSize: 11,
   },
+  divider: {
+    height: 1,
+    marginVertical: 14,
+  },
+  initialsDisc: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  initials: {
+    fontFamily: FONT_FAMILIES.hero,
+    fontSize: 18,
+    lineHeight: 22,
+  },
 
-  // Slide 1
-  moon: {
+  // Tickets
+  ticketBehind: {
     position: 'absolute',
-    width: MOON,
-    height: MOON,
-    borderRadius: MOON / 2,
+    top: 28,
+    opacity: 0.55,
+    transform: [{ rotate: '5deg' }, { translateX: 14 }],
+  },
+  ticketFront: {
+    marginTop: 64,
+    transform: [{ rotate: '-3deg' }],
+  },
+  ticket: {
+    flexDirection: 'row',
+    height: 150,
+    borderRadius: 16,
     borderWidth: 1,
+    overflow: 'hidden',
+  },
+  stub: {
+    width: 78,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 2,
+  },
+  stubDay: {
+    fontFamily: FONT_FAMILIES.brand,
+    fontSize: 34,
+    lineHeight: 40,
+  },
+  perforation: {
+    width: 0,
+    borderLeftWidth: 2,
+    borderStyle: 'dashed',
+    marginVertical: 14,
+  },
+  notch: {
+    position: 'absolute',
+    left: 79 - 9,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+  },
+  notchTop: {
+    top: -9,
+  },
+  notchBottom: {
+    bottom: -9,
+  },
+  ticketBody: {
+    flex: 1,
+    padding: 14,
+    gap: 4,
+  },
+  spotsTrack: {
+    height: 6,
+    borderRadius: 3,
+    marginTop: 8,
+    overflow: 'hidden',
+  },
+  spotsFill: {
+    height: '100%',
+    borderRadius: 3,
   },
 
-  // Slide 2
-  lotStage: {
-    height: ART_HEIGHT,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  // Auction
   lotGhost: {
     position: 'absolute',
-    top: 4,
+    top: 2,
     height: 60,
     borderRadius: 20,
     borderWidth: 1,
-  },
-  lotHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
   },
   lotPlayer: {
     flexDirection: 'row',
@@ -458,35 +834,19 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 14,
   },
-  lotAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  lotInitials: {
-    fontFamily: FONT_FAMILIES.hero,
-    fontSize: 18,
-    lineHeight: 22,
-  },
-  lotDivider: {
-    height: 1,
-    marginVertical: 14,
-  },
   lotBidRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
   bid: {
-    fontSize: 34,
-    lineHeight: 42,
+    fontSize: 32,
+    lineHeight: 40,
   },
   lotSteps: {
     flexDirection: 'row',
     gap: 8,
-    marginTop: 14,
+    marginTop: 12,
   },
   lotStep: {
     flex: 1,
@@ -501,17 +861,69 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // Slide 3
-  cardStage: {
-    height: ART_HEIGHT,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    justifyContent: 'center',
+  // Podium
+  podium: {
+    height: DESIGN_H,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+    paddingBottom: 1,
   },
+  podiumCol: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  podiumAvatar: {
+    borderWidth: 2,
+    marginBottom: 2,
+  },
+  podiumBlock: {
+    alignSelf: 'stretch',
+    marginTop: 6,
+    borderTopWidth: 3,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    alignItems: 'center',
+    paddingTop: 8,
+  },
+  podiumRank: {
+    fontFamily: FONT_FAMILIES.brand,
+    fontSize: 30,
+    lineHeight: 36,
+  },
+  podiumFloor: {
+    position: 'absolute',
+    left: -12,
+    right: -12,
+    bottom: 0,
+    height: 1,
+  },
+
+  // Card
   cardGlow: {
     position: 'absolute',
   },
   cardTilt: {
     transform: [{ rotate: '-4deg' }],
+  },
+
+  // Also inside
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 14,
+  },
+  tile: {
+    width: '47%',
+  },
+  tileIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
   },
 });

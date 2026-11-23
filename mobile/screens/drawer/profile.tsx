@@ -1,5 +1,5 @@
-import React, { useCallback, useState } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { ProfileLayout } from '../profile/profile-layout';
 import { usersRepository } from '../../src/repositories/UsersRepository';
@@ -11,11 +11,14 @@ import { useConfirmLogout } from '../../src/hooks/useConfirmLogout';
 import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
 import { BottomSheet } from '../../src/components/BottomSheet';
-import { PlayerCardShareSheet } from '../../src/components/playercard/PlayerCardShareSheet';
+import { CustomizeCardSheet } from '../../src/components/playercard/CustomizeCardSheet';
+import { useSharePlayerCard } from '../../src/components/playercard/useSharePlayerCard';
+import { CARD_STYLES, DEFAULT_CARD_STYLE, PlayerCard, type CardStyleId } from '../../src/components/playercard/cardStyles';
+import { CARD_LOGOS, DEFAULT_CARD_LOGO, type CardLogoId } from '../../src/components/playercard/cardLogos';
+import { loadCardPrefs, saveCardPrefs, type CardPrefs } from '../../src/components/playercard/cardPrefs';
 import {
   PLAYER_CARD_HEIGHT,
   PLAYER_CARD_WIDTH,
-  PlayerCardView,
   type PlayerCardViewProps,
 } from '../../src/components/playercard/PlayerCardView';
 import { useResponsive } from '../../src/responsive';
@@ -65,9 +68,39 @@ export default function Profile() {
   const popup = usePopup();
   const confirmLogout = useConfirmLogout();
   const [actions, setActions] = useState(false);
-  const [shareOpen, setShareOpen] = useState(false);
+  // Design and logo picked in Customize card, saved on this device per account (cardPrefs).
+  const [cardStyle, setCardStyle] = useState<CardStyleId>(DEFAULT_CARD_STYLE);
+  const [cardLogo, setCardLogo] = useState<CardLogoId>(DEFAULT_CARD_LOGO);
+  const [prefs, setPrefs] = useState<CardPrefs | null>(null);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const prompted = useRef(false);
+  const cardRef = useRef<React.ComponentRef<typeof View>>(null);
   const ref = route.params?.ref ?? user?.id;
   const isSelf = !route.params?.ref || ref === user?.id || ref === user?.username;
+  const userId = user?.id;
+
+  useEffect(() => {
+    if (!userId) return;
+    let live = true;
+    void loadCardPrefs(userId).then((p) => {
+      if (!live) return;
+      if (CARD_STYLES.some((s) => s.id === p.style)) setCardStyle(p.style as CardStyleId);
+      if (CARD_LOGOS.some((l) => l.id === p.logo)) setCardLogo(p.logo as CardLogoId);
+      setPrefs(p);
+    });
+    return () => {
+      live = false;
+    };
+  }, [userId]);
+
+  const chooseStyle = (style: CardStyleId) => {
+    setCardStyle(style);
+    if (userId) void saveCardPrefs(userId, { style });
+  };
+  const chooseLogo = (logo: CardLogoId) => {
+    setCardLogo(logo);
+    if (userId) void saveCardPrefs(userId, { logo });
+  };
   // Opened from the bottom tab bar there is nothing to go back to: show the menu button instead.
   const isTabRoot = route.name === 'ProfileTab';
 
@@ -121,10 +154,35 @@ export default function Profile() {
     events: inputs?.participations ?? 0,
     podiums: inputs?.podiums ?? 0,
     challenges: inputs?.challenges ?? 0,
+    points: summary?.balance ?? inputs?.points_balance ?? 0,
     interests: card?.interests ?? [],
   };
   // The card has a fixed design size; shrink it on phones narrower than card + gutters.
   const cardScale = Math.min(1, (windowWidth - gutter * 2) / PLAYER_CARD_WIDTH);
+
+  // Someone else's card shows the default look: their choice lives on their device for now.
+  const shownStyle = isSelf ? cardStyle : DEFAULT_CARD_STYLE;
+  const shownLogo = isSelf ? cardLogo : undefined;
+  const { share, sharing } = useSharePlayerCard(
+    cardRef,
+    `${fullName} (@${cardProps.username}) · ${cardProps.tier} · BGSC rating ${cardProps.rating}`,
+  );
+
+  // First visit to your own profile: offer to customize the card, once.
+  const hasCard = !!card;
+  useEffect(() => {
+    if (!isSelf || !hasCard || !userId || !prefs || prefs.introSeen || prompted.current) return;
+    prompted.current = true;
+    void saveCardPrefs(userId, { introSeen: true });
+    void popup
+      .confirm({
+        title: 'Make your card yours',
+        message: 'Pick a design and a logo for your player card. You can change them any time with Customize card.',
+        confirmLabel: 'Customize',
+        cancelLabel: 'Later',
+      })
+      .then((yes) => yes && setCustomizeOpen(true));
+  }, [isSelf, hasCard, userId, prefs, popup]);
 
   return (
     <ProfileLayout title="Profile" refreshing={profile.refreshing} onRefresh={refresh} isRoot={isTabRoot}>
@@ -135,7 +193,11 @@ export default function Profile() {
         <>
           {/* Player card */}
           <View style={styles.cardStage}>
-            <View
+            <Pressable
+              disabled={!isSelf}
+              onPress={() => setCustomizeOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Customize card"
               style={{
                 width: PLAYER_CARD_WIDTH * cardScale,
                 height: PLAYER_CARD_HEIGHT * cardScale,
@@ -150,9 +212,21 @@ export default function Profile() {
                   marginTop: -(PLAYER_CARD_HEIGHT * (1 - cardScale)) / 2,
                 }}
               >
-                <PlayerCardView {...cardProps} />
+                {/* Unscaled capture target for Share card; collapsable={false} keeps it on Android. */}
+                <View ref={cardRef} collapsable={false}>
+                  <PlayerCard {...cardProps} logo={shownLogo} cardStyle={shownStyle} />
+                </View>
               </View>
-            </View>
+            </Pressable>
+            {isSelf && (
+              <Button
+                label="Customize card"
+                variant="secondary"
+                leftIcon="sparkles"
+                onPress={() => setCustomizeOpen(true)}
+                containerStyle={{ ...styles.customize, width: PLAYER_CARD_WIDTH * cardScale }}
+              />
+            )}
           </View>
 
           {/* What the card doesn't show: role, tenure, points, bio — and the actions */}
@@ -189,13 +263,22 @@ export default function Profile() {
               <Button
                 label="Share card"
                 leftIcon="share"
-                onPress={() => setShareOpen(true)}
+                loading={sharing}
+                onPress={() => void share()}
                 containerStyle={styles.flex}
               />
             </View>
           </View>
 
-          <PlayerCardShareSheet visible={shareOpen} onClose={() => setShareOpen(false)} card={cardProps} />
+          <CustomizeCardSheet
+            visible={customizeOpen}
+            onClose={() => setCustomizeOpen(false)}
+            card={cardProps}
+            cardStyle={cardStyle}
+            onCardStyleChange={chooseStyle}
+            logo={cardLogo}
+            onLogoChange={chooseLogo}
+          />
 
           <SectionHeader title="Interests & Disciplines" actionLabel={isSelf ? 'Edit' : undefined} onAction={() => go('EditProfile')} />
           <View style={styles.interestsRow}>
@@ -309,6 +392,9 @@ const styles = StyleSheet.create({
   cardStage: {
     alignItems: 'center',
     paddingTop: 4,
+  },
+  customize: {
+    marginTop: 12,
   },
   // No surrounding card: role/points/bio and the two buttons sit directly on the page.
   metaBlock: {

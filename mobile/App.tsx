@@ -6,6 +6,8 @@ import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, In
 import { DMSerifDisplay_400Regular } from '@expo-google-fonts/dm-serif-display';
 import { Graduate_400Regular } from '@expo-google-fonts/graduate';
 import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
+import { BarlowCondensed_600SemiBold, BarlowCondensed_800ExtraBold } from '@expo-google-fonts/barlow-condensed';
+import { PixelifySans_500Medium, PixelifySans_700Bold } from '@expo-google-fonts/pixelify-sans';
 import DrawerLayout from './screens/drawer/layout';
 import { AuthProvider, useAuth } from './store/auth';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
@@ -53,6 +55,10 @@ export default function App() {
     DMSerifDisplay_400Regular,
     JetBrainsMono_500Medium,
     Graduate_400Regular,
+    BarlowCondensed_600SemiBold,
+    BarlowCondensed_800ExtraBold,
+    PixelifySans_500Medium,
+    PixelifySans_700Bold,
   });
   // On a load error render anyway with system fonts rather than hanging on a blank screen.
   if (!fontsLoaded && !fontError) return null;
