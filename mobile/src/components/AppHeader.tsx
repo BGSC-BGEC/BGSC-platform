@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Typography } from '../typography/Typography';
 import { Icon } from '../icons/Icon';
 import { Avatar } from './Avatar';
+import { BgscLogo } from './BgscLogo';
 import { useTheme } from '../theme/ThemeProvider';
 import { withAlpha } from '../theme/colors';
 import { FONT_FAMILIES } from '../theme/typography';
@@ -134,6 +135,7 @@ export function AppHeader({
 
       {isBrand ? (
         <View style={styles.brandTitleWrap}>
+          <BgscLogo size={26} style={styles.brandLogo} />
           <Typography variant="h3" color={fg} style={styles.brandTitle}>
             BGSC
           </Typography>
@@ -177,7 +179,7 @@ export function AppHeader({
           <View style={[styles.capsuleDivider, { backgroundColor: brandTone ? withAlpha(colors.white, 0.35) : withAlpha(colors.border, 0.6) }]} />
 
           <Pressable
-            onPress={() => navigation.navigate('Profile', undefined, { pop: true })}
+            onPress={() => navigation.navigate('App', { screen: 'MainTabs', params: { screen: 'ProfileTab' } }, { pop: true })}
             accessibilityRole="button"
             accessibilityLabel="Your profile"
             hitSlop={6}
@@ -293,6 +295,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
+  },
+  brandLogo: {
+    marginRight: 4,
   },
   brandTitle: {
     fontFamily: FONT_FAMILIES.hero,

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useId, useMemo, forwardRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Eye, EyeOff, KeyRound, Loader2, Check, AlertCircle, Trophy, X, Shield, Sparkles } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Loader2, Check, AlertCircle, X, Shield, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@/types/admin";
 import { DEFAULT_ASTRONAUT_IMAGE } from "@/assets/astronaut";
@@ -751,9 +751,7 @@ export function SpaceLogin({
 
           <div className="flex flex-col items-center mb-6 text-center">
             <div className="flex items-center gap-2.5 mb-2">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-[0_0_18px_rgba(245,158,11,0.4)]">
-                <Trophy className="w-5 h-5 text-white" />
-              </div>
+              <img src="/bgsc-logo.png" alt="BGSC" className="w-11 h-11 drop-shadow-[0_0_14px_rgba(245,158,11,0.35)] object-contain shrink-0 select-none" draggable={false} />
               <span className="text-2xl font-black tracking-tight text-white">BGSC</span>
             </div>
             <h1 className="text-3xl sm:text-[34px] font-black tracking-tight text-white">{title}</h1>

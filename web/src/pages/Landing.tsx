@@ -82,9 +82,7 @@ export const Landing: React.FC = () => {
               onClick={() => navigate('/')}
               className="flex items-center gap-2.5 cursor-pointer group select-none"
             >
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-[0_0_18px_rgba(245,158,11,0.4)] group-hover:scale-105 transition-transform">
-                <Trophy className="w-5 h-5 text-white" />
-              </div>
+              <img src="/bgsc-logo.png" alt="BGSC" className="w-10 h-10 drop-shadow-[0_0_14px_rgba(245,158,11,0.35)] group-hover:scale-105 transition-transform object-contain shrink-0 select-none" draggable={false} />
               <div className="flex flex-col">
                 <span className="text-xl font-black tracking-tight text-white leading-none">
                   BGSC
@@ -608,9 +606,7 @@ export const Landing: React.FC = () => {
           {/* Top row: Logo on left, links and status on right */}
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center text-white shadow-sm">
-                <Trophy className="w-4 h-4" />
-              </div>
+              <img src="/bgsc-logo.png" alt="BGSC" className="w-9 h-9 object-contain shrink-0 select-none" draggable={false} />
               <div>
                 <span className="font-bold text-white tracking-tight">BGSC Platform</span>
                 <span className="text-neutral-500 text-xs ml-2">Collegiate Sports & Esports OS</span>

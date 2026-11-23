@@ -97,9 +97,10 @@ export function Podium({
   const { isCompactPhone } = useResponsive();
   if (rows.length === 0) return null;
 
-  const championGold = isDark ? '#D97706' : '#DF7A5E';
-  const championTopSheen = isDark ? 'rgba(254, 243, 199, 0.45)' : 'rgba(255, 255, 255, 0.55)';
-  const championGlow = isDark ? 'rgba(245, 158, 11, 0.35)' : 'rgba(223, 122, 94, 0.25)';
+  // #1 uses the app's coral orange (theme primary) in both modes, not a separate amber.
+  const championGold = colors.primary;
+  const championTopSheen = 'rgba(255, 255, 255, 0.5)';
+  const championGlow = withAlpha(colors.primary, isDark ? 0.35 : 0.25);
 
   const silverPedestal = isDark ? '#3A424E' : '#E2E8F0';
   const silverTopSheen = isDark ? 'rgba(226, 232, 240, 0.35)' : 'rgba(255, 255, 255, 0.6)';
@@ -144,13 +145,13 @@ export function Podium({
             : bronzeTopSheen;
 
           const ringColor = isChampion
-            ? '#F59E0B'
+            ? colors.primary
             : place === 2
             ? '#94A3B8'
             : '#B45309';
 
           const scorePillBg = isChampion
-            ? isDark ? '#B45309' : '#B4553C'
+            ? colors.primarySolid
             : isDark
             ? 'rgba(255, 255, 255, 0.08)'
             : 'rgba(0, 0, 0, 0.06)';
@@ -183,7 +184,7 @@ export function Podium({
                   style={{
                     borderColor: ringColor,
                     borderWidth: isChampion ? 3 : 2,
-                    shadowColor: isChampion ? '#F59E0B' : 'transparent',
+                    shadowColor: isChampion ? colors.primary : 'transparent',
                     shadowOpacity: isChampion ? 0.45 : 0,
                     shadowRadius: 10,
                   }}
@@ -206,7 +207,7 @@ export function Podium({
                   styles.scorePill,
                   {
                     backgroundColor: scorePillBg,
-                    borderColor: isChampion ? 'rgba(254, 243, 199, 0.4)' : colors.border,
+                    borderColor: isChampion ? 'rgba(255, 255, 255, 0.35)' : colors.border,
                   },
                 ]}
               >

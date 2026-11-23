@@ -4,7 +4,6 @@ import {
   Platform,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -26,8 +25,10 @@ import { Button } from '../../src/components/Button';
 import { authorColor } from '../../src/components/AnnouncementCard';
 import { EventCard, eventCardData } from '../../src/components/EventCard';
 import { SectionHeader } from '../../src/components/SectionHeader';
+import { BgscLogo } from '../../src/components/BgscLogo';
 import { GamingBackdrop } from '../../src/components/GamingBackdrop';
 import { AnimatedScrollView } from '../../src/components/reacticx/templates/parallax-header';
+import { DrawerSafeScrollView } from '../../src/navigation/drawerGesture';
 import { HeroIllustration, HERO_ILLUSTRATION_ASPECT } from '../../src/components/HeroIllustration';
 import { FrostedRim, FrostedSheen } from '../../src/components/FrostedSheen';
 import { SkeletonEventCard, Skeleton } from '../../src/feedback/Skeleton';
@@ -645,26 +646,24 @@ export default function Home() {
 
             <View style={styles.finderCarouselContainer}>
               {loading ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.eventsCarousel}>
+                <DrawerSafeScrollView contentContainerStyle={styles.eventsCarousel}>
                   <View style={styles.carouselCardWrap}>
                     <SkeletonEventCard />
                   </View>
                   <View style={styles.carouselCardWrap}>
                     <SkeletonEventCard />
                   </View>
-                </ScrollView>
+                </DrawerSafeScrollView>
               ) : carouselEvents.length === 1 ? (
                 renderFinderEventCard(carouselEvents[0], true)
               ) : carouselEvents.length > 1 ? (
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
+                <DrawerSafeScrollView
                   contentContainerStyle={styles.eventsCarousel}
                   snapToInterval={278}
                   decelerationRate="fast"
                 >
                   {carouselEvents.map((event) => renderFinderEventCard(event, false))}
-                </ScrollView>
+                </DrawerSafeScrollView>
               ) : (
                 <View style={[styles.emptyEventsBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
                   <Icon name="calendar-outline" size={24} color="textMuted" />
@@ -718,7 +717,7 @@ export default function Home() {
           {data?.heads.length ? (
             <View style={styles.section}>
               <SectionHeader title="From the heads" actionLabel="All posts" onAction={() => navigation.navigate('AnnouncementsTab')} />
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.carousel}>
+              <DrawerSafeScrollView contentContainerStyle={styles.carousel}>
                 {data.heads.map((h) => (
                   <HeadBubble
                     key={h.coordinator.user_id}
@@ -726,7 +725,7 @@ export default function Home() {
                     onPress={h.announcement ? () => navigation.navigate('AnnouncementDetail', { id: h.announcement!._id }) : undefined}
                   />
                 ))}
-              </ScrollView>
+              </DrawerSafeScrollView>
             </View>
           ) : null}
 
@@ -813,9 +812,12 @@ export default function Home() {
           accessibilityRole="header"
           accessibilityLabel="BGSC"
         >
-          <Typography color="text" style={styles.brandWordmark}>
-            BGSC
-          </Typography>
+          <View style={styles.brandRow}>
+            <BgscLogo size={30} />
+            <Typography color="text" style={styles.brandWordmark}>
+              BGSC
+            </Typography>
+          </View>
         </View>
 
         <View style={[styles.glass, styles.actionsCapsule, glassTone]}>
@@ -839,7 +841,7 @@ export default function Home() {
           <View style={[styles.capsuleDivider, { backgroundColor: withAlpha(colors.border, 0.7) }]} />
 
           <Pressable
-            onPress={() => navigation.navigate('Profile', undefined, { pop: true })}
+            onPress={() => navigation.navigate('App', { screen: 'MainTabs', params: { screen: 'ProfileTab' } }, { pop: true })}
             accessibilityRole="button"
             accessibilityLabel="Your profile"
             hitSlop={4}
@@ -1053,6 +1055,11 @@ const styles = StyleSheet.create({
   },
   // Plain bold wordmark: theme text colour reads on both the orange hero and the
   // frosted collapsed bar.
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   brandWordmark: {
     fontFamily: FONT_FAMILIES.brand,
     fontSize: 24,

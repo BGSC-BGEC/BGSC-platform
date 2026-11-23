@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 
 import { Avatar } from '../components/Avatar';
+import { BgscLogo } from '../components/BgscLogo';
 import { Icon, type IconName } from '../icons/Icon';
 import { Typography } from '../typography/Typography';
 import { FONT_FAMILIES } from '../theme/typography';
@@ -160,7 +161,7 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
           <Pressable
             onPress={() => {
               tap();
-              go('Profile');
+              go('MainTabs', 'ProfileTab');
             }}
             accessibilityRole="button"
             accessibilityLabel="View profile"
@@ -205,9 +206,12 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
               Log out
             </Typography>
           </Pressable>
-          <Typography variant="mono" style={[styles.version, { color: glass.inactiveInk }]}>
-            BGSC 1.0.0
-          </Typography>
+          <View style={styles.versionRow}>
+            <BgscLogo size={18} />
+            <Typography variant="mono" style={[styles.version, { color: glass.inactiveInk }]}>
+              BGSC 1.0.0
+            </Typography>
+          </View>
         </ScrollView>
       </GlassSurface>
     </View>
@@ -265,6 +269,7 @@ const styles = StyleSheet.create({
   badgeText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15 },
   divider: { height: StyleSheet.hairlineWidth * 2, marginHorizontal: 8 },
   spacer: { flex: 1 },
-  version: { fontSize: 10, paddingHorizontal: 16 },
+  versionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16 },
+  version: { fontSize: 10 },
   pressed: { opacity: 0.7, transform: [{ scale: 0.98 }] },
 });

@@ -1,8 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { FlatList, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Badge } from '../../src/components/Badge';
+import { BottomSheet } from '../../src/components/BottomSheet';
+import { Icon } from '../../src/icons/Icon';
+import { FONT_FAMILIES } from '../../src/theme/typography';
+import { withAlpha } from '../../src/theme/colors';
 import { Button } from '../../src/components/Button';
 import { Card } from '../../src/components/Card';
 import { FilterChips } from '../../src/components/FilterChips';
@@ -69,6 +73,10 @@ export default function Leaderboard() {
   const [period, setPeriod] = useState<LeaderboardPeriod>('all');
   const [domain, setDomain] = useState<LeaderboardDomain>('all');
   const [eventCursor, setEventCursor] = useState<string | null>(null);
+  // Filter sheet edits a draft; the board only reloads on "Show results".
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [draftPeriod, setDraftPeriod] = useState<LeaderboardPeriod>('all');
+  const [draftDomain, setDraftDomain] = useState<LeaderboardDomain>('all');
 
   const [standings, setStandings] = useState<GlobalStanding[]>([]);
   const [page, setPage] = useState(1);
@@ -199,9 +207,7 @@ export default function Leaderboard() {
           ) : events.error ? (
             <ErrorState message={events.error} onRetry={() => void events.reload()} />
           ) : !events.data?.events.some(event => event.leaderboard) ? (
-            <Card variant="inner">
-              <EmptyState icon="trophy" title="No event leaderboards yet" description="Standings appear once an event goes live." />
-            </Card>
+            <EmptyState icon="trophy" title="No event leaderboards yet" description="Standings appear once an event goes live." style={styles.empty} />
           ) : (
             events.data.events.filter(event => event.leaderboard).map((event) => {
               const pill = eventStatusPill(event);
@@ -234,28 +240,61 @@ export default function Leaderboard() {
     );
   }
 
+  const showDomain = tab === 'global';
+  const activeFilters = (period !== 'all' ? 1 : 0) + (showDomain && domain !== 'all' ? 1 : 0);
+  const periodLabel = PERIODS.find((p) => p.value === period)?.label ?? 'All time';
+  const domainLabel = domain === 'all' ? 'All domains' : DOMAINS.find((d) => d.value === domain)?.label ?? domain;
+  const filterSummary = showDomain ? `${periodLabel} · ${domainLabel}` : periodLabel;
+
+  const openFilters = () => {
+    setDraftPeriod(period);
+    setDraftDomain(domain);
+    setFiltersOpen(true);
+  };
+  const applyFilters = () => {
+    setPeriod(draftPeriod);
+    setDomain(draftDomain);
+    setFiltersOpen(false);
+  };
+  const clearFilters = () => {
+    setPeriod('all');
+    setDomain('all');
+  };
+
   const header = (
     <View style={styles.header}>
       {tabs}
 
-      {/* Season Reset Indicator Banner */}
-      <View
-        style={[
-          styles.timerBanner,
-          {
-            backgroundColor: colors.surfaceInner,
-            borderColor: colors.border,
-            borderWidth: 1,
-          },
-        ]}
-      >
-        <Typography variant="caption" style={{ color: colors.textMuted }}>
-          ⏱️ Season ends in <Typography variant="caption" style={{ color: colors.primary, fontWeight: '700' }}>23h 57m 36s</Typography>
+      {/* One filter button instead of two rows of pills; the summary says what is applied. */}
+      <View style={styles.filterRow}>
+        <Typography variant="caption" color="textMuted" numberOfLines={1} style={styles.filterSummary}>
+          {filterSummary}
         </Typography>
+        <Pressable
+          onPress={openFilters}
+          accessibilityRole="button"
+          accessibilityLabel={activeFilters ? `Filters, ${activeFilters} applied` : 'Filters'}
+          style={({ pressed }) => [
+            styles.filterButton,
+            activeFilters
+              ? { backgroundColor: withAlpha(colors.primary, 0.12), borderColor: withAlpha(colors.primary, 0.5) }
+              : { backgroundColor: colors.surfaceInner, borderColor: colors.border },
+            pressed && { opacity: 0.8 },
+          ]}
+        >
+          <Icon name="filter" size={15} color={activeFilters ? 'primary' : 'text'} />
+          <Typography variant="caption" color={activeFilters ? 'primary' : 'text'} style={styles.filterLabel}>
+            Filter
+          </Typography>
+          {activeFilters ? (
+            <View style={[styles.filterCount, { backgroundColor: colors.primarySolid }]}>
+              <Typography variant="caption" color="primaryText" style={styles.filterCountText}>
+                {activeFilters}
+              </Typography>
+            </View>
+          ) : null}
+        </Pressable>
       </View>
-
-      <FilterChips options={PERIODS} value={period} onChange={setPeriod} />
-      {tab === 'global' ? <FilterChips options={DOMAINS} value={domain} onChange={setDomain} /> : null}
 
       {loading && standings.length === 0 ? (
         <>
@@ -265,9 +304,14 @@ export default function Leaderboard() {
       ) : error && standings.length === 0 ? (
         <ErrorState title="Could not load the leaderboard" message={error} onRetry={() => void load('initial')} />
       ) : rows.length === 0 ? (
-        <Card variant="inner">
-          <EmptyState icon="trophy" title="No rankings yet" description="Nobody has earned points in this period yet." />
-        </Card>
+        <EmptyState
+          icon="trophy"
+          title="No rankings yet"
+          description="Nobody has earned points in this period yet."
+          actionLabel={activeFilters ? 'Clear filters' : undefined}
+          onAction={activeFilters ? clearFilters : undefined}
+          style={styles.empty}
+        />
       ) : (
         <>
           {/* 3D Stepped Podium */}
@@ -287,7 +331,8 @@ export default function Leaderboard() {
     </View>
   );
 
-  const bottomPillOffset = Math.max(insets.bottom, 12) + 76;
+  // Leaderboard is a drawer screen with no tab bar, so the pill only clears the home indicator.
+  const bottomPillOffset = Math.max(insets.bottom, 12) + 8;
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
@@ -299,7 +344,7 @@ export default function Leaderboard() {
         keyExtractor={(item) => item.key}
         renderItem={({ item }) => <StandingRow row={item} onPress={() => navigation.navigate('Profile', { ref: item.key })} />}
         ListHeaderComponent={header}
-        contentContainerStyle={[contentStyle, { paddingBottom: bottomPillOffset + 48 }]}
+        contentContainerStyle={[contentStyle, { paddingBottom: bottomPillOffset + 60 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} tintColor={colors.primary} />}
         onEndReachedThreshold={0.4}
         onEndReached={() => {
@@ -313,6 +358,33 @@ export default function Leaderboard() {
 
       {/* Floating Sticky "You" Pill at Bottom */}
       <MyPositionPill me={myRow} onPress={scrollToMe} bottomOffset={bottomPillOffset} />
+
+      <BottomSheet visible={filtersOpen} onClose={() => setFiltersOpen(false)}>
+        <View style={styles.sheetHeader}>
+          <Typography variant="h3" color="text">Filter rankings</Typography>
+          <Pressable
+            onPress={() => {
+              setDraftPeriod('all');
+              setDraftDomain('all');
+            }}
+            accessibilityRole="button"
+            hitSlop={10}
+          >
+            <Typography variant="body" color="primary" style={styles.filterLabel}>Reset</Typography>
+          </Pressable>
+        </View>
+        <View style={styles.sheetSection}>
+          <Typography variant="caption" color="textMuted" style={styles.sheetLabel}>PERIOD</Typography>
+          <FilterChips options={PERIODS} value={draftPeriod} onChange={setDraftPeriod} />
+        </View>
+        {showDomain ? (
+          <View style={styles.sheetSection}>
+            <Typography variant="caption" color="textMuted" style={styles.sheetLabel}>DOMAIN</Typography>
+            <FilterChips options={DOMAINS} value={draftDomain} onChange={setDraftDomain} />
+          </View>
+        ) : null}
+        <Button label="Show results" onPress={applyFilters} fullWidth />
+      </BottomSheet>
     </SafeAreaView>
   );
 }
@@ -321,17 +393,28 @@ const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   content: { padding: 13, gap: 8, width: '100%', maxWidth: 720, alignSelf: 'center' },
   header: { gap: 8, marginBottom: 4 },
-  timerBanner: {
-    paddingVertical: 4.5,
-    paddingHorizontal: 11,
-    borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-  },
   sectionHeaderRow: {
     marginTop: 4,
     marginBottom: 2,
   },
   footer: { paddingVertical: 16 },
+  // Empty states sit straight on the background, no card around them.
+  empty: { paddingTop: 40, paddingBottom: 24 },
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  filterSummary: { flex: 1 },
+  filterButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minHeight: 34,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderRadius: 999,
+  },
+  filterLabel: { fontFamily: FONT_FAMILIES.bodySemiBold, includeFontPadding: false },
+  filterCount: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
+  filterCountText: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 11, lineHeight: 13, includeFontPadding: false },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  sheetSection: { gap: 8 },
+  sheetLabel: { fontFamily: FONT_FAMILIES.bodySemiBold, letterSpacing: 0.8 },
 });

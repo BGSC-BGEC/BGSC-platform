@@ -15,6 +15,8 @@ import { useAuth } from '../../store/auth';
 import { isGoogleCallbackUrl } from '../../src/repositories/AuthRepository';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { DrawerContent } from '../../src/navigation/DrawerContent';
+import { configureDrawerGesture } from '../../src/navigation/drawerGesture';
+import { SectionTransition } from '../../src/navigation/SectionTransition';
 
 import SplashScreen from '../login/splash';
 import LandingScreen from '../login/landing';
@@ -76,6 +78,8 @@ function AppDrawer() {
   return (
     <Drawer.Navigator
       drawerContent={(props) => <DrawerContent {...props} />}
+      // Drawer sections otherwise swap instantly; fade + lift the incoming one.
+      screenLayout={({ route, children }) => <SectionTransition routeKey={route.key}>{children}</SectionTransition>}
       screenOptions={{
         headerShown: false,
         drawerType: 'front',
@@ -86,6 +90,8 @@ function AppDrawer() {
         },
         // Lighter dim so the glass panel has the app content to show through.
         overlayColor: 'rgba(0, 0, 0, 0.45)',
+        // Lets horizontal carousels (DrawerSafeScrollView) keep their swipes from opening the drawer.
+        configureGestureHandler: configureDrawerGesture,
       }}
     >
       <Drawer.Screen name="MainTabs" component={BottomTabsLayout} />
@@ -102,7 +108,15 @@ function AppDrawer() {
 // Defined at module level so auth-state re-renders do not remount the whole stack.
 function LoggedInStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+        animation: 'slide_from_right',
+        // iOS: swipe back from anywhere on the screen, and the pop follows the finger's direction.
+        fullScreenGestureEnabled: true,
+        animationMatchesGesture: true,
+      }}
+    >
       <Stack.Screen name="App" component={AppDrawer} />
 
       <Stack.Screen name="AnnouncementDetail" component={AnnouncementDetailScreen} />

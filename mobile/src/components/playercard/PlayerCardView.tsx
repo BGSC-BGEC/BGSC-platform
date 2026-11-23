@@ -1,11 +1,13 @@
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import Svg, { Line, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Defs, LinearGradient, Path, Rect, Stop } from 'react-native-svg';
 
-import { BDomeArt } from './BDomeArt';
-import { cardTierStyle, type CardTierStyle } from './cardTiers';
+import { BDOME_ASPECT, BDomeArt } from './BDomeArt';
+import { cardTierStyle, type CardTierPalette } from './cardTiers';
 import { Doodle, type DoodleName } from '../doodles/Doodles';
 import { FONT_FAMILIES } from '../../theme/typography';
+import { useTheme } from '../../theme/ThemeProvider';
+import type { ThemeMode } from '../../theme/colors';
 
 /** Fixed design size: the card is captured as an image, so it never reflows. */
 export const PLAYER_CARD_WIDTH = 300;
@@ -21,17 +23,34 @@ export interface PlayerCardViewProps {
   podiums: number;
   challenges: number;
   interests: string[];
+  /** Defaults to the app theme. */
+  mode?: ThemeMode;
 }
 
-const BAND_ICONS: DoodleName[] = ['controller', 'football', 'headphones', 'trophy'];
+const W = PLAYER_CARD_WIDTH;
+const H = PLAYER_CARD_HEIGHT;
+/** Foil border width */
+const B = 3;
+/** Where the hero panel meets the body; the avatar sits centred on this line. */
+const SEAM = 214;
+const AVATAR = 92;
+const DOME_W = 210;
+
+const FOOTER_ICONS: DoodleName[] = ['controller', 'football', 'headphones', 'trophy'];
 
 /**
- * BGSC player card: tier-styled frame, the illustrated BDome as the centrepiece with the avatar
- * on its front platform, name and handle, a stat block and top interests. Fixed size so
+ * BGSC player card, trading-card style: a tier-tinted hero with the rating up front and the BDome
+ * behind the avatar, then name, three stats and top interests on a body that follows the theme.
+ * The tier shows in the metal: foil border, avatar ring and hero seam. Fixed size so
  * `react-native-view-shot` exports the same card everywhere.
  */
 export function PlayerCardView(props: PlayerCardViewProps) {
-  const t = cardTierStyle(props.tier);
+  const theme = useTheme();
+  const mode = props.mode ?? theme.mode;
+  const t = cardTierStyle(props.tier, mode);
+  // SVG ids are document-global on web, and the profile and share sheet can show the same card.
+  const id = React.useId().replace(/:/g, '');
+
   const initials = props.fullName
     .split(/\s+/)
     .filter(Boolean)
@@ -40,181 +59,207 @@ export function PlayerCardView(props: PlayerCardViewProps) {
     .join('');
 
   return (
-    <View style={[styles.card, { backgroundColor: t.frame }]} collapsable={false}>
-      <CardFrame t={t} />
+    <View style={styles.card} collapsable={false}>
+      <CardBackground t={t} id={id} sheen={mode === 'dark' ? 0.06 : 0.14} />
 
-      {/* Plaque */}
-      <View style={[styles.plaque, { backgroundColor: t.bg, borderColor: t.accent }]}>
-        <Shield color={t.accent} />
-        <Text style={[styles.plaqueText, { color: t.ink }]}>BGSC</Text>
+      {/* Rating and tier, top left */}
+      <View style={styles.ratingBlock}>
+        <Text style={[styles.rating, { color: t.heroInk }]}>{props.rating.toLocaleString('en-IN')}</Text>
+        <Text style={[styles.tierText, { color: t.heroAccent }]}>{t.label.toUpperCase()} TIER</Text>
       </View>
 
-      {/* BDome: the centrepiece, fully visible above the avatar */}
-      <View style={styles.art} pointerEvents="none">
-        <BDomeArt width={260} />
+      {/* Wordmark, top right */}
+      <View style={styles.wordmark}>
+        <Shield color={t.heroInk} />
+        <Text style={[styles.wordmarkText, { color: t.heroInk }]}>BGSC</Text>
       </View>
-      <Sparkles color={t.accent} />
 
-      {/* Avatar */}
-      <View style={[styles.avatarRing, { borderColor: t.ring, backgroundColor: t.bg }]}>
-        <View style={[styles.avatar, { backgroundColor: t.avatarBg }]}>
-          {props.avatarUrl ? (
-            <Image source={{ uri: props.avatarUrl }} style={styles.avatarImg} />
-          ) : (
-            <Text style={[styles.initials, { color: t.ink }]}>{initials || '?'}</Text>
-          )}
+      {/* BDome, standing on the seam */}
+      <View style={styles.dome} pointerEvents="none">
+        <BDomeArt width={DOME_W} />
+      </View>
+
+      {/* Avatar in a foil ring, centred on the seam */}
+      <View style={styles.avatarWrap}>
+        <Svg width={AVATAR} height={AVATAR} style={StyleSheet.absoluteFill}>
+          <Defs>
+            <FoilGradient id={`ring-${id}`} t={t} />
+          </Defs>
+          <Circle cx={AVATAR / 2} cy={AVATAR / 2} r={AVATAR / 2} fill={`url(#ring-${id})`} />
+        </Svg>
+        <View style={[styles.avatarGap, { backgroundColor: t.surface }]}>
+          <View style={[styles.avatar, { backgroundColor: t.avatarBg }]}>
+            {props.avatarUrl ? (
+              <Image source={{ uri: props.avatarUrl }} style={styles.avatarImg} />
+            ) : (
+              <Text style={[styles.initials, { color: t.ink }]}>{initials || '?'}</Text>
+            )}
+          </View>
         </View>
       </View>
 
       {/* Identity */}
-      <Text style={[styles.name, { color: t.ink }]} numberOfLines={1}>
+      <Text
+        style={[styles.name, { color: t.ink }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+      >
         {props.fullName}
       </Text>
       <Text style={[styles.handle, { color: t.inkMuted }]} numberOfLines={1}>
         @{props.username}
       </Text>
-      <View style={[styles.tierPill, { borderColor: t.accent }]}>
-        <Text style={[styles.tierText, { color: t.accent }]}>★ {t.label.toUpperCase()} TIER</Text>
-      </View>
 
       {/* Stats */}
-      <View style={styles.stats}>
-        <View style={styles.statCol}>
-          <Stat label="EVENTS" value={props.events} t={t} />
-          <Stat label="PODIUMS" value={props.podiums} t={t} />
-        </View>
-        <View style={[styles.statDivider, { borderColor: t.inkMuted }]} />
-        <View style={styles.statCol}>
-          <Stat label="CHALLENGES" value={props.challenges} t={t} />
-          <Stat label="RATING" value={props.rating} t={t} />
-        </View>
+      <View style={[styles.stats, { borderColor: t.hairline }]}>
+        <Stat label="EVENTS" value={props.events} t={t} />
+        <View style={[styles.statDivider, { backgroundColor: t.hairline }]} />
+        <Stat label="PODIUMS" value={props.podiums} t={t} />
+        <View style={[styles.statDivider, { backgroundColor: t.hairline }]} />
+        <Stat label="CHALLENGES" value={props.challenges} t={t} />
       </View>
 
       {/* Interests */}
       <View style={styles.chips}>
         {props.interests.slice(0, 3).map((i) => (
-          <View key={i} style={[styles.chip, { backgroundColor: t.chipBg, borderColor: t.accent }]}>
+          <View key={i} style={[styles.chip, { backgroundColor: t.chipBg }]}>
             <Text style={[styles.chipText, { color: t.chipText }]} numberOfLines={1}>
-              {i.toUpperCase()}
+              {i}
             </Text>
           </View>
         ))}
       </View>
 
-      {/* Icon band */}
-      <View style={[styles.band, { backgroundColor: t.band, borderColor: t.accent }]}>
-        {BAND_ICONS.map((name) => (
-          <Doodle key={name} name={name} size={26} color={t.bandIcon} strokeWidth={2} />
-        ))}
+      {/* Footer */}
+      <View style={styles.footer}>
+        <View style={styles.footerIcons}>
+          {FOOTER_ICONS.map((name) => (
+            <Doodle key={name} name={name} size={15} color={t.inkMuted} strokeWidth={2} />
+          ))}
+        </View>
+        <Text style={[styles.footerText, { color: t.inkMuted }]}>PLAYER CARD</Text>
       </View>
     </View>
   );
 }
 
-function Stat({ label, value, t }: { label: string; value: number; t: CardTierStyle }) {
+function Stat({ label, value, t }: { label: string; value: number; t: CardTierPalette }) {
   return (
-    <View style={styles.statRow}>
-      <Text style={[styles.statLabel, { color: t.inkMuted }]}>{label}</Text>
+    <View style={styles.stat}>
       <Text style={[styles.statValue, { color: t.ink }]}>{value.toLocaleString('en-IN')}</Text>
+      <Text style={[styles.statLabel, { color: t.inkMuted }]}>{label}</Text>
     </View>
   );
 }
 
-/** Frame: body panel, inner border line, corner stars and side scrolls. */
-function CardFrame({ t }: { t: CardTierStyle }) {
-  const W = PLAYER_CARD_WIDTH;
-  const H = PLAYER_CARD_HEIGHT;
-  const corner = (x: number, y: number) =>
-    `M${x} ${y - 6} L${x + 2} ${y - 2} L${x + 6} ${y} L${x + 2} ${y + 2} L${x} ${y + 6} L${x - 2} ${y + 2} L${x - 6} ${y} L${x - 2} ${y - 2} Z`;
-  const scroll = (x: number, dir: 1 | -1) =>
-    `M${x} ${H / 2 - 26} C${x + 12 * dir} ${H / 2 - 18} ${x + 12 * dir} ${H / 2 + 18} ${x} ${H / 2 + 26} M${x + 4 * dir} ${H / 2 - 8} C${x + 9 * dir} ${H / 2 - 4} ${x + 9 * dir} ${H / 2 + 4} ${x + 4 * dir} ${H / 2 + 8}`;
+/** Diagonal metal: dark edge, highlight across the middle, dark edge. */
+function FoilGradient({ id, t }: { id: string; t: CardTierPalette }) {
+  return (
+    <LinearGradient id={id} x1="0" y1="0" x2="1" y2="1">
+      <Stop offset="0" stopColor={t.foil[0]} />
+      <Stop offset="0.45" stopColor={t.foil[1]} />
+      <Stop offset="0.55" stopColor={t.foil[1]} />
+      <Stop offset="1" stopColor={t.foil[2]} />
+    </LinearGradient>
+  );
+}
+
+/** Foil border, body, hero panel with a light sheen, and the foil seam under the hero. */
+function CardBackground({ t, id, sheen }: { t: CardTierPalette; id: string; sheen: number }) {
+  const r = 17; // inner corner radius
+  const hero = `M${B} ${SEAM} V${B + r} Q${B} ${B} ${B + r} ${B} H${W - B - r} Q${W - B} ${B} ${W - B} ${B + r} V${SEAM} Z`;
+  const sheenBand = `M168 ${B} L222 ${B} L118 ${SEAM} L64 ${SEAM} Z`;
+  const star = (x: number, y: number, s: number) =>
+    `M${x} ${y - s} Q${x} ${y} ${x + s} ${y} Q${x} ${y} ${x} ${y + s} Q${x} ${y} ${x - s} ${y} Q${x} ${y} ${x} ${y - s} Z`;
 
   return (
     <Svg width={W} height={H} style={StyleSheet.absoluteFill}>
-      <Rect x={1} y={1} width={W - 2} height={H - 2} rx={18} fill={t.frame} stroke={t.frameDeep} strokeWidth={2} />
-      <Rect x={9} y={9} width={W - 18} height={H - 18} rx={12} fill={t.bg} />
-      <Rect x={15} y={15} width={W - 30} height={H - 30} rx={9} fill="none" stroke={t.accent} strokeWidth={1.2} opacity={0.7} />
+      <Defs>
+        <FoilGradient id={`foil-${id}`} t={t} />
+        <LinearGradient id={`hero-${id}`} x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={t.heroTop} />
+          <Stop offset="1" stopColor={t.heroBottom} />
+        </LinearGradient>
+      </Defs>
+      <Rect x={0} y={0} width={W} height={H} rx={r + B} fill={`url(#foil-${id})`} />
+      <Rect x={B} y={B} width={W - B * 2} height={H - B * 2} rx={r} fill={t.surface} />
+      <Path d={hero} fill={`url(#hero-${id})`} />
+      <Path d={sheenBand} fill="#FFFFFF" opacity={sheen} />
       {[
-        [17, 17],
-        [W - 17, 17],
-        [17, H - 17],
-        [W - 17, H - 17],
-      ].map(([x, y]) => (
-        <Path key={`${x}-${y}`} d={corner(x!, y!)} fill={t.frame} stroke={t.accent} strokeWidth={1} />
+        [252, 96, 5],
+        [236, 80, 2.5],
+        [52, 120, 3.5],
+      ].map(([x, y, s]) => (
+        <Path key={`${x}-${y}`} d={star(x!, y!, s!)} fill={t.heroAccent} opacity={0.6} />
       ))}
-      <Path d={scroll(16, 1)} fill="none" stroke={t.accent} strokeWidth={1.4} strokeLinecap="round" />
-      <Path d={scroll(W - 16, -1)} fill="none" stroke={t.accent} strokeWidth={1.4} strokeLinecap="round" />
-      <Line x1={40} y1={H - 66} x2={W - 40} y2={H - 66} stroke={t.accent} strokeWidth={0.8} opacity={0.4} />
+      <Rect x={B} y={SEAM - 1} width={W - B * 2} height={2} fill={`url(#foil-${id})`} />
     </Svg>
   );
 }
 
 function Shield({ color }: { color: string }) {
   return (
-    <Svg width={16} height={18} viewBox="0 0 16 18">
-      <Path d="M8 1 L15 4 V9 C15 13 12 16 8 17 C4 16 1 13 1 9 V4 Z" fill="none" stroke={color} strokeWidth={1.6} />
-      <Path d="M8 1 V17 M1 8 H15" stroke={color} strokeWidth={1.2} />
-    </Svg>
-  );
-}
-
-/** A few four-point sparkles around the dome, like the sample cards. */
-function Sparkles({ color }: { color: string }) {
-  const star = (x: number, y: number, r: number) =>
-    `M${x} ${y - r} Q${x} ${y} ${x + r} ${y} Q${x} ${y} ${x} ${y + r} Q${x} ${y} ${x - r} ${y} Q${x} ${y} ${x} ${y - r} Z`;
-  return (
-    <Svg width={PLAYER_CARD_WIDTH} height={200} style={styles.sparkles} pointerEvents="none">
-      {[
-        [48, 70, 6],
-        [258, 64, 7],
-        [214, 56, 3.5],
-      ].map(([x, y, r]) => (
-        <Path key={`${x}-${y}`} d={star(x!, y!, r!)} fill={color} opacity={0.75} />
-      ))}
+    <Svg width={13} height={15} viewBox="0 0 16 18">
+      <Path d="M8 1 L15 4 V9 C15 13 12 16 8 17 C4 16 1 13 1 9 V4 Z" fill="none" stroke={color} strokeWidth={1.8} />
+      <Path d="M8 1 V17 M1 8 H15" stroke={color} strokeWidth={1.3} />
     </Svg>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    width: PLAYER_CARD_WIDTH,
-    height: PLAYER_CARD_HEIGHT,
-    borderRadius: 18,
-    alignItems: 'center',
+    width: W,
+    height: H,
+    borderRadius: 20,
     overflow: 'hidden',
   },
-  plaque: {
-    marginTop: 20,
+  ratingBlock: {
+    position: 'absolute',
+    top: 20,
+    left: 22,
+  },
+  rating: {
+    fontFamily: FONT_FAMILIES.brand,
+    fontSize: 40,
+    lineHeight: 46,
+  },
+  tierText: {
+    fontFamily: FONT_FAMILIES.bodyBold,
+    fontSize: 10.5,
+    letterSpacing: 1.8,
+    marginTop: -2,
+  },
+  wordmark: {
+    position: 'absolute',
+    top: 24,
+    right: 22,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1.4,
+    gap: 5,
   },
-  plaqueText: {
+  wordmarkText: {
     fontFamily: FONT_FAMILIES.brand,
-    fontSize: 17,
+    fontSize: 15,
     letterSpacing: 1,
   },
-  art: {
+  dome: {
     position: 'absolute',
-    top: 52,
-    left: 20,
+    top: SEAM - DOME_W / BDOME_ASPECT,
+    left: (W - DOME_W) / 2,
   },
-  sparkles: {
+  avatarWrap: {
     position: 'absolute',
-    top: 0,
-    left: 0,
+    top: SEAM - AVATAR / 2,
+    left: (W - AVATAR) / 2,
+    width: AVATAR,
+    height: AVATAR,
+    padding: 4,
   },
-  avatarRing: {
-    marginTop: 125,
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    borderWidth: 3,
-    padding: 2,
+  avatarGap: {
+    flex: 1,
+    borderRadius: 999,
+    padding: 3,
   },
   avatar: {
     flex: 1,
@@ -229,90 +274,96 @@ const styles = StyleSheet.create({
   },
   initials: {
     fontFamily: FONT_FAMILIES.hero,
-    fontSize: 24,
+    fontSize: 28,
   },
   name: {
-    marginTop: 6,
-    maxWidth: 240,
+    position: 'absolute',
+    top: SEAM + AVATAR / 2 + 10,
+    left: 22,
+    right: 22,
+    textAlign: 'center',
     fontFamily: FONT_FAMILIES.hero,
-    fontSize: 24,
-    lineHeight: 28,
+    fontSize: 26,
+    lineHeight: 31,
   },
   handle: {
+    position: 'absolute',
+    top: SEAM + AVATAR / 2 + 42,
+    left: 22,
+    right: 22,
+    textAlign: 'center',
     fontFamily: FONT_FAMILIES.bodySemiBold,
     fontSize: 13,
-    marginTop: 1,
-  },
-  tierPill: {
-    marginTop: 8,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 2,
-  },
-  tierText: {
-    fontFamily: FONT_FAMILIES.brand,
-    fontSize: 10,
-    letterSpacing: 1.2,
   },
   stats: {
-    marginTop: 12,
-    width: 236,
+    position: 'absolute',
+    top: 334,
+    left: 22,
+    right: 22,
+    height: 60,
     flexDirection: 'row',
-    alignItems: 'stretch',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
   },
-  statCol: {
+  stat: {
     flex: 1,
-    gap: 4,
-    paddingHorizontal: 6,
+    alignItems: 'center',
   },
   statDivider: {
-    borderLeftWidth: 1.2,
-    borderStyle: 'dashed',
-    marginVertical: 2,
-  },
-  statRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-  },
-  statLabel: {
-    fontFamily: FONT_FAMILIES.brand,
-    fontSize: 10.5,
-    letterSpacing: 0.6,
+    width: 1,
+    height: 30,
   },
   statValue: {
     fontFamily: FONT_FAMILIES.brand,
-    fontSize: 17,
+    fontSize: 22,
+    lineHeight: 26,
+  },
+  statLabel: {
+    fontFamily: FONT_FAMILIES.bodySemiBold,
+    fontSize: 9.5,
+    letterSpacing: 1.2,
+    marginTop: 2,
   },
   chips: {
-    marginTop: 10,
-    height: 22,
+    position: 'absolute',
+    top: 408,
+    left: 22,
+    right: 22,
+    height: 24,
     flexDirection: 'row',
+    justifyContent: 'center',
     gap: 6,
   },
   chip: {
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 8,
+    borderRadius: 12,
+    paddingHorizontal: 10,
     justifyContent: 'center',
-    maxWidth: 90,
+    maxWidth: 110,
+    // Three long interests must shrink (and ellipsize) inside the 256px row, not spill past the foil.
+    flexShrink: 1,
+    minWidth: 0,
   },
   chipText: {
-    fontFamily: FONT_FAMILIES.brand,
-    fontSize: 10,
-    letterSpacing: 0.6,
+    fontFamily: FONT_FAMILIES.bodySemiBold,
+    fontSize: 11,
   },
-  band: {
+  footer: {
     position: 'absolute',
-    bottom: 22,
+    bottom: 16,
     left: 22,
     right: 22,
-    height: 40,
-    borderRadius: 6,
-    borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
+  },
+  footerIcons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  footerText: {
+    fontFamily: FONT_FAMILIES.bodyBold,
+    fontSize: 9.5,
+    letterSpacing: 1.6,
   },
 });

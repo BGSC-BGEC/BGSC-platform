@@ -74,9 +74,7 @@ export const Sidebar: React.FC = () => {
         <div className="h-[60px] flex items-center justify-between px-3.5 border-b border-border shrink-0">
           {!collapsed ? (
             <div className="flex items-center gap-2.5 select-none min-w-0">
-              <div className="w-7 h-7 rounded-lg bg-orange-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-                <Trophy className="w-3.5 h-3.5" />
-              </div>
+              <img src="/bgsc-logo.png" alt="BGSC" className="w-8 h-8 object-contain shrink-0 select-none" draggable={false} />
               <div className="leading-tight min-w-0">
                 <div className="text-[13px] font-bold text-foreground tracking-tight truncate">
                   BGSC
@@ -87,9 +85,7 @@ export const Sidebar: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div className="w-7 h-7 rounded-lg bg-orange-500 text-white flex items-center justify-center mx-auto shrink-0 shadow-xs">
-              <Trophy className="w-3.5 h-3.5" />
-            </div>
+            <img src="/bgsc-logo.png" alt="BGSC" className="w-8 h-8 mx-auto object-contain shrink-0 select-none" draggable={false} />
           )}
 
           {/* Desktop collapse toggle */}
