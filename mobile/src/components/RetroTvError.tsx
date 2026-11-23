@@ -383,10 +383,9 @@ const styles = StyleSheet.create({
     zIndex: 0,
   },
   digitText: {
-    fontFamily: FONT_FAMILIES.mono,
+    fontFamily: FONT_FAMILIES.hero,
     fontSize: 110,
     lineHeight: 120,
-    fontWeight: '900',
     letterSpacing: -2,
     includeFontPadding: false,
   },

@@ -17,7 +17,6 @@ import { Icon } from '../../src/icons/Icon';
 import { Typography } from '../../src/typography/Typography';
 import { FONT_FAMILIES } from '../../src/theme/typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
-import { withAlpha } from '../../src/theme/colors';
 import { eventsRepository } from '../../src/repositories/EventsRepository';
 import { auctionRepository } from '../../src/repositories/AuctionRepository';
 import { getErrorMessage } from '../../src/api/client';
@@ -38,6 +37,8 @@ const TIME_TABS: Array<{ label: string; value: TimeFilter }> = [
 ];
 const STATUS_FOR: Record<TimeFilter, EventStatus[]> = { upcoming: ['upcoming'], ongoing: ['ongoing'], past: ['past'] };
 const WEEK_MS = 7 * 24 * 3600 * 1000;
+/** Side padding of the list, matching Home's sheet. */
+const GUTTER = 20;
 
 type Row =
   | { kind: 'section'; title: string }
@@ -45,11 +46,11 @@ type Row =
   | { kind: 'rows'; events: ApiEvent[] };
 
 /**
- * Date carousel switcher, search filter bar, boarding-pass cards,
- * and flight-schedule style compact list rows.
+ * Events: title, search, a plain date strip, time tabs and category chips, then this week's
+ * events as full cards and later ones as hairline-divided rows on the page itself (no boxes).
  */
 export default function Events() {
-  const { colors, shadow } = useTheme();
+  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const [search, setSearch] = useState('');
@@ -165,49 +166,30 @@ export default function Events() {
 
       <SearchInput value={search} onChangeText={setSearch} onSearch={(t) => setQuery(t.trim())} placeholder="Search tournaments, games or venues" />
 
+      {/* Date strip: plain day / number pairs; the chosen one turns orange with a short underline */}
       <View style={styles.dateCarouselWrap}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateCarousel}>
-          <Pressable
-            onPress={() => setSelectedDayOffset(null)}
-            accessibilityRole="tab"
-            accessibilityState={{ selected: selectedDayOffset == null }}
-            style={[
-              styles.datePill,
-              { backgroundColor: selectedDayOffset == null ? colors.primary : colors.surface, borderColor: colors.border },
-              shadow('flat'),
-            ]}
-          >
-            <Typography variant="caption" style={{ color: selectedDayOffset == null ? colors.background : colors.textMuted, fontWeight: '700' }}>
-              All
-            </Typography>
-            <Typography variant="bodySmall" style={{ color: selectedDayOffset == null ? colors.background : colors.text, fontWeight: '700' }}>
-              Dates
-            </Typography>
-          </Pressable>
-
-          {datePills.map((p) => {
+          {[{ offset: null as number | null, dayName: 'All', dayNum: 'Dates' as string | number }, ...datePills].map((p) => {
             const active = selectedDayOffset === p.offset;
             return (
               <Pressable
-                key={p.offset}
-                onPress={() => setSelectedDayOffset(active ? null : p.offset)}
+                key={p.offset ?? 'all'}
+                onPress={() => setSelectedDayOffset(p.offset == null || active ? null : p.offset)}
                 accessibilityRole="tab"
                 accessibilityState={{ selected: active }}
-                style={[
-                  styles.datePill,
-                  {
-                    backgroundColor: active ? colors.primary : colors.surface,
-                    borderColor: active ? colors.primary : colors.border,
-                  },
-                  shadow('flat'),
-                ]}
+                hitSlop={4}
+                style={styles.dateItem}
               >
-                <Typography variant="caption" style={{ color: active ? colors.background : colors.textMuted, fontSize: 10, fontWeight: '600' }}>
+                <Typography color={active ? 'primary' : 'textMuted'} style={styles.dateName}>
                   {p.dayName}
                 </Typography>
-                <Typography variant="body" style={{ color: active ? colors.background : colors.text, fontWeight: '700' }}>
+                <Typography
+                  color={active ? 'primary' : 'text'}
+                  style={typeof p.dayNum === 'number' ? styles.dateNum : styles.dateAll}
+                >
                   {p.dayNum}
                 </Typography>
+                <View style={[styles.dateLine, { backgroundColor: active ? colors.primary : 'transparent' }]} />
               </Pressable>
             );
           })}
@@ -224,13 +206,10 @@ export default function Events() {
           accessibilityLabel={`Live auction: ${live.title}`}
           style={({ pressed }) => [
             styles.live,
-            { backgroundColor: colors.dangerMuted, borderColor: withAlpha(colors.danger, 0.4) },
+            { borderTopColor: colors.border, borderBottomColor: colors.border },
             pressed && styles.pressed,
           ]}
         >
-          <View style={[styles.liveIcon, { backgroundColor: colors.danger }]}>
-            <Icon name="gavel" size={20} color="white" />
-          </View>
           <View style={styles.flex}>
             <View style={styles.liveKicker}>
               <View style={[styles.dot, { backgroundColor: colors.dangerText }]} />
@@ -246,7 +225,7 @@ export default function Events() {
               </Typography>
             ) : null}
           </View>
-          <Icon name="chevron-right" size={20} color="dangerText" />
+          <Icon name="chevron-right" size={18} color="textMuted" />
         </Pressable>
       ) : null}
 
@@ -268,7 +247,7 @@ export default function Events() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         renderItem={({ item: row }) => {
-          if (row.kind === 'section') return <SectionHeader title={row.title} />;
+          if (row.kind === 'section') return <SectionHeader title={row.title} titleStyle={styles.sectionTitle} style={styles.sectionHead} />;
           if (row.kind === 'rows') return <CompactList events={row.events} onOpen={openEvent} />;
           const card = eventCardData(row.event);
           const ref = row.event.slug || row.event._id;
@@ -355,9 +334,9 @@ export default function Events() {
 
 /** Event list item row. */
 function CompactList({ events, onOpen }: { events: ApiEvent[]; onOpen: (e: ApiEvent) => void }) {
-  const { colors, shadow } = useTheme();
+  const { colors } = useTheme();
   return (
-    <View style={[styles.list, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('flat')]}>
+    <View>
       {events.map((e, i) => {
         const d = new Date(e.start_at);
         const pill = eventStatusPill(e);
@@ -369,16 +348,16 @@ function CompactList({ events, onOpen }: { events: ApiEvent[]; onOpen: (e: ApiEv
             accessibilityLabel={`${e.title}, ${pill.label}`}
             style={({ pressed }) => [
               styles.listRow,
-              i < events.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border },
+              i < events.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
               pressed && styles.pressed,
             ]}
           >
-            {/* Date Tile */}
-            <View style={[styles.dateTile, { backgroundColor: colors.surfaceInner, borderColor: colors.border }]}>
-              <Typography variant="mono" color="text" style={styles.day}>
+            {/* Date: plain number over month, no tile */}
+            <View style={styles.dateCol}>
+              <Typography color="text" style={styles.day}>
                 {String(d.getDate()).padStart(2, '0')}
               </Typography>
-              <Typography color="primary" style={styles.month}>
+              <Typography color="textMuted" style={styles.month}>
                 {d.toLocaleDateString('en-IN', { month: 'short', timeZone: 'Asia/Kolkata' }).toUpperCase()}
               </Typography>
             </View>
@@ -414,36 +393,41 @@ const styles = StyleSheet.create({
   gap: { gap: 16 },
   pressed: { opacity: 0.85, transform: [{ scale: 0.99 }] },
   semibold: { fontFamily: FONT_FAMILIES.bodySemiBold },
-  content: { paddingHorizontal: 13, paddingTop: 4, paddingBottom: 32, gap: 11 },
-  header: { gap: 10, marginBottom: 2 },
+  content: { paddingHorizontal: GUTTER, paddingTop: 8, paddingBottom: 32, gap: 16 },
+  header: { gap: 18, marginBottom: 4 },
   title: { fontSize: 32, lineHeight: 40 },
+  sectionHead: { marginTop: 10 },
+  sectionTitle: { fontSize: 27, lineHeight: 33 },
+  // The date strip runs to the screen edges; its first item lines up with the content.
   dateCarouselWrap: {
-    marginHorizontal: -13,
+    marginHorizontal: -GUTTER,
   },
   dateCarousel: {
-    paddingHorizontal: 13,
-    gap: 7,
+    paddingHorizontal: GUTTER,
+    gap: 22,
   },
-  datePill: {
-    width: 48,
-    height: 50,
-    borderRadius: 12,
-    borderWidth: 1,
+  dateItem: { alignItems: 'center', minWidth: 30 },
+  dateName: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, lineHeight: 14, letterSpacing: 0.4 },
+  dateNum: { fontFamily: FONT_FAMILIES.hero, fontSize: 22, lineHeight: 28 },
+  dateAll: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 15, lineHeight: 28 },
+  dateLine: { width: 16, height: 2, borderRadius: 1, marginTop: 4 },
+  // Live auction: a plain row between hairlines; the red kicker carries the urgency.
+  live: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
+    gap: 10,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  live: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderRadius: 15, borderWidth: 1 },
-  liveIcon: { padding: 9, borderRadius: 10 },
   liveKicker: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   dot: { width: 7, height: 7, borderRadius: 4 },
   liveLabel: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
   mono: { fontSize: 11 },
-  list: { borderRadius: 18, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 2 },
-  listRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
-  dateTile: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 10, borderWidth: 1 },
-  day: { fontSize: 15, fontWeight: '700' },
-  month: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 9, letterSpacing: 0.8 },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 13 },
+  dateCol: { width: 36, alignItems: 'center' },
+  day: { fontFamily: FONT_FAMILIES.hero, fontSize: 20, lineHeight: 24 },
+  month: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 9.5, letterSpacing: 0.8 },
   rowRoute: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   flightSubRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   rowEnd: { alignItems: 'flex-end', gap: 4 },

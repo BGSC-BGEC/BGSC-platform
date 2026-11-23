@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AppState, StyleSheet, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import { AppState, Image, StyleSheet, useWindowDimensions, View, type ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useAnimatedStyle,
@@ -9,11 +9,9 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useClock } from '@shopify/react-native-skia';
 
-import { GrainyGradient } from './reacticx/organisms/grainy-gradient';
-import type { GrainyGradientColors } from './reacticx/organisms/grainy-gradient/types';
 import { Doodle, type DoodleName } from './doodles/Doodles';
 import { useTheme } from '../theme/ThemeProvider';
-import { PALETTE, withAlpha } from '../theme/colors';
+import { withAlpha } from '../theme/colors';
 
 export interface GamingBackdropProps {
   width?: number | string;
@@ -160,36 +158,19 @@ function scatterDoodles(
   return placed;
 }
 
-/** Blends two 6-digit hex colours: t = 0 gives `from`, t = 1 gives `to`. */
-function mixHex(from: string, to: string, t: number): string {
-  const ch = (hex: string, i: number) => parseInt(hex.replace('#', '').substring(i, i + 2), 16);
-  const out = [0, 2, 4].map((i) =>
-    Math.round(ch(from, i) + (ch(to, i) - ch(from, i)) * t).toString(16).padStart(2, '0'),
-  );
-  return `#${out.join('')}`.toUpperCase();
-}
-
 /**
- * Near-flat grainy orange: close shades of the app's main orange (`PALETTE.orange`, the
- * button colour) so the hero matches the buttons and reads as one surface with soft tonal
- * shifts. Derived from the theme, so changing the brand orange updates the shader too.
- * Dark mode leans toward the deeper press shade; light mode toward a lighter tint.
+ * Near-flat grainy orange in shades of `PALETTE.orange`, baked to static images (it was a
+ * live Skia shader redrawing every frame). Regenerate with
+ * `node scripts/generate-hero-texture.cjs` after changing the brand orange.
+ * The colour field is a small image stretched to fit; the grain is a tile repeated on top
+ * so it keeps its fine size on any screen.
  */
-const DARK_GRADIENT: GrainyGradientColors = [
-  PALETTE.orange,
-  PALETTE.orangeDark,
-  mixHex(PALETTE.orange, '#FFFFFF', 0.08),
-  mixHex(PALETTE.orange, PALETTE.orangeDark, 0.5),
-];
-const LIGHT_GRADIENT: GrainyGradientColors = [
-  mixHex(PALETTE.orange, '#FFFFFF', 0.1),
-  PALETTE.orange,
-  mixHex(PALETTE.orange, '#FFFFFF', 0.2),
-  mixHex(PALETTE.orange, PALETTE.orangeDark, 0.25),
-];
+const GRADIENT_DARK = require('../../assets/images/hero-gradient-dark.png');
+const GRADIENT_LIGHT = require('../../assets/images/hero-gradient-light.png');
+const GRAIN_TILE = require('../../assets/images/hero-grain.png');
 
 /**
- * Hero backdrop: slow grainy gradient, a few floating doodles, and a fade into the
+ * Hero backdrop: static grainy orange, a few floating doodles, and a fade into the
  * screen background at the bottom.
  */
 export function GamingBackdrop({
@@ -236,16 +217,17 @@ export function GamingBackdrop({
 
   return (
     <View style={[styles.container, style]} pointerEvents="none">
-      <GrainyGradient
-        width={width}
-        height={height}
-        colors={isDark ? DARK_GRADIENT : LIGHT_GRADIENT}
-        brightness={isDark ? -0.08 : -0.04}
-        speed={0.5}
-        amplitude={0.08}
-        intensity={0.11}
-        size={1.4}
-        animated={running}
+      <Image
+        source={isDark ? GRADIENT_DARK : GRADIENT_LIGHT}
+        style={{ width, height }}
+        resizeMode="stretch"
+        fadeDuration={0}
+      />
+      <Image
+        source={GRAIN_TILE}
+        style={[styles.grain, { width, height }]}
+        resizeMode="repeat"
+        fadeDuration={0}
       />
 
       {placed.map((d, i) => (
@@ -323,6 +305,11 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     overflow: 'hidden',
+  },
+  grain: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
   },
   doodle: {
     position: 'absolute',

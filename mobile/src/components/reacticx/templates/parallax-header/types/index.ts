@@ -67,6 +67,18 @@ type AnimatedViewProps = {
   disableScale?: boolean;
 
   /**
+   * Keep the header (and its overlay content) still while scrolling up: the content below slides
+   * over it like a sheet, with no parallax drift or fade. Pull-down stretch still works.
+   */
+  pinHeader?: boolean;
+
+  /**
+   * Called on the JS thread with the vertical scroll offset. Use this instead of
+   * `onScroll`, which would replace the parallax scroll handler.
+   */
+  onScrollOffset?: (y: number) => void;
+
+  /**
    * Image styles
    */
   imageStyle?: StyleProp<ImageStyle>;
@@ -91,6 +103,8 @@ export type AnimatedHeaderProps = {
   translateYUp: Animated.AnimatedInterpolation<string | number> | 0;
   translateYDown: Animated.AnimatedInterpolation<string | number> | 0 | any;
   scale: Animated.AnimatedInterpolation<string | number> | 1;
+  /** Counter-scroll offset that holds the header still (pinHeader); 0 when not pinned. */
+  pin: Animated.AnimatedInterpolation<string | number> | 0;
 
   imageStyle?: StyleProp<ImageStyle>;
   HeaderComponent?: JSX.Element;

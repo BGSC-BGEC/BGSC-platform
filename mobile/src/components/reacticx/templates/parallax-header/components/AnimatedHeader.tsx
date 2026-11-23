@@ -15,21 +15,26 @@ export const AnimatedHeader = ({
   translateYUp,
   translateYDown,
   scale,
+  pin,
   imageStyle,
   OverlayHeaderContent,
 }: AnimatedHeaderProps) => {
+  const pinned = pin !== 0;
   const { width } = useWindowDimensions();
+  // Pinned: no fade on scroll-up (the sheet covers it instead); the pull-down fade stays.
   const opacity = translateYDown.interpolate({
     inputRange: [-imageHeight * 0.3, 0, imageHeight * 0.3],
-    outputRange: [0, 1, 0],
+    outputRange: [0, 1, pinned ? 1 : 0],
     extrapolate: "clamp",
   });
 
-  const headerOpacity = translateYDown.interpolate({
-    inputRange: [0, 100],
-    outputRange: [1, 0],
-    extrapolate: "clamp",
-  });
+  const headerOpacity = pinned
+    ? 1
+    : translateYDown.interpolate({
+        inputRange: [0, 100],
+        outputRange: [1, 0],
+        extrapolate: "clamp",
+      });
 
   return (
     <View
@@ -71,6 +76,7 @@ export const AnimatedHeader = ({
                   { height: imageHeight, width },
                   {
                     transform: [
+                      { translateY: pin },
                       { scale },
                       { translateY: translateYUp },
                       { translateY: translateYDown },
@@ -103,6 +109,7 @@ export const AnimatedHeader = ({
                     bottom: 0,
 
                     width: "100%",
+                    transform: [{ translateY: pin }],
                   },
                 ]}
               >

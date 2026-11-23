@@ -11,6 +11,7 @@ import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '../theme/ThemeProvider';
+import { GlassSurface } from '../navigation/GlassSurface';
 
 export interface BottomSheetProps {
   visible: boolean;
@@ -24,9 +25,10 @@ export interface BottomSheetProps {
 }
 
 const DURATION = 220;
+const SHEET_RADIUS = 24;
 const OFFSCREEN = 600;
 
-/** v2 bottom sheet — dimmed scrim, grabber, surface card pinned to the bottom. */
+/** v2 bottom sheet — dimmed scrim, grabber, liquid-glass panel pinned to the bottom (same material as the tab bar). */
 export function BottomSheet({
   visible,
   onClose,
@@ -87,7 +89,6 @@ export function BottomSheet({
           style={[
             styles.sheet,
             {
-              backgroundColor: colors.surface,
               paddingBottom: insets.bottom + 32,
             },
             {
@@ -103,6 +104,7 @@ export function BottomSheet({
             style,
           ]}
         >
+          <GlassSurface panel fill radius={SHEET_RADIUS} style={styles.glass} />
           <View style={[styles.grabber, { backgroundColor: colors.border }]} />
           {children}
         </Animated.View>
@@ -115,11 +117,13 @@ const styles = StyleSheet.create({
   scrim: { backgroundColor: 'rgba(0, 0, 0, 0.62)' },
   keyboard: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, justifyContent: 'flex-end' },
   sheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: SHEET_RADIUS,
+    borderTopRightRadius: SHEET_RADIUS,
     paddingTop: 12,
     paddingHorizontal: 20,
     gap: 16,
   },
+  // Square bottom: the sheet runs off the screen edge.
+  glass: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottomWidth: 0 },
   grabber: { alignSelf: 'center', width: 40, height: 5, borderRadius: 999 },
 });

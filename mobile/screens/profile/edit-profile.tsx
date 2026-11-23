@@ -60,7 +60,10 @@ export default function EditProfile() {
     setBusy(true); setError(null);
     try { await usersRepository.update({ full_name: form.full_name.trim(), bio: form.bio, phone_number: phone || null, interests, social_links: { instagram: form.instagram.trim() || null, linkedin: form.linkedin.trim() || null, steam_id: form.steam_id.trim() || null } }); await refreshUser(); navigation.goBack(); } catch (err) { setError(getErrorMessage(err)); setErrors(getFieldErrors(err)); } finally { setBusy(false); }
   };
-  return <ProfileLayout title="Edit profile">
+  return <ProfileLayout
+    title="Edit profile"
+    footer={profile.data ? <Button label="Save changes" fullWidth loading={busy} onPress={() => void save()} /> : undefined}
+  >
     {profile.loading && <Skeleton.Card />}{profile.error && <ErrorState message={profile.error} onRetry={() => void profile.reload()} />}
     {profile.data && <>
       <ProfilePhoto name={profile.data.profile.full_name || profile.data.username} uri={profile.data.profile.avatar_url} onChange={async () => { await profile.reload(); await refreshUser(); }} />
@@ -96,7 +99,6 @@ export default function EditProfile() {
       <TextInput label="INSTAGRAM" value={form.instagram} onChangeText={set('instagram')} maxLength={64} autoCapitalize="none" disabled={busy} error={errors['social_links.instagram']} />
       <TextInput label="LINKEDIN" value={form.linkedin} onChangeText={set('linkedin')} maxLength={128} autoCapitalize="none" disabled={busy} error={errors['social_links.linkedin']} />
       <TextInput label="STEAM" value={form.steam_id} onChangeText={set('steam_id')} maxLength={64} autoCapitalize="none" disabled={busy} error={errors['social_links.steam_id']} />
-      <View style={{ paddingTop: 8 }}><Button label="Save changes" fullWidth loading={busy} onPress={() => void save()} /></View>
     </>}
   </ProfileLayout>;
 }

@@ -29,6 +29,8 @@ export const AnimatedScrollView = forwardRef<
       renderTopNavBarComponent,
       renderToHardwareTextureAndroid,
       renderHeaderNavBarComponent,
+      onScrollOffset,
+      pinHeader,
       ...props
     }: AnimatedScrollViewProps,
     ref,
@@ -36,8 +38,8 @@ export const AnimatedScrollView = forwardRef<
     const imageHeight = headerMaxHeight || IMG_HEADER_HEIGHT;
     const headerNavHeight = topBarHeight || HEADER_HEIGHT;
     const headerElevation = topBarElevation || 0;
-    const [scroll, onScroll, scale, translateYDown, translateYUp] =
-      useAnimateScrollView(imageHeight, disableScale);
+    const [scroll, onScroll, scale, translateYDown, translateYUp, pin] =
+      useAnimateScrollView(imageHeight, disableScale, onScrollOffset, pinHeader);
 
     return (
       <>
@@ -58,6 +60,7 @@ export const AnimatedScrollView = forwardRef<
             translateYDown={translateYDown}
             translateYUp={translateYUp}
             scale={scale}
+            pin={pin}
             OverlayHeaderContent={
               renderOveralComponent
                 ? renderOveralComponent!()

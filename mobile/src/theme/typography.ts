@@ -1,20 +1,32 @@
 import type { TextStyle } from 'react-native';
 
+/**
+ * The app uses two families:
+ * - Barlow Condensed (display): headlines and numbers people compare (scores, ranks, bids, prices).
+ * - Inter (body/UI): everything people read or tap.
+ * Graduate is only for the BGSC wordmark and the default player card. Card-only fonts
+ * (e.g. Pixelify for the Minecraft card) are loaded inside their card, not here.
+ */
 export const FONT_FAMILIES = {
-  hero: 'DMSerifDisplay_400Regular',
+  hero: 'BarlowCondensed_700Bold',
   /** Varsity block letters for the BGSC wordmark. */
   brand: 'Graduate_400Regular',
+  /** Elegant high-contrast serif for the BGSC wordmark in the home top bar. */
+  wordmark: 'PlayfairDisplay_900Black',
 
-  headingBold: 'DMSerifDisplay_400Regular',
-  headingHeavy: 'DMSerifDisplay_400Regular',
+  headingBold: 'BarlowCondensed_700Bold',
+  headingHeavy: 'BarlowCondensed_700Bold',
 
   bodyRegular: 'Inter_400Regular',
   bodyMedium: 'Inter_500Medium',
   bodySemiBold: 'Inter_600SemiBold',
   bodyBold: 'Inter_700Bold',
-  bodyBlack: 'Inter_900Black',
 
-  mono: 'JetBrainsMono_500Medium',
+  /** Numbers that line up in columns: Inter with tabular figures (see TYPOGRAPHY_STYLES.mono). */
+  mono: 'Inter_500Medium',
+
+  condensed: 'BarlowCondensed_600SemiBold',
+  condensedHeavy: 'BarlowCondensed_800ExtraBold',
 } as const;
 
 export type TypographyVariant =

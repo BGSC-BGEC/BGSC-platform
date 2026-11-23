@@ -5,7 +5,6 @@ import { useRoute, type RouteProp } from '@react-navigation/native';
 import { AppHeader } from '../../src/components/AppHeader';
 import { Avatar } from '../../src/components/Avatar';
 import { authorColor } from '../../src/components/AnnouncementCard';
-import { Badge } from '../../src/components/Badge';
 import { SectionHeader } from '../../src/components/SectionHeader';
 import { SegmentedTabs } from '../../src/components/SegmentedTabs';
 import { SearchInput } from '../../src/forms/SearchInput';
@@ -15,7 +14,6 @@ import { Skeleton } from '../../src/feedback/Skeleton';
 import { Typography } from '../../src/typography/Typography';
 import { FONT_FAMILIES } from '../../src/theme/typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
-import { withAlpha } from '../../src/theme/colors';
 import { useAsyncResource } from '../../src/hooks/useAsyncResource';
 import { auctionRepository } from '../../src/repositories/AuctionRepository';
 import type { AuctionLot } from '../../src/api/types';
@@ -79,7 +77,8 @@ export default function AuctionLots() {
             <SegmentedTabs tabs={tabs} value={tab} onChange={setTab} />
 
             {onBlock ? (
-              <View style={[styles.card, styles.block, { backgroundColor: colors.dangerMuted, borderColor: withAlpha(colors.danger, 0.4) }]}>
+              // Live lot: a plain row between hairlines; the red dot and label carry the urgency.
+              <View style={[styles.block, { borderColor: colors.border }]}>
                 <Avatar name={onBlock.player.display_name} uri={onBlock.player.avatar_url} size={36} />
                 <View style={styles.flex}>
                   <View style={styles.row}>
@@ -90,8 +89,11 @@ export default function AuctionLots() {
                     {onBlock.player.display_name}
                   </Typography>
                 </View>
-                <Typography variant="mono" color="text">
-                  {formatNumber(onBlock.current_bid ?? onBlock.oc_adjusted_price ?? onBlock.base_price)} cr
+                <Typography color="text" style={styles.amount} numberOfLines={1}>
+                  {formatNumber(onBlock.current_bid ?? onBlock.oc_adjusted_price ?? onBlock.base_price)}
+                  <Typography color="textMuted" style={styles.tiny}>
+                    {' '}cr
+                  </Typography>
                 </Typography>
               </View>
             ) : null}
@@ -149,7 +151,7 @@ function LotList(props: {
 }) {
   const { colors } = useTheme();
   return (
-    <View style={[styles.card, styles.list, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View>
       {props.lots.map((l, i) => {
         const tag = props.renderTag?.(l);
         return (
@@ -157,7 +159,7 @@ function LotList(props: {
             key={l._id}
             accessible
             accessibilityLabel={`${l.player.display_name}, ${props.renderRight(l)}`}
-            style={[styles.listRow, i < props.lots.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}
+            style={[styles.listRow, i < props.lots.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}
           >
             {props.showOrder ? (
               <Typography variant="mono" color="textMuted" style={styles.order}>
@@ -169,10 +171,14 @@ function LotList(props: {
               <Typography variant="body" color="text" style={styles.semibold} numberOfLines={1}>
                 {l.player.display_name}
               </Typography>
-              {tag ? <Badge label={tag} variant="info" size="sm" /> : null}
+              {tag ? (
+                <Typography color="textMuted" style={styles.sub} numberOfLines={1}>
+                  {tag}
+                </Typography>
+              ) : null}
             </View>
             <View style={styles.right}>
-              <Typography variant="mono" color="text">
+              <Typography color="text" style={styles.amount} numberOfLines={1}>
                 {props.renderRight(l)}
               </Typography>
               {props.renderSub ? (
@@ -192,15 +198,15 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   flex: { flex: 1 },
   semibold: { fontFamily: FONT_FAMILIES.bodySemiBold },
-  tiny: { fontSize: 10, lineHeight: 15 },
+  tiny: { fontSize: 11, lineHeight: 15 },
   kicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 32, gap: 16 },
-  card: { borderWidth: 1 },
-  block: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 20 },
+  content: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40, gap: 18 },
+  block: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
+  amount: { fontFamily: FONT_FAMILIES.hero, fontSize: 17, lineHeight: 22 },
+  sub: { fontSize: 12.5, lineHeight: 17, marginTop: 1 },
   dot: { width: 7, height: 7, borderRadius: 4 },
   section: { gap: 12 },
-  list: { borderRadius: 20, paddingHorizontal: 16, paddingVertical: 4 },
   listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
   order: { width: 32, fontSize: 12 },
   right: { alignItems: 'flex-end', gap: 2 },

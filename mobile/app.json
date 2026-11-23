@@ -8,5 +8,6 @@
     "expo-sharing"
   ],
   "scheme": "bgsc",
-  "orientation": "portrait"
+  "orientation": "portrait",
+  "userInterfaceStyle": "automatic"
 }

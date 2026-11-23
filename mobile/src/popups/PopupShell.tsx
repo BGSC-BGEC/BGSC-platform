@@ -2,6 +2,7 @@ import React from 'react';
 import { Modal, Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 
 import { useTheme } from '../theme/ThemeProvider';
+import { GlassSurface } from '../navigation/GlassSurface';
 import { Icon, type IconName } from '../icons/Icon';
 import { Typography } from '../typography/Typography';
 import type { UIThemeColors } from '../theme/colors';
@@ -33,7 +34,7 @@ export interface PopupShellProps {
 }
 
 /**
- * Centered popup card shared by every dialog in the app.
+ * Centered popup card shared by every dialog in the app, in the tab bar's liquid-glass material.
  * Matches the confirmation modal used on the registration screen.
  */
 export function PopupShell({
@@ -47,7 +48,7 @@ export function PopupShell({
   children,
   style,
 }: PopupShellProps) {
-  const { colors, shadow } = useTheme();
+  const { colors } = useTheme();
   const config = tone ? TONE_CONFIG[tone] : undefined;
 
   return (
@@ -61,12 +62,11 @@ export function PopupShell({
         <View
           style={[
             styles.card,
-            { backgroundColor: colors.surface, borderColor: colors.border },
-            shadow('elevated'),
             style,
           ]}
           accessibilityViewIsModal
         >
+          <GlassSurface panel fill radius={CARD_RADIUS} />
           {config ? (
             <View style={[styles.iconCircle, { backgroundColor: colors[config.bg] }]}>
               <Icon name={icon ?? config.icon} size="lg" color={config.color} />
@@ -85,6 +85,8 @@ export function PopupShell({
   );
 }
 
+const CARD_RADIUS = 24;
+
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
@@ -92,7 +94,7 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: 'rgba(0, 0, 0, 0.45)',
   },
-  card: { borderWidth: 1, borderRadius: 24, padding: 24, gap: 16 },
+  card: { borderRadius: CARD_RADIUS, padding: 24, gap: 16 },
   iconCircle: {
     width: 56,
     height: 56,

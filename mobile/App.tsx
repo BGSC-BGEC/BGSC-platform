@@ -2,10 +2,11 @@ import React, { useEffect } from 'react';
 import { Platform, StatusBar } from 'react-native';
 import { useFonts } from 'expo-font';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
-import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold, Inter_900Black } from '@expo-google-fonts/inter';
-import { DMSerifDisplay_400Regular } from '@expo-google-fonts/dm-serif-display';
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { Graduate_400Regular } from '@expo-google-fonts/graduate';
-import { JetBrainsMono_500Medium } from '@expo-google-fonts/jetbrains-mono';
+// Weight subpath so only this one font file is bundled.
+import { PlayfairDisplay_900Black } from '@expo-google-fonts/playfair-display/900Black';
+import { BarlowCondensed_600SemiBold, BarlowCondensed_700Bold, BarlowCondensed_800ExtraBold } from '@expo-google-fonts/barlow-condensed';
 import DrawerLayout from './screens/drawer/layout';
 import { AuthProvider, useAuth } from './store/auth';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider';
@@ -49,10 +50,11 @@ export default function App() {
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
-    Inter_900Black,
-    DMSerifDisplay_400Regular,
-    JetBrainsMono_500Medium,
     Graduate_400Regular,
+    PlayfairDisplay_900Black,
+    BarlowCondensed_600SemiBold,
+    BarlowCondensed_700Bold,
+    BarlowCondensed_800ExtraBold,
   });
   // On a load error render anyway with system fonts rather than hanging on a blank screen.
   if (!fontsLoaded && !fontError) return null;
