@@ -29,6 +29,8 @@ export interface ApiUser {
   };
   points_balance?: number;
   player_card?: { card_tier: string; stats: Record<string, unknown> };
+  /** Account creation time (ISO). */
+  created_at?: string;
 }
 
 export interface AuthResult {

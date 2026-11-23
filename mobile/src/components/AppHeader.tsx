@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, View, Platform } from 'react-native';
+import { Pressable, StatusBar, StyleSheet, View, type StatusBarStyle } from 'react-native';
 import { DrawerActions, useFocusEffect, useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -19,6 +19,11 @@ interface AppHeaderProps {
   showMenuButton?: boolean;
   /** Bell + avatar on the right */
   showNotifications?: boolean;
+  /**
+   * 'brand': orange band with white title/actions and a rounded sheet edge below it (section roots).
+   * 'plain': the translucent header (pushed screens). Defaults to 'brand' on screens with the menu button.
+   */
+  tone?: 'brand' | 'plain';
 }
 
 const UNREAD_POLL_MS = 30000;
@@ -31,6 +36,7 @@ export function AppHeader({
   showBackButton = false,
   showMenuButton = true,
   showNotifications = true,
+  tone,
 }: AppHeaderProps) {
   const { colors, shadow } = useTheme();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
@@ -58,17 +64,34 @@ export function AppHeader({
   );
 
   const isBrand = title === 'BGSC';
+  const brandTone = (tone ?? (showMenuButton && !showBackButton ? 'brand' : 'plain')) === 'brand';
+
+  // White status-bar icons over the orange band, only while this screen is focused.
+  useFocusEffect(
+    useCallback(() => {
+      if (!brandTone) return undefined;
+      const entry = StatusBar.pushStackEntry({ barStyle: 'light-content' as StatusBarStyle, animated: true });
+      return () => StatusBar.popStackEntry(entry);
+    }, [brandTone]),
+  );
+
+  const fg = brandTone ? colors.white : colors.text;
+  const buttonSkin = brandTone
+    ? { backgroundColor: withAlpha(colors.white, 0.18), borderColor: withAlpha(colors.white, 0.28) }
+    : { backgroundColor: withAlpha(colors.surface, 0.72), borderColor: withAlpha(colors.border, 0.5) };
+  const buttonShadow = brandTone ? null : shadow('flat');
 
   return (
     <View
       style={[
-        styles.header,
+        styles.wrapper,
         {
-          backgroundColor: withAlpha(colors.background, 0.92),
-          paddingTop: insets.top + 4,
+          backgroundColor: brandTone ? colors.primary : withAlpha(colors.background, 0.92),
+          paddingTop: insets.top + (brandTone ? 2 : 4),
         },
       ]}
     >
+    <View style={[styles.header, brandTone && styles.headerBrand]}>
       {showBackButton ? (
         <Pressable
           onPress={() => navigation.goBack()}
@@ -77,15 +100,12 @@ export function AppHeader({
           hitSlop={10}
           style={({ pressed }) => [
             styles.actionBtn,
-            {
-              backgroundColor: withAlpha(colors.surface, 0.72),
-              borderColor: withAlpha(colors.border, 0.5),
-            },
-            shadow('flat'),
+            buttonSkin,
+            buttonShadow,
             pressed && styles.pressed,
           ]}
         >
-          <Icon name="arrow-left" size={20} color="text" />
+          <Icon name="arrow-left" size={20} color={fg} />
         </Pressable>
       ) : showMenuButton ? (
         <Pressable
@@ -95,15 +115,18 @@ export function AppHeader({
           hitSlop={10}
           style={({ pressed }) => [
             styles.actionBtn,
-            {
-              backgroundColor: withAlpha(colors.surface, 0.72),
-              borderColor: withAlpha(colors.border, 0.5),
-            },
-            shadow('flat'),
+            styles.menuBtn,
+            buttonSkin,
+            brandTone && styles.menuBtnBrand,
+            buttonShadow,
             pressed && styles.pressed,
           ]}
         >
-          <Icon name="menu" size={20} color="text" />
+          {/* Staggered two-line glyph: long bar over a short one, left-aligned. */}
+          <View style={styles.menuGlyph}>
+            <View style={[styles.menuBar, styles.menuBarLong, { backgroundColor: fg }]} />
+            <View style={[styles.menuBar, styles.menuBarShort, { backgroundColor: brandTone ? fg : colors.primary }]} />
+          </View>
         </Pressable>
       ) : (
         <View style={styles.actionSpacer} />
@@ -111,13 +134,13 @@ export function AppHeader({
 
       {isBrand ? (
         <View style={styles.brandTitleWrap}>
-          <Typography variant="h3" color="text" style={styles.brandTitle}>
+          <Typography variant="h3" color={fg} style={styles.brandTitle}>
             BGSC
           </Typography>
-          <View style={[styles.brandDot, { backgroundColor: colors.primary }]} />
+          <View style={[styles.brandDot, { backgroundColor: brandTone ? colors.white : colors.primary }]} />
         </View>
       ) : (
-        <Typography variant="h3" color="text" numberOfLines={1} style={styles.title}>
+        <Typography variant="h3" color={fg} numberOfLines={1} style={styles.title}>
           {title}
         </Typography>
       )}
@@ -126,11 +149,8 @@ export function AppHeader({
         <View
           style={[
             styles.actionsCapsule,
-            {
-              backgroundColor: withAlpha(colors.surface, 0.72),
-              borderColor: withAlpha(colors.border, 0.5),
-            },
-            shadow('flat'),
+            buttonSkin,
+            buttonShadow,
           ]}
         >
           <Pressable
@@ -140,21 +160,21 @@ export function AppHeader({
             hitSlop={8}
             style={({ pressed }) => [styles.capsuleBtn, pressed && styles.pressed]}
           >
-            <Icon name="bell" size={18} color="text" />
+            <Icon name="bell" size={18} color={fg} />
             {unread > 0 ? (
               <View
                 style={[
                   styles.dot,
                   {
-                    backgroundColor: colors.primary,
-                    borderColor: colors.surface,
+                    backgroundColor: brandTone ? colors.white : colors.primary,
+                    borderColor: brandTone ? colors.primary : colors.surface,
                   },
                 ]}
               />
             ) : null}
           </Pressable>
 
-          <View style={[styles.capsuleDivider, { backgroundColor: withAlpha(colors.border, 0.6) }]} />
+          <View style={[styles.capsuleDivider, { backgroundColor: brandTone ? withAlpha(colors.white, 0.35) : withAlpha(colors.border, 0.6) }]} />
 
           <Pressable
             onPress={() => navigation.navigate('Profile', undefined, { pop: true })}
@@ -170,17 +190,54 @@ export function AppHeader({
         <View style={styles.actionSpacer} />
       )}
     </View>
+    {brandTone ? <View style={[styles.sheetLip, { backgroundColor: colors.background }]} /> : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper: {
+    zIndex: 10,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 14,
     paddingBottom: 6,
-    zIndex: 10,
+  },
+  headerBrand: {
+    paddingTop: 0,
+    paddingBottom: 10,
+  },
+  // The top of the content "sheet": the screen's own background with rounded corners, so the
+  // orange band reads as sitting behind the page (the list below continues the same colour).
+  sheetLip: {
+    height: 16,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+  },
+  menuBtn: {
+    borderRadius: 19,
+  },
+  // On orange: a soft frosted disc, no hard outline.
+  menuBtnBrand: {
+    borderColor: 'transparent',
+  },
+  menuGlyph: {
+    width: 18,
+    gap: 5,
+    alignItems: 'flex-start',
+  },
+  menuBar: {
+    height: 2.25,
+    borderRadius: 2,
+  },
+  menuBarLong: {
+    width: 18,
+  },
+  menuBarShort: {
+    width: 11,
   },
   actionBtn: {
     width: 38,

@@ -10,6 +10,7 @@ import * as Haptics from 'expo-haptics';
 import { useTheme } from '../theme/ThemeProvider';
 import { Typography } from '../typography/Typography';
 import { ANIMATION } from '../theme/spacing';
+import { FrostedRim, FrostedSheen } from './FrostedSheen';
 
 export type CardVariant = 'solid' | 'elevated' | 'accent' | 'layered' | 'inner';
 
@@ -122,7 +123,16 @@ export function Card({
     style,
   ];
 
-  const content = <>{children}</>;
+  // Frosted finish: sheen under the content, faint rim over it (see FrostedSheen).
+  // Follows a borderRadius passed in `style`, so the layers match the card's corners.
+  const radius = (StyleSheet.flatten(style)?.borderRadius as number | undefined) ?? borderRadius;
+  const content = (
+    <>
+      <FrostedSheen radius={radius} />
+      {children}
+      <FrostedRim radius={radius} />
+    </>
+  );
 
   if (onPress) {
     return (

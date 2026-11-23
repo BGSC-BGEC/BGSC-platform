@@ -4,7 +4,9 @@
     "expo-image",
     "expo-video",
     "expo-font",
-    "expo-web-browser"
+    "expo-web-browser",
+    "expo-sharing"
   ],
-  "scheme": "bgsc"
+  "scheme": "bgsc",
+  "orientation": "portrait"
 }

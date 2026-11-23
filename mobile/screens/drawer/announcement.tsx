@@ -9,6 +9,7 @@ import { AppHeader } from '../../src/components/AppHeader';
 import { AnnouncementCard, announcementTags } from '../../src/components/AnnouncementCard';
 import { Badge } from '../../src/components/Badge';
 import { FilterChips } from '../../src/components/FilterChips';
+import { SearchInput } from '../../src/forms/SearchInput';
 import { Skeleton } from '../../src/feedback/Skeleton';
 import { EmptyState } from '../../src/feedback/EmptyState';
 import { ErrorState } from '../../src/feedback/ErrorState';
@@ -29,6 +30,9 @@ import {
 } from '../../src/utils/format';
 import MegaphoneWatermark from '../../assets/illustrations/megaphone-watermark.svg';
 
+/** Horizontal page padding — matches the Events tab. */
+const GUTTER = 13;
+
 type Filter = 'all' | AnnouncementCategory;
 const FILTERS: Array<{ label: string; value: Filter }> = [
   { label: 'All', value: 'all' },
@@ -47,6 +51,9 @@ export default function AnnouncementsScreen() {
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
 
   const [filter, setFilter] = useState<Filter>('all');
+  // `search` is what's typed; `query` is the debounced value actually sent to the API.
+  const [search, setSearch] = useState('');
+  const [query, setQuery] = useState('');
   const [items, setItems] = useState<Announcement[]>([]);
   const [pinned, setPinned] = useState<Announcement | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -59,17 +66,18 @@ export default function AnnouncementsScreen() {
     async (mode: 'initial' | 'refresh' | 'more') => {
       const id = ++request.current;
       const category = filter === 'all' ? undefined : filter;
+      const q = query || undefined;
       setState(mode === 'initial' ? 'loading' : mode === 'refresh' ? 'refreshing' : 'more');
       try {
         if (mode === 'more') {
-          const page = await announcementsRepository.list({ category, cursor });
+          const page = await announcementsRepository.list({ category, q, cursor });
           if (id !== request.current) return;
           setItems((prev) => [...prev, ...page.announcements]);
           setCursor(page.next_cursor);
         } else {
           const [page, pins, count] = await Promise.all([
-            announcementsRepository.list({ category }),
-            announcementsRepository.list({ category, pinned: true, limit: 5 }).catch(() => null),
+            announcementsRepository.list({ category, q }),
+            announcementsRepository.list({ category, q, pinned: true, limit: 5 }).catch(() => null),
             announcementsRepository.unreadCount().catch(() => 0),
           ]);
           if (id !== request.current) return;
@@ -85,13 +93,19 @@ export default function AnnouncementsScreen() {
         if (id === request.current) setState('ready');
       }
     },
-    [filter, cursor],
+    [filter, query, cursor],
   );
 
-  // Reload when the filter changes; the cursor dependency must not retrigger this.
+  // Reload when the filter or search changes; the cursor dependency must not retrigger this.
   useEffect(() => {
     void load('initial');
-  }, [filter]);
+  }, [filter, query]);
+
+  const clearFilters = () => {
+    setSearch('');
+    setQuery('');
+    setFilter('all');
+  };
 
   // Coming back from a detail screen: refresh the read dots quietly.
   useFocusEffect(
@@ -154,7 +168,17 @@ export default function AnnouncementsScreen() {
         ) : null}
       </View>
 
-      <FilterChips options={FILTERS} value={filter} onChange={setFilter} />
+      <SearchInput
+        value={search}
+        onChangeText={setSearch}
+        onSearch={(t) => setQuery(t.trim().slice(0, 100))}
+        placeholder="Search announcements"
+      />
+
+      {/* Bleeds to the screen edges so the chip row scrolls under the gutter instead of clipping at it. */}
+      <View style={styles.chipsBleed}>
+        <FilterChips options={FILTERS} value={filter} onChange={setFilter} style={styles.chipsRow} />
+      </View>
 
       {error && state !== 'loading' ? <ErrorState title="Couldn’t load announcements" message={error} onRetry={() => load('initial')} /> : null}
       {pinned ? <PinnedCard item={pinned} onPress={() => open(pinned)} /> : null}
@@ -168,6 +192,7 @@ export default function AnnouncementsScreen() {
         data={state === 'loading' ? [] : rows}
         keyExtractor={(row, i) => (row.kind === 'item' ? row.item._id : `label-${i}`)}
         ListHeaderComponent={header}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.content,
           { paddingBottom: Math.max(110, insets.bottom + 90) },
@@ -196,17 +221,29 @@ export default function AnnouncementsScreen() {
         ListEmptyComponent={
           state === 'loading' ? (
             <View style={styles.skeletons}>
-              <Skeleton height={300} borderRadius={24} />
-              <Skeleton height={150} borderRadius={20} />
-              <Skeleton height={150} borderRadius={20} />
+              <Skeleton height={290} borderRadius={22} />
+              <Skeleton height={150} borderRadius={22} />
+              <Skeleton height={150} borderRadius={22} />
             </View>
           ) : !error && !pinned ? (
             <EmptyState
-              icon="megaphone"
-              title={filter === 'all' ? 'No broadcasts yet' : `Nothing from ${ANNOUNCEMENT_CATEGORY_LABELS[filter]}`}
-              description={filter === 'all' ? 'New posts from the core team show up here.' : 'Try another club or clear the filter.'}
-              actionLabel={filter === 'all' ? undefined : 'Show all'}
-              onAction={filter === 'all' ? undefined : () => setFilter('all')}
+              icon={query ? 'search' : 'megaphone'}
+              title={
+                query
+                  ? `No announcements match “${query}”`
+                  : filter === 'all'
+                    ? 'No broadcasts yet'
+                    : `Nothing from ${ANNOUNCEMENT_CATEGORY_LABELS[filter]}`
+              }
+              description={
+                query
+                  ? 'Try different words, or clear the search.'
+                  : filter === 'all'
+                    ? 'New posts from the core team show up here.'
+                    : 'Try another club or clear the filter.'
+              }
+              actionLabel={query ? 'Clear search' : filter === 'all' ? undefined : 'Show all'}
+              onAction={query ? clearFilters : filter === 'all' ? undefined : () => setFilter('all')}
             />
           ) : undefined
         }
@@ -214,7 +251,7 @@ export default function AnnouncementsScreen() {
         onEndReached={() => {
           if (cursor && state === 'ready') void load('more');
         }}
-        ListFooterComponent={state === 'more' ? <Skeleton height={150} borderRadius={20} /> : undefined}
+        ListFooterComponent={state === 'more' ? <Skeleton height={150} borderRadius={22} /> : undefined}
         refreshControl={
           <RefreshControl refreshing={state === 'refreshing'} onRefresh={() => load('refresh')} tintColor={colors.primary} />
         }
@@ -288,20 +325,26 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   flex: { flex: 1 },
   pressed: { opacity: 0.85 },
-  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 32, gap: 20 },
-  header: { gap: 20 },
-  titleRow: { flexDirection: 'row', alignItems: 'flex-end' },
-  title: { fontSize: 34, lineHeight: 48 },
-  markAll: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
+  // Same gutter / rhythm as the Events tab so the two feeds feel like one app.
+  content: { paddingHorizontal: GUTTER, paddingTop: 4, paddingBottom: 32, gap: 11 },
+  header: { gap: 12, marginBottom: 2 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  title: { fontSize: 32, lineHeight: 40 },
+  markAll: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 999, borderWidth: 1 },
   markAllText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 12, lineHeight: 15 },
-  group: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, lineHeight: 15, letterSpacing: 1 },
-  skeletons: { gap: 20 },
-  pinned: { borderRadius: 24, borderWidth: 1, overflow: 'hidden' },
-  pinnedMedia: { height: 197, justifyContent: 'flex-end', padding: 16, overflow: 'hidden' },
+  chipsBleed: { marginHorizontal: -GUTTER },
+  chipsRow: { paddingHorizontal: GUTTER },
+  // Extra space above a TODAY / EARLIER label so it groups with the cards below it.
+  group: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, lineHeight: 15, letterSpacing: 1, marginTop: 8, marginLeft: 2 },
+  skeletons: { gap: 11 },
+  pinned: { borderRadius: 22, borderWidth: 1, overflow: 'hidden' },
+  pinnedMedia: { height: 172, justifyContent: 'flex-end', padding: 14, overflow: 'hidden' },
   watermark: { position: 'absolute', right: -6, top: 5, transform: [{ rotate: '12deg' }] },
-  badges: { flexDirection: 'row', gap: 8 },
-  pinBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999 },
-  pinText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.6 },
-  pinnedBody: { gap: 8, padding: 20 },
+  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  // Same 21px height as the priority Badge beside it.
+  pinBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 21, paddingHorizontal: 9, borderRadius: 999 },
+  pinText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.6, includeFontPadding: false, textAlignVertical: 'center' },
+  // Matches AnnouncementCard's 16px padding so pinned and regular cards line up.
+  pinnedBody: { gap: 6, padding: 16 },
   pinnedKicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
 });

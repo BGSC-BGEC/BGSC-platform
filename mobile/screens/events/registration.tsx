@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StackActions, useNavigation, usePreventRemove, useRoute, type NavigationProp, type ParamListBase, type RouteProp } from '@react-navigation/native';
 
@@ -287,10 +288,12 @@ export default function EventRegistration() {
         showBackButton
         showMenuButton={false}
       />
-      <ScrollView
+      {/* Scrolls the focused form field above the keyboard on both platforms (the old
+          automaticallyAdjustKeyboardInsets only worked on iOS). */}
+      <KeyboardAwareScrollView
         contentContainerStyle={styles.content}
+        bottomOffset={24}
         keyboardShouldPersistTaps="handled"
-        automaticallyAdjustKeyboardInsets
         showsVerticalScrollIndicator={false}
       >
         <Stepper current={step === 'review' ? 3 : 2} />
@@ -468,7 +471,7 @@ export default function EventRegistration() {
             <Terms agreed={agreed} onChange={setAgreed} onRead={rules?.length ? () => setRulesOpen(true) : undefined} />
           </>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       {form ? (
         <StickyCTABar

@@ -74,7 +74,7 @@ const PointsAdjustmentModalContent: React.FC<ContentProps> = ({ onClose, targetE
         }
       })
       .catch((err) => {
-        if (!ignore) setBalanceError(err instanceof Error ? err.message : 'Could not load balance')
+        if (!ignore) setBalanceError(err instanceof Error ? err.message : 'Could not load points')
       })
     return () => {
       ignore = true
@@ -130,7 +130,7 @@ const PointsAdjustmentModalContent: React.FC<ContentProps> = ({ onClose, targetE
       })
       onClose()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to adjust points balance')
+      setError(err instanceof Error ? err.message : 'Failed to adjust points')
     } finally {
       setIsSubmitting(false)
     }
@@ -181,7 +181,7 @@ const PointsAdjustmentModalContent: React.FC<ContentProps> = ({ onClose, targetE
             <UserSearchPicker selected={member} onSelect={handleSelectMember} />
             {member && (
               <div className="text-[11px] text-muted-foreground mt-1.5 flex justify-between px-1">
-                <span>Spendable balance</span>
+                <span>Spendable points</span>
                 <span>
                   {balanceError ? (
                     <span className="text-destructive">{balanceError}</span>
@@ -268,11 +268,11 @@ const PointsAdjustmentModalContent: React.FC<ContentProps> = ({ onClose, targetE
             </span>
           </div>
 
-          {/* Projected Balance Card */}
+          {/* Projected Points Card */}
           {balance !== null && numericAmount > 0 && (
             <div className="p-3.5 rounded-xl border border-border bg-muted/20 space-y-1.5 animate-in fade-in">
               <div className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
-                Projected Balance
+                Projected Points
               </div>
               <div className="flex items-center gap-2 font-mono text-xs">
                 <span className="text-muted-foreground">{balance.toLocaleString()} PTS</span>

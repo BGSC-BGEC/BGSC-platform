@@ -12,6 +12,9 @@ import { withAlpha } from '../theme/colors';
 import { resolveMediaUrl } from '../api/config';
 import type { ApiEvent, EventCategory } from '../api/types';
 import { EVENT_CATEGORY_LABELS, eventDateLabel, eventStatusPill } from '../utils/format';
+import { FrostedRim, FrostedSheen } from './FrostedSheen';
+
+const EVENT_CARD_RADIUS = 18;
 
 /** Category style accents */
 export const EVENT_CATEGORY_STYLE: Record<
@@ -149,6 +152,7 @@ export function EventCard({
         style,
       ]}
     >
+      <FrostedSheen radius={EVENT_CARD_RADIUS} />
       <Pressable
         onPress={onPress}
         accessibilityLabel={`${title}, ${status.label}`}
@@ -313,6 +317,7 @@ export function EventCard({
           </View>
         </View>
       </Pressable>
+      <FrostedRim radius={EVENT_CARD_RADIUS} />
     </View>
   );
 }
@@ -320,7 +325,7 @@ export function EventCard({
 const styles = StyleSheet.create({
   card: {
     borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: EVENT_CARD_RADIUS,
     overflow: 'hidden',
     position: 'relative',
   },

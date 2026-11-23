@@ -79,14 +79,13 @@ function AppDrawer() {
       screenOptions={{
         headerShown: false,
         drawerType: 'front',
+        // Transparent: DrawerContent draws its own floating glass panel (tab bar style).
         drawerStyle: {
-          width: 312,
-          backgroundColor: colors.surface,
-          borderTopRightRadius: 24,
-          borderBottomRightRadius: 24,
-          overflow: 'hidden',
+          width: 310,
+          backgroundColor: 'transparent',
         },
-        overlayColor: 'rgba(0, 0, 0, 0.62)',
+        // Lighter dim so the glass panel has the app content to show through.
+        overlayColor: 'rgba(0, 0, 0, 0.45)',
       }}
     >
       <Drawer.Screen name="MainTabs" component={BottomTabsLayout} />

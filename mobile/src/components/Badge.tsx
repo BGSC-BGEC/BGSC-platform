@@ -141,6 +141,9 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 15,
     letterSpacing: 0.6,
+    // Android adds font padding above the glyphs, which pushes short pill labels low.
+    includeFontPadding: false,
+    textAlignVertical: 'center',
   },
 });
 

@@ -110,7 +110,7 @@ export const Users: React.FC = () => {
       'Phone',
       'Role',
       'Status',
-      'Points Balance',
+      'Points',
       'Join Date',
     ]
 

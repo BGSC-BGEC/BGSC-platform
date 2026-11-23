@@ -62,5 +62,6 @@ export function FilterChips<T extends string>({ options, value, onChange, style 
 const styles = StyleSheet.create({
   row: { gap: 6, paddingVertical: 1 },
   chip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4.5 },
-  label: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11.5, lineHeight: 14 },
+  // includeFontPadding off so the label sits centred in the chip on Android.
+  label: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11.5, lineHeight: 14, includeFontPadding: false, textAlignVertical: 'center' },
 });

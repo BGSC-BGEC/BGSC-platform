@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Alert } from '../../src/feedback/Alert';
@@ -67,8 +68,8 @@ export default function Feedback() {
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]} edges={['left', 'right']}>
       <AppHeader title="Feedback & contact" />
-      <KeyboardAvoidingView style={styles.safeArea} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={[styles.content, { paddingHorizontal: gutter, paddingTop: gutter }]} keyboardShouldPersistTaps="handled">
+      {/* Scrolls the focused field above the keyboard on both platforms. */}
+      <KeyboardAwareScrollView style={styles.safeArea} bottomOffset={24} contentContainerStyle={[styles.content, { paddingHorizontal: gutter, paddingTop: gutter }]} keyboardShouldPersistTaps="handled">
           <Typography variant="displayTitle">Help us make BGSC better.</Typography>
           <Typography color="textMuted">Bugs, ideas, complaints — it all reaches the core team.</Typography>
           <SegmentedTabs tabs={[{ label: 'Feedback', value: 'feedback' }, { label: 'Contact us', value: 'contact' }]} value={kind} onChange={setKind} />
@@ -102,8 +103,7 @@ export default function Feedback() {
           </Card>
           <Button label="My tickets" variant="outline" onPress={() => navigation.navigate('MyTickets')} />
           <Button label="Contact & FAQ" variant="ghost" onPress={() => navigation.navigate('ContactFaq')} />
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
     </SafeAreaView>
   );
 }

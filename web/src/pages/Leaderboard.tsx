@@ -167,7 +167,7 @@ export const Leaderboard: React.FC = () => {
     const name = entry ? entry.name : result.userId
     const delta = result.transaction.amount
     const sign = delta > 0 ? `+${delta}` : `${delta}`
-    setNotice(`Points adjusted for ${name}: ${sign} points. New balance: ${result.newBalance.toLocaleString()} pts.`)
+    setNotice(`Points adjusted for ${name}: ${sign} points. Points now: ${result.newBalance.toLocaleString()} pts.`)
     if (tab !== 'events') setReloadKey((k) => k + 1)
   }
 

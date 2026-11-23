@@ -11,14 +11,13 @@ import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { LinearGradient as ExpoLinearGradient } from 'expo-linear-gradient';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 
 import { Icon, type IconName } from '../icons/Icon';
 import { Typography } from '../typography/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { FONT_FAMILIES } from '../theme/typography';
-import { withAlpha } from '../theme/colors';
+import { GLASS_ACTIVE_FILL, GLASS_ACTIVE_GLOW, GLASS_ACTIVE_INK, glassTokens } from './glass';
 
 export const TAB_ICONS: Record<string, IconName> = {
   HomeTab: 'home',
@@ -28,11 +27,18 @@ export const TAB_ICONS: Record<string, IconName> = {
   SocialTab: 'users',
 };
 
-const MAX_INDICATOR_WIDTH = 68;
+const MAX_INDICATOR_WIDTH = 84;
 const INDICATOR_GUTTER = 6;
-const INDICATOR_RADIUS = 16;
 const BAR_HEIGHT = 58;
-const IS_IOS = Platform.OS === 'ios';
+/** Gap between the indicator and the bar's top/bottom edges. */
+const INDICATOR_INSET = 4;
+/**
+ * Pill, like the bar: radius = half its height. That also equals the bar's radius
+ * minus the inset, so the indicator's ends run parallel to the bar's ends.
+ */
+const INDICATOR_RADIUS = BAR_HEIGHT / 2 - INDICATOR_INSET;
+/** Active-tab pill fill (shared with the drawer's active item). */
+const INDICATOR_FILL = GLASS_ACTIVE_FILL;
 
 /**
  * Mobile Bottom TabBar:
@@ -106,30 +112,15 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     if (width > 0 && Math.abs(width - rowWidth) > 0.5) setRowWidth(width);
   };
 
-  // Liquid glass: a thin tint over a strong blur. Android has no real blur here, so
-  // its tint stays heavier to keep labels legible over busy content.
-  const tintTone = isDark
-    ? IS_IOS ? 'rgba(16, 20, 32, 0.22)' : 'rgba(18, 22, 34, 0.9)'
-    : IS_IOS ? 'rgba(255, 255, 255, 0.18)' : 'rgba(255, 255, 255, 0.92)';
-  // Rim: bright top edge, softer sides, darker bottom edge (thick glass catching light).
-  const rim = {
-    borderColor: isDark ? 'rgba(255, 255, 255, 0.16)' : 'rgba(255, 255, 255, 0.55)',
-    borderTopColor: isDark ? 'rgba(255, 255, 255, 0.42)' : 'rgba(255, 255, 255, 0.98)',
-    borderBottomColor: isDark ? 'rgba(0, 0, 0, 0.35)' : 'rgba(0, 0, 0, 0.1)',
-  };
-  const sheenTone = isDark ? 'rgba(255, 255, 255, 0.45)' : 'rgba(255, 255, 255, 0.95)';
-  // Curved-surface light: strong top highlight, faint bottom glow, diagonal streak.
-  const highlight = isDark
-    ? ['rgba(255,255,255,0.16)', 'rgba(255,255,255,0.04)', 'rgba(255,255,255,0)'] as const
-    : ['rgba(255,255,255,0.65)', 'rgba(255,255,255,0.18)', 'rgba(255,255,255,0)'] as const;
-  const bottomGlow = isDark
-    ? ['rgba(255,255,255,0)', 'rgba(255,255,255,0.07)'] as const
-    : ['rgba(255,255,255,0)', 'rgba(255,255,255,0.35)'] as const;
-  const streak = isDark
-    ? ['rgba(255,255,255,0)', 'rgba(255,255,255,0.07)', 'rgba(255,255,255,0)'] as const
-    : ['rgba(255,255,255,0)', 'rgba(255,255,255,0.32)', 'rgba(255,255,255,0)'] as const;
-  const inactiveColor = isDark ? withAlpha('#FFFFFF', 0.65) : withAlpha('#0F172A', 0.65);
-  const activeColor = '#141821'; // dark on the coral pill, like the primary buttons (white is only 2.9:1)
+  // Liquid glass material, shared with the side drawer (see ./glass.ts).
+  const glass = glassTokens(isDark);
+  const tintTone = glass.tint;
+  const rim = glass.rim;
+  const highlight = glass.highlight;
+  const bottomGlow = glass.bottomGlow;
+  const streak = glass.streak;
+  const inactiveColor = glass.inactiveInk;
+  const activeColor = GLASS_ACTIVE_INK;
 
   return (
     <View
@@ -142,12 +133,8 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         <View style={[styles.pillGlass, rim]}>
           <BlurView
             pointerEvents="none"
-            intensity={isDark ? 70 : 85}
-            tint={
-              IS_IOS
-                ? isDark ? 'systemUltraThinMaterialDark' : 'systemUltraThinMaterialLight'
-                : isDark ? 'dark' : 'light'
-            }
+            intensity={glass.blurIntensity}
+            tint={glass.blurTint}
             style={StyleSheet.absoluteFill}
           />
           <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: tintTone }]} />
@@ -170,7 +157,6 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
             locations={[0.3, 0.42, 0.54]}
             style={StyleSheet.absoluteFill}
           />
-          <View pointerEvents="none" style={[styles.topSheen, { backgroundColor: sheenTone }]} />
 
           <View style={styles.tabsRow} onLayout={handleRowLayout}>
             {/* Sliding liquid orange glass squircle */}
@@ -182,30 +168,14 @@ export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
                   { width: indicatorWidth, transform: [{ translateX: indicatorX }] },
                 ]}
               >
+                {/* Solid, fully opaque fill edge to edge: no border ring, no white overlays. */}
                 <View style={styles.indicatorGlass}>
-                  <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
-                    <Defs>
-                      <LinearGradient id="glassBodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <Stop offset="0%" stopColor="#F0A48E" stopOpacity={0.95} />
-                        <Stop offset="30%" stopColor="#E68A70" stopOpacity={0.9} />
-                        <Stop offset="72%" stopColor="#DF7A5E" stopOpacity={0.92} />
-                        <Stop offset="100%" stopColor="#B4553C" stopOpacity={0.96} />
-                      </LinearGradient>
-                      <LinearGradient id="glassSheenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <Stop offset="0%" stopColor="#FFFFFF" stopOpacity={0.5} />
-                        <Stop offset="45%" stopColor="#FFFFFF" stopOpacity={0.12} />
-                        <Stop offset="100%" stopColor="#FFFFFF" stopOpacity={0} />
-                      </LinearGradient>
-                      <LinearGradient id="glassCausticGrad" x1="0%" y1="100%" x2="0%" y2="0%">
-                        <Stop offset="0%" stopColor="#F6C8B9" stopOpacity={0.4} />
-                        <Stop offset="100%" stopColor="#F6C8B9" stopOpacity={0} />
-                      </LinearGradient>
-                    </Defs>
-                    <Rect width="100%" height="100%" fill="url(#glassBodyGrad)" />
-                    <Rect width="100%" height="52%" fill="url(#glassSheenGrad)" />
-                    <Rect width="100%" height="34%" y="66%" fill="url(#glassCausticGrad)" />
-                  </Svg>
-                  <View pointerEvents="none" style={styles.indicatorSheen} />
+                  <ExpoLinearGradient
+                    colors={INDICATOR_FILL}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={StyleSheet.absoluteFill}
+                  />
                 </View>
               </Animated.View>
             ) : null}
@@ -301,14 +271,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     paddingHorizontal: 4,
   },
-  topSheen: {
-    position: 'absolute',
-    top: 1,
-    left: 22,
-    right: 22,
-    height: 1.2,
-    borderRadius: 1,
-  },
   bottomGlow: {
     position: 'absolute',
     left: 0,
@@ -323,13 +285,13 @@ const styles = StyleSheet.create({
   },
   indicatorShadow: {
     position: 'absolute',
-    top: 4,
-    bottom: 4,
+    top: INDICATOR_INSET,
+    bottom: INDICATOR_INSET,
     left: 0,
     borderRadius: INDICATOR_RADIUS,
     ...Platform.select({
       ios: {
-        shadowColor: '#DF7A5E',
+        shadowColor: GLASS_ACTIVE_GLOW,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.45,
         shadowRadius: 10,
@@ -341,20 +303,6 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: INDICATOR_RADIUS,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.75)',
-    borderBottomColor: 'rgba(154, 52, 18, 0.5)',
-    borderLeftColor: 'rgba(255, 255, 255, 0.3)',
-    borderRightColor: 'rgba(255, 255, 255, 0.22)',
-  },
-  indicatorSheen: {
-    position: 'absolute',
-    top: 1.5,
-    left: 8,
-    right: 8,
-    height: 1.5,
-    backgroundColor: 'rgba(255, 255, 255, 0.65)',
-    borderRadius: 1,
   },
   tab: {
     flex: 1,

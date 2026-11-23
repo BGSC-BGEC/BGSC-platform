@@ -29,6 +29,7 @@ import { SectionHeader } from '../../src/components/SectionHeader';
 import { GamingBackdrop } from '../../src/components/GamingBackdrop';
 import { AnimatedScrollView } from '../../src/components/reacticx/templates/parallax-header';
 import { HeroIllustration, HERO_ILLUSTRATION_ASPECT } from '../../src/components/HeroIllustration';
+import { FrostedRim, FrostedSheen } from '../../src/components/FrostedSheen';
 import { SkeletonEventCard, Skeleton } from '../../src/feedback/Skeleton';
 import { ErrorState } from '../../src/feedback/ErrorState';
 import { Icon, type IconName } from '../../src/icons/Icon';
@@ -255,6 +256,8 @@ const HERO_TEXT_ABOVE_SHEET = 12;
 const HERO_IDENTITY_PADDING_BOTTOM = SHEET_OVERLAP + HERO_TEXT_ABOVE_SHEET - HERO_BLOCK_PADDING_BOTTOM;
 const HERO_ART_WIDTH_RATIO = 0.72;
 const HERO_ART_OVERFLOW_RATIO = 0.18;
+/** Toned down so the illustration supports the greeting instead of grabbing attention. */
+const HERO_ART_OPACITY = 0.78;
 /** How far the greeting column may reach over the art's (mostly empty) left edge. */
 const HERO_TEXT_OVER_ART = 14;
 function heroArtLayout(screenWidth: number) {
@@ -437,7 +440,11 @@ export default function Home() {
             {/* Greeting on the left, large illustration behind it on the right (running
                 slightly off-screen), both above the strip. */}
             <View style={[styles.heroRow, { height: heroArt.rowHeight }]}>
-              <HeroIllustration width={heroArt.width} style={[styles.heroArt, { right: heroArt.right }]} />
+              <HeroIllustration
+                width={heroArt.width}
+                opacity={HERO_ART_OPACITY}
+                style={[styles.heroArt, { right: heroArt.right }]}
+              />
               <View style={[styles.identity, { width: heroArt.identityWidth }]}>
                 <View style={styles.avatarRing}>
                   <Avatar
@@ -495,6 +502,7 @@ export default function Home() {
             <Skeleton height={210} borderRadius={24} />
           ) : data?.points ? (
             <View style={[styles.card, styles.pointsPass, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('raised')]}>
+              <FrostedSheen radius={18} />
               <View style={[styles.passRibbon, { borderBottomColor: colors.border }]}>
                 <View style={styles.passType}>
                   <Icon name="zap" size={14} color="primary" />
@@ -505,11 +513,11 @@ export default function Home() {
                 {data.rank ? <Badge label={`Top ${data.rank.topPercent}%`} variant="success" /> : null}
               </View>
 
-              {/* Point Balance */}
+              {/* Points */}
               <View style={styles.balanceRow}>
                 <View>
                   <Typography variant="caption" color="textMuted">
-                    TOTAL BALANCE
+                    TOTAL POINTS
                   </Typography>
                   <Typography color="text" style={styles.balance}>
                     {formatNumber(data.points.balance)}
@@ -542,6 +550,7 @@ export default function Home() {
                 <Button label="History" variant="outline" onPress={() => navigation.navigate('Points')} containerStyle={styles.flex} />
                 <Button label="Leaderboard" onPress={() => navigation.navigate('Leaderboard')} containerStyle={styles.flex} />
               </View>
+              <FrostedRim radius={18} />
             </View>
           ) : null}
 
@@ -557,6 +566,7 @@ export default function Home() {
                 pressed && styles.pressed,
               ]}
             >
+              <FrostedSheen radius={14} />
               <View style={[styles.iconTile, { backgroundColor: colors.primarySolid }]}>
                 <Icon name="megaphone" size={20} color="white" />
               </View>
@@ -583,6 +593,7 @@ export default function Home() {
               },
             ]}
           >
+            <FrostedSheen radius={16} />
             <View
               style={[
                 styles.finderTabs,
@@ -724,6 +735,7 @@ export default function Home() {
             <View style={styles.section}>
               <SectionHeader title="Recent Activity" actionLabel="History" onAction={() => navigation.navigate('Points')} />
               <View style={[styles.card, styles.list, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('flat')]}>
+                <FrostedSheen radius={16} />
                 {data.activity.map((t, i) => (
                   <View
                     key={t.id}
@@ -746,6 +758,7 @@ export default function Home() {
                     </Typography>
                   </View>
                 ))}
+                <FrostedRim radius={16} />
               </View>
             </View>
           ) : null}
@@ -761,6 +774,7 @@ export default function Home() {
               pressed && styles.pressed,
             ]}
           >
+            <FrostedSheen radius={16} />
             <View style={[styles.iconTile, { backgroundColor: colors.success }]}>
               <Icon name="message" size={20} color="white" />
             </View>
@@ -872,6 +886,7 @@ function QuickAction({ icon, title, meta, onPress }: { icon: IconName; title: st
         pressed && styles.pressed,
       ]}
     >
+      <FrostedSheen radius={14} />
       <View style={[styles.iconTile, { backgroundColor: withAlpha(colors.primary, 0.15) }]}>
         <Icon name={icon} size={20} color="primary" />
       </View>

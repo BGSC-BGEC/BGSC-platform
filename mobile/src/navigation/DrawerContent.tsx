@@ -1,15 +1,18 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 
 import { Avatar } from '../components/Avatar';
 import { Icon, type IconName } from '../icons/Icon';
 import { Typography } from '../typography/Typography';
 import { FONT_FAMILIES } from '../theme/typography';
 import { useTheme } from '../theme/ThemeProvider';
-import { withAlpha } from '../theme/colors';
 import { useAuth } from '../../store/auth';
+import { GLASS_ACTIVE_FILL, GLASS_ACTIVE_GLOW, GLASS_ACTIVE_INK, glassTokens } from './glass';
+import { GlassSurface } from './GlassSurface';
 import { useConfirmLogout } from '../hooks/useConfirmLogout';
 import { useAsyncResource } from '../hooks/useAsyncResource';
 import { eventsRepository } from '../repositories/EventsRepository';
@@ -36,9 +39,14 @@ function isRegistrationOpen(e: { registration: { opens_at: string | null; closes
   return opens <= now && now < Date.parse(e.registration.closes_at);
 }
 
-/** v2/Drawer — profile card, sections (active = current drawer route), Log out. */
+/**
+ * Side drawer in the bottom tab bar's design language: a floating liquid-glass panel,
+ * pill-shaped rows, the active row as the coral pill with dark ink, haptic taps.
+ * Profile card, sections (active = current drawer route), Log out.
+ */
 export function DrawerContent({ state, navigation }: DrawerContentComponentProps) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
+  const glass = glassTokens(isDark);
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const confirmLogout = useConfirmLogout();
@@ -86,35 +94,51 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
     .filter(Boolean)
     .join(' · ');
 
+  const tap = () => {
+    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
   const renderItem = (item: Item) => {
     const active = item.screen
       ? current === item.route && activeTabName === item.screen
       : current === item.route;
-    const tint = active ? 'primary' : 'text';
+    const ink = active ? GLASS_ACTIVE_INK : glass.inactiveInk;
+    const badgeText = badge[item.label] || badge[item.route];
     return (
       <Pressable
         key={item.screen ? `${item.route}-${item.screen}` : item.route}
-        onPress={() => go(item.route, item.screen)}
+        onPress={() => {
+          tap();
+          go(item.route, item.screen);
+        }}
         accessibilityRole="button"
         accessibilityState={{ selected: active }}
-        style={({ pressed }) => [
-          styles.item,
-          active && {
-            backgroundColor: withAlpha(colors.primary, 0.16),
-            borderColor: withAlpha(colors.primary, 0.38),
-            borderWidth: 1,
-          },
-          pressed && styles.pressed,
-        ]}
+        style={({ pressed }) => [styles.item, active && styles.itemActive, pressed && styles.pressed]}
       >
-        <Icon name={item.icon} size={20} color={active ? 'primary' : 'textMuted'} />
-        <Typography variant="body" color={tint} style={styles.itemLabel}>
+        {/* Active item = the tab bar's coral pill. */}
+        {active ? (
+          <LinearGradient
+            pointerEvents="none"
+            colors={GLASS_ACTIVE_FILL}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={[StyleSheet.absoluteFill, styles.pill]}
+          />
+        ) : null}
+        <Icon name={item.icon} size={20} color={ink} />
+        <Typography
+          variant="body"
+          style={[
+            styles.itemLabel,
+            active ? { color: GLASS_ACTIVE_INK, fontFamily: FONT_FAMILIES.bodyBold } : { color: colors.text },
+          ]}
+        >
           {item.label}
         </Typography>
-        {badge[item.label] || badge[item.route] ? (
-          <View style={[styles.badge, { backgroundColor: colors.accentMuted }]}>
-            <Typography variant="caption" color="primary" style={styles.badgeText}>
-              {badge[item.label] || badge[item.route]}
+        {badgeText ? (
+          <View style={[styles.badge, { backgroundColor: active ? 'rgba(20, 24, 33, 0.14)' : colors.accentMuted }]}>
+            <Typography variant="caption" style={[styles.badgeText, { color: active ? GLASS_ACTIVE_INK : colors.primary }]}>
+              {badgeText}
             </Typography>
           </View>
         ) : null}
@@ -123,81 +147,124 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
   };
 
   return (
-    <ScrollView
-      style={{ backgroundColor: colors.surface }}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 32 }]}
-    >
-      <Pressable
-        onPress={() => go('Profile')}
-        accessibilityRole="button"
-        accessibilityLabel="View profile"
-        style={({ pressed }) => [
-          styles.profile,
-          {
-            backgroundColor: withAlpha(colors.surfaceInner, 0.85),
-            borderColor: withAlpha(colors.border, 0.75),
-            borderTopColor: withAlpha('#FFFFFF', 0.2),
-          },
-          pressed && styles.pressed,
-        ]}
-      >
-        <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={48} />
-        <View style={styles.profileText}>
-          <Typography variant="body" color="text" style={styles.itemLabel} numberOfLines={1}>
-            {user?.fullName || user?.username || 'Your profile'}
+    // Full-height glass panel attached to the left edge; only the right corners round.
+    <View style={styles.frame}>
+      <GlassSurface radius={PANEL_RADIUS} style={styles.panel}>
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            { paddingTop: insets.top + 16, paddingBottom: Math.max(insets.bottom, 12) + 8 },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
+          <Pressable
+            onPress={() => {
+              tap();
+              go('Profile');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="View profile"
+            style={({ pressed }) => [
+              styles.profile,
+              {
+                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.55)',
+                borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.06)',
+              },
+              pressed && styles.pressed,
+            ]}
+          >
+            <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={48} />
+            <View style={styles.profileText}>
+              <Typography variant="body" color="text" style={styles.itemLabel} numberOfLines={1}>
+                {user?.fullName || user?.username || 'Your profile'}
+              </Typography>
+              <Typography variant="bodySmall" style={[styles.meta, { color: glass.inactiveInk }]} numberOfLines={1}>
+                {meta}
+              </Typography>
+            </View>
+            <Icon name="chevron-right" size={18} color={glass.inactiveInk} />
+          </Pressable>
+
+          <View style={styles.group}>{PRIMARY.map(renderItem)}</View>
+          <View style={[styles.divider, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)' }]} />
+          <View style={styles.group}>{SECONDARY.map(renderItem)}</View>
+
+          <View style={styles.spacer} />
+
+          <Pressable
+            onPress={() => {
+              tap();
+              navigation.closeDrawer();
+              void confirmLogout();
+            }}
+            accessibilityRole="button"
+            style={({ pressed }) => [styles.item, pressed && styles.pressed]}
+          >
+            <Icon name="arrow-left" size={20} color="dangerText" />
+            <Typography variant="body" style={[styles.itemLabel, { color: colors.dangerText }]}>
+              Log out
+            </Typography>
+          </Pressable>
+          <Typography variant="mono" style={[styles.version, { color: glass.inactiveInk }]}>
+            BGSC 1.0.0
           </Typography>
-          <Typography variant="bodySmall" color="textMuted" style={styles.meta} numberOfLines={1}>
-            {meta}
-          </Typography>
-        </View>
-        <Icon name="chevron-right" size={18} color="textMuted" />
-      </Pressable>
-
-      <View style={styles.group}>{PRIMARY.map(renderItem)}</View>
-      <View style={[styles.divider, { backgroundColor: colors.border }]} />
-      <View style={styles.group}>{SECONDARY.map(renderItem)}</View>
-
-      <View style={styles.spacer} />
-
-      <Pressable
-        onPress={() => {
-          navigation.closeDrawer();
-          void confirmLogout();
-        }}
-        accessibilityRole="button"
-        style={({ pressed }) => [styles.item, pressed && styles.pressed]}
-      >
-        <Icon name="arrow-left" size={20} color="dangerText" />
-        <Typography variant="body" style={[styles.itemLabel, { color: colors.dangerText }]}>
-          Log out
-        </Typography>
-      </Pressable>
-      <Typography variant="mono" color="textMuted" style={styles.version}>
-        BGSC 1.0.0
-      </Typography>
-    </ScrollView>
+        </ScrollView>
+      </GlassSurface>
+    </View>
   );
 }
 
+/** Rounding on the panel's right-hand corners (the left side meets the screen edge). */
+const PANEL_RADIUS = 28;
+/** Menu rows are pills, like the tab bar's active indicator. */
+const ITEM_HEIGHT = 46;
+
 const styles = StyleSheet.create({
-  content: { flexGrow: 1, paddingHorizontal: 16, gap: 20 },
+  frame: { flex: 1 },
+  // Square on the left (flush with the screen edge), rounded on the right; no left
+  // border so the rim doesn't draw a line down the screen edge.
+  panel: {
+    flex: 1,
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    borderLeftWidth: 0,
+  },
+  content: { flexGrow: 1, paddingHorizontal: 12, gap: 18 },
   profile: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
     padding: 12,
-    borderRadius: 20,
-    borderWidth: 1,
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth * 2,
   },
   profileText: { flex: 1, gap: 4 },
   meta: { fontSize: 11 },
   group: { gap: 4 },
-  item: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 12 },
+  item: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    height: ITEM_HEIGHT,
+    paddingHorizontal: 16,
+    borderRadius: ITEM_HEIGHT / 2,
+  },
+  // Coloured glow under the active pill (iOS), like the tab bar's indicator.
+  itemActive: Platform.select({
+    ios: {
+      shadowColor: GLASS_ACTIVE_GLOW,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.4,
+      shadowRadius: 10,
+    },
+    default: {},
+  }) as object,
+  pill: { borderRadius: ITEM_HEIGHT / 2 },
   itemLabel: { flex: 1, fontFamily: FONT_FAMILIES.bodySemiBold },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
   badgeText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15 },
-  divider: { height: 1 },
+  divider: { height: StyleSheet.hairlineWidth * 2, marginHorizontal: 8 },
   spacer: { flex: 1 },
-  version: { fontSize: 10 },
-  pressed: { opacity: 0.6 },
+  version: { fontSize: 10, paddingHorizontal: 16 },
+  pressed: { opacity: 0.7, transform: [{ scale: 0.98 }] },
 });

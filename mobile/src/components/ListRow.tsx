@@ -12,6 +12,8 @@ export interface ListRowProps {
   onPress?: () => void;
   danger?: boolean;
   disabled?: boolean;
+  /** Brand-tinted icon tile (orange icon on a soft orange square) instead of the neutral one. */
+  accent?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -23,14 +25,17 @@ export function ListRow({
   onPress,
   danger = false,
   disabled = false,
+  accent = false,
   style,
 }: ListRowProps) {
   const { colors } = useTheme();
+  const tileBg = danger ? colors.dangerMuted : accent ? colors.accentMuted : colors.surfaceInner;
+  const tileFg = danger ? 'danger' : accent ? 'primary' : 'textMuted';
   const content = (
     <>
       {icon ? (
-        <View style={[styles.icon, { backgroundColor: danger ? colors.dangerMuted : colors.surfaceInner }]}>
-          <Icon name={icon} size={18} color={danger ? 'danger' : 'textMuted'} />
+        <View style={[styles.icon, { backgroundColor: tileBg }]}>
+          <Icon name={icon} size={18} color={tileFg} />
         </View>
       ) : null}
       <View style={styles.text}>
@@ -52,7 +57,12 @@ export function ListRow({
       disabled={disabled}
       accessibilityRole="button"
       accessibilityState={{ disabled }}
-      style={[styles.row, disabled && styles.disabled, style]}
+      style={({ pressed }) => [
+        styles.row,
+        disabled && styles.disabled,
+        style,
+        pressed && { backgroundColor: colors.surfaceHighlight },
+      ]}
     >
       {content}
     </Pressable>
@@ -64,6 +74,6 @@ export function ListRow({
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 56, paddingVertical: 12 },
   disabled: { opacity: 0.5 },
-  icon: { padding: 8, borderRadius: 12 },
+  icon: { width: 36, height: 36, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   text: { flex: 1, minWidth: 0, gap: 4 },
 });

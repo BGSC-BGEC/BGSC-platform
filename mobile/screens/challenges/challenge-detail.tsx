@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Linking, Platform, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, RefreshControl, StyleSheet, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -127,9 +128,10 @@ export default function ChallengeDetail() {
   const editable = !!p && canSubmit(p);
   const acceptsNow = c?.status === 'active' && (!c.window.opens_at || Date.parse(c.window.opens_at) <= Date.now()) && (!c.window.closes_at || Date.parse(c.window.closes_at) >= Date.now()) && (!c.window.submissions_close_at || Date.parse(c.window.submissions_close_at) >= Date.now());
   const teamReady = !c?.teaming.enabled || !!captainTeam && captainTeam.members.length >= (c.teaming.team_size_min ?? 1) && captainTeam.members.length <= (c.teaming.team_size_max ?? Infinity);
-  return <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={[styles.screen, { backgroundColor: colors.background }]}>
+  return <View style={[styles.screen, { backgroundColor: colors.background }]}>
     <AppHeader title="Challenge" showBackButton showMenuButton={false} />
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
+    {/* Scrolls the focused proof field above the keyboard on both platforms. */}
+    <KeyboardAwareScrollView bottomOffset={24} keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.primary} />}>
       {loading && <View style={styles.body}><SkeletonCard /><SkeletonCard /></View>}
       {error && <View style={styles.body}><ErrorState variant={c ? 'inline' : 'screen'} message={error} onRetry={() => void load(true)} /></View>}
@@ -231,11 +233,11 @@ export default function ChallengeDetail() {
           {!p && <Typography variant="caption" color="textMuted">{c.counts.accepted} accepted · {c.counts.approved} completed</Typography>}
         </View>
       </>}
-    </ScrollView>
+    </KeyboardAwareScrollView>
     {!loading && c && !p && <View style={[styles.cta, { backgroundColor: colors.surface, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, 16) }]}>
       <Typography variant="caption" color="textMuted">{!acceptsNow ? 'Acceptance is closed or has not opened yet.' : c.window.time_limit_minutes ? `Your ${c.window.time_limit_minutes}-minute timer starts when you accept.` : 'Ready when you are.'}</Typography>
       <Button label={c.teaming.enabled ? 'Accept for team' : 'Accept and start'} fullWidth loading={busy} disabled={!acceptsNow || !teamReady} onPress={() => void act(accepted)} />
     </View>}
-  </KeyboardAvoidingView>;
+  </View>;
 }
 const styles = StyleSheet.create({ screen: { flex: 1 }, content: { width: '100%', maxWidth: 720, alignSelf: 'center' }, body: { padding: 20, gap: 20 }, hero: { minHeight: 200, justifyContent: 'flex-end', padding: 20, overflow: 'hidden' }, watermark: { position: 'absolute', right: 0, top: -20, transform: [{ rotate: '12deg' }] }, row: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 12 }, flex: { flex: 1, minWidth: 100, gap: 4 }, grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 }, tile: { flexGrow: 1, flexBasis: '46%', minWidth: 128 }, resultIcon: { alignSelf: 'center', padding: 24, borderRadius: 60 }, cta: { padding: 16, gap: 10, borderTopWidth: 1 } });

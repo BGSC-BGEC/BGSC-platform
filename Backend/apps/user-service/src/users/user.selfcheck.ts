@@ -7,7 +7,7 @@
 import assert from 'assert';
 import { IUser, RESERVED_USERNAMES, UserRole, userSnapshotOf as snapshotOf } from '@bgsc/shared';
 import { maskEmail, maskPhone, visibilityFor, serializeUser } from './user.serializer';
-import { computeRating, RATING_VERSION, RATING_WEIGHTS } from './playerCard';
+import { CARD_TIERS, computeRating, RATING_VERSION, RATING_WEIGHTS, tierForRating } from './playerCard';
 import { sniffImage } from '../storage/storage';
 import { isUuid, ListUsersQuery, UpdateProfileSchema } from './user.schemas';
 import { userRoutes } from './user.routes';
@@ -130,6 +130,18 @@ assert.strictEqual(
 );
 
 /* --------------------------------- rating --------------------------------- */
+
+// Card tiers: each threshold is inclusive, the ladder is ascending, and a rating never falls off it.
+for (let i = 0; i < CARD_TIERS.length; i++) {
+    const t = CARD_TIERS[i];
+    assert.strictEqual(tierForRating(t.min), t.tier, `rating ${t.min} reaches ${t.tier}`);
+    if (i > 0) {
+        assert.ok(t.min > CARD_TIERS[i - 1].min, 'tier thresholds ascend');
+        assert.strictEqual(tierForRating(t.min - 1), CARD_TIERS[i - 1].tier, `one below ${t.tier} stays ${CARD_TIERS[i - 1].tier}`);
+    }
+}
+assert.strictEqual(tierForRating(0), 'Rookie', 'a new user is a Rookie');
+assert.strictEqual(tierForRating(1e9), 'Legend', 'there is no rating above the top tier');
 
 const r = computeRating({ participations: 3, podiums: 2, challenges: 4, points_balance: 260 });
 assert.strictEqual(r.rating, 3 * 2 + 2 * 15 + 4 * 5 + 5, 'rating matches the formula');
