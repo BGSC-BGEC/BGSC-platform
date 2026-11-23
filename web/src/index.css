@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* `dark:` utilities follow the in-app theme toggle (themeStore puts `.dark` on <html>), not the OS
+   preference — otherwise light mode on a dark-OS machine still gets every `dark:` style. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-border: var(--border);
   --color-input: var(--border-strong);

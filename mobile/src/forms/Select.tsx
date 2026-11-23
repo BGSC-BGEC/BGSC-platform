@@ -257,7 +257,7 @@ export function Select<T = string>({
                     onPress={() => setModalVisible(false)}
                     style={[styles.doneBtn, { backgroundColor: colors.primary }]}
                   >
-                    <Typography variant="button" color="primaryText">
+                    <Typography variant="button" color="onPrimary">
                       Done
                     </Typography>
                   </Pressable>

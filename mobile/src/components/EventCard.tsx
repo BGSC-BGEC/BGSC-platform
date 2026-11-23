@@ -19,7 +19,7 @@ export const EVENT_CATEGORY_STYLE: Record<
   { pill: BadgeVariant; cover: string; tagColor: string; gradEnd: string }
 > = {
   bgec: { pill: 'info', cover: '#7354BF', tagColor: '#68B5D9', gradEnd: '#D96A27' },
-  leagues: { pill: 'primary', cover: '#E07A40', tagColor: '#F3A775', gradEnd: '#E07A40' },
+  leagues: { pill: 'primary', cover: '#DF7A5E', tagColor: '#EFA996', gradEnd: '#DF7A5E' },
   fitsoc: { pill: 'success', cover: '#339E6B', tagColor: '#34D399', gradEnd: '#2D8A58' },
   general: { pill: 'muted', cover: '#5B8FA8', tagColor: '#93C5FD', gradEnd: '#4A6F82' },
 };
@@ -158,8 +158,8 @@ export function EventCard({
           <Svg width="100%" height={126} style={StyleSheet.absoluteFill}>
             <Defs>
               <LinearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="85%">
-                <Stop offset="0%" stopColor="#1C2125" />
-                <Stop offset="40%" stopColor="#2A3035" />
+                <Stop offset="0%" stopColor="#0E1118" />
+                <Stop offset="40%" stopColor="#1B202A" />
                 <Stop offset="100%" stopColor={themeAccent.gradEnd} />
               </LinearGradient>
             </Defs>
@@ -177,7 +177,7 @@ export function EventCard({
             <Svg width={115} height={115} viewBox="0 0 120 120">
               <Path
                 d="M 34 26 L 86 26 C 86 54, 76 68, 60 72 C 44 68, 34 54, 34 26 Z"
-                stroke="#F3A775"
+                stroke="#EFA996"
                 strokeWidth="6"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -186,7 +186,7 @@ export function EventCard({
               />
               <Path
                 d="M 34 35 C 16 35, 14 56, 34 56"
-                stroke="#F3A775"
+                stroke="#EFA996"
                 strokeWidth="6"
                 strokeLinecap="round"
                 fill="none"
@@ -194,7 +194,7 @@ export function EventCard({
               />
               <Path
                 d="M 86 35 C 104 35, 106 56, 86 56"
-                stroke="#F3A775"
+                stroke="#EFA996"
                 strokeWidth="6"
                 strokeLinecap="round"
                 fill="none"
@@ -202,7 +202,7 @@ export function EventCard({
               />
               <Path
                 d="M 54 72 L 54 86 M 66 72 L 66 86"
-                stroke="#F3A775"
+                stroke="#EFA996"
                 strokeWidth="5"
                 strokeLinecap="round"
                 fill="none"
@@ -210,7 +210,7 @@ export function EventCard({
               />
               <Path
                 d="M 42 86 L 78 86 L 84 98 L 36 98 Z"
-                stroke="#F3A775"
+                stroke="#EFA996"
                 strokeWidth="5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -303,7 +303,7 @@ export function EventCard({
                 <Typography
                   style={[
                     styles.ctaText,
-                    { color: cta.variant === 'outline' ? colors.primary : '#FFFFFF' },
+                    { color: cta.variant === 'outline' ? colors.primary : colors.onPrimary },
                   ]}
                 >
                   {cta.label}

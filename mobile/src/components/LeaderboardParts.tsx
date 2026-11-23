@@ -76,7 +76,7 @@ function CrownIcon({ size = 24 }: { size?: number }) {
       <Circle cx="5.5" cy="7.5" r="1.6" fill="#FFFFFF" stroke="#D97706" strokeWidth="0.8" />
       <Circle cx="12" cy="5" r="2" fill="#FFFFFF" stroke="#D97706" strokeWidth="0.8" />
       <Circle cx="18.5" cy="7.5" r="1.6" fill="#FFFFFF" stroke="#D97706" strokeWidth="0.8" />
-      <Circle cx="12" cy="14" r="1.2" fill="#E07A3F" />
+      <Circle cx="12" cy="14" r="1.2" fill="#DF7A5E" />
       <Rect x="3.5" y="17" width="17" height="3" rx="1.5" fill="#B45309" />
       <Rect x="4" y="17.5" width="16" height="2" rx="1" fill="#FDE68A" />
     </Svg>
@@ -97,9 +97,9 @@ export function Podium({
   const { isCompactPhone } = useResponsive();
   if (rows.length === 0) return null;
 
-  const championGold = isDark ? '#D97706' : '#E07A3F';
+  const championGold = isDark ? '#D97706' : '#DF7A5E';
   const championTopSheen = isDark ? 'rgba(254, 243, 199, 0.45)' : 'rgba(255, 255, 255, 0.55)';
-  const championGlow = isDark ? 'rgba(245, 158, 11, 0.35)' : 'rgba(224, 122, 63, 0.25)';
+  const championGlow = isDark ? 'rgba(245, 158, 11, 0.35)' : 'rgba(223, 122, 94, 0.25)';
 
   const silverPedestal = isDark ? '#3A424E' : '#E2E8F0';
   const silverTopSheen = isDark ? 'rgba(226, 232, 240, 0.35)' : 'rgba(255, 255, 255, 0.6)';
@@ -150,7 +150,7 @@ export function Podium({
             : '#B45309';
 
           const scorePillBg = isChampion
-            ? isDark ? '#B45309' : '#D4632A'
+            ? isDark ? '#B45309' : '#B4553C'
             : isDark
             ? 'rgba(255, 255, 255, 0.08)'
             : 'rgba(0, 0, 0, 0.06)';
@@ -227,7 +227,7 @@ export function Podium({
                   {
                     height: pedestalHeight,
                     backgroundColor: pedestalBg,
-                    shadowColor: isChampion ? championGlow : isDark ? '#1E2226' : '#D1CCC7',
+                    shadowColor: isChampion ? championGlow : isDark ? '#0B0E13' : '#D1CCC7',
                     shadowOpacity: isChampion ? 0.4 : 0.25,
                     shadowRadius: 12,
                     shadowOffset: { width: 0, height: 6 },
@@ -438,7 +438,7 @@ export function MyPositionPill({
   const { colors, isDark } = useTheme();
   if (!me) return null;
 
-  const pillBg = isDark ? '#1E2226' : '#FFFFFF';
+  const pillBg = isDark ? '#0B0E13' : '#FFFFFF';
   const pillBorder = colors.primary;
 
   return (

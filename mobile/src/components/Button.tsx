@@ -120,7 +120,7 @@ export function Button({
     onPress();
   };
 
-  const orangeAccent = colors.primary || '#f97316';
+  const orangeAccent = colors.primary;
 
   let backgroundColor = 'transparent';
   let borderColor = 'transparent';
@@ -133,7 +133,7 @@ export function Button({
       backgroundColor = orangeAccent;
       borderColor = withAlpha(orangeAccent, 0.65);
       borderTopColor = 'rgba(255, 255, 255, 0.45)';
-      textColor = '#FFFFFF';
+      textColor = colors.onPrimary;
       shadowStyle = {
         shadowColor: orangeAccent,
         shadowOffset: { width: 0, height: 4 },

@@ -15,19 +15,21 @@ export const PALETTE = {
   lightShadowDark: '#D1CCC7',     // Dark shadow
   lightShadowLight: '#FFFFFF',    // Light highlight shadow
 
-  // Dark mode - Soft slate/charcoal tones
-  darkBase: '#2C3135',            // Main background (dark slate)
-  darkCard: '#33383D',            // Card surface
-  darkCardInner: '#3A4045',       // Inner card layer (lighter)
-  darkText: '#E8E8E8',            // Primary text
-  darkTextMuted: '#ABABAB',       // Secondary text (v2 contrast fix)
-  darkShadowDark: '#1E2226',      // Dark shadow
-  darkShadowLight: '#3D4449',     // Light highlight shadow
+  // Dark mode - deep navy-black tones
+  darkBase: '#141821',            // Main background (navy-black)
+  darkCard: '#1B202A',            // Card surface
+  darkCardInner: '#232935',       // Inner card layer (lighter)
+  darkText: '#E8E8E8',            // Primary text (15:1 on the base)
+  darkTextMuted: '#ABABAB',       // Secondary text (8:1 on the base)
+  darkShadowDark: '#0B0E13',      // Dark shadow
+  darkShadowLight: '#262C38',     // Light highlight shadow
 
   // Accent colors
-  orange: '#E07A3F',              // Primary CTA (warm orange)
-  orangeDark: '#D4632A',          // Darker orange for press states
-  orangeSolid: '#BD5420',         // Solid orange behind white text (avatars) — passes contrast
+  orange: '#DF7A5E',              // Primary CTA (soft coral orange)
+  orangeDark: '#C9644A',          // Darker orange for press states
+  orangeSolid: '#B4553C',         // Solid orange behind white text (avatars) — 4.9:1
+  orangeLight: '#F0A48E',         // Highlight end of orange gradients
+  onOrange: '#141821',            // Text/icons ON the bright orange (white is only 2.9:1 there; this is 6:1)
   red: '#E74C3C',                 // Error/love/favorite
   redText: '#FF6B5E',             // Danger text on dark surfaces
   blue: '#5B8FA8',                // Info/links
@@ -80,8 +82,10 @@ export interface UIThemeColors {
 
   /** Primary brand CTA */
   primary: string;
-  /** Text on primary button */
+  /** White text — use on primarySolid, danger and other deep fills */
   primaryText: string;
+  /** Text/icons on the bright `primary` fill (dark — white fails contrast on the coral) */
+  onPrimary: string;
   /** Darker primary for press states */
   primaryDark: string;
   /** Solid primary fill behind white text (avatars, badges) */
@@ -135,6 +139,7 @@ export const lightThemeColors: UIThemeColors = {
 
   primary: PALETTE.orange,
   primaryText: PALETTE.white,
+  onPrimary: PALETTE.onOrange,
   primaryDark: PALETTE.orangeDark,
   primarySolid: PALETTE.orangeSolid,
 
@@ -183,6 +188,7 @@ export const darkThemeColors: UIThemeColors = {
 
   primary: PALETTE.orange,
   primaryText: PALETTE.white,
+  onPrimary: PALETTE.onOrange,
   primaryDark: PALETTE.orangeDark,
   primarySolid: PALETTE.orangeSolid,
 

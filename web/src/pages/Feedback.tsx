@@ -8,7 +8,6 @@ import {
   Clock,
   AlertTriangle,
   CheckCircle2,
-  AlertCircle,
   X,
 } from 'lucide-react'
 import type {
@@ -21,6 +20,7 @@ import type {
 import { feedbackService } from '../services/feedbackService'
 import { FeedbackTable } from '../components/feedback/FeedbackTable'
 import { TicketDetailModal } from '../components/feedback/TicketDetailModal'
+import { PageError } from '../components/ui/page-error'
 
 export const Feedback: React.FC = () => {
   const [allTickets, setAllTickets] = useState<FeedbackTicket[]>([])
@@ -226,21 +226,7 @@ export const Feedback: React.FC = () => {
       </div>
 
       {/* 2. Error Banner */}
-      {error && (
-        <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 text-xs text-foreground flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
-            <span>{error}</span>
-          </div>
-          <button
-            type="button"
-            onClick={handleRefresh}
-            className="font-bold underline hover:no-underline text-destructive cursor-pointer flex-shrink-0"
-          >
-            Retry
-          </button>
-        </div>
-      )}
+      {error && <PageError message={error} onRetry={handleRefresh} />}
 
       {/* 3. Metric Cards Grid */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

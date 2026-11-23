@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import { Search, FileText, PlusCircle, Trophy, AlertCircle, Download } from 'lucide-react'
+import { Search, FileText, PlusCircle, Trophy, Download } from 'lucide-react'
 import type {
   GlobalLeaderboardPage,
   LeaderboardDomain,
@@ -20,6 +20,7 @@ import { PointsLedgerModal } from '../components/leaderboard/PointsLedgerModal'
 import { EventLeaderboardPanel } from '../components/leaderboard/EventLeaderboardPanel'
 import { downloadCsv } from '../components/leaderboard/csv'
 import { Button } from '../components/ui/button'
+import { PageError } from '../components/ui/page-error'
 
 type BoardTab = 'global' | 'events' | 'challenges'
 
@@ -368,21 +369,7 @@ export const Leaderboard: React.FC = () => {
             </div>
           )}
 
-          {!isLoading && error && (
-            <div className="p-4 border border-rose-500/30 text-foreground bg-rose-500/5 rounded-xl flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-rose-500" />
-                <span className="text-sm">{error}</span>
-              </div>
-              <button
-                type="button"
-                onClick={handleRetry}
-                className="px-3 py-1 text-xs border border-border hover:border-foreground rounded-lg transition-colors cursor-pointer"
-              >
-                Retry
-              </button>
-            </div>
-          )}
+          {!isLoading && error && <PageError message={error} onRetry={handleRetry} />}
 
           {!isLoading && !error && filteredEntries.length === 0 && (
             <div className="p-12 text-center border border-dashed border-border rounded-xl bg-card dark:bg-transparent space-y-2">

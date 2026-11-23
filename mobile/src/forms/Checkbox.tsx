@@ -69,7 +69,7 @@ export function Checkbox({
           <Icon
             name="check"
             size={14}
-            color={colors.primaryText}
+            color={colors.onPrimary}
           />
         )}
       </View>

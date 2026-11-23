@@ -18,7 +18,7 @@ export default function SplashScreen() {
           <RadialGradient id="splash-glow" cx="195" cy="352" rx="195" ry="703" gradientUnits="userSpaceOnUse">
             <Stop offset="0" stopColor="#6B3D24" />
             <Stop offset="0.5" stopColor="#4B372D" />
-            <Stop offset="1" stopColor="#2B3036" />
+            <Stop offset="1" stopColor="#141821" />
           </RadialGradient>
         </Defs>
         <Rect width="390" height="844" fill="url(#splash-glow)" />

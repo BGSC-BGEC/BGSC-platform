@@ -132,7 +132,7 @@ export default function ChallengeDetail() {
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 32 }]}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load(true)} tintColor={colors.primary} />}>
       {loading && <View style={styles.body}><SkeletonCard /><SkeletonCard /></View>}
-      {error && <View style={styles.body}><ErrorState message={error} onRetry={() => void load(true)} /></View>}
+      {error && <View style={styles.body}><ErrorState variant={c ? 'inline' : 'screen'} message={error} onRetry={() => void load(true)} /></View>}
       {notice && <View style={styles.body}><Typography color="success" accessibilityLiveRegion="polite">{notice}</Typography></View>}
       {!loading && c && <>
         {!p && <View style={styles.hero}>
