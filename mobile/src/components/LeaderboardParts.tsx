@@ -274,7 +274,11 @@ export function Podium({
   );
 }
 
-/** One standings row: floating capsule card with rank, delta badge, avatar, name, and gold coin score */
+/**
+ * One standings row, as a plain list line: rank, avatar, name, score, with a hairline
+ * between rows. No card, border or shadow; your own row is marked with a faint tint and
+ * orange text instead.
+ */
 export function StandingRow({
   row,
   onPress,
@@ -294,15 +298,7 @@ export function StandingRow({
       ? row.previousRank - row.rank
       : null;
 
-  const cardBg = row.isMe
-    ? isDark
-      ? withAlpha(colors.primary, 0.14)
-      : withAlpha(colors.primary, 0.08)
-    : colors.surface;
-
-  const cardBorder = row.isMe
-    ? colors.primary
-    : colors.border;
+  const rowBg = row.isMe ? withAlpha(colors.primary, isDark ? 0.12 : 0.07) : 'transparent';
 
   const rankColor =
     row.rank === 1
@@ -320,16 +316,8 @@ export function StandingRow({
       onPress={onPress}
       disabled={!onPress}
       style={({ pressed }) => [
-        styles.rowCard,
-        {
-          backgroundColor: cardBg,
-          borderColor: cardBorder,
-          borderWidth: row.isMe ? 1.5 : 1,
-          shadowColor: isDark ? colors.shadowDark : colors.shadowDark,
-          shadowOpacity: row.isMe ? 0.25 : 0.1,
-          shadowRadius: row.isMe ? 8 : 4,
-          shadowOffset: { width: 0, height: 2 },
-        },
+        styles.rowLine,
+        { backgroundColor: rowBg, borderBottomColor: withAlpha(colors.border, 0.6) },
         pressed && styles.pressed,
       ]}
       accessibilityLabel={`Rank ${row.rank ?? 'unranked'}, ${row.name}, ${row.score} ${unit}`}
@@ -340,7 +328,7 @@ export function StandingRow({
           variant="caption"
           style={styles.trophyIcon}
         >
-          {row.rank === 1 ? '🥇' : row.rank === 2 ? '🥈' : row.rank === 3 ? '🥉' : row.rank && row.rank <= 5 ? '⭐' : '•'}
+          {row.rank === 1 ? '🥇' : row.rank === 2 ? '🥈' : row.rank === 3 ? '🥉' : ''}
         </Typography>
         <Typography
           variant="mono"
@@ -355,11 +343,8 @@ export function StandingRow({
         name={row.name}
         uri={row.avatarUrl}
         size={34}
-        ring
-        style={{
-          borderColor: row.isMe ? colors.primary : colors.border,
-          borderWidth: row.isMe ? 2 : 1,
-        }}
+        ring={!!row.isMe}
+        style={row.isMe ? { borderColor: colors.primary, borderWidth: 2 } : undefined}
       />
 
       {/* Identity & Rank Delta */}
@@ -570,17 +555,16 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   embossedNumber: {
-    fontFamily: FONT_FAMILIES.bodyBlack,
+    fontFamily: FONT_FAMILIES.bodyBold,
     letterSpacing: -2,
   },
-  rowCard: {
+  rowLine: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    paddingVertical: 7,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    marginBottom: 5,
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   pressed: { opacity: 0.8 },
   rankBadge: {

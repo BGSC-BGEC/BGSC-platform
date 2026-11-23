@@ -316,7 +316,7 @@ export default function Auction() {
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <AppHeader title="Live auction" showBackButton showMenuButton={false} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Status strip */}
+        {/* Status line: the status pill (it is a status), lot counter, and a link to bids/players */}
         <View style={styles.row}>
           <View style={[styles.pill, { backgroundColor: statusPill.bg }]}>
             {live.status === 'live' ? <View style={[styles.dot, { backgroundColor: colors.dangerText }]} /> : null}
@@ -328,29 +328,29 @@ export default function Auction() {
           <Pressable
             onPress={() => navigation.navigate(myTeam ? 'MyBids' : 'AuctionLots', { eventRef })}
             accessibilityRole="button"
+            accessibilityLabel={myTeam ? `${myTeam.name}: my bids` : 'All players'}
             hitSlop={12}
-            style={({ pressed }) => [styles.pill, styles.teamPillBox, { backgroundColor: colors.accentMuted }, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.headerLink, pressed && styles.pressed]}
           >
-            <Icon name={myTeam ? 'gavel' : 'users'} size={12} color="primary" />
-            <Typography color="primary" style={[styles.teamPill, styles.shrink]} numberOfLines={1}>
-              {myTeam ? myTeam.name : 'Players'}
+            <Typography color="primary" style={[styles.linkText, styles.shrink]} numberOfLines={1}>
+              {myTeam ? 'My bids' : 'Players'}
             </Typography>
+            <Icon name="chevron-right" size={16} color="primary" />
           </Pressable>
         </View>
 
         {error ? (
-          <View accessibilityRole="alert" style={[styles.strip, { backgroundColor: colors.warningMuted }]}>
-            <Icon name="activity" size={16} color="warning" />
-            <Typography style={[styles.small12, styles.flex, { color: colors.warning }]}>Connection unstable — retrying…</Typography>
-          </View>
+          <Typography accessibilityRole="alert" style={[styles.small, { color: colors.warning }]}>
+            Connection unstable — retrying…
+          </Typography>
         ) : null}
 
         {live.status === 'not_started' ? (
-          <View style={[styles.card, styles.center, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <Typography variant="bodySmall" color="textMuted">
-              Auction starts in
+          <View style={styles.center}>
+            <Typography color="textMuted" style={styles.kicker}>
+              AUCTION STARTS IN
             </Typography>
-            <Typography color="text" style={styles.bigClock}>
+            <Typography color="text" style={styles.bigClock} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
               {startsIn || 'moments'}
             </Typography>
             <Typography variant="bodySmall" color="textMuted" align="center">
@@ -360,43 +360,26 @@ export default function Auction() {
         ) : null}
 
         {live.status === 'paused' ? (
-          <View style={[styles.card, styles.paused, { backgroundColor: colors.warningMuted, borderColor: withAlpha(colors.warning, 0.45) }]}>
-            <View style={[styles.pauseTile, { backgroundColor: colors.warning }]}>
-              <View style={[styles.pauseBar, { backgroundColor: colors.background }]} />
-              <View style={[styles.pauseBar, { backgroundColor: colors.background }]} />
-            </View>
-            <View style={styles.flex}>
-              <Typography color="text" style={styles.semibold}>
-                Auction paused by the desk
-              </Typography>
-              <Typography variant="bodySmall" color="textMuted">
-                Timer frozen{lot ? ` on Lot ${lot.order}` : ''}. Bids resume when the desk restarts.
-              </Typography>
-            </View>
-          </View>
+          <Notice
+            tone="warning"
+            icon="clock"
+            title="Auction paused by the desk"
+            body={`Timer frozen${lot ? ` on Lot ${lot.order}` : ''}. Bids resume when the desk restarts.`}
+          />
         ) : null}
 
         {feedback ? <Notice {...feedback} /> : null}
 
-        {/* On the block */}
+        {/* On the block: the focal point — player, timer, then the current bid as the biggest number on screen */}
         {lot ? (
-          <View style={[styles.card, styles.block, { borderColor: colors.primary }]}>
-            <Svg style={StyleSheet.absoluteFill} preserveAspectRatio="none">
-              <Defs>
-                <LinearGradient id="on-block" x1="0.15" y1="0" x2="0.85" y2="1">
-                  <Stop offset="0.14" stopColor="#523324" />
-                  <Stop offset="0.86" stopColor={colors.surface} />
-                </LinearGradient>
-              </Defs>
-              <Rect width="100%" height="100%" fill="url(#on-block)" />
-            </Svg>
+          <View style={styles.block}>
             <View style={styles.row}>
               <Avatar name={lot.player.display_name} uri={lot.player.avatar_url} size={64} />
               <View style={styles.flex}>
                 <Typography color="primary" style={styles.kicker}>
                   {lot.status === 'settling' ? 'SETTLING…' : 'ON THE BLOCK'}
                 </Typography>
-                <Typography color="text" style={styles.playerName} numberOfLines={1}>
+                <Typography color="text" style={styles.playerName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                   {lot.player.display_name}
                 </Typography>
                 <Typography variant="bodySmall" color="textMuted">
@@ -405,43 +388,47 @@ export default function Auction() {
               </View>
               {live.status === 'live' ? <CountdownRing seconds={secondsLeft} total={live.config.bid_timer_seconds} /> : null}
             </View>
-            <View style={[styles.row, styles.alignEnd]}>
-              <View style={styles.flex}>
-                <Typography color="textMuted" style={styles.kicker}>
-                  {lot.current_bid != null ? 'CURRENT BID' : 'OPENING AT'}
+
+            <View>
+              <Typography color="textMuted" style={styles.kicker}>
+                {lot.current_bid != null ? 'CURRENT BID' : 'OPENING AT'}
+              </Typography>
+              <View style={[styles.row, styles.alignEnd, styles.gap8]}>
+                <Typography color="text" style={[styles.bid, styles.shrink]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                  {formatNumber(lot.current_bid ?? minBid)}
                 </Typography>
-                <View style={[styles.row, styles.alignEnd, styles.gap8]}>
-                  <Typography color="text" style={[styles.bid, styles.shrink]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                    {formatNumber(lot.current_bid ?? minBid)}
-                  </Typography>
-                  <Typography variant="mono" color="textMuted" style={styles.cr}>
-                    cr
-                  </Typography>
-                </View>
+                <Typography variant="mono" color="textMuted" style={styles.cr}>
+                  cr
+                </Typography>
               </View>
               {lot.current_bidder ? (
-                <View style={styles.leading}>
-                  <Typography color="textMuted" style={styles.kicker}>
-                    LEADING
+                <Typography color="textMuted" style={styles.leadingLine} numberOfLines={1}>
+                  Leading ·{' '}
+                  <Typography style={[styles.semibold, { color: isHighest ? colors.success : colors.text }]}>
+                    {isHighest ? 'You' : teamName(lot.current_bidder.team_id) ?? 'A team'}
                   </Typography>
-                  <Badge label={isHighest ? 'You' : teamName(lot.current_bidder.team_id) ?? ''} variant={isHighest ? 'success' : 'info'} />
-                </View>
+                </Typography>
               ) : null}
             </View>
-            <View style={styles.row}>
+
+            {/* Lot facts: plain columns with hairline dividers, no tiles */}
+            <View style={styles.statsRow}>
               {[
                 [formatNumber(lot.base_price), 'Base'],
                 [lot.oc_adjusted_price != null ? formatNumber(lot.oc_adjusted_price) : '—', 'OC-adjusted'],
                 [`+${formatNumber(increment)}`, 'Min raise'],
-              ].map(([v, l]) => (
-                <View key={l} style={[styles.stat, { backgroundColor: colors.background }]}>
-                  <Typography variant="mono" color="text" style={styles.mono14}>
-                    {v}
-                  </Typography>
-                  <Typography color="textMuted" style={styles.tiny}>
-                    {l}
-                  </Typography>
-                </View>
+              ].map(([v, l], i) => (
+                <React.Fragment key={l}>
+                  {i > 0 ? <View style={[styles.statDivider, { backgroundColor: colors.border }]} /> : null}
+                  <View style={styles.stat}>
+                    <Typography color="text" style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                      {v}
+                    </Typography>
+                    <Typography color="textMuted" style={styles.tiny}>
+                      {l}
+                    </Typography>
+                  </View>
+                </React.Fragment>
               ))}
             </View>
           </View>
@@ -459,13 +446,16 @@ export default function Auction() {
 
         {/* Captain panel, or the spectator note */}
         {myTeam && live.status !== 'finished' ? (
-          <View style={[styles.card, styles.panel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <View style={styles.row}>
-              <Typography variant="body" color="text" style={[styles.semibold, styles.flex]}>
-                Your purse
+          <View style={[styles.panel, { borderTopColor: colors.border }]}>
+            <View style={[styles.row, styles.alignBaseline]}>
+              <Typography color="text" style={[styles.panelTitle, styles.flex]} numberOfLines={1}>
+                {myTeam.name}
               </Typography>
-              <Typography variant="mono" color="text" style={styles.mono12}>
-                {formatNumber(myTeam.purse_remaining)} / {formatNumber(myTeam.purse_total)} cr
+              <Typography color="textMuted" style={styles.small}>
+                <Typography color="text" style={styles.purseValue}>
+                  {formatNumber(myTeam.purse_remaining)}
+                </Typography>
+                {` / ${formatNumber(myTeam.purse_total)} cr`}
               </Typography>
             </View>
             <View style={[styles.track, { backgroundColor: colors.surfaceInner }]}>
@@ -476,17 +466,13 @@ export default function Auction() {
                 ]}
               />
             </View>
-            <View style={styles.row}>
-              <Icon name="users" size={14} color="textMuted" />
-              <Typography variant="bodySmall" color="textMuted" style={styles.flex}>
-                Roster {myTeam.members_count}
-                {myTeam.size_max ? ` / ${myTeam.size_max}` : ''}
-                {event?.teaming.team_size_min && myTeam.members_count < event.teaming.team_size_min
-                  ? ` · need ${event.teaming.team_size_min - myTeam.members_count} more to field a side`
-                  : ''}
-              </Typography>
-            </View>
-            <View style={[styles.divider, { backgroundColor: colors.border }]} />
+            <Typography variant="bodySmall" color="textMuted">
+              Roster {myTeam.members_count}
+              {myTeam.size_max ? ` / ${myTeam.size_max}` : ''}
+              {event?.teaming.team_size_min && myTeam.members_count < event.teaming.team_size_min
+                ? ` · need ${event.teaming.team_size_min - myTeam.members_count} more to field a side`
+                : ''}
+            </Typography>
 
             {isHighest ? (
               <Notice tone="success" icon="check" title="You hold the highest bid" body={`${formatNumber(lot?.current_bid)} cr — wait for a raise.`} />
@@ -503,11 +489,11 @@ export default function Auction() {
                     onPress={() => setBidAmount(Math.max(minBid, amount - increment))}
                   />
                   <View style={[styles.flex, styles.centerItems]}>
-                    <Typography variant="mono" color="text" style={styles.yourBid}>
+                    <Typography color="text" style={styles.yourBid} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                       {formatNumber(amount)}
                     </Typography>
                     <Typography color="textMuted" style={styles.tiny}>
-                      your bid
+                      your bid · cr
                     </Typography>
                   </View>
                   <StepButton label="+" disabled={!canBid} onPress={() => setBidAmount(amount + increment)} />
@@ -522,15 +508,16 @@ export default function Auction() {
                         onPress={() => setBidAmount(target)}
                         disabled={!canBid}
                         accessibilityRole="button"
+                        accessibilityState={{ selected, disabled: !canBid }}
                         style={[
                           styles.chip,
                           selected
                             ? { backgroundColor: colors.primarySolid, borderColor: colors.primarySolid }
-                            : { backgroundColor: colors.surfaceInner, borderColor: colors.border },
+                            : { borderColor: colors.border },
                           !canBid && styles.disabled,
                         ]}
                       >
-                        <Typography color={selected ? 'primaryText' : 'text'} style={styles.chipText}>
+                        <Typography color={selected ? 'primaryText' : 'text'} style={styles.chipText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                           {lot?.current_bid != null ? `+${formatNumber(increment * k)}` : formatNumber(target)}
                         </Typography>
                       </Pressable>
@@ -552,21 +539,16 @@ export default function Auction() {
             )}
           </View>
         ) : !myTeam && live.status !== 'finished' ? (
-          <View style={[styles.card, styles.panel, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-            <View style={styles.row}>
-              <View style={[styles.iconTile, { backgroundColor: colors.surfaceInner }]}>
-                <Icon name="users" size={18} color="textMuted" />
-              </View>
-              <View style={styles.flex}>
-                <Typography variant="body" color="text" style={styles.semibold}>
-                  {isApprovedCaptain ? 'Create your team to bid' : 'You’re spectating'}
-                </Typography>
-                <Typography variant="bodySmall" color="textMuted">
-                  {isApprovedCaptain
-                    ? 'You’re an approved captain but don’t have a team yet. Create it from the event page.'
-                    : 'Only approved captains can bid. The board updates on its own.'}
-                </Typography>
-              </View>
+          <View style={[styles.panel, { borderTopColor: colors.border }]}>
+            <View>
+              <Typography variant="body" color="text" style={styles.semibold}>
+                {isApprovedCaptain ? 'Create your team to bid' : 'You’re spectating'}
+              </Typography>
+              <Typography variant="bodySmall" color="textMuted">
+                {isApprovedCaptain
+                  ? 'You’re an approved captain but don’t have a team yet. Create it from the event page.'
+                  : 'Only approved captains can bid. The board updates on its own.'}
+              </Typography>
             </View>
             {isApprovedCaptain ? (
               <Button label="Go to event" variant="outline" fullWidth onPress={() => navigation.navigate('EventDetails', { eventId: eventRef })} />
@@ -578,21 +560,24 @@ export default function Auction() {
         {lot ? (
           <View style={styles.section}>
             <SectionHeader title="Bid log" actionLabel="All lots" onAction={() => navigation.navigate('AuctionLots', { eventRef })} />
-            <View style={[styles.card, styles.list, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              {bids.length === 0 ? (
-                <Typography variant="body" color="textMuted" style={styles.listEmpty}>
-                  No bids yet for this player.
-                </Typography>
-              ) : (
-                bids.map((b, i) => {
+            {bids.length === 0 ? (
+              <Typography variant="bodySmall" color="textMuted">
+                No bids yet for this player.
+              </Typography>
+            ) : (
+              <View>
+                {bids.map((b, i) => {
                   const name = teamName(b.team_id) ?? 'A team';
                   const mine = b.team_id === myTeam?.team_id;
                   const leading = i === 0 && lot.current_bidder?.team_id === b.team_id;
                   return (
-                    <View key={b.bid_id} style={[styles.listRow, i < bids.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
-                      <Avatar name={name} size={30} color={authorColor(name, colors)} />
+                    <View
+                      key={b.bid_id}
+                      style={[styles.listRow, i < bids.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}
+                    >
+                      <Avatar name={name} size={32} color={authorColor(name, colors)} />
                       <View style={styles.flex}>
-                        <Typography color={leading ? 'text' : 'textMuted'} style={[styles.semibold, styles.small]}>
+                        <Typography color={leading ? 'text' : 'textMuted'} style={[styles.semibold, styles.small]} numberOfLines={1}>
                           {name}
                           {mine ? ' (you)' : ''}
                         </Typography>
@@ -601,35 +586,45 @@ export default function Auction() {
                           {timeAgo(b.placed_at)}
                         </Typography>
                       </View>
-                      <Typography variant="mono" color={leading ? 'text' : 'textMuted'} style={styles.mono13}>
-                        {formatNumber(b.amount)} cr
+                      <Typography color={leading ? 'text' : 'textMuted'} style={styles.rowAmount} numberOfLines={1}>
+                        {formatNumber(b.amount)}
+                        <Typography color="textMuted" style={styles.tiny}>
+                          {' '}cr
+                        </Typography>
                       </Typography>
                     </View>
                   );
-                })
-              )}
-            </View>
+                })}
+              </View>
+            )}
           </View>
         ) : null}
 
-        {/* Team purses */}
+        {/* Team purses: plain rows, purse on the right */}
         {live.teams.length ? (
           <View style={styles.section}>
             <SectionHeader title={live.status === 'finished' ? 'Final squads' : 'Team purses'} />
-            <View style={styles.grid}>
-              {live.teams.map((t) => (
-                <View key={t.team_id} style={[styles.card, styles.purse, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <View style={styles.row}>
-                    <View style={[styles.teamDot, { backgroundColor: authorColor(t.name, colors) }]} />
-                    <Typography color="text" style={[styles.semibold, styles.small12, styles.flex]} numberOfLines={1}>
+            <View>
+              {live.teams.map((t, i) => (
+                <View
+                  key={t.team_id}
+                  style={[styles.listRow, i < live.teams.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}
+                >
+                  <View style={[styles.teamDot, { backgroundColor: authorColor(t.name, colors) }]} />
+                  <View style={styles.flex}>
+                    <Typography color="text" style={[styles.semibold, styles.small]} numberOfLines={1}>
                       {t.name}
+                      {t.team_id === myTeam?.team_id ? ' (you)' : ''}
+                    </Typography>
+                    <Typography color="textMuted" style={styles.tiny}>
+                      {t.members_count} {t.members_count === 1 ? 'player' : 'players'}
                     </Typography>
                   </View>
-                  <Typography variant="mono" color="text" style={styles.mono15}>
-                    {formatNumber(t.purse_remaining)} cr
-                  </Typography>
-                  <Typography color="textMuted" style={styles.tiny}>
-                    {t.members_count} {t.members_count === 1 ? 'player' : 'players'}
+                  <Typography color="text" style={styles.rowAmount} numberOfLines={1}>
+                    {formatNumber(t.purse_remaining)}
+                    <Typography color="textMuted" style={styles.tiny}>
+                      {' '}cr
+                    </Typography>
                   </Typography>
                 </View>
               ))}
@@ -654,8 +649,8 @@ export default function Auction() {
               </View>
               <CountdownRing seconds={secondsLeft} total={live.config.bid_timer_seconds} size={44} stroke={3} />
             </View>
-            <View style={[styles.amountBox, { backgroundColor: colors.surfaceInner }]}>
-              <Typography color="text" style={styles.sheetAmount}>
+            <View style={styles.amountBox}>
+              <Typography color="text" style={styles.sheetAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                 {formatNumber(pending.amount)} cr
               </Typography>
               {pending.leadingBid != null && pending.leaderName ? (
@@ -674,7 +669,7 @@ export default function Auction() {
                   ['Purse', `${formatNumber(myTeam.purse_remaining)} → ${formatNumber(myTeam.purse_remaining - pending.amount)} cr`],
                   ['Roster', `${myTeam.members_count} → ${myTeam.members_count + 1}${myTeam.size_max ? ` of ${myTeam.size_max}` : ''}`],
                 ].map(([l, v], i) => (
-                  <View key={l} style={[styles.sheetRow, i === 0 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                  <View key={l} style={[styles.sheetRow, i === 0 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }]}>
                     <Typography variant="body" color="textMuted" style={styles.flex}>
                       {l}
                     </Typography>
@@ -709,9 +704,11 @@ function StepButton({ label, disabled, onPress }: { label: string; disabled?: bo
       disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={label === '+' ? 'Raise bid' : 'Lower bid'}
+      accessibilityState={{ disabled }}
+      hitSlop={6}
       style={({ pressed }) => [
         styles.stepBtn,
-        { backgroundColor: colors.surfaceInner, borderColor: colors.border },
+        { borderColor: colors.border },
         (pressed || disabled) && styles.disabled,
       ]}
     >
@@ -722,12 +719,16 @@ function StepButton({ label, disabled, onPress }: { label: string; disabled?: bo
   );
 }
 
-function Notice({ tone, icon, title, body }: { tone: Tone; icon: IconName; title: string; body?: string }) {
+/**
+ * Inline bid feedback: no tinted box or icon tile — a coloured rule on the left carries the tone.
+ * `icon` stays in the data (Feedback) for callers, but isn't drawn.
+ */
+function Notice({ tone, title, body }: { tone: Tone; icon?: IconName; title: string; body?: string }) {
   const { colors } = useTheme();
   const t = toneColors(tone, colors);
   return (
-    <View accessibilityRole="alert" style={[styles.card, styles.notice, { backgroundColor: t.bg, borderColor: t.border }]}>
-      <Icon name={icon} size={18} color={t.fg} />
+    <View accessibilityRole="alert" style={styles.notice}>
+      <View style={[styles.noticeRule, { backgroundColor: t.fg }]} />
       <View style={styles.flex}>
         <Typography color="text" style={[styles.semibold, styles.small]}>
           {title}
@@ -769,7 +770,7 @@ function ResultReveal({
   const over = sold && lot.sold_amount != null && base ? Math.round(((lot.sold_amount - base) / base) * 100) : null;
   const confettiColors = [colors.primary, colors.success, colors.info, colors.warning, colors.text];
   const next = result.next ? (
-    <View style={[styles.card, styles.revealNext, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View style={[styles.revealNext, { borderTopColor: colors.border }]}>
       <Avatar name={result.next.player.display_name} uri={result.next.player.avatar_url} size={40} />
       <View style={styles.flex}>
         <Typography color="textMuted" style={styles.revealKicker}>
@@ -798,9 +799,10 @@ function ResultReveal({
           <>
             <Svg style={StyleSheet.absoluteFill} preserveAspectRatio="none">
               <Defs>
+                {/* Theme colours only: the old fixed browns/near-black left a dark band in light mode. */}
                 <LinearGradient id="reveal" x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor="#6B3D24" />
-                  <Stop offset="0.55" stopColor="#141821" />
+                  <Stop offset="0" stopColor={colors.primary} stopOpacity={0.35} />
+                  <Stop offset="0.55" stopColor={colors.background} />
                   <Stop offset="1" stopColor={colors.background} />
                 </LinearGradient>
               </Defs>
@@ -822,21 +824,21 @@ function ResultReveal({
             <View style={[styles.revealAvatar, { borderColor: colors.text }]}>
               <Avatar name={lot.player.display_name} uri={lot.player.avatar_url} size={compact ? 64 : 96} />
             </View>
-            <Typography color="text" style={styles.revealName}>
+            <Typography color="text" style={styles.revealName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
               {lot.player.display_name}
             </Typography>
-            <View style={[styles.card, styles.revealCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={styles.row}>
-                <View style={[styles.flex, styles.gap8]}>
+            <View style={styles.revealCard}>
+              <View style={[styles.row, styles.alignEnd]}>
+                <View style={styles.flex}>
                   <Typography color="textMuted" style={styles.revealKicker}>
                     JOINS
                   </Typography>
-                  <View style={styles.inlineStart}>
-                    <Badge label={result.teamName ?? 'A team'} variant="info" />
-                  </View>
+                  <Typography color="text" style={styles.revealTeam} numberOfLines={1}>
+                    {result.teamName ?? 'A team'}
+                  </Typography>
                 </View>
                 <View style={styles.alignRight}>
-                  <Typography variant="mono" color="text" style={styles.revealAmount}>
+                  <Typography color="text" style={styles.revealAmount} numberOfLines={1}>
                     {formatNumber(lot.sold_amount)} cr
                   </Typography>
                   {over != null ? (
@@ -847,20 +849,23 @@ function ResultReveal({
                   ) : null}
                 </View>
               </View>
-              <View style={styles.row}>
+              <View style={[styles.statsRow, { borderTopColor: colors.border }, styles.revealStats]}>
                 {[
                   [String(lot.bids.length), 'bids'],
                   [formatNumber(base), 'base cr'],
                   [result.purseLeft != null ? formatNumber(result.purseLeft) : '—', 'purse left'],
-                ].map(([value, label]) => (
-                  <View key={label} style={[styles.stat, { backgroundColor: colors.background }]}>
-                    <Typography variant="mono" color="text" style={styles.mono14}>
-                      {value}
-                    </Typography>
-                    <Typography color="textMuted" style={styles.tiny}>
-                      {label}
-                    </Typography>
-                  </View>
+                ].map(([value, label], i) => (
+                  <React.Fragment key={label}>
+                    {i > 0 ? <View style={[styles.statDivider, { backgroundColor: colors.border }]} /> : null}
+                    <View style={styles.stat}>
+                      <Typography color="text" style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                        {value}
+                      </Typography>
+                      <Typography color="textMuted" style={styles.tiny}>
+                        {label}
+                      </Typography>
+                    </View>
+                  </React.Fragment>
                 ))}
               </View>
             </View>
@@ -868,7 +873,7 @@ function ResultReveal({
           </>
         ) : (
           <>
-            <View style={[styles.card, styles.revealCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.revealCard}>
               <View style={styles.row}>
                 <Avatar name={lot.player.display_name} uri={lot.player.avatar_url} size={44} style={styles.muted} />
                 <View style={styles.flex}>
@@ -896,66 +901,62 @@ function ResultReveal({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   flex: { flex: 1 },
-  flex2: { flex: 2 },
   gap: { gap: 16 },
   gap8: { gap: 8 },
   pressed: { opacity: 0.7 },
   disabled: { opacity: 0.45 },
   semibold: { fontFamily: FONT_FAMILIES.bodySemiBold },
   small: { fontSize: 13 },
-  small12: { fontSize: 12 },
   tiny: { fontSize: 11, lineHeight: 16 },
   mono12: { fontSize: 12 },
   mono13: { fontSize: 13 },
-  mono14: { fontSize: 14 },
-  mono15: { fontSize: 15 },
   kicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 1 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   alignEnd: { alignItems: 'flex-end' },
   alignRight: { alignItems: 'flex-end' },
   center: { alignItems: 'center' },
   centerItems: { alignItems: 'center' },
-  content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 32, gap: 16 },
-  card: { borderWidth: 1 },
+  alignBaseline: { alignItems: 'baseline' },
+  content: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 40, gap: 24 },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   pillText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
-  teamPill: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, lineHeight: 15 },
-  bigClock: { fontFamily: FONT_FAMILIES.hero, fontSize: 44, lineHeight: 52 },
-  block: { gap: 20, padding: 20, borderRadius: 24, overflow: 'hidden' },
-  playerName: { fontFamily: FONT_FAMILIES.hero, fontSize: 28, lineHeight: 48 },
-  bid: { fontFamily: FONT_FAMILIES.hero, fontSize: 56, lineHeight: 60 },
-  cr: { fontSize: 14, paddingBottom: 8 },
-  leading: { alignItems: 'flex-end', gap: 4, paddingBottom: 12, maxWidth: '45%' },
+  // 44pt tall tap target, text-only (no tinted pill).
+  headerLink: { flexDirection: 'row', alignItems: 'center', gap: 2, minHeight: 44, maxWidth: '45%' },
+  linkText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 14, lineHeight: 20 },
+  bigClock: { fontFamily: FONT_FAMILIES.hero, fontSize: 48, lineHeight: 56 },
+  block: { gap: 20 },
+  playerName: { fontFamily: FONT_FAMILIES.hero, fontSize: 28, lineHeight: 34 },
+  bid: { fontFamily: FONT_FAMILIES.hero, fontSize: 64, lineHeight: 70 },
+  cr: { fontSize: 15, paddingBottom: 10 },
+  leadingLine: { fontSize: 14, lineHeight: 20, marginTop: 2 },
   shrink: { flexShrink: 1 },
-  teamPillBox: { maxWidth: '45%' },
-  stat: { flex: 1, gap: 2, padding: 12, borderRadius: 16 },
-  panel: { gap: 16, padding: 20, borderRadius: 24 },
-  track: { height: 8, borderRadius: 999, overflow: 'hidden' },
+  statsRow: { flexDirection: 'row', alignItems: 'center' },
+  stat: { flex: 1, alignItems: 'center', gap: 1 },
+  statDivider: { width: StyleSheet.hairlineWidth * 2, height: 28 },
+  statValue: { fontFamily: FONT_FAMILIES.hero, fontSize: 18, lineHeight: 22 },
+  // Captain panel: a section under a hairline, not a card.
+  panel: { gap: 14, paddingTop: 20, borderTopWidth: StyleSheet.hairlineWidth },
+  panelTitle: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 18, lineHeight: 24 },
+  purseValue: { fontFamily: FONT_FAMILIES.hero, fontSize: 18 },
+  track: { height: 6, borderRadius: 999, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: 999 },
-  divider: { height: 1 },
-  stepBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 16, borderWidth: 1 },
-  stepText: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 18, lineHeight: 24 },
-  yourBid: { fontSize: 28, lineHeight: 34 },
-  chip: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
-  chipText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 12, lineHeight: 15 },
-  iconTile: { padding: 8, borderRadius: 12 },
-  notice: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, borderRadius: 16 },
-  strip: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 12 },
-  paused: { flexDirection: 'row', alignItems: 'center', gap: 16, padding: 20, borderRadius: 24 },
-  pauseTile: { flexDirection: 'row', gap: 4, padding: 14, borderRadius: 14 },
-  pauseBar: { width: 4, height: 14, borderRadius: 1 },
-  section: { gap: 12 },
-  list: { borderRadius: 20, paddingHorizontal: 16, paddingVertical: 4 },
-  listEmpty: { paddingVertical: 16 },
+  // 52pt round steppers (were ~48×44 rounded boxes).
+  stepBtn: { width: 52, height: 52, borderRadius: 26, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  stepText: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 22, lineHeight: 26 },
+  yourBid: { fontFamily: FONT_FAMILIES.hero, fontSize: 36, lineHeight: 42 },
+  chip: { flex: 1, alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingHorizontal: 4, borderRadius: 999, borderWidth: 1 },
+  chipText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 13, lineHeight: 17 },
+  notice: { flexDirection: 'row', alignItems: 'stretch', gap: 12 },
+  noticeRule: { width: 3, borderRadius: 2 },
+  section: { gap: 10 },
   listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  purse: { flexBasis: '47%', flexGrow: 1, gap: 8, padding: 12, borderRadius: 20 },
-  teamDot: { width: 8, height: 8, borderRadius: 4 },
+  rowAmount: { fontFamily: FONT_FAMILIES.hero, fontSize: 17, lineHeight: 22 },
+  teamDot: { width: 10, height: 10, borderRadius: 5 },
   sheet: { gap: 16 },
   sheetName: { fontFamily: FONT_FAMILIES.hero, fontSize: 23, lineHeight: 29 },
-  amountBox: { alignItems: 'center', gap: 2, paddingVertical: 16, borderRadius: 20 },
-  sheetAmount: { fontFamily: FONT_FAMILIES.hero, fontSize: 44, lineHeight: 52 },
+  amountBox: { alignItems: 'center', gap: 2, paddingVertical: 8 },
+  sheetAmount: { fontFamily: FONT_FAMILIES.hero, fontSize: 48, lineHeight: 56 },
   sheetRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14 },
   reveal: { flex: 1, alignItems: 'center', gap: 24, padding: 24 },
   confetti: { position: 'absolute', height: 14, borderRadius: 2, opacity: 0.85 },
@@ -964,10 +965,11 @@ const styles = StyleSheet.create({
   revealCompact: { gap: 14 },
   soldCompact: { fontSize: 60, lineHeight: 66 },
   revealKicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, lineHeight: 15, letterSpacing: 1.2 },
-  revealName: { fontFamily: FONT_FAMILIES.hero, fontSize: 32, lineHeight: 48 },
-  revealNext: { alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 20 },
-  inlineStart: { flexDirection: 'row' },
+  revealName: { fontFamily: FONT_FAMILIES.hero, fontSize: 32, lineHeight: 38, alignSelf: 'stretch', textAlign: 'center' },
+  revealTeam: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 18, lineHeight: 24 },
+  revealNext: { alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth },
   muted: { opacity: 0.6 },
-  revealCard: { alignSelf: 'stretch', gap: 16, padding: 20, borderRadius: 24 },
-  revealAmount: { fontSize: 28, lineHeight: 34 },
+  revealCard: { alignSelf: 'stretch', gap: 18 },
+  revealStats: { paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth },
+  revealAmount: { fontFamily: FONT_FAMILIES.hero, fontSize: 30, lineHeight: 36 },
 });

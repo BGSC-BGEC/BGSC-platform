@@ -19,12 +19,12 @@ const EVENT_CARD_RADIUS = 18;
 /** Category style accents */
 export const EVENT_CATEGORY_STYLE: Record<
   EventCategory,
-  { pill: BadgeVariant; cover: string; tagColor: string; gradEnd: string }
+  { pill: BadgeVariant; cover: string; gradEnd: string }
 > = {
-  bgec: { pill: 'info', cover: '#7354BF', tagColor: '#68B5D9', gradEnd: '#D96A27' },
-  leagues: { pill: 'primary', cover: '#DF7A5E', tagColor: '#EFA996', gradEnd: '#DF7A5E' },
-  fitsoc: { pill: 'success', cover: '#339E6B', tagColor: '#34D399', gradEnd: '#2D8A58' },
-  general: { pill: 'muted', cover: '#5B8FA8', tagColor: '#93C5FD', gradEnd: '#4A6F82' },
+  bgec: { pill: 'info', cover: '#7354BF', gradEnd: '#D96A27' },
+  leagues: { pill: 'primary', cover: '#DF7A5E', gradEnd: '#DF7A5E' },
+  fitsoc: { pill: 'success', cover: '#339E6B', gradEnd: '#2D8A58' },
+  general: { pill: 'muted', cover: '#5B8FA8', gradEnd: '#4A6F82' },
 };
 
 /** Formats event data for the premium card presentation */
@@ -227,7 +227,7 @@ export function EventCard({
           <View style={styles.coverHeaderRow}>
             <View style={styles.badgeRow}>
               <View style={[styles.badgePill, { backgroundColor: 'rgba(24, 32, 40, 0.75)' }]}>
-                <Typography style={[styles.badgeText, { color: themeAccent.tagColor }]} numberOfLines={1}>
+                <Typography style={[styles.badgeText, styles.badgeTextPlain]} numberOfLines={1}>
                   {categoryLabel.toUpperCase()}
                 </Typography>
               </View>
@@ -380,24 +380,24 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     flexShrink: 0,
   },
+  badgeTextPlain: { color: '#FFFFFF' },
   dateStampDay: {
     fontFamily: FONT_FAMILIES.bodyBold,
     fontSize: 9.5,
     fontWeight: '700',
     letterSpacing: 1.0,
-    color: '#6BA4E8',
+    color: 'rgba(255, 255, 255, 0.8)',
     textTransform: 'uppercase',
     textShadowColor: 'rgba(0, 0, 0, 0.85)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
   dateStampDate: {
-    fontFamily: FONT_FAMILIES.bodyBold,
-    fontSize: 21,
-    lineHeight: 24,
-    fontWeight: '800',
+    fontFamily: FONT_FAMILIES.hero,
+    fontSize: 26,
+    lineHeight: 28,
     color: '#FFFFFF',
-    letterSpacing: -0.3,
+    letterSpacing: 0,
     marginTop: -2,
     textShadowColor: 'rgba(0, 0, 0, 0.85)',
     textShadowOffset: { width: 0, height: 1.5 },
@@ -410,10 +410,10 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   title: {
-    fontFamily: FONT_FAMILIES.bodyBold,
-    fontSize: 15.5,
-    lineHeight: 20,
-    fontWeight: '700',
+    fontFamily: FONT_FAMILIES.hero,
+    fontSize: 19,
+    lineHeight: 23,
+    letterSpacing: 0.2,
     marginBottom: 1,
   },
   metaRow: {

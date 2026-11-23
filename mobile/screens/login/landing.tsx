@@ -781,7 +781,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   stubDay: {
-    fontFamily: FONT_FAMILIES.brand,
+    fontFamily: FONT_FAMILIES.hero,
     fontSize: 34,
     lineHeight: 40,
   },
@@ -888,7 +888,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   podiumRank: {
-    fontFamily: FONT_FAMILIES.brand,
+    fontFamily: FONT_FAMILIES.hero,
     fontSize: 30,
     lineHeight: 36,
   },

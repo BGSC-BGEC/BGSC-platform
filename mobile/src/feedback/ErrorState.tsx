@@ -2,8 +2,6 @@ import React from 'react';
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 
 import { useTheme } from '../theme/ThemeProvider';
-import { withAlpha } from '../theme/colors';
-import { Icon } from '../icons/Icon';
 import { Typography } from '../typography/Typography';
 import { FONT_FAMILIES } from '../theme/typography';
 import { RetroTvError } from '../components/RetroTvError';
@@ -30,7 +28,8 @@ const TV_HEIGHT = 306;
 const TV_SCALE = 0.75;
 
 /**
- * v2 error banner — red-tinted card, icon tile, title, hint and a "Retry" link.
+ * Error message as plain text on the page (no tinted card or icon tile): a short red title, the
+ * hint in grey, and a "Try again" link.
  * "Not found" errors are not failures, so they render quietly instead: a muted line (inline) or the
  * retro TV (screen), with no red card.
  */
@@ -38,7 +37,7 @@ export function ErrorState({
   title = 'Something went wrong',
   message = 'Check your connection. Pull down to refresh or retry.',
   onRetry,
-  retryLabel = 'Retry',
+  retryLabel = 'Try again',
   style,
   variant = 'inline',
   notFound,
@@ -79,38 +78,37 @@ export function ErrorState({
   }
 
   return (
-    <View
-      accessibilityRole="alert"
-      style={[styles.card, { backgroundColor: colors.dangerMuted, borderColor: withAlpha(colors.danger, 0.4) }, style]}
-    >
-      <View style={[styles.iconTile, { backgroundColor: colors.danger }]}>
-        <Icon name="activity" size={18} color="white" />
-      </View>
-      <View style={styles.text}>
-        <Typography variant="body" color="text" style={styles.title}>
-          {title}
-        </Typography>
-        <Typography variant="bodySmall" color="textMuted">
-          {message}
-        </Typography>
-        {onRetry ? (
-          <Pressable onPress={onRetry} hitSlop={8} accessibilityRole="button" accessibilityLabel={retryLabel}>
-            <Typography variant="button" style={[styles.retry, { color: colors.dangerText }]}>
-              {retryLabel}
-            </Typography>
-          </Pressable>
-        ) : null}
-      </View>
+    <View accessibilityRole="alert" style={[styles.plain, style]}>
+      <Typography variant="body" style={[styles.title, { color: colors.dangerText }]}>
+        {title}
+      </Typography>
+      <Typography variant="bodySmall" color="textMuted" style={styles.message}>
+        {message}
+      </Typography>
+      {onRetry ? (
+        <Pressable
+          onPress={onRetry}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={retryLabel}
+          style={({ pressed }) => [styles.retryWrap, pressed && styles.pressed]}
+        >
+          <Typography variant="button" color="primary" style={styles.retry}>
+            {retryLabel}
+          </Typography>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, borderRadius: 20, borderWidth: 1 },
-  iconTile: { padding: 8, borderRadius: 12 },
-  text: { flex: 1, gap: 8 },
+  plain: { gap: 3, paddingVertical: 8 },
   title: { fontFamily: FONT_FAMILIES.bodySemiBold },
-  retry: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 13 },
+  message: { lineHeight: 19 },
+  retryWrap: { alignSelf: 'flex-start', marginTop: 6 },
+  retry: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 14 },
+  pressed: { opacity: 0.6 },
   quiet: { alignItems: 'center', gap: 6, paddingVertical: 24, paddingHorizontal: 16 },
   quietText: { textAlign: 'center', maxWidth: 320 },
   quietRetry: { textDecorationLine: 'underline' },

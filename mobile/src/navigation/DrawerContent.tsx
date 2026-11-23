@@ -21,7 +21,7 @@ import { leaderboardRepository } from '../repositories/LeaderboardRepository';
 
 type Item = { label: string; icon: IconName; route: string; screen?: string };
 
-/** Drawer routes, in order. `route` is the drawer screen; Settings is a pushed stack screen. */
+/** Drawer routes, in order. `route` is the drawer screen; Settings and About are pushed stack screens. */
 const PRIMARY: Item[] = [
   { label: 'Home', icon: 'home', route: 'MainTabs', screen: 'HomeTab' },
   { label: 'Events', icon: 'calendar', route: 'MainTabs', screen: 'EventsTab' },
@@ -33,6 +33,7 @@ const PRIMARY: Item[] = [
 const SECONDARY: Item[] = [
   { label: 'Feedback & help', icon: 'message', route: 'Feedback' },
   { label: 'Settings', icon: 'settings', route: 'Settings' },
+  { label: 'About the devs', icon: 'code-slash-outline', route: 'About' },
 ];
 
 function isRegistrationOpen(e: { registration: { opens_at: string | null; closes_at: string } }, now: number) {
@@ -43,7 +44,8 @@ function isRegistrationOpen(e: { registration: { opens_at: string | null; closes
 /**
  * Side drawer in the bottom tab bar's design language: a floating liquid-glass panel,
  * pill-shaped rows, the active row as the coral pill with dark ink, haptic taps.
- * Profile card, sections (active = current drawer route), Log out.
+ * Profile header (unboxed: avatar, name, handle, points and rank), sections (active = current
+ * drawer route), Log out.
  */
 export function DrawerContent({ state, navigation }: DrawerContentComponentProps) {
   const { colors, isDark } = useTheme();
@@ -87,13 +89,7 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
     Events: openCount ? `${openCount} open` : undefined,
   };
 
-  const meta = [
-    user?.pointsBalance != null ? `${user.pointsBalance.toLocaleString()} pts` : null,
-    myRank ? `#${myRank.rank}` : null,
-    'View profile',
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const hairline = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)';
 
   const tap = () => {
     if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -158,36 +154,53 @@ export function DrawerContent({ state, navigation }: DrawerContentComponentProps
           ]}
           showsVerticalScrollIndicator={false}
         >
+          {/* Profile header: no box. Avatar, name, handle, then points and rank as bold numbers. */}
           <Pressable
             onPress={() => {
               tap();
               go('MainTabs', 'ProfileTab');
             }}
             accessibilityRole="button"
-            accessibilityLabel="View profile"
-            style={({ pressed }) => [
-              styles.profile,
-              {
-                backgroundColor: isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.55)',
-                borderColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.06)',
-              },
-              pressed && styles.pressed,
-            ]}
+            accessibilityLabel={`${user?.fullName || user?.username || 'Your'} profile`}
+            accessibilityHint="Opens your profile"
+            style={({ pressed }) => [styles.profile, pressed && styles.profilePressed]}
           >
-            <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={48} />
+            <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={60} />
             <View style={styles.profileText}>
-              <Typography variant="body" color="text" style={styles.itemLabel} numberOfLines={1}>
+              <Typography color="text" style={styles.profileName} numberOfLines={1}>
                 {user?.fullName || user?.username || 'Your profile'}
               </Typography>
-              <Typography variant="bodySmall" style={[styles.meta, { color: glass.inactiveInk }]} numberOfLines={1}>
-                {meta}
-              </Typography>
+              {user?.username ? (
+                <Typography style={[styles.handle, { color: glass.inactiveInk }]} numberOfLines={1}>
+                  @{user.username}
+                </Typography>
+              ) : null}
             </View>
-            <Icon name="chevron-right" size={18} color={glass.inactiveInk} />
+            {user?.pointsBalance != null || myRank ? (
+              <View style={styles.profileStats}>
+                {user?.pointsBalance != null ? (
+                  <Typography style={[styles.statLabel, { color: glass.inactiveInk }]}>
+                    <Typography color="text" style={styles.statValue}>
+                      {user.pointsBalance.toLocaleString()}
+                    </Typography>
+                    {'  points'}
+                  </Typography>
+                ) : null}
+                {myRank ? (
+                  <Typography style={[styles.statLabel, { color: glass.inactiveInk }]}>
+                    <Typography color="text" style={styles.statValue}>
+                      #{myRank.rank}
+                    </Typography>
+                    {'  rank'}
+                  </Typography>
+                ) : null}
+              </View>
+            ) : null}
           </Pressable>
+          <View style={[styles.divider, { backgroundColor: hairline }]} />
 
           <View style={styles.group}>{PRIMARY.map(renderItem)}</View>
-          <View style={[styles.divider, { backgroundColor: isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(15, 23, 42, 0.08)' }]} />
+          <View style={[styles.divider, { backgroundColor: hairline }]} />
           <View style={styles.group}>{SECONDARY.map(renderItem)}</View>
 
           <View style={styles.spacer} />
@@ -234,16 +247,15 @@ const styles = StyleSheet.create({
     borderLeftWidth: 0,
   },
   content: { flexGrow: 1, paddingHorizontal: 12, gap: 18 },
-  profile: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    borderRadius: 22,
-    borderWidth: StyleSheet.hairlineWidth * 2,
-  },
-  profileText: { flex: 1, gap: 4 },
-  meta: { fontSize: 11 },
+  // Lined up with the menu rows' icons (same 16px inset).
+  profile: { paddingHorizontal: 16, gap: 12 },
+  profilePressed: { opacity: 0.7 },
+  profileText: { gap: 1 },
+  profileName: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 20, lineHeight: 25, letterSpacing: -0.2 },
+  handle: { fontSize: 14, lineHeight: 19 },
+  profileStats: { flexDirection: 'row', gap: 18 },
+  statValue: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 14 },
+  statLabel: { fontSize: 14, lineHeight: 19 },
   group: { gap: 4 },
   item: {
     flexDirection: 'row',

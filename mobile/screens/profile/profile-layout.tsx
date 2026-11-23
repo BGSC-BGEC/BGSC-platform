@@ -17,6 +17,8 @@ export function ProfileLayout({
   onRefresh,
   isRoot = false,
   footer,
+  brandHeader = false,
+  showNotifications = true,
 }: {
   title: string;
   children: ReactNode;
@@ -26,12 +28,16 @@ export function ProfileLayout({
   isRoot?: boolean;
   /** Floats over the bottom of the screen (and rides above the keyboard), e.g. a "Save changes" button. */
   footer?: ReactNode;
+  /** Orange brand bar (as on the main sections) instead of the plain translucent header. */
+  brandHeader?: boolean;
+  /** Bell + avatar in the header (off on the notifications screen itself). */
+  showNotifications?: boolean;
 }) {
   const { colors, shadow } = useTheme();
   const insets = useSafeAreaInsets();
   const { gutter, isCompactPhone } = useResponsive();
   return <SafeAreaView edges={['left', 'right', 'bottom']} style={{ flex: 1, backgroundColor: colors.background }}>
-    <AppHeader title={title} showBackButton={!isRoot} showMenuButton={isRoot} />
+    <AppHeader title={title} showBackButton={!isRoot} showMenuButton={isRoot} showNotifications={showNotifications} tone={brandHeader ? 'brand' : undefined} />
     {/* Scrolls the focused field above the keyboard on both platforms. */}
     <KeyboardAwareScrollView
       style={{ flex: 1 }}

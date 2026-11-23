@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
+import { Pressable, StyleSheet, View, type TextStyle, type ViewStyle } from 'react-native';
 
 import { Typography } from '../typography/Typography';
 import { FONT_FAMILIES } from '../theme/typography';
@@ -12,16 +12,18 @@ export interface SectionHeaderProps {
   actionLabel?: string;
   onAction?: () => void;
   style?: ViewStyle;
+  /** Overrides for the title text, e.g. a larger size on a feed screen */
+  titleStyle?: TextStyle;
 }
 
 /** v2/SectionHeader — serif section title with an optional orange "See all" action. */
-export function SectionHeader({ title, subtitle, badge, actionLabel, onAction, style }: SectionHeaderProps) {
+export function SectionHeader({ title, subtitle, badge, actionLabel, onAction, style, titleStyle }: SectionHeaderProps) {
   const { colors } = useTheme();
   return (
     <View style={[styles.container, style]}>
       <View style={styles.row}>
         <View style={styles.titleRow}>
-          <Typography variant="h2" color="text" numberOfLines={1} style={styles.title}>
+          <Typography variant="h2" color="text" numberOfLines={1} style={titleStyle ? { ...styles.title, ...titleStyle } : styles.title}>
             {title}
           </Typography>
           {badge !== undefined && (

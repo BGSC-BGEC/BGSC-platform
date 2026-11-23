@@ -2,11 +2,10 @@ import React, { useEffect } from 'react';
 import { Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import { useNavigation, useRoute, type NavigationProp, type ParamListBase, type RouteProp } from '@react-navigation/native';
 import { Image } from 'expo-image';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { AppHeader } from '../../src/components/AppHeader';
 import { Avatar } from '../../src/components/Avatar';
-import { announcementTags, authorColor } from '../../src/components/AnnouncementCard';
+import { authorColor } from '../../src/components/AnnouncementCard';
 import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
 import { Skeleton } from '../../src/feedback/Skeleton';
@@ -19,12 +18,20 @@ import { useAsyncResource } from '../../src/hooks/useAsyncResource';
 import { resolveMediaUrl } from '../../src/api/config';
 import { announcementsRepository } from '../../src/repositories/AnnouncementsRepository';
 import { eventsRepository } from '../../src/repositories/EventsRepository';
-import { ANNOUNCEMENT_PRIORITY, capacityLabel, eventStatusPill, formatDate } from '../../src/utils/format';
-import MegaphoneWatermark from '../../assets/illustrations/megaphone-watermark.svg';
+import {
+  ANNOUNCEMENT_CATEGORY_LABELS,
+  ANNOUNCEMENT_PRIORITY,
+  capacityLabel,
+  eventStatusPill,
+  formatDate,
+} from '../../src/utils/format';
 
 type Params = { AnnouncementDetail: { id: string } };
 
-/** v2 Announcement detail (35:775). Opening it marks the post read. */
+/**
+ * Announcement detail, laid out like an article: photo (if any), kicker, title, byline, body, then the
+ * linked event as a plain row. Opening it marks the post read.
+ */
 export default function AnnouncementDetailScreen() {
   const { colors } = useTheme();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
@@ -55,13 +62,14 @@ export default function AnnouncementDetailScreen() {
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <AppHeader title="Announcement" showBackButton showMenuButton={false} />
       {loading ? (
-        <View style={styles.loading}>
-          <Skeleton height={220} borderRadius={0} />
-          <View style={styles.pad}>
-            <Skeleton height={96} borderRadius={12} />
-            <Skeleton height={44} width={220} borderRadius={22} />
-            <Skeleton height={140} borderRadius={12} />
-          </View>
+        <View style={[styles.pad, styles.loading]}>
+          <Skeleton height={12} width="40%" />
+          <Skeleton height={30} width="90%" />
+          <Skeleton height={30} width="65%" />
+          <Skeleton height={44} width={220} borderRadius={22} />
+          <Skeleton height={14} width="100%" />
+          <Skeleton height={14} width="95%" />
+          <Skeleton height={14} width="80%" />
         </View>
       ) : !post ? (
         <View style={styles.pad}>
@@ -69,34 +77,20 @@ export default function AnnouncementDetailScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.cover}>
-            {media ? (
-              <Image source={{ uri: media }} style={StyleSheet.absoluteFill} contentFit="cover" />
-            ) : (
-              <>
-                <Svg style={StyleSheet.absoluteFill} preserveAspectRatio="none">
-                  <Defs>
-                    <LinearGradient id="announcement-cover" x1="0" y1="0" x2="0" y2="1">
-                      <Stop offset="0" stopColor="#DF7A5E" />
-                      <Stop offset="1" stopColor="#141821" />
-                    </LinearGradient>
-                  </Defs>
-                  <Rect width="100%" height="100%" fill="url(#announcement-cover)" />
-                </Svg>
-                <View style={styles.watermark} pointerEvents="none">
-                  <MegaphoneWatermark width={200} height={200} />
-                </View>
-              </>
-            )}
-            <View style={styles.badges}>
-              <Badge label={ANNOUNCEMENT_PRIORITY[post.priority].label} variant={ANNOUNCEMENT_PRIORITY[post.priority].variant} />
-              {announcementTags(post).map((t) => (
-                <Badge key={t.label} label={t.label} variant={t.variant} />
-              ))}
-            </View>
-          </View>
+          {media ? <Image source={{ uri: media }} style={styles.cover} contentFit="cover" /> : null}
 
           <View style={styles.pad}>
+            {/* Kicker: the clubs it's for, as text; urgent / important keep their status pill */}
+            <View style={styles.kickerRow}>
+              {post.categories.length ? (
+                <Typography color="primary" style={styles.kicker} numberOfLines={1}>
+                  {post.categories.map((c) => (ANNOUNCEMENT_CATEGORY_LABELS[c] ?? c).toUpperCase()).join(' · ')}
+                </Typography>
+              ) : null}
+              {post.priority !== 'normal' ? (
+                <Badge label={ANNOUNCEMENT_PRIORITY[post.priority].label} variant={ANNOUNCEMENT_PRIORITY[post.priority].variant} />
+              ) : null}
+            </View>
             <Typography variant="displayHero" color="text" style={styles.title}>
               {post.title}
             </Typography>
@@ -136,16 +130,12 @@ export default function AnnouncementDetailScreen() {
               <Pressable
                 onPress={() => navigation.navigate('EventDetails', { eventId: eventRef })}
                 accessibilityRole="button"
-                style={({ pressed }) => [
-                  styles.linked,
-                  { backgroundColor: colors.surface, borderColor: colors.border },
-                  pressed && styles.pressed,
-                ]}
+                style={({ pressed }) => [styles.linked, { borderColor: colors.border }, pressed && styles.pressed]}
               >
-                <View style={[styles.linkedIcon, { backgroundColor: colors.accentMuted }]}>
-                  <Icon name="calendar" size={20} color="primary" />
-                </View>
                 <View style={styles.flex}>
+                  <Typography color="textMuted" style={styles.linkedKicker}>
+                    EVENT
+                  </Typography>
                   <Typography variant="body" color="text" style={styles.semibold} numberOfLines={1}>
                     {event.title}
                   </Typography>
@@ -178,20 +168,27 @@ export default function AnnouncementDetailScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   flex: { flex: 1 },
-  pressed: { opacity: 0.85 },
+  pressed: { opacity: 0.6 },
   semibold: { fontFamily: FONT_FAMILIES.bodySemiBold },
-  loading: { gap: 20 },
-  content: { paddingBottom: 32, gap: 20 },
+  loading: { gap: 14, paddingTop: 20 },
+  content: { paddingTop: 4, paddingBottom: 40, gap: 20 },
   pad: { paddingHorizontal: 20, gap: 20 },
-  cover: { height: 220, justifyContent: 'flex-end', padding: 20, overflow: 'hidden' },
-  watermark: { position: 'absolute', right: -6, top: 0, transform: [{ rotate: '12deg' }] },
-  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  title: { fontSize: 32, lineHeight: 48 },
-  author: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 16, borderBottomWidth: 1 },
+  cover: { width: '100%', aspectRatio: 16 / 9 },
+  kickerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: -8 },
+  kicker: { flexShrink: 1, fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, lineHeight: 15, letterSpacing: 0.8 },
+  title: { fontSize: 32, lineHeight: 40 },
+  author: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 18, borderBottomWidth: StyleSheet.hairlineWidth },
   body: { gap: 16 },
-  bodyText: { fontSize: 15, lineHeight: 22 },
-  linked: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 20, borderWidth: 1 },
-  linkedIcon: { padding: 12, borderRadius: 12 },
+  bodyText: { fontSize: 16, lineHeight: 25 },
+  linked: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  linkedKicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10.5, lineHeight: 14, letterSpacing: 0.8, marginBottom: 2 },
   actions: { flexDirection: 'row', gap: 12 },
   share: { width: 110 },
 });

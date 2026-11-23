@@ -19,7 +19,7 @@ export function BrandMark({ size = 'md' }: { size?: keyof typeof SIZES }) {
       <BgscLogo size={s.logo} />
       <Typography
         color="text"
-        style={{ fontFamily: FONT_FAMILIES.bodyBlack, fontSize: s.text, lineHeight: s.text * 1.15, letterSpacing: -1 }}
+        style={{ fontFamily: FONT_FAMILIES.bodyBold, fontSize: s.text, lineHeight: s.text * 1.15, letterSpacing: -1 }}
       >
         BGSC
       </Typography>

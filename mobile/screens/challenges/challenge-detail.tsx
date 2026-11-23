@@ -8,7 +8,6 @@ import Svg, { Circle, Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { AppHeader } from '../../src/components/AppHeader';
 import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
-import { Card } from '../../src/components/Card';
 import { FilterChips } from '../../src/components/FilterChips';
 import { ListRow } from '../../src/components/ListRow';
 import { SectionHeader } from '../../src/components/SectionHeader';
@@ -18,7 +17,6 @@ import { TextArea } from '../../src/forms/TextArea';
 import { EmptyState } from '../../src/feedback/EmptyState';
 import { ErrorState } from '../../src/feedback/ErrorState';
 import { SkeletonCard } from '../../src/feedback/Skeleton';
-import { Icon } from '../../src/icons/Icon';
 import { Typography } from '../../src/typography/Typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { useResponsive } from '../../src/responsive/useResponsive';
@@ -30,8 +28,10 @@ import { stravaRepository, type StravaActivity } from '../../src/repositories/St
 import type { Team } from '../../src/api/types';
 import { stravaActivityUrl, canSubmit, proofError } from '../../services/challengeLogic';
 import { useAuth } from '../../store/auth';
+import { FONT_FAMILIES } from '../../src/theme/typography';
 import TargetWatermark from '../../assets/illustrations/challenge-target-watermark.svg';
 
+const cap = (s: string) => s ? s[0]!.toUpperCase() + s.slice(1) : s;
 const date = (value: string | null) => value ? new Date(value).toLocaleString() : 'No fixed deadline';
 const messages: Record<string, string> = {
   already_accepted: 'You already accepted this challenge. Refresh to see your progress.', challenge_full: 'This challenge is full.',
@@ -142,51 +142,55 @@ export default function ChallengeDetail() {
             <Svg style={StyleSheet.absoluteFill} preserveAspectRatio="none"><Defs><LinearGradient id="challenge-hero" x1="0" y1="0" x2="0" y2="1"><Stop offset="0" stopColor={colors.warning} stopOpacity={0.85} /><Stop offset="1" stopColor={colors.background} /></LinearGradient></Defs><Rect width="100%" height="100%" fill="url(#challenge-hero)" /></Svg>
             <View style={styles.watermark} pointerEvents="none"><TargetWatermark /></View>
           </>}
-          <View style={styles.row}><Badge label={c.difficulty} variant={c.difficulty === 'legend' ? 'primary' : 'warning'} /><Badge label={c.kind} /><Badge label={c.domain} variant="success" /></View>
+          <Typography color="text" style={styles.heroMeta}>{[cap(c.difficulty), cap(c.kind), cap(c.domain)].join(' · ')}</Typography>
         </View>}
         <View style={[styles.body, { paddingHorizontal: gutter }]}>
-          {p && <View style={styles.row}><Badge label={c.difficulty} variant="info" /><Badge label={p.status.replaceAll('_', ' ')} variant={p.status === 'approved' ? 'success' : p.status === 'rejected' ? 'danger' : 'primary'} /></View>}
-          {p?.status === 'approved' && <View style={[styles.resultIcon, { backgroundColor: colors.successMuted }]}><Icon name="check" size={40} color="success" /></View>}
+          {p && <View style={styles.row}><Badge label={p.status.replaceAll('_', ' ')} variant={p.status === 'approved' ? 'success' : p.status === 'rejected' ? 'danger' : 'primary'} /><Typography color="textMuted" style={styles.small}>{cap(c.difficulty)}</Typography></View>}
           <Typography variant="h1">{c.title}</Typography>
-          <Card variant="inner"><View style={styles.row}><Icon name="coins" color="warning" size={22} /><View style={styles.flex}><Typography variant="mono">+{p?.reward?.points_awarded ?? p?.challenge_snapshot.award_points ?? c.award_points} points</Typography><Typography variant="caption" color="textMuted">{p?.status === 'approved' ? 'Approved reward · check your points history' : 'Awarded on approval'}</Typography></View></View></Card>
+          <View><Typography color="text" style={styles.reward}>+{p?.reward?.points_awarded ?? p?.challenge_snapshot.award_points ?? c.award_points}<Typography color="textMuted" style={styles.rewardUnit}>  POINTS</Typography></Typography><Typography color="textMuted" style={styles.small}>{p?.status === 'approved' ? 'Approved reward · check your points history' : 'Awarded on approval'}</Typography></View>
           {!p && <>
-            <View style={styles.grid}>
-              <View style={styles.tile}><Card><Icon name="calendar" color="primary" size={18} /><Typography variant="label" color="textMuted">Acceptance closes</Typography><Typography>{date(c.window.closes_at)}</Typography></Card></View>
-              <View style={styles.tile}><Card><Icon name="clock" color="primary" size={18} /><Typography variant="label" color="textMuted">Time limit</Typography><Typography>{c.window.time_limit_minutes ? `${c.window.time_limit_minutes} min after acceptance` : 'No personal time limit'}</Typography></Card></View>
-              <View style={styles.tile}><Card><Icon name="map-pin" color="primary" size={18} /><Typography variant="label" color="textMuted">Location</Typography><Typography>{c.location?.name ?? 'Online'}</Typography>{c.location?.details && <Typography variant="caption" color="textMuted">{c.location.details}</Typography>}</Card></View>
-              <View style={styles.tile}><Card><Icon name="users" color="primary" size={18} /><Typography variant="label" color="textMuted">Teaming</Typography><Typography>{c.teaming.enabled ? `${c.teaming.team_size_min}–${c.teaming.team_size_max} members` : 'Individual challenge'}</Typography></Card></View>
+            <View>
+              {[
+                { label: 'Acceptance closes', value: date(c.window.closes_at) },
+                { label: 'Time limit', value: c.window.time_limit_minutes ? `${c.window.time_limit_minutes} min after acceptance` : 'No personal time limit' },
+                { label: 'Location', value: c.location?.name ?? 'Online', detail: c.location?.details },
+                { label: 'Teaming', value: c.teaming.enabled ? `${c.teaming.team_size_min}–${c.teaming.team_size_max} members` : 'Individual challenge' },
+              ].map((fact, i) => <View key={fact.label} style={[styles.fact, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}>
+                <Typography color="textMuted" style={styles.factLabel}>{fact.label}</Typography>
+                <View style={styles.factValue}><Typography color="text" style={styles.factText}>{fact.value}</Typography>{fact.detail ? <Typography color="textMuted" style={styles.small}>{fact.detail}</Typography> : null}</View>
+              </View>)}
             </View>
-            {c.grants_hall_of_fame && <Badge label="Hall of Fame honour on approval" icon="sparkles" variant="primary" />}
+            {c.grants_hall_of_fame && <Typography color="primary" style={styles.small}>Hall of Fame honour on approval</Typography>}
           </>}
-          {c.description ? <><SectionHeader title="The brief" /><Typography>{c.description}</Typography></> : <Card><EmptyState icon="lock" title="Brief unlocks when you accept" description="Accept when you are ready. Your personal timer starts immediately." /></Card>}
-          {!!c.resources.length && <><SectionHeader title="Resources" /><Card>{c.resources.map((r, index) => <ListRow key={`${r.url}-${index}`} title={r.label} icon="external-link" onPress={() => void openResource(r.url)} />)}</Card></>}
+          {c.description ? <><SectionHeader title="The brief" /><Typography>{c.description}</Typography></> : <EmptyState icon="lock" title="Brief unlocks when you accept" description="Accept when you are ready. Your personal timer starts immediately." />}
+          {!!c.resources.length && <><SectionHeader title="Resources" /><View>{c.resources.map((r, index) => <ListRow key={`${r.url}-${index}`} title={r.label} icon="external-link" onPress={() => void openResource(r.url)} />)}</View></>}
           {!p && c.teaming.enabled && <>
             <SectionHeader title="Your challenge team" />
             <Typography color="textMuted">The captain accepts for the whole team once the roster is ready. Acceptance locks the roster.</Typography>
-            {teams.filter(t => t.status !== 'disbanded').map(t => <Card key={t._id}><Card.Header title={t.name} subtitle={`${t.members.length} / ${c.teaming.team_size_max} members · ${t.status}`} /><Typography variant="caption" color="textMuted">{t.members.map(m => m.display_name || 'Player').join(', ')}</Typography>
+            {teams.filter(t => t.status !== 'disbanded').map((t, i) => <View key={t._id} style={[styles.team, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border }]}><Typography color="text" style={styles.factText}>{t.name}</Typography><Typography color="textMuted" style={styles.small}>{`${t.members.length} / ${c.teaming.team_size_max} members · ${t.status}`}</Typography><Typography color="textMuted" style={styles.small}>{t.members.map(m => m.display_name || 'Player').join(', ')}</Typography>
               {t.invite_code && <Typography selectable variant="mono">Invite code: {t.invite_code}</Typography>}
               {t.captain_user_id === user?.id ? <Badge label="Your team · captain" variant="primary" /> : t.members.some(m => m.user_id === user?.id) ? <Typography color="textMuted">Waiting for your captain to accept.</Typography> : t.status === 'forming' && t.join_policy === 'open' && !myTeam ? <Button label="Join team" variant="outline" disabled={busy} onPress={() => void act(async () => { await registrationRepository.joinTeam(t._id); await load(true); })} /> : null}
-            </Card>)}
+            </View>)}
             {teamOffset != null && <Button label="More teams" variant="outline" disabled={busy} onPress={() => void act(async () => { const next = await challengesRepository.teams(c._id, teamOffset); setTeams(current => [...current, ...next.filter(t => !current.some(old => old._id === t._id))]); setTeamOffset(next.length === 20 ? teamOffset + 20 : null); })} />}
-            {!myTeam && <Card><TextInput label="Create an open team" value={teamName} onChangeText={setTeamName} maxLength={60} placeholder="Team name" /><Button label="Create team" variant="outline" disabled={busy || !teamName.trim()} onPress={() => void act(async () => { await challengesRepository.createTeam(c._id, teamName); setTeamName(''); await load(true); })} /></Card>}
+            {!myTeam && <View style={styles.group}><TextInput label="Create an open team" value={teamName} onChangeText={setTeamName} maxLength={60} placeholder="Team name" /><Button label="Create team" variant="outline" disabled={busy || !teamName.trim()} onPress={() => void act(async () => { await challengesRepository.createTeam(c._id, teamName); setTeamName(''); await load(true); })} /></View>}
           </>}
           {p && <>
             {p.deadline_at && <Typography variant="caption" color="textMuted">Submission deadline: {date(p.deadline_at)}</Typography>}
             {p.status === 'accepted' && <>
-              <Card><View style={styles.row}><Svg width={88} height={88} viewBox="0 0 88 88"><Circle cx={44} cy={44} r={37} fill="none" stroke={colors.surfaceInner} strokeWidth={7} /><Circle cx={44} cy={44} r={37} fill="none" stroke={colors.success} strokeWidth={7} strokeDasharray={`${p.progress.percent * 2.3248} 232.48`} rotation={-90} origin="44,44" /></Svg><View style={styles.flex}><Typography variant="mono">{p.progress.percent}% complete</Typography><Typography color="textMuted">Keep a record of your progress.</Typography></View></View></Card>
-              {!!p.progress.steps.length && <><SectionHeader title="Checklist" /><Card>{p.progress.steps.map(step => <Checkbox key={step.key} label={step.label} checked={step.done} disabled={busy} onChange={done => void act(async () => { const updated = await challengesRepository.progress(p._id, { steps: p.progress.steps.map(s => s.key === step.key ? { ...s, done } : s) }); setData(current => current ? { ...current, my_participation: updated } : current); })} />)}</Card></>}
+              <View style={styles.row}><Svg width={88} height={88} viewBox="0 0 88 88"><Circle cx={44} cy={44} r={37} fill="none" stroke={colors.surfaceInner} strokeWidth={7} /><Circle cx={44} cy={44} r={37} fill="none" stroke={colors.success} strokeWidth={7} strokeDasharray={`${p.progress.percent * 2.3248} 232.48`} rotation={-90} origin="44,44" /></Svg><View style={styles.flex}><Typography variant="mono">{p.progress.percent}% complete</Typography><Typography color="textMuted">Keep a record of your progress.</Typography></View></View>
+              {!!p.progress.steps.length && <><SectionHeader title="Checklist" /><View>{p.progress.steps.map(step => <Checkbox key={step.key} label={step.label} checked={step.done} disabled={busy} onChange={done => void act(async () => { const updated = await challengesRepository.progress(p._id, { steps: p.progress.steps.map(s => s.key === step.key ? { ...s, done } : s) }); setData(current => current ? { ...current, my_participation: updated } : current); })} />)}</View></>}
               <TextInput label="Progress (%)" value={percent} onChangeText={setPercent} keyboardType="number-pad" maxLength={3} helperText="Enter a whole number from 0 to 100." />
               <TextArea label="Progress notes" value={progressNotes} onChangeText={setProgressNotes} maxLength={2000} showCharCount />
               <Button label="Save progress" variant="outline" disabled={busy || !/^\d{1,3}$/.test(percent) || Number(percent) > 100} onPress={() => void act(async () => { const updated = await challengesRepository.progress(p._id, { percent: Number(percent), notes: progressNotes.trim() || null }); setData(current => current ? { ...current, my_participation: updated } : current); }, 'Progress saved.')} />
             </>}
-            {p.status !== 'accepted' && <Card><Card.Header title={p.status === 'approved' ? 'Challenge complete' : p.status === 'rejected' ? 'Changes needed' : p.status === 'expired' ? 'The deadline has passed' : p.status === 'withdrawn' ? 'Participation withdrawn' : 'Under review'} /><Typography>{p.review?.reason ?? (p.status === 'approved' ? 'Your effort has been recognised.' : p.status === 'under_review' || p.status === 'submitted' ? 'Your proof is with the reviewers. You can update it before the deadline.' : 'See the current status above for the outcome.')}</Typography>{p.review?.reviewed_at && <Typography variant="caption" color="textMuted">Reviewed {date(p.review.reviewed_at)}</Typography>}</Card>}
+            {p.status !== 'accepted' && <View style={styles.group}><Typography variant="h3" color="text">{p.status === 'approved' ? 'Challenge complete' : p.status === 'rejected' ? 'Changes needed' : p.status === 'expired' ? 'The deadline has passed' : p.status === 'withdrawn' ? 'Participation withdrawn' : 'Under review'}</Typography><Typography>{p.review?.reason ?? (p.status === 'approved' ? 'Your effort has been recognised.' : p.status === 'under_review' || p.status === 'submitted' ? 'Your proof is with the reviewers. You can update it before the deadline.' : 'See the current status above for the outcome.')}</Typography>{p.review?.reviewed_at && <Typography variant="caption" color="textMuted">Reviewed {date(p.review.reviewed_at)}</Typography>}</View>}
             {p.reward?.hall_of_fame_entry_id && <Button label="See your honour" variant="outline" onPress={() => navigation.navigate('HallOfFameDetail', { slugOrId: p.reward!.hall_of_fame_entry_id })} />}
-            {p.submission && <><SectionHeader title="Submitted proof" /><Card>{p.submission.proofs.map((proof, index) => proof.type === 'url' ? <ListRow key={index} icon="external-link" title={proof.name || `Link ${index + 1}`} subtitle={proof.value} onPress={() => void openResource(proof.value)} /> : <Typography key={index}>{proof.value}</Typography>)}{p.submission.notes && <Typography color="textMuted">{p.submission.notes}</Typography>}</Card></>}
+            {p.submission && <><SectionHeader title="Submitted proof" /><View style={styles.group}>{p.submission.proofs.map((proof, index) => proof.type === 'url' ? <ListRow key={index} icon="external-link" title={proof.name || `Link ${index + 1}`} subtitle={proof.value} onPress={() => void openResource(proof.value)} /> : <Typography key={index}>{proof.value}</Typography>)}{p.submission.notes && <Typography color="textMuted">{p.submission.notes}</Typography>}</View></>}
             {editable && c.submission.requires_proof && <>
               <SectionHeader title={p.submission ? 'Update proof' : 'Submit proof'} />
               {proofOptions.length === 0 ? <Typography color="textMuted">This challenge has no supported proof format. Please contact the organiser.</Typography> : <>
                 {c.submission.proof_types.includes('url') && stravaActivities.length > 0 && (
-                  <Card variant="inner">
+                  <View style={styles.group}>
                     <Typography variant="label" color="textMuted">Attach a synced Strava activity</Typography>
                     {stravaActivities.map((actItem) => {
                       const actUrl = stravaActivityUrl(actItem._id);
@@ -213,12 +217,12 @@ export default function ChallengeDetail() {
                         />
                       );
                     })}
-                  </Card>
+                  </View>
                 )}
-                {proofs.map((proof, index) => <Card key={index}><FilterChips options={proofOptions} value={proof.type} onChange={type => { setProofIssue(null); setProofs(current => current.map((item, i) => i === index ? { ...item, type: type as Proof['type'] } : item)); }} />
+                {proofs.map((proof, index) => <View key={index} style={styles.group}><FilterChips options={proofOptions} value={proof.type} onChange={type => { setProofIssue(null); setProofs(current => current.map((item, i) => i === index ? { ...item, type: type as Proof['type'] } : item)); }} />
                   {proof.type === 'url' ? <TextInput label={`Proof link ${index + 1}`} value={proof.value} onChangeText={value => setProofs(current => current.map((item, i) => i === index ? { ...item, value } : item))} keyboardType="url" autoCapitalize="none" autoCorrect={false} placeholder="https://" maxLength={5000} /> : <TextArea label={`Proof ${index + 1}`} value={proof.value} onChangeText={value => setProofs(current => current.map((item, i) => i === index ? { ...item, value } : item))} maxLength={5000} showCharCount />}
                   {proofs.length > 1 && <Button label="Remove proof" variant="ghost" onPress={() => setProofs(current => current.filter((_, i) => i !== index))} />}
-                </Card>)}
+                </View>)}
                 {proofs.length < Math.min(c.submission.max_files, 20) && <Button label="Add another proof" variant="outline" onPress={() => setProofs(current => [...current, { type: proofOptions[0].value as Proof['type'], value: '' }])} />}
                 <TextArea label="Note for reviewers (optional)" value={notes} onChangeText={setNotes} maxLength={500} showCharCount />
                 {proofIssue && <ErrorState title="Check your proof" message={proofIssue} />}
@@ -240,4 +244,4 @@ export default function ChallengeDetail() {
     </View>}
   </View>;
 }
-const styles = StyleSheet.create({ screen: { flex: 1 }, content: { width: '100%', maxWidth: 720, alignSelf: 'center' }, body: { padding: 20, gap: 20 }, hero: { minHeight: 200, justifyContent: 'flex-end', padding: 20, overflow: 'hidden' }, watermark: { position: 'absolute', right: 0, top: -20, transform: [{ rotate: '12deg' }] }, row: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 12 }, flex: { flex: 1, minWidth: 100, gap: 4 }, grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 }, tile: { flexGrow: 1, flexBasis: '46%', minWidth: 128 }, resultIcon: { alignSelf: 'center', padding: 24, borderRadius: 60 }, cta: { padding: 16, gap: 10, borderTopWidth: 1 } });
+const styles = StyleSheet.create({ screen: { flex: 1 }, content: { width: '100%', maxWidth: 720, alignSelf: 'center' }, body: { padding: 20, gap: 20 }, hero: { minHeight: 200, justifyContent: 'flex-end', padding: 20, overflow: 'hidden' }, watermark: { position: 'absolute', right: 0, top: -20, transform: [{ rotate: '12deg' }] }, row: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 12 }, flex: { flex: 1, minWidth: 100, gap: 4 }, small: { fontSize: 13, lineHeight: 18 }, group: { gap: 10 }, heroMeta: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 13, letterSpacing: 0.4 }, reward: { fontFamily: FONT_FAMILIES.hero, fontSize: 40, lineHeight: 46 }, rewardUnit: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, letterSpacing: 0.8 }, fact: { flexDirection: 'row', gap: 16, paddingVertical: 12 }, factLabel: { width: 128, fontSize: 13.5, lineHeight: 20 }, factValue: { flex: 1 }, factText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 14.5, lineHeight: 20 }, team: { paddingVertical: 12, gap: 4 }, cta: { padding: 16, gap: 10, borderTopWidth: 1 } });

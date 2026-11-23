@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from './Button';
 import { Typography } from '../typography/Typography';
 import { FONT_FAMILIES } from '../theme/typography';
-import { useTheme } from '../theme/ThemeProvider';
+import { GlassSurface } from '../navigation/GlassSurface';
 
 export interface StickyCTABarProps {
   /** "12 slots left" */
@@ -16,19 +16,20 @@ export interface StickyCTABarProps {
 }
 
 /**
- * v2 sticky bottom bar — context text on the left, primary action on the right.
+ * v2 sticky bottom bar — context text on the left, primary action on the right, on the tab bar's
+ * liquid glass with rounded top corners.
  * Render it as a sibling *after* the ScrollView so it stays pinned.
  */
 export function StickyCTABar({ title, subtitle, cta }: StickyCTABarProps) {
-  const { colors } = useTheme();
   const insets = useSafeAreaInsets();
   return (
     <View
       style={[
         styles.bar,
-        { backgroundColor: colors.surface, borderTopColor: colors.border, paddingBottom: Math.max(insets.bottom, 32) },
+        { paddingBottom: Math.max(insets.bottom, 32) },
       ]}
     >
+      <GlassSurface panel fill radius={BAR_RADIUS} style={styles.glass} />
       <View style={styles.text}>
         <Typography variant="body" color="text" style={styles.title} numberOfLines={1}>
           {title}
@@ -53,8 +54,11 @@ export function StickyCTABar({ title, subtitle, cta }: StickyCTABarProps) {
   );
 }
 
+const BAR_RADIUS = 22;
+
 const styles = StyleSheet.create({
-  bar: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingTop: 16, paddingHorizontal: 20, borderTopWidth: 1 },
+  bar: { flexDirection: 'row', alignItems: 'center', gap: 16, paddingTop: 16, paddingHorizontal: 20 },
+  glass: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottomWidth: 0 },
   text: { flex: 1, gap: 2 },
   title: { fontFamily: FONT_FAMILIES.bodySemiBold },
   cta: { minWidth: 150 },

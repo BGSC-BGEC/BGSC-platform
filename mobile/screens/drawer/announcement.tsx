@@ -3,17 +3,16 @@ import { FlatList, Pressable, RefreshControl, StyleSheet, View } from 'react-nat
 import { useFocusEffect, useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
-import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 import { AppHeader } from '../../src/components/AppHeader';
-import { AnnouncementCard, announcementTags } from '../../src/components/AnnouncementCard';
+import { Avatar } from '../../src/components/Avatar';
+import { authorColor } from '../../src/components/AnnouncementCard';
 import { Badge } from '../../src/components/Badge';
 import { FilterChips } from '../../src/components/FilterChips';
 import { SearchInput } from '../../src/forms/SearchInput';
 import { Skeleton } from '../../src/feedback/Skeleton';
 import { EmptyState } from '../../src/feedback/EmptyState';
 import { ErrorState } from '../../src/feedback/ErrorState';
-import { Icon } from '../../src/icons/Icon';
 import { Typography } from '../../src/typography/Typography';
 import { FONT_FAMILIES } from '../../src/theme/typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
@@ -28,10 +27,9 @@ import {
   isToday,
   timeAgo,
 } from '../../src/utils/format';
-import MegaphoneWatermark from '../../assets/illustrations/megaphone-watermark.svg';
 
 /** Horizontal page padding — matches the Events tab. */
-const GUTTER = 13;
+const GUTTER = 16;
 
 type Filter = 'all' | AnnouncementCategory;
 const FILTERS: Array<{ label: string; value: Filter }> = [
@@ -42,9 +40,13 @@ const FILTERS: Array<{ label: string; value: Filter }> = [
   })),
 ];
 
-type Row = { kind: 'label'; text: string } | { kind: 'item'; item: Announcement };
+/** `divider`: a hairline under this post (another post follows in the same group). */
+type Row = { kind: 'label'; text: string } | { kind: 'item'; item: Announcement; divider: boolean };
 
-/** v2 Announcements (35:646) — broadcasts feed, newest first, four-month window. */
+/**
+ * Announcements — a broadcasts feed, newest first, four-month window. One continuous surface:
+ * a pinned post up top, then plain post rows grouped under Today / Earlier with hairlines between.
+ */
 export default function AnnouncementsScreen() {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -126,11 +128,13 @@ export default function AnnouncementsScreen() {
 
   const rows = useMemo<Row[]>(() => {
     const feed = items.filter((a) => a._id !== pinned?._id);
-    const today = feed.filter((a) => isToday(a.published_at));
-    const earlier = feed.filter((a) => !isToday(a.published_at));
+    const group = (text: string, list: Announcement[]): Row[] =>
+      list.length
+        ? [{ kind: 'label', text }, ...list.map((item, i) => ({ kind: 'item', item, divider: i < list.length - 1 }) as Row)]
+        : [];
     return [
-      ...(today.length ? [{ kind: 'label', text: 'TODAY' } as Row, ...today.map((item) => ({ kind: 'item', item }) as Row)] : []),
-      ...(earlier.length ? [{ kind: 'label', text: 'EARLIER' } as Row, ...earlier.map((item) => ({ kind: 'item', item }) as Row)] : []),
+      ...group('Today', feed.filter((a) => isToday(a.published_at))),
+      ...group('Earlier', feed.filter((a) => !isToday(a.published_at))),
     ];
   }, [items, pinned]);
 
@@ -151,16 +155,7 @@ export default function AnnouncementsScreen() {
           </Typography>
         </View>
         {unread > 0 ? (
-          <Pressable
-            onPress={markAllRead}
-            accessibilityRole="button"
-            style={({ pressed }) => [
-              styles.markAll,
-              { backgroundColor: colors.surfaceInner, borderColor: colors.border },
-              pressed && styles.pressed,
-            ]}
-          >
-            <Icon name="check-check" size={16} color="primary" />
+          <Pressable onPress={markAllRead} accessibilityRole="button" hitSlop={8} style={({ pressed }) => pressed && styles.pressed}>
             <Typography color="primary" style={styles.markAllText}>
               Mark all read
             </Typography>
@@ -181,7 +176,7 @@ export default function AnnouncementsScreen() {
       </View>
 
       {error && state !== 'loading' ? <ErrorState title="Couldn’t load announcements" message={error} onRetry={() => load('initial')} /> : null}
-      {pinned ? <PinnedCard item={pinned} onPress={() => open(pinned)} /> : null}
+      {pinned ? <PinnedPost item={pinned} onPress={() => open(pinned)} /> : null}
     </View>
   );
 
@@ -193,37 +188,29 @@ export default function AnnouncementsScreen() {
         keyExtractor={(row, i) => (row.kind === 'item' ? row.item._id : `label-${i}`)}
         ListHeaderComponent={header}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: Math.max(110, insets.bottom + 90) },
-        ]}
+        contentContainerStyle={[styles.content, { paddingBottom: Math.max(110, insets.bottom + 90) }]}
         renderItem={({ item: row }) =>
           row.kind === 'label' ? (
-            <Typography color="textMuted" style={styles.group}>
+            <Typography color="text" style={styles.group}>
               {row.text}
             </Typography>
           ) : (
-            <AnnouncementCard
-              author={row.item.author.display_name}
-              authorAvatar={row.item.author.avatar_url}
-              meta={`${row.item.author.role_label} · ${timeAgo(row.item.published_at)}`}
-              title={row.item.title}
-              body={row.item.body}
-              unread={row.item.unread}
-              priority={
-                row.item.priority !== 'normal' || row.item.unread ? ANNOUNCEMENT_PRIORITY[row.item.priority] : undefined
-              }
-              tags={announcementTags(row.item)}
-              onPress={() => open(row.item)}
-            />
+            <PostRow item={row.item} divider={row.divider} onPress={() => open(row.item)} />
           )
         }
         ListEmptyComponent={
           state === 'loading' ? (
             <View style={styles.skeletons}>
-              <Skeleton height={290} borderRadius={22} />
-              <Skeleton height={150} borderRadius={22} />
-              <Skeleton height={150} borderRadius={22} />
+              {[0, 1, 2, 3].map((i) => (
+                <View key={i} style={styles.skeletonRow}>
+                  <Skeleton width={40} height={40} borderRadius={20} />
+                  <View style={styles.skeletonText}>
+                    <Skeleton height={12} width="45%" />
+                    <Skeleton height={14} width="85%" />
+                    <Skeleton height={12} width="70%" />
+                  </View>
+                </View>
+              ))}
             </View>
           ) : !error && !pinned ? (
             <EmptyState
@@ -251,7 +238,17 @@ export default function AnnouncementsScreen() {
         onEndReached={() => {
           if (cursor && state === 'ready') void load('more');
         }}
-        ListFooterComponent={state === 'more' ? <Skeleton height={150} borderRadius={22} /> : undefined}
+        ListFooterComponent={
+          state === 'more' ? (
+            <View style={styles.skeletonRow}>
+              <Skeleton width={40} height={40} borderRadius={20} />
+              <View style={styles.skeletonText}>
+                <Skeleton height={12} width="45%" />
+                <Skeleton height={14} width="85%" />
+              </View>
+            </View>
+          ) : undefined
+        }
         refreshControl={
           <RefreshControl refreshing={state === 'refreshing'} onRefresh={() => load('refresh')} tintColor={colors.primary} />
         }
@@ -261,62 +258,84 @@ export default function AnnouncementsScreen() {
   );
 }
 
-/** Large pinned post: media (or blue gradient + megaphone watermark), badges, then the text. */
-function PinnedCard({ item, onPress }: { item: Announcement; onPress: () => void }) {
+/** Priority only when it says something (urgent / important); "normal" shows nothing. */
+function priorityOf(a: Announcement) {
+  return a.priority !== 'normal' ? ANNOUNCEMENT_PRIORITY[a.priority] : undefined;
+}
+
+/**
+ * One post as a feed row: avatar, who · role · when, then the title and a two-line preview.
+ * Unread posts get a bold title and a small orange dot; urgent / important keep their status pill.
+ */
+function PostRow({ item, divider, onPress }: { item: Announcement; divider: boolean; onPress: () => void }) {
   const { colors } = useTheme();
+  const name = item.author.display_name;
+  const priority = priorityOf(item);
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${item.unread ? 'Unread. ' : ''}${item.title}, from ${name}`}
+      style={({ pressed }) => [
+        styles.row,
+        divider && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+        pressed && styles.pressed,
+      ]}
+    >
+      <Avatar name={name} uri={item.author.avatar_url} size={40} color={authorColor(name, colors)} />
+      <View style={styles.flex}>
+        <View style={styles.meta}>
+          <Typography color="text" style={[styles.small, styles.semibold, styles.name]} numberOfLines={1}>
+            {name}
+          </Typography>
+          <Typography color="textMuted" style={[styles.small, styles.role]} numberOfLines={1}>
+            {item.author.role_label} · {timeAgo(item.published_at)}
+          </Typography>
+          {item.unread ? <View style={[styles.dot, { backgroundColor: colors.primary }]} /> : null}
+        </View>
+        <Typography color="text" style={item.unread ? [styles.postTitle, styles.bold] : styles.postTitle} numberOfLines={2}>
+          {item.title}
+        </Typography>
+        <Typography color="textMuted" style={styles.preview} numberOfLines={2}>
+          {item.body}
+        </Typography>
+        {priority ? (
+          <View style={styles.statusRow}>
+            <Badge label={priority.label} variant={priority.variant} />
+          </View>
+        ) : null}
+      </View>
+    </Pressable>
+  );
+}
+
+/** The pinned post as a feature: its photo (if it has one), a small kicker, then a big title. */
+function PinnedPost({ item, onPress }: { item: Announcement; onPress: () => void }) {
   const media = resolveMediaUrl(item.media_url);
-  const priority = ANNOUNCEMENT_PRIORITY[item.priority];
+  const priority = priorityOf(item);
+  const category = ANNOUNCEMENT_CATEGORY_LABELS[item.categories[0]];
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`Pinned: ${item.title}`}
-      style={({ pressed }) => [
-        styles.pinned,
-        { backgroundColor: colors.surface, borderColor: colors.primary },
-        pressed && styles.pressed,
-      ]}
+      style={({ pressed }) => [styles.pinned, pressed && styles.pressed]}
     >
-      <View style={styles.pinnedMedia}>
-        {media ? (
-          <Image source={{ uri: media }} style={StyleSheet.absoluteFill} contentFit="cover" />
-        ) : (
-          <>
-            <Svg style={StyleSheet.absoluteFill} preserveAspectRatio="none">
-              <Defs>
-                <LinearGradient id="pinned-cover" x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor="#5C8FA8" />
-                  <Stop offset="1" stopColor="#141821" />
-                </LinearGradient>
-              </Defs>
-              <Rect width="100%" height="100%" fill="url(#pinned-cover)" />
-            </Svg>
-            <View style={styles.watermark} pointerEvents="none">
-              <MegaphoneWatermark width={160} height={160} />
-            </View>
-          </>
-        )}
-        <View style={styles.badges}>
-          <View style={[styles.pinBadge, { backgroundColor: colors.primarySolid }]}>
-            <Icon name="pin" size={12} color="white" />
-            <Typography color="primaryText" style={styles.pinText}>
-              PINNED
-            </Typography>
-          </View>
-          {item.priority !== 'normal' ? <Badge label={priority.label} variant={priority.variant} /> : null}
+      {media ? <Image source={{ uri: media }} style={styles.pinnedMedia} contentFit="cover" /> : null}
+      <Typography color="primary" style={styles.pinnedKicker}>
+        PINNED{category ? ` · ${category.toUpperCase()}` : ''} · {timeAgo(item.published_at).toUpperCase()}
+      </Typography>
+      <Typography variant="h2" color="text">
+        {item.title}
+      </Typography>
+      <Typography variant="body" color="textMuted" numberOfLines={3}>
+        {item.body}
+      </Typography>
+      {priority ? (
+        <View style={styles.statusRow}>
+          <Badge label={priority.label} variant={priority.variant} />
         </View>
-      </View>
-      <View style={styles.pinnedBody}>
-        <Typography color="textMuted" style={styles.pinnedKicker}>
-          {(ANNOUNCEMENT_CATEGORY_LABELS[item.categories[0]] ?? '').toUpperCase()} · {timeAgo(item.published_at).toUpperCase()}
-        </Typography>
-        <Typography variant="h2" color="text">
-          {item.title}
-        </Typography>
-        <Typography variant="body" color="textMuted" numberOfLines={3}>
-          {item.body}
-        </Typography>
-      </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -324,27 +343,32 @@ function PinnedCard({ item, onPress }: { item: Announcement; onPress: () => void
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   flex: { flex: 1 },
-  pressed: { opacity: 0.85 },
-  // Same gutter / rhythm as the Events tab so the two feeds feel like one app.
-  content: { paddingHorizontal: GUTTER, paddingTop: 4, paddingBottom: 32, gap: 11 },
-  header: { gap: 12, marginBottom: 2 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  pressed: { opacity: 0.6 },
+  small: { fontSize: 13, lineHeight: 18 },
+  semibold: { fontFamily: FONT_FAMILIES.bodySemiBold },
+  bold: { fontFamily: FONT_FAMILIES.bodyBold },
+  content: { paddingHorizontal: GUTTER, paddingTop: 4, paddingBottom: 32 },
+  header: { gap: 14, marginBottom: 4 },
+  titleRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 12 },
   title: { fontSize: 32, lineHeight: 40 },
-  markAll: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 999, borderWidth: 1 },
-  markAllText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 12, lineHeight: 15 },
+  markAllText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 14, lineHeight: 20, marginBottom: 2 },
   chipsBleed: { marginHorizontal: -GUTTER },
   chipsRow: { paddingHorizontal: GUTTER },
-  // Extra space above a TODAY / EARLIER label so it groups with the cards below it.
-  group: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, lineHeight: 15, letterSpacing: 1, marginTop: 8, marginLeft: 2 },
-  skeletons: { gap: 11 },
-  pinned: { borderRadius: 22, borderWidth: 1, overflow: 'hidden' },
-  pinnedMedia: { height: 172, justifyContent: 'flex-end', padding: 14, overflow: 'hidden' },
-  watermark: { position: 'absolute', right: -6, top: 5, transform: [{ rotate: '12deg' }] },
-  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  // Same 21px height as the priority Badge beside it.
-  pinBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 21, paddingHorizontal: 9, borderRadius: 999 },
-  pinText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.6, includeFontPadding: false, textAlignVertical: 'center' },
-  // Matches AnnouncementCard's 16px padding so pinned and regular cards line up.
-  pinnedBody: { gap: 6, padding: 16 },
-  pinnedKicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
+  // Group heading (Today / Earlier): clear space above so it groups with the posts below it.
+  group: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 15, lineHeight: 20, marginTop: 26, marginBottom: 2 },
+  row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 14 },
+  meta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  // Name keeps its width; role and time give way first on a narrow screen.
+  name: { flexShrink: 0, maxWidth: '55%' },
+  role: { flexShrink: 1 },
+  dot: { width: 7, height: 7, borderRadius: 3.5, marginLeft: 2 },
+  postTitle: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 15.5, lineHeight: 21, marginTop: 3 },
+  preview: { fontSize: 13.5, lineHeight: 19, marginTop: 2 },
+  statusRow: { flexDirection: 'row', marginTop: 8 },
+  pinned: { gap: 6, marginTop: 10 },
+  pinnedMedia: { width: '100%', aspectRatio: 16 / 9, borderRadius: 14, marginBottom: 6 },
+  pinnedKicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 11, lineHeight: 15, letterSpacing: 0.8 },
+  skeletons: { gap: 6, marginTop: 20 },
+  skeletonRow: { flexDirection: 'row', gap: 12, paddingVertical: 12 },
+  skeletonText: { flex: 1, gap: 8 },
 });

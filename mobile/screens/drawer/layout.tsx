@@ -50,6 +50,7 @@ import PhoneOtp from '../profile/phone-otp';
 import FeedbackSuccess from '../feedback/feedback-success';
 import MyTickets from '../feedback/my-tickets';
 import ContactFaq from '../feedback/contact-faq';
+import AboutDevs from '../about/about-devs';
 import NotFoundScreen from '../not-found';
 
 const linking = {
@@ -154,6 +155,7 @@ function LoggedInStack() {
       <Stack.Screen name="FeedbackSuccess" component={FeedbackSuccess} />
       <Stack.Screen name="MyTickets" component={MyTickets} />
       <Stack.Screen name="ContactFaq" component={ContactFaq} />
+      <Stack.Screen name="About" component={AboutDevs} />
       <Stack.Screen name="NotFound" component={NotFoundScreen} />
     </Stack.Navigator>
   );

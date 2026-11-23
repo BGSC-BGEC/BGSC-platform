@@ -22,7 +22,7 @@ interface AppHeaderProps {
   showNotifications?: boolean;
   /**
    * 'brand': orange band with white title/actions and a rounded sheet edge below it (section roots).
-   * 'plain': the translucent header (pushed screens). Defaults to 'brand' on screens with the menu button.
+   * 'plain': the translucent glass header, as an opt-out. Defaults to 'brand' everywhere.
    */
   tone?: 'brand' | 'plain';
 }
@@ -39,7 +39,7 @@ export function AppHeader({
   showNotifications = true,
   tone,
 }: AppHeaderProps) {
-  const { colors, shadow } = useTheme();
+  const { colors } = useTheme();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -65,7 +65,8 @@ export function AppHeader({
   );
 
   const isBrand = title === 'BGSC';
-  const brandTone = (tone ?? (showMenuButton && !showBackButton ? 'brand' : 'plain')) === 'brand';
+  // Orange everywhere by default (section roots and pushed screens alike), so the app reads as one product.
+  const brandTone = (tone ?? 'brand') === 'brand';
 
   // White status-bar icons over the orange band, only while this screen is focused.
   useFocusEffect(
@@ -77,10 +78,9 @@ export function AppHeader({
   );
 
   const fg = brandTone ? colors.white : colors.text;
-  const buttonSkin = brandTone
-    ? { backgroundColor: withAlpha(colors.white, 0.18), borderColor: withAlpha(colors.white, 0.28) }
-    : { backgroundColor: withAlpha(colors.surface, 0.72), borderColor: withAlpha(colors.border, 0.5) };
-  const buttonShadow = brandTone ? null : shadow('flat');
+  // No pills behind the buttons: the header is always a solid band (orange, or the near-opaque
+  // page colour), so bare, slightly larger icons read fine. Pills are kept only where icons
+  // sit over imagery or busy colour (e.g. the home hero, the media viewer).
 
   return (
     <View
@@ -99,14 +99,9 @@ export function AppHeader({
           accessibilityRole="button"
           accessibilityLabel="Back"
           hitSlop={10}
-          style={({ pressed }) => [
-            styles.actionBtn,
-            buttonSkin,
-            buttonShadow,
-            pressed && styles.pressed,
-          ]}
+          style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}
         >
-          <Icon name="arrow-left" size={20} color={fg} />
+          <Icon name="arrow-left" size={24} color={fg} />
         </Pressable>
       ) : showMenuButton ? (
         <Pressable
@@ -114,14 +109,7 @@ export function AppHeader({
           accessibilityRole="button"
           accessibilityLabel="Open menu"
           hitSlop={10}
-          style={({ pressed }) => [
-            styles.actionBtn,
-            styles.menuBtn,
-            buttonSkin,
-            brandTone && styles.menuBtnBrand,
-            buttonShadow,
-            pressed && styles.pressed,
-          ]}
+          style={({ pressed }) => [styles.actionBtn, pressed && styles.pressed]}
         >
           {/* Staggered two-line glyph: long bar over a short one, left-aligned. */}
           <View style={styles.menuGlyph}>
@@ -148,13 +136,7 @@ export function AppHeader({
       )}
 
       {showNotifications ? (
-        <View
-          style={[
-            styles.actionsCapsule,
-            buttonSkin,
-            buttonShadow,
-          ]}
-        >
+        <View style={styles.actionsGroup}>
           <Pressable
             onPress={() => navigation.navigate('Notifications', undefined, { pop: true })}
             accessibilityRole="button"
@@ -162,7 +144,7 @@ export function AppHeader({
             hitSlop={8}
             style={({ pressed }) => [styles.capsuleBtn, pressed && styles.pressed]}
           >
-            <Icon name="bell" size={18} color={fg} />
+            <Icon name="bell" size={23} color={fg} />
             {unread > 0 ? (
               <View
                 style={[
@@ -176,8 +158,6 @@ export function AppHeader({
             ) : null}
           </Pressable>
 
-          <View style={[styles.capsuleDivider, { backgroundColor: brandTone ? withAlpha(colors.white, 0.35) : withAlpha(colors.border, 0.6) }]} />
-
           <Pressable
             onPress={() => navigation.navigate('App', { screen: 'MainTabs', params: { screen: 'ProfileTab' } }, { pop: true })}
             accessibilityRole="button"
@@ -185,7 +165,7 @@ export function AppHeader({
             hitSlop={6}
             style={({ pressed }) => [styles.avatarPressable, pressed && styles.pressed]}
           >
-            <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={28} ring={false} />
+            <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={32} ring={false} />
           </Pressable>
         </View>
       ) : (
@@ -219,74 +199,58 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
   },
-  menuBtn: {
-    borderRadius: 19,
-  },
-  // On orange: a soft frosted disc, no hard outline.
-  menuBtnBrand: {
-    borderColor: 'transparent',
-  },
   menuGlyph: {
-    width: 18,
-    gap: 5,
+    width: 22,
+    gap: 6,
     alignItems: 'flex-start',
   },
   menuBar: {
-    height: 2.25,
+    height: 2.5,
     borderRadius: 2,
   },
   menuBarLong: {
-    width: 18,
+    width: 22,
   },
   menuBarShort: {
-    width: 11,
+    width: 13,
   },
+  // Bare icon buttons: 40px touch area, no background.
   actionBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
     zIndex: 2,
   },
   actionSpacer: {
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 40,
   },
-  actionsCapsule: {
+  actionsGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1,
-    paddingLeft: 4,
-    paddingRight: 4,
-    gap: 1,
+    height: 40,
+    gap: 8,
     zIndex: 2,
   },
   capsuleBtn: {
-    width: 28,
-    height: 28,
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
-  capsuleDivider: {
-    width: 1,
-    height: 14,
-    marginHorizontal: 2,
-  },
   avatarPressable: {
-    borderRadius: 14,
+    borderRadius: 16,
   },
   dot: {
     position: 'absolute',
-    top: 4,
-    right: 4,
-    width: 6.5,
-    height: 6.5,
-    borderRadius: 3.25,
+    top: 5,
+    right: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     borderWidth: 1.5,
   },
   brandTitleWrap: {

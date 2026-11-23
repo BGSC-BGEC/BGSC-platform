@@ -20,6 +20,10 @@ export function glassTokens(isDark: boolean) {
     tint: isDark
       ? IS_IOS ? 'rgba(16, 20, 32, 0.22)' : 'rgba(18, 22, 34, 0.9)'
       : IS_IOS ? 'rgba(255, 255, 255, 0.18)' : 'rgba(255, 255, 255, 0.92)',
+    /** Heavier tint for panels holding body text (sheets, popups), so copy stays readable over a scrim. */
+    panelTint: isDark
+      ? IS_IOS ? 'rgba(20, 24, 36, 0.72)' : 'rgba(22, 26, 38, 0.96)'
+      : IS_IOS ? 'rgba(255, 255, 255, 0.72)' : 'rgba(255, 255, 255, 0.97)',
     blurIntensity: isDark ? 70 : 85,
     blurTint: (IS_IOS
       ? isDark ? 'systemUltraThinMaterialDark' : 'systemUltraThinMaterialLight'

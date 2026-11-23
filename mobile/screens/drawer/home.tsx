@@ -1,4 +1,5 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import Reanimated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import {
   Linking,
   Platform,
@@ -18,19 +19,21 @@ import {
 } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
+import { usersRepository } from '../../src/repositories/UsersRepository';
+import { cardTierStyle } from '../../src/components/playercard/cardTiers';
 
 import { Avatar } from '../../src/components/Avatar';
-import { Badge } from '../../src/components/Badge';
 import { Button } from '../../src/components/Button';
 import { authorColor } from '../../src/components/AnnouncementCard';
 import { EventCard, eventCardData } from '../../src/components/EventCard';
 import { SectionHeader } from '../../src/components/SectionHeader';
+import { FilterChips } from '../../src/components/FilterChips';
 import { BgscLogo } from '../../src/components/BgscLogo';
 import { GamingBackdrop } from '../../src/components/GamingBackdrop';
 import { AnimatedScrollView } from '../../src/components/reacticx/templates/parallax-header';
 import { DrawerSafeScrollView } from '../../src/navigation/drawerGesture';
 import { HeroIllustration, HERO_ILLUSTRATION_ASPECT } from '../../src/components/HeroIllustration';
-import { FrostedRim, FrostedSheen } from '../../src/components/FrostedSheen';
 import { SkeletonEventCard, Skeleton } from '../../src/feedback/Skeleton';
 import { ErrorState } from '../../src/feedback/ErrorState';
 import { Icon, type IconName } from '../../src/icons/Icon';
@@ -70,8 +73,11 @@ const SHEET_OVERLAP = 24;
 /** Hero text sits on the orange doodle backdrop in both themes, so it is always white. */
 const HERO_INK = '#FFFFFF';
 const HERO_INK_SOFT = 'rgba(255, 255, 255, 0.88)';
-const HERO_AVATAR_SIZE = 64;
-const HERO_AVATAR_GAP = 8;
+const HERO_AVATAR_SIZE = 80;
+/** Space between the avatar and the greeting; generous so the avatar sits a bit higher. */
+const HERO_AVATAR_GAP = 18;
+/** Thickness of the tier foil ring around the hero avatar. */
+const HERO_AVATAR_RING = 3;
 /** Avatar fallback fill: deep burnt orange, so initials don't vanish into the hero. */
 const HERO_AVATAR_BG = '#7A2E06';
 const HERO_TEXT_SHADOW = {
@@ -81,6 +87,12 @@ const HERO_TEXT_SHADOW = {
 } as const;
 
 export type FinderCategory = 'general' | 'gaming' | 'sports';
+
+const FINDER_TABS: ReadonlyArray<{ label: string; value: FinderCategory }> = [
+  { label: 'General', value: 'general' },
+  { label: 'Gaming', value: 'gaming' },
+  { label: 'Sports', value: 'sports' },
+];
 
 export const FINDER_CONFIG: Record<
   FinderCategory,
@@ -162,6 +174,8 @@ interface HomeData {
   heads: AnnouncementHead[];
   events: ApiEvent[];
   activity: Array<PointTransaction & { title: string }>;
+  /** Player-card tier (e.g. 'Gold'); colours the hero avatar ring. */
+  cardTier: string | null;
 }
 
 const ACTIVE_PARTICIPATION = ['accepted', 'submitted', 'under_review'];
@@ -173,7 +187,7 @@ async function loadHome(userId: string | undefined): Promise<HomeData> {
       firstError ??= err;
       return null;
     });
-  const [points, txPage, rank, total, regs, parts, pinnedList, heads, events] = await Promise.all([
+  const [points, txPage, rank, total, regs, parts, pinnedList, heads, events, card] = await Promise.all([
     settle(pointsRepository.me()),
     settle(pointsRepository.transactions({ limit: 50 })),
     userId ? settle(leaderboardRepository.findMyGlobalRank(userId)) : Promise.resolve(null),
@@ -183,6 +197,8 @@ async function loadHome(userId: string | undefined): Promise<HomeData> {
     settle(announcementsRepository.list({ pinned: true, limit: 5 })),
     settle(announcementsRepository.heads()),
     settle(eventsRepository.list({ status: ['upcoming', 'ongoing'], sort: 'date_asc', limit: 20 })),
+    // Not settle(): a missing card only loses the ring colour, it shouldn't surface as an error.
+    userId ? usersRepository.card(userId).catch(() => null) : Promise.resolve(null),
   ]);
   if (!points && !txPage && !total && !events && !heads && !pinnedList) throw firstError;
 
@@ -222,6 +238,7 @@ async function loadHome(userId: string | undefined): Promise<HomeData> {
     heads: Array.isArray(heads) ? heads : [],
     events: Array.isArray(events?.events) ? events.events : [],
     activity: recent.map((t, i) => ({ ...t, title: titles[i] ? `${humanizeReason(t.reason)} · ${titles[i]}` : humanizeReason(t.reason) })),
+    cardTier: card?.card_tier ?? null,
   };
 }
 
@@ -266,9 +283,9 @@ function heroArtLayout(screenWidth: number) {
   const height = Math.round(width / HERO_ILLUSTRATION_ASPECT);
   const overflow = Math.round(width * HERO_ART_OVERFLOW_RATIO);
   const left = screenWidth + overflow - width; // art's left edge on screen
-  // Greeting column: ringed avatar + gap + greeting + name (max line height) + subline.
+  // Greeting column: ringed avatar + gap + greeting + name (max line height).
   const identityHeight =
-    HERO_AVATAR_SIZE + 9 + HERO_AVATAR_GAP + 18 + Math.round(HERO_NAME_MAX * 1.15) + 22;
+    HERO_AVATAR_SIZE + HERO_AVATAR_RING * 2 + HERO_AVATAR_GAP + 18 + Math.round(HERO_NAME_MAX * 1.15);
   const rowHeight = Math.max(height, identityHeight + HERO_IDENTITY_PADDING_BOTTOM + HERO_ROW_RAISE);
   return {
     width,
@@ -307,6 +324,14 @@ export default function Home() {
   const [unread, setUnread] = useState(0);
 
   const currentConfig = FINDER_CONFIG[searchTab];
+  // Heads who have posted, newest post first. With none, the section shows one shared message.
+  const headPosts = useMemo(
+    () =>
+      (data?.heads ?? [])
+        .filter((h) => h.announcement != null)
+        .sort((a, b) => postTime(b.announcement!) - postTime(a.announcement!)),
+    [data?.heads],
+  );
 
   const carouselEvents = useMemo(() => {
     const all = data?.events ?? [];
@@ -386,6 +411,59 @@ export default function Home() {
   const heroHeight = insets.top + heroArt.bodyHeight;
   const topBarHeight = insets.top + TOP_BAR_BODY_HEIGHT;
 
+  // The top bar's avatar and BGSC logo only show once the hero avatar has scrolled up under
+  // the bar; at the top the hero carries the identity, so the bar stays clear (two avatars on
+  // screen at once read as a duplicate). The crossing point is measured
+  // from the hero avatar; until then, a fallback a little way into the hero is used.
+  const [showBarIdentity, setShowBarIdentity] = useState(false);
+  const scrollOffset = useRef(0);
+  const heroAvatarRef = useRef<React.ComponentRef<typeof View>>(null);
+  const barAvatarThreshold = useRef(heroHeight * 0.3);
+  // Once the solid (frosted) bar has faded in, the menu/bell/avatar drop their glass pills
+  // and grow: the bar itself is now the backdrop. The bar fades in over the last quarter of
+  // (hero - top bar), so switch near its end.
+  const [barSolid, setBarSolid] = useState(false);
+  const barSolidThreshold = useRef(0);
+  barSolidThreshold.current = (heroHeight - topBarHeight) * 0.9;
+  const updateBarAvatar = useCallback((y: number) => {
+    scrollOffset.current = y;
+    const next = y >= barAvatarThreshold.current;
+    setShowBarIdentity((prev) => (prev === next ? prev : next));
+    const solid = y >= barSolidThreshold.current;
+    setBarSolid((prev) => (prev === solid ? prev : solid));
+  }, []);
+  const measureHeroAvatar = useCallback(() => {
+    heroAvatarRef.current?.measureInWindow((_x, y, _w, h) => {
+      // The hero is pinned (pinHeader), so the avatar stays at y on screen while the content
+      // sheet slides up over it; the sheet's top is at heroHeight - SHEET_OVERLAP - offset.
+      // Switch once the sheet has covered the avatar's middle.
+      const covered = heroHeight - SHEET_OVERLAP - (y + h / 2);
+      barAvatarThreshold.current = Math.max(0, covered);
+      updateBarAvatar(scrollOffset.current);
+    });
+  }, [heroHeight, topBarHeight, updateBarAvatar]);
+
+  // Home always opens at the top: when you leave it (another tab, a pushed screen), jump back to
+  // the top while it's hidden, so returning never lands mid-page and never shows the jump.
+  const scrollRef = useRef<React.ComponentRef<typeof AnimatedScrollView>>(null);
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+        updateBarAvatar(0);
+      },
+      [updateBarAvatar],
+    ),
+  );
+
+  const openProfile = () =>
+    navigation.navigate('App', { screen: 'MainTabs', params: { screen: 'ProfileTab' } }, { pop: true });
+
+  // Hero avatar ring: the tier's foil (dark edge, highlight, dark edge), as on the player card.
+  const heroRingColors: [string, string, ...string[]] = data?.cardTier
+    ? cardTierStyle(data.cardTier, isDark ? 'dark' : 'light').foil
+    : ['rgba(255, 255, 255, 0.9)', 'rgba(255, 255, 255, 0.9)'];
+
   // Shared frosted-glass tone for the top bar's menu button and action capsule.
   const glassTone = {
     backgroundColor: withAlpha(colors.surface, isDark ? 0.62 : 0.8),
@@ -396,9 +474,13 @@ export default function Home() {
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <AnimatedScrollView
+        ref={scrollRef}
         showsVerticalScrollIndicator={false}
         headerMaxHeight={heroHeight}
         topBarHeight={topBarHeight}
+        onScrollOffset={updateBarAvatar}
+        // The orange hero stays still; the content sheet slides up over it.
+        pinHeader
         // Frosted bar that fades in behind the fixed top buttons once the hero scrolls away.
         renderTopNavBarComponent={() => (
           <View
@@ -414,7 +496,7 @@ export default function Home() {
             />
           </View>
         )}
-        // Parallax layer: drifts down at half scroll speed, fades, and stretches on pull-down.
+        // Hero backdrop: held still (pinHeader) while the sheet slides over it; stretches on pull-down.
         renderHeaderComponent={() => (
           <View pointerEvents="none" style={[styles.heroLayer, { backgroundColor: colors.background }]}>
             <GamingBackdrop
@@ -431,7 +513,7 @@ export default function Home() {
             />
           </View>
         )}
-        // Player card on the orange hero; fades out as you scroll.
+        // Greeting on the orange hero; held still while the sheet slides over it.
         renderOveralComponent={() => (
           <View
             pointerEvents="box-none"
@@ -447,14 +529,30 @@ export default function Home() {
                 style={[styles.heroArt, { right: heroArt.right }]}
               />
               <View style={[styles.identity, { width: heroArt.identityWidth }]}>
-                <View style={styles.avatarRing}>
-                  <Avatar
-                    name={user?.fullName || user?.username}
-                    uri={user?.avatar_url}
-                    size={HERO_AVATAR_SIZE}
-                    color={HERO_AVATAR_BG}
-                  />
-                </View>
+                {/* Ringed in the player-card tier's foil (white until the tier loads); opens the profile. */}
+                <Pressable
+                  ref={heroAvatarRef}
+                  onLayout={measureHeroAvatar}
+                  onPress={openProfile}
+                  accessibilityRole="button"
+                  accessibilityLabel="Your profile"
+                  hitSlop={6}
+                  style={({ pressed }) => [styles.avatarRing, pressed && styles.pressed]}
+                >
+                  <LinearGradient
+                    colors={heroRingColors}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.avatarRingFill}
+                  >
+                    <Avatar
+                      name={user?.fullName || user?.username}
+                      uri={user?.avatar_url}
+                      size={HERO_AVATAR_SIZE}
+                      color={HERO_AVATAR_BG}
+                    />
+                  </LinearGradient>
+                </Pressable>
                 <Typography style={styles.greetingText} numberOfLines={1}>
                   Good {greeting().toLowerCase()}
                 </Typography>
@@ -463,9 +561,6 @@ export default function Home() {
                   numberOfLines={1}
                 >
                   {firstName || 'Player'}
-                </Typography>
-                <Typography style={styles.heroSubline} numberOfLines={1}>
-                  Ready to play?
                 </Typography>
               </View>
             </View>
@@ -498,43 +593,28 @@ export default function Home() {
           {/* Feed Error Alert */}
           {error && !data ? <ErrorState title="Couldn’t load your home feed" message={error} onRetry={() => reload()} /> : null}
 
-          {/* Member Pass: points balance, weekly gain, rank and activity stats. */}
+          {/* Points: the one number this screen is about, straight on the sheet. */}
           {loading ? (
-            <Skeleton height={210} borderRadius={24} />
+            <Skeleton height={170} borderRadius={12} />
           ) : data?.points ? (
-            <View style={[styles.card, styles.pointsPass, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('raised')]}>
-              <FrostedSheen radius={18} />
-              <View style={[styles.passRibbon, { borderBottomColor: colors.border }]}>
-                <View style={styles.passType}>
-                  <Icon name="zap" size={14} color="primary" />
-                  <Typography variant="mono" color="textMuted" style={styles.passLabel}>
-                    BGSC MEMBER PASS
-                  </Typography>
-                </View>
-                {data.rank ? <Badge label={`Top ${data.rank.topPercent}%`} variant="success" /> : null}
-              </View>
-
-              {/* Points */}
-              <View style={styles.balanceRow}>
-                <View>
-                  <Typography variant="caption" color="textMuted">
+            <View style={styles.pointsBlock}>
+              <View>
+                <View style={styles.balanceHead}>
+                  <Typography variant="caption" color="textMuted" style={styles.kicker}>
                     TOTAL POINTS
                   </Typography>
-                  <Typography color="text" style={styles.balance}>
-                    {formatNumber(data.points.balance)}
-                  </Typography>
-                </View>
-                {data.points.week > 0 ? (
-                  <View style={[styles.weekPill, { backgroundColor: withAlpha(colors.success, 0.15) }]}>
-                    <Icon name="arrow-up" size={12} color="success" />
-                    <Typography variant="mono" color="success" style={styles.week}>
-                      +{formatNumber(data.points.week)} this week
+                  {data.rank ? (
+                    <Typography variant="bodySmall" color="textMuted" style={styles.rankText}>
+                      Top {data.rank.topPercent}%
                     </Typography>
-                  </View>
-                ) : null}
+                  ) : null}
+                </View>
+                <Typography color="text" style={styles.balance} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                  {formatNumber(data.points.balance)}
+                </Typography>
               </View>
 
-              <View style={[styles.statsStrip, { backgroundColor: colors.surfaceInner, borderColor: colors.border }]}>
+              <View style={styles.statsRow}>
                 <Stat value={data.rank ? `#${data.rank.rank}` : '—'} label="Global Rank" />
                 <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
                 <Stat value={data.eventsJoined != null ? String(data.eventsJoined) : '—'} label="Events Joined" />
@@ -546,30 +626,86 @@ export default function Home() {
                 />
               </View>
 
-              {/* Actions */}
               <View style={styles.passActions}>
                 <Button label="History" variant="outline" onPress={() => navigation.navigate('Points')} containerStyle={styles.flex} />
                 <Button label="Leaderboard" onPress={() => navigation.navigate('Leaderboard')} containerStyle={styles.flex} />
               </View>
-              <FrostedRim radius={18} />
             </View>
           ) : null}
 
-          {/* Pinned Announcement */}
+          {/* Events: heading, filter chips, then the cards running edge to edge */}
+          <View style={styles.section}>
+            <SectionHeader titleStyle={styles.sectionTitle}
+              title="Upcoming events"
+              actionLabel="Show all"
+              onAction={() =>
+                navigation.navigate('Events', currentConfig.targetCategory ? { category: currentConfig.targetCategory } : undefined)
+              }
+            />
+            <FilterChips options={FINDER_TABS} value={searchTab} onChange={setSearchTab} />
+            {loading ? (
+              <DrawerSafeScrollView style={styles.bleed} contentContainerStyle={styles.eventsCarousel}>
+                <View style={styles.carouselCardWrap}>
+                  <SkeletonEventCard />
+                </View>
+                <View style={styles.carouselCardWrap}>
+                  <SkeletonEventCard />
+                </View>
+              </DrawerSafeScrollView>
+            ) : carouselEvents.length === 1 ? (
+              renderFinderEventCard(carouselEvents[0], true)
+            ) : carouselEvents.length > 1 ? (
+              <DrawerSafeScrollView
+                style={styles.bleed}
+                contentContainerStyle={styles.eventsCarousel}
+                snapToInterval={278}
+                decelerationRate="fast"
+              >
+                {carouselEvents.map((event) => renderFinderEventCard(event, false))}
+              </DrawerSafeScrollView>
+            ) : (
+              <Typography variant="bodySmall" color="textMuted" style={styles.emptyText}>
+                No upcoming {searchTab} events right now. Check back soon or browse all events.
+              </Typography>
+            )}
+          </View>
+
+          {/* Explore: a typographic list, no icons; name left, count right */}
+          <View style={styles.section}>
+            <SectionHeader titleStyle={styles.sectionTitle} title="Explore" />
+            <View>
+              <QuickAction
+                title="Events"
+                caption="Tournaments, matches and meetups"
+                count={openEvents.length}
+                countLabel="open"
+                onPress={() => navigation.navigate('Events')}
+              />
+              <QuickAction
+                title="Challenges"
+                caption="Complete them to earn points"
+                count={data?.activeChallenges ?? undefined}
+                countLabel="active"
+                onPress={() => navigation.navigate('Challenges')}
+              />
+              <QuickAction
+                title="Hall of Fame"
+                caption="Past champions and winning teams"
+                onPress={() => navigation.navigate('HallOfFame')}
+                last
+              />
+            </View>
+          </View>
+
+          {/* Pinned Announcement: a plain row */}
           {data?.pinned ? (
             <Pressable
               onPress={() => navigation.navigate('AnnouncementDetail', { id: data.pinned!._id })}
               accessibilityRole="button"
-              style={({ pressed }) => [
-                styles.pinned,
-                { backgroundColor: colors.accentMuted, borderColor: colors.primary },
-                shadow('flat'),
-                pressed && styles.pressed,
-              ]}
+              style={({ pressed }) => [styles.plainRow, pressed && styles.rowPressed]}
             >
-              <FrostedSheen radius={14} />
-              <View style={[styles.iconTile, { backgroundColor: colors.primarySolid }]}>
-                <Icon name="megaphone" size={20} color="white" />
+              <View style={[styles.rowIcon, { backgroundColor: withAlpha(colors.primary, 0.14) }]}>
+                <Icon name="megaphone" size={18} color="primary" />
               </View>
               <View style={styles.flex}>
                 <Typography color="primary" style={styles.pinnedKicker}>
@@ -579,168 +715,47 @@ export default function Home() {
                   {data.pinned.title}
                 </Typography>
               </View>
-              <Icon name="chevron-right" size={20} color="primary" />
+              <Icon name="chevron-right" size={18} color="textMuted" />
             </Pressable>
           ) : null}
 
-          {/* Tournament & Event Finder */}
-          <View
-            style={[
-              styles.finderBoxWrap,
-              {
-                backgroundColor: withAlpha(colors.surfaceInner, 0.88),
-                borderColor: withAlpha(colors.border, 0.8),
-                borderTopColor: withAlpha('#FFFFFF', 0.2),
-              },
-            ]}
-          >
-            <FrostedSheen radius={16} />
-            <View
-              style={[
-                styles.finderTabs,
-                {
-                  backgroundColor: withAlpha(colors.surface, 0.65),
-                  borderColor: withAlpha(colors.border, 0.7),
-                  borderTopColor: withAlpha('#FFFFFF', 0.14),
-                },
-              ]}
-            >
-              {(['general', 'gaming', 'sports'] as const).map((tabKey) => {
-                const active = searchTab === tabKey;
-                return (
-                  <Pressable
-                    key={tabKey}
-                    onPress={() => setSearchTab(tabKey)}
-                    accessibilityRole="tab"
-                    accessibilityState={{ selected: active }}
-                    style={[
-                      styles.finderTab,
-                      active && [
-                        {
-                          backgroundColor: colors.surfaceElevated,
-                          borderColor: withAlpha(colors.primary, 0.35),
-                          shadowColor: colors.primary,
-                          shadowOffset: { width: 0, height: 2 },
-                          shadowOpacity: 0.22,
-                          shadowRadius: 6,
-                          elevation: 3,
-                        },
-                      ],
-                    ]}
-                  >
-                    <Typography
-                      variant="caption"
-                      style={{
-                        fontFamily: active ? FONT_FAMILIES.bodyBold : FONT_FAMILIES.bodyMedium,
-                        color: active ? colors.text : colors.textMuted,
-                        textTransform: 'capitalize',
-                        fontSize: 12,
-                      }}
-                    >
-                      {tabKey}
-                    </Typography>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <View style={styles.finderCarouselContainer}>
-              {loading ? (
-                <DrawerSafeScrollView contentContainerStyle={styles.eventsCarousel}>
-                  <View style={styles.carouselCardWrap}>
-                    <SkeletonEventCard />
-                  </View>
-                  <View style={styles.carouselCardWrap}>
-                    <SkeletonEventCard />
-                  </View>
-                </DrawerSafeScrollView>
-              ) : carouselEvents.length === 1 ? (
-                renderFinderEventCard(carouselEvents[0], true)
-              ) : carouselEvents.length > 1 ? (
-                <DrawerSafeScrollView
-                  contentContainerStyle={styles.eventsCarousel}
-                  snapToInterval={278}
-                  decelerationRate="fast"
-                >
-                  {carouselEvents.map((event) => renderFinderEventCard(event, false))}
-                </DrawerSafeScrollView>
-              ) : (
-                <View style={[styles.emptyEventsBox, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <Icon name="calendar-outline" size={24} color="textMuted" />
-                  <Typography variant="bodySmall" color="textMuted" style={{ textAlign: 'center' }}>
-                    No upcoming {searchTab} events right now.{'\n'}Check back soon or browse all events.
-                  </Typography>
+          {/* From the heads: each head's latest post as a feed row, newest first */}
+          {data ? (
+            <View style={styles.section}>
+              <SectionHeader titleStyle={styles.sectionTitle} title="From the heads" actionLabel="All posts" onAction={() => navigation.navigate('AnnouncementsTab')} />
+              {headPosts.length ? (
+                <View>
+                  {headPosts.map((h, i) => (
+                    <HeadPost
+                      key={h.coordinator.user_id}
+                      head={h}
+                      last={i === headPosts.length - 1}
+                      onPress={() => navigation.navigate('AnnouncementDetail', { id: h.announcement!._id })}
+                    />
+                  ))}
                 </View>
+              ) : (
+                <Typography variant="bodySmall" color="textMuted" style={styles.emptyText}>
+                  No posts from the heads yet.
+                </Typography>
               )}
             </View>
-
-            <Pressable
-              onPress={() =>
-                navigation.navigate(
-                  'Events',
-                  currentConfig.targetCategory ? { category: currentConfig.targetCategory } : undefined,
-                )
-              }
-              accessibilityRole="button"
-              accessibilityLabel={`Show all ${searchTab} events`}
-              style={({ pressed }) => [
-                styles.finderFooterRow,
-                { backgroundColor: colors.surface, borderColor: colors.border },
-                pressed && styles.pressed,
-              ]}
-            >
-              <Typography variant="caption" color="textMuted" style={{ fontSize: 12, fontWeight: '500' }}>
-                {carouselEvents.length} event{carouselEvents.length === 1 ? '' : 's'}
-              </Typography>
-              <View style={styles.finderFooterAction}>
-                <Typography variant="caption" color="primary" style={[styles.semibold, { fontSize: 12 }]}>
-                  Show all
-                </Typography>
-                <Icon name="chevron-right" size={14} color="primary" />
-              </View>
-            </Pressable>
-          </View>
-
-          {/* Quick Actions */}
-          <View style={styles.quickGrid}>
-            <QuickAction icon="calendar" title="Events" meta={`${openEvents.length} open`} onPress={() => navigation.navigate('Events')} />
-            <QuickAction
-              icon="target"
-              title="Challenges"
-              meta={data?.activeChallenges != null ? `${data.activeChallenges} active` : 'Browse'}
-              onPress={() => navigation.navigate('Challenges')}
-            />
-            <QuickAction icon="trophy" title="Hall of Fame" meta="Champions" onPress={() => navigation.navigate('HallOfFame')} />
-          </View>
-
-          {/* From the heads */}
-          {data?.heads.length ? (
-            <View style={styles.section}>
-              <SectionHeader title="From the heads" actionLabel="All posts" onAction={() => navigation.navigate('AnnouncementsTab')} />
-              <DrawerSafeScrollView contentContainerStyle={styles.carousel}>
-                {data.heads.map((h) => (
-                  <HeadBubble
-                    key={h.coordinator.user_id}
-                    head={h}
-                    onPress={h.announcement ? () => navigation.navigate('AnnouncementDetail', { id: h.announcement!._id }) : undefined}
-                  />
-                ))}
-              </DrawerSafeScrollView>
-            </View>
           ) : null}
 
-          {/* Recent Activity */}
+          {/* Recent Activity: a plain list, hairlines between rows */}
           {data?.activity.length ? (
             <View style={styles.section}>
-              <SectionHeader title="Recent Activity" actionLabel="History" onAction={() => navigation.navigate('Points')} />
-              <View style={[styles.card, styles.list, { backgroundColor: colors.surface, borderColor: colors.border }, shadow('flat')]}>
-                <FrostedSheen radius={16} />
+              <SectionHeader titleStyle={styles.sectionTitle} title="Recent activity" actionLabel="History" onAction={() => navigation.navigate('Points')} />
+              <View>
                 {data.activity.map((t, i) => (
                   <View
                     key={t.id}
-                    style={[styles.activityRow, i < data.activity.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}
+                    style={[
+                      styles.activityRow,
+                      i < data.activity.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+                    ]}
                   >
-                    <View style={[styles.iconTile, { backgroundColor: colors.surfaceInner }]}>
+                    <View style={[styles.rowIcon, { backgroundColor: colors.surfaceInner }]}>
                       <Icon name={SOURCE_ICON[t.source] ?? 'zap'} size={18} color="textMuted" />
                     </View>
                     <View style={styles.flex}>
@@ -757,25 +772,18 @@ export default function Home() {
                     </Typography>
                   </View>
                 ))}
-                <FrostedRim radius={16} />
               </View>
             </View>
           ) : null}
 
-          {/* WhatsApp community */}
+          {/* WhatsApp community: a plain row */}
           <Pressable
             onPress={() => void Linking.openURL(WHATSAPP_URL)}
             accessibilityRole="link"
-            style={({ pressed }) => [
-              styles.card,
-              styles.whatsapp,
-              { backgroundColor: colors.successMuted, borderColor: colors.success },
-              pressed && styles.pressed,
-            ]}
+            style={({ pressed }) => [styles.plainRow, pressed && styles.rowPressed]}
           >
-            <FrostedSheen radius={16} />
-            <View style={[styles.iconTile, { backgroundColor: colors.success }]}>
-              <Icon name="message" size={20} color="white" />
+            <View style={[styles.rowIcon, { backgroundColor: colors.success }]}>
+              <Icon name="message" size={18} color="white" />
             </View>
             <View style={styles.flex}>
               <Typography variant="body" color="text" style={styles.semibold}>
@@ -785,7 +793,7 @@ export default function Home() {
                 Announcements land there first
               </Typography>
             </View>
-            <Icon name="chevron-right" size={18} color="success" />
+            <Icon name="chevron-right" size={18} color="textMuted" />
           </Pressable>
         </View>
       </AnimatedScrollView>
@@ -800,9 +808,17 @@ export default function Home() {
           accessibilityRole="button"
           accessibilityLabel="Open menu"
           hitSlop={8}
-          style={({ pressed }) => [styles.glass, styles.menuButton, glassTone, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.control, styles.menuButton, pressed && styles.pressed]}
         >
-          <Icon name="menu" size={20} color="text" />
+          {/* Glass pill over the orange hero; gone on the solid bar. */}
+          {!barSolid ? (
+            <Reanimated.View
+              entering={FadeIn.duration(180)}
+              exiting={FadeOut.duration(180)}
+              style={[styles.glassBg, glassTone]}
+            />
+          ) : null}
+          <Icon name="menu" size={barSolid ? 26 : 20} color="text" />
         </Pressable>
 
         <View
@@ -812,15 +828,33 @@ export default function Home() {
           accessibilityRole="header"
           accessibilityLabel="BGSC"
         >
+          {/* The wordmark always shows; the logo mark joins it (like the avatar) only once
+              the hero has scrolled away, and the wordmark slides over to make room. */}
           <View style={styles.brandRow}>
-            <BgscLogo size={30} />
-            <Typography color="text" style={styles.brandWordmark}>
-              BGSC
-            </Typography>
+            {showBarIdentity ? (
+              <Reanimated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
+                <BgscLogo size={30} />
+              </Reanimated.View>
+            ) : null}
+            <Reanimated.View layout={LinearTransition.duration(180)}>
+              <Typography color="text" style={styles.brandWordmark}>
+                BGSC
+              </Typography>
+            </Reanimated.View>
           </View>
         </View>
 
-        <View style={[styles.glass, styles.actionsCapsule, glassTone]}>
+        <Reanimated.View
+          layout={LinearTransition.duration(180)}
+          style={[styles.control, styles.actionsCapsule]}
+        >
+          {!barSolid ? (
+            <Reanimated.View
+              entering={FadeIn.duration(180)}
+              exiting={FadeOut.duration(180)}
+              style={[styles.glassBg, glassTone]}
+            />
+          ) : null}
           <Pressable
             onPress={() => navigation.navigate('Notifications', undefined, { pop: true })}
             accessibilityRole="button"
@@ -828,7 +862,7 @@ export default function Home() {
             hitSlop={4}
             style={({ pressed }) => [styles.capsuleBtn, pressed && styles.pressed]}
           >
-            <Icon name="bell" size={19} color="text" />
+            <Icon name="bell" size={barSolid ? 23 : 19} color="text" />
             {unread > 0 ? (
               <View style={[styles.unreadBadge, { backgroundColor: colors.primarySolid, borderColor: colors.surface }]}>
                 <Typography style={styles.unreadText} numberOfLines={1}>
@@ -838,18 +872,34 @@ export default function Home() {
             ) : null}
           </Pressable>
 
-          <View style={[styles.capsuleDivider, { backgroundColor: withAlpha(colors.border, 0.7) }]} />
-
-          <Pressable
-            onPress={() => navigation.navigate('App', { screen: 'MainTabs', params: { screen: 'ProfileTab' } }, { pop: true })}
-            accessibilityRole="button"
-            accessibilityLabel="Your profile"
-            hitSlop={4}
-            style={({ pressed }) => [styles.capsuleBtn, pressed && styles.pressed]}
-          >
-            <Avatar name={user?.fullName || user?.username} uri={user?.avatar_url} size={30} ring={false} />
-          </Pressable>
-        </View>
+          {/* Avatar joins the capsule only after the hero avatar has scrolled away. */}
+          {showBarIdentity ? (
+            <Reanimated.View
+              entering={FadeIn.duration(180)}
+              exiting={FadeOut.duration(120)}
+              style={styles.capsuleAvatarGroup}
+            >
+              {/* Divider only separates the two inside a pill. */}
+              {!barSolid ? (
+                <View style={[styles.capsuleDivider, { backgroundColor: withAlpha(colors.border, 0.7) }]} />
+              ) : null}
+              <Pressable
+                onPress={openProfile}
+                accessibilityRole="button"
+                accessibilityLabel="Your profile"
+                hitSlop={4}
+                style={({ pressed }) => [styles.capsuleBtn, pressed && styles.pressed]}
+              >
+                <Avatar
+                  name={user?.fullName || user?.username}
+                  uri={user?.avatar_url}
+                  size={barSolid ? 32 : 30}
+                  ring={false}
+                />
+              </Pressable>
+            </Reanimated.View>
+          ) : null}
+        </Reanimated.View>
       </View>
     </View>
   );
@@ -874,65 +924,138 @@ function Stat({ value, label, onPress }: { value: string; label: string; onPress
   );
 }
 
-function QuickAction({ icon, title, meta, onPress }: { icon: IconName; title: string; meta: string; onPress: () => void }) {
-  const { colors, shadow } = useTheme();
+/** One Explore row: name and what's inside on the left, the live count (if any) on the right. */
+function QuickAction({
+  title,
+  caption,
+  count,
+  countLabel,
+  onPress,
+  last = false,
+}: {
+  title: string;
+  caption: string;
+  count?: number;
+  countLabel?: string;
+  onPress: () => void;
+  last?: boolean;
+}) {
+  const { colors } = useTheme();
+  const hasCount = count != null;
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`${title}, ${meta}`}
+      accessibilityLabel={hasCount ? `${title}, ${count} ${countLabel ?? ''}` : title}
       style={({ pressed }) => [
         styles.quick,
-        { backgroundColor: colors.surface, borderColor: colors.border },
-        shadow('flat'),
-        pressed && styles.pressed,
+        !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+        pressed && styles.rowPressed,
       ]}
     >
-      <FrostedSheen radius={14} />
-      <View style={[styles.iconTile, { backgroundColor: withAlpha(colors.primary, 0.15) }]}>
-        <Icon name={icon} size={20} color="primary" />
-      </View>
-      <View>
-        <Typography variant="body" color="text" style={styles.semibold} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+      <View style={styles.flex}>
+        <Typography color="text" style={styles.quickTitle} numberOfLines={1}>
           {title}
         </Typography>
-        <Typography color="textMuted" style={styles.tiny} numberOfLines={1}>
-          {meta}
+        <Typography color="textMuted" style={styles.quickCaption} numberOfLines={1}>
+          {caption}
         </Typography>
+      </View>
+      {hasCount ? (
+        <View style={styles.quickCount}>
+          <Typography color="text" style={styles.quickCountValue}>
+            {count}
+          </Typography>
+          {countLabel ? (
+            <Typography color="textMuted" style={styles.quickCountLabel}>
+              {countLabel.toUpperCase()}
+            </Typography>
+          ) : null}
+        </View>
+      ) : null}
+      <Icon name="chevron-right" size={18} color="textMuted" />
+    </Pressable>
+  );
+}
+
+function postTime(post: Announcement): number {
+  const t = Date.parse(post.published_at ?? '');
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/** First line of a post body as plain text (markdown marks dropped), for a one-line preview. */
+function previewLine(body: string): string {
+  return body
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[#>*_`~]+/g, '')
+    .split('\n')
+    .map((l) => l.trim())
+    .find(Boolean) ?? '';
+}
+
+/** A head's latest post: avatar, who and when, then the title and a one-line preview. */
+function HeadPost({
+  head,
+  last,
+  onPress,
+}: {
+  head: AnnouncementHead;
+  last: boolean;
+  onPress?: () => void;
+}) {
+  const { colors } = useTheme();
+  const name = head.coordinator.display_name;
+  const post = head.announcement;
+  const preview = post ? previewLine(post.body) : '';
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={!onPress}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={`${name}, ${head.coordinator.role_label}: ${post ? post.title : 'no posts yet'}`}
+      style={({ pressed }) => [
+        styles.headPost,
+        !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+        pressed && styles.rowPressed,
+      ]}
+    >
+      <Avatar name={name} uri={head.coordinator.avatar_url} size={40} color={authorColor(name, colors)} />
+      <View style={styles.flex}>
+        <View style={styles.headPostMeta}>
+          <Typography color="text" style={[styles.semibold, styles.small, styles.headName]} numberOfLines={1}>
+            {name}
+          </Typography>
+          <Typography color="textMuted" style={[styles.small, styles.headRole]} numberOfLines={1}>
+            {head.coordinator.role_label}
+          </Typography>
+          {post?.published_at ? (
+            <Typography color="textMuted" style={styles.small}>
+              · {timeAgo(post.published_at)}
+            </Typography>
+          ) : null}
+        </View>
+        {post ? (
+          <Typography color="text" style={styles.headTitle} numberOfLines={2}>
+            {post.title}
+          </Typography>
+        ) : (
+          <Typography color="textMuted" style={styles.headPreview}>
+            No posts yet
+          </Typography>
+        )}
+        {preview ? (
+          <Typography color="textMuted" style={styles.headPreview} numberOfLines={1}>
+            {preview}
+          </Typography>
+        ) : null}
       </View>
     </Pressable>
   );
 }
 
-function HeadBubble({ head, onPress }: { head: AnnouncementHead; onPress?: () => void }) {
-  const { colors } = useTheme();
-  const name = head.coordinator.display_name;
-  return (
-    <View style={styles.head}>
-      <Pressable
-        onPress={onPress}
-        disabled={!onPress}
-        accessibilityRole={onPress ? 'button' : undefined}
-        style={({ pressed }) => [styles.bubble, { backgroundColor: colors.text }, pressed && styles.pressed]}
-      >
-        <Typography variant="body" style={{ color: colors.background }} numberOfLines={3}>
-          {head.announcement ? head.announcement.title : 'Nothing posted yet — check back soon.'}
-        </Typography>
-      </Pressable>
-      <View style={styles.headWho}>
-        <Avatar name={name} uri={head.coordinator.avatar_url} size={36} color={authorColor(name, colors)} />
-        <View>
-          <Typography variant="body" color="text" style={styles.semibold} numberOfLines={1}>
-            {name}
-          </Typography>
-          <Typography color="textMuted" style={styles.tiny} numberOfLines={1}>
-            {head.coordinator.role_label}
-          </Typography>
-        </View>
-      </View>
-    </View>
-  );
-}
+/** Content sheet's top corners, and its side and top padding. */
+const SHEET_RADIUS = 32;
+const SHEET_INSET = 20;
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
@@ -983,18 +1106,11 @@ const styles = StyleSheet.create({
   avatarRing: {
     alignSelf: 'flex-start',
     marginBottom: HERO_AVATAR_GAP,
-    padding: 2.5,
     borderRadius: 999,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.9)',
   },
-  heroSubline: {
-    fontFamily: FONT_FAMILIES.bodySemiBold,
-    fontSize: 14,
-    lineHeight: 18,
-    marginTop: 4,
-    color: HERO_INK_SOFT,
-    ...HERO_TEXT_SHADOW,
+  avatarRingFill: {
+    padding: HERO_AVATAR_RING,
+    borderRadius: 999,
   },
   greetingText: {
     fontFamily: FONT_FAMILIES.bodySemiBold,
@@ -1005,7 +1121,7 @@ const styles = StyleSheet.create({
   },
   // Plain bold white; size comes from heroNameSize() so long names fit on one line.
   heroName: {
-    fontFamily: FONT_FAMILIES.bodyBlack,
+    fontFamily: FONT_FAMILIES.bodyBold,
     letterSpacing: -1,
     color: HERO_INK,
     ...HERO_TEXT_SHADOW,
@@ -1024,13 +1140,23 @@ const styles = StyleSheet.create({
   },
   // Frosted glass pill shared by the menu button and the action capsule.
   // Soft iOS shadow only: Android elevation draws grey artifacts on translucent views.
-  glass: {
+  // Menu button / action group: layout only. The glass look is a separate layer
+  // (glassBg) so it can fade away on the solid bar.
+  control: {
     height: TOP_BAR_CONTROL_SIZE,
     borderRadius: TOP_BAR_CONTROL_SIZE / 2,
-    borderWidth: StyleSheet.hairlineWidth * 2,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,
+  },
+  glassBg: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: TOP_BAR_CONTROL_SIZE / 2,
+    borderWidth: StyleSheet.hairlineWidth * 2,
     ...Platform.select({
       ios: {
         shadowColor: '#000',
@@ -1061,10 +1187,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   brandWordmark: {
-    fontFamily: FONT_FAMILIES.brand,
-    fontSize: 24,
-    lineHeight: 30,
-    letterSpacing: 2,
+    // Elegant serif at its heaviest (Black). Line height leaves room for Playfair's tall caps while the
+    // row's centre alignment keeps it level with the 30px logo mark.
+    fontFamily: FONT_FAMILIES.wordmark,
+    fontSize: 30,
+    lineHeight: 36,
+    letterSpacing: 1,
   },
   actionsCapsule: {
     flexDirection: 'row',
@@ -1077,6 +1205,13 @@ const styles = StyleSheet.create({
     borderRadius: (TOP_BAR_CONTROL_SIZE - 6) / 2,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Divider + avatar, kept together so they appear and leave as one; same spacing as
+  // the capsule's own row.
+  capsuleAvatarGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
   },
   capsuleDivider: {
     width: StyleSheet.hairlineWidth * 2,
@@ -1106,125 +1241,52 @@ const styles = StyleSheet.create({
     maxWidth: 600,
     width: '100%',
     alignSelf: 'center',
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
+    borderTopLeftRadius: SHEET_RADIUS,
+    borderTopRightRadius: SHEET_RADIUS,
     borderTopWidth: 1,
-    paddingHorizontal: 12,
-    paddingTop: 10,
+    paddingHorizontal: SHEET_INSET,
+    paddingTop: SHEET_INSET + 4,
     paddingBottom: 28,
-    gap: 10,
+    gap: 30,
   },
 
-  finderBoxWrap: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 9,
-    gap: 6,
-  },
-  finderTabs: {
-    flexDirection: 'row',
-    borderRadius: 10,
-    borderWidth: 1,
-    padding: 2.5,
-    marginBottom: 0,
-  },
-  finderTab: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 32,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  finderCarouselContainer: {
-    marginVertical: 1,
-  },
-  emptyEventsBox: {
-    borderRadius: 14,
-    borderWidth: 1,
-    padding: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    width: '100%',
-  },
-  finderFooterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 34,
-    paddingVertical: 5,
-    paddingHorizontal: 11,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginTop: 0,
-  },
-  finderFooterAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-
-  card: { borderWidth: 1 },
-  pinned: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 14, borderWidth: 1 },
   pinnedKicker: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 9.5, lineHeight: 14, letterSpacing: 0.6 },
-  iconTile: { padding: 8, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  pointsPass: { borderRadius: 18, padding: 12, gap: 9 },
-  passRibbon: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: 7,
-    borderBottomWidth: 1,
-  },
-  passType: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  passLabel: { fontSize: 9.5, letterSpacing: 0.8 },
-  balanceRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
-  balance: { fontFamily: FONT_FAMILIES.hero, fontSize: 32, lineHeight: 36 },
-  weekPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 6,
-    paddingVertical: 2.5,
-    borderRadius: 7,
-  },
-  week: { fontSize: 10.5, fontWeight: '700' },
-  statsStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingVertical: 5,
-    paddingHorizontal: 3,
-  },
-  stat: { flex: 1, alignItems: 'center', gap: 1, paddingVertical: 2 },
-  statDivider: { width: 1, height: 20 },
-  statValue: { fontSize: 15, fontWeight: '700' },
+  pointsBlock: { gap: 18 },
+  kicker: { letterSpacing: 1.2 },
+  balanceHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  rankText: { fontWeight: '700' },
+  statsRow: { flexDirection: 'row', alignItems: 'center' },
+  stat: { flex: 1, alignItems: 'center', gap: 1 },
+  statDivider: { width: StyleSheet.hairlineWidth * 2, height: 28 },
+  statValue: { fontFamily: FONT_FAMILIES.hero, fontSize: 20, lineHeight: 24 },
+  balance: { fontFamily: FONT_FAMILIES.hero, fontSize: 56, lineHeight: 64, marginTop: 4 },
   passActions: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 10,
   },
-  quickGrid: { flexDirection: 'row', gap: 8 },
-  quick: { flex: 1, gap: 6, padding: 9, borderRadius: 14, borderWidth: 1 },
-  section: { gap: 8 },
-  carousel: { gap: 8 },
-  eventsCarousel: { gap: 8, paddingRight: 6, paddingVertical: 1 },
+  quick: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
+  quickTitle: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 17, lineHeight: 22 },
+  quickCaption: { fontSize: 13, lineHeight: 18, marginTop: 1 },
+  quickCount: { alignItems: 'flex-end', minWidth: 36 },
+  quickCountValue: { fontFamily: FONT_FAMILIES.hero, fontSize: 22, lineHeight: 26 },
+  quickCountLabel: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 9.5, lineHeight: 12, letterSpacing: 0.8 },
+  plainRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  rowPressed: { opacity: 0.6 },
+  rowIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  section: { gap: 12 },
+  sectionTitle: { fontSize: 27, lineHeight: 33 },
+  // Horizontal rows run to the screen edges; their content starts in line with the rest.
+  bleed: { marginHorizontal: -SHEET_INSET },
+  eventsCarousel: { gap: 8, paddingHorizontal: SHEET_INSET, paddingVertical: 1 },
+  emptyText: { paddingVertical: 8 },
   carouselCardWrap: { width: 270 },
   carouselSingleCardWrap: { width: '100%' },
-  head: { width: 230, gap: 8 },
-  bubble: {
-    padding: 12,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    borderBottomRightRadius: 16,
-    borderBottomLeftRadius: 4,
-  },
-  headWho: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  compactPass: { flex: 1, gap: 5, padding: 10, borderRadius: 14 },
-  compactTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  tinyCode: { fontSize: 9.5, fontWeight: '700', letterSpacing: 0.5 },
-  list: { borderRadius: 16, paddingHorizontal: 12, paddingVertical: 2 },
-  activityRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
-  whatsapp: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 16 },
+  headPost: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 14 },
+  headPostMeta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  // Name keeps its width; the role gives way first on a narrow screen.
+  headName: { flexShrink: 0, maxWidth: '55%' },
+  headRole: { flexShrink: 1 },
+  headTitle: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 15.5, lineHeight: 21, marginTop: 3 },
+  headPreview: { fontSize: 13.5, lineHeight: 19, marginTop: 2 },
+  activityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 11 },
 });

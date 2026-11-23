@@ -6,7 +6,11 @@ import { BDOME_LINE_ASPECT } from './BDomeLineArt';
 import { PixelBDome } from './PixelBDome';
 import { CardLogo } from './cardLogos';
 import { PLAYER_CARD_HEIGHT, PLAYER_CARD_WIDTH, type PlayerCardViewProps } from './PlayerCardView';
-import { FONT_FAMILIES } from '../../theme/typography';
+import { useFonts, PixelifySans_500Medium, PixelifySans_700Bold } from '@expo-google-fonts/pixelify-sans';
+
+/** Blocky pixel type, used only on this card, so it is loaded here rather than app-wide. */
+const PIXEL = 'PixelifySans_500Medium';
+const PIXEL_BOLD = 'PixelifySans_700Bold';
 
 /**
  * Minecraft-style player card: the whole card is a grass block side (grass dripping into speckled
@@ -116,6 +120,8 @@ const TEXTURE = (() => {
 })();
 
 export function MinecraftCardView(props: PlayerCardViewProps) {
+  // Text falls back to the system font for the moment the pixel font is loading.
+  useFonts({ PixelifySans_500Medium, PixelifySans_700Bold });
   const ore = ORES[props.tier] ?? ORES.Rookie!;
   const id = React.useId().replace(/:/g, '');
   const initials = props.fullName
@@ -310,7 +316,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   initials: {
-    fontFamily: FONT_FAMILIES.pixelBold,
+    fontFamily: PIXEL_BOLD,
     fontSize: 52,
     color: C.text,
   },
@@ -322,7 +328,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   rating: {
-    fontFamily: FONT_FAMILIES.pixelBold,
+    fontFamily: PIXEL_BOLD,
     fontSize: 34,
     lineHeight: 40,
     color: C.xp,
@@ -333,7 +339,7 @@ const styles = StyleSheet.create({
   },
   ratingLabel: {
     marginTop: -2,
-    fontFamily: FONT_FAMILIES.pixelBold,
+    fontFamily: PIXEL_BOLD,
     fontSize: 11,
     lineHeight: 13,
     color: C.text,
@@ -349,7 +355,7 @@ const styles = StyleSheet.create({
     left: 18,
     right: 18,
     textAlign: 'center',
-    fontFamily: FONT_FAMILIES.pixelBold,
+    fontFamily: PIXEL_BOLD,
     fontSize: 28,
     lineHeight: 32,
     color: C.text,
@@ -362,12 +368,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   handle: {
-    fontFamily: FONT_FAMILIES.pixel,
+    fontFamily: PIXEL,
     fontSize: 14,
     color: C.textMuted,
   },
   tier: {
-    fontFamily: FONT_FAMILIES.pixelBold,
+    fontFamily: PIXEL_BOLD,
     fontSize: 14,
   },
   hotbar: {
@@ -386,14 +392,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   slotValue: {
-    fontFamily: FONT_FAMILIES.pixelBold,
+    fontFamily: PIXEL_BOLD,
     fontSize: 22,
     lineHeight: 24,
     color: C.text,
     maxWidth: 50,
   },
   slotLabel: {
-    fontFamily: FONT_FAMILIES.pixel,
+    fontFamily: PIXEL,
     fontSize: 10,
     lineHeight: 12,
     color: C.textMuted,
@@ -405,7 +411,7 @@ const styles = StyleSheet.create({
     left: 22,
     right: 22,
     textAlign: 'center',
-    fontFamily: FONT_FAMILIES.pixel,
+    fontFamily: PIXEL,
     fontSize: 13,
     color: C.text,
   },

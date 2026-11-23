@@ -15,12 +15,11 @@ import { SectionHeader } from '../../src/components/SectionHeader';
 import { StickyCTABar } from '../../src/components/StickyCTABar';
 import { ErrorState } from '../../src/feedback/ErrorState';
 import { Skeleton } from '../../src/feedback/Skeleton';
-import { Icon, type IconName } from '../../src/icons/Icon';
+import { Icon } from '../../src/icons/Icon';
 import { TextInput } from '../../src/forms/TextInput';
 import { Typography } from '../../src/typography/Typography';
 import { FONT_FAMILIES } from '../../src/theme/typography';
 import { useTheme } from '../../src/theme/ThemeProvider';
-import { withAlpha } from '../../src/theme/colors';
 import { usePopup } from '../../src/popups/PopupProvider';
 import { TermsPopup } from '../../src/popups/TermsPopup';
 import { useAsyncResource } from '../../src/hooks/useAsyncResource';
@@ -235,18 +234,13 @@ export default function EventDetails() {
             <Typography variant="displayHero" color="text" style={styles.title}>
               {event.title}
             </Typography>
-            {event.description ? (
-              <Typography variant="body" color="textMuted" numberOfLines={2}>
-                {event.description.split('\n')[0]}
-              </Typography>
-            ) : null}
           </View>
 
-          <View style={styles.facts}>
-            <Fact icon="calendar" label="STARTS" value={shortWhen(event.start_at)} />
-            <Fact icon="map-pin" label="VENUE" value={event.venue ?? 'TBA'} />
+          {/* Key facts: a plain 2 × 2 grid of label over value, between hairlines */}
+          <View style={[styles.facts, { borderTopColor: colors.border, borderBottomColor: colors.border }]}>
+            <Fact label="STARTS" value={shortWhen(event.start_at)} />
+            <Fact label="VENUE" value={event.venue ?? 'TBA'} />
             <Fact
-              icon="users"
               label={event.teaming?.is_teamed ? 'TEAM SIZE' : 'ENTRY'}
               value={
                 event.teaming?.is_teamed
@@ -254,7 +248,7 @@ export default function EventDetails() {
                   : 'Individual'
               }
             />
-            <Fact icon="trophy" label="FORMAT" value={EVENT_TYPE_LABELS[event.type]} />
+            <Fact label="FORMAT" value={`${EVENT_TYPE_LABELS[event.type]} · ${EVENT_CATEGORY_LABELS[event.category]}`} />
           </View>
 
           {registration ? (
@@ -268,22 +262,21 @@ export default function EventDetails() {
               onFindTeam={() => navigation.navigate('TeamJoin', { eventId: ref })}
             />
           ) : max != null ? (
-            <View style={[styles.card, styles.capacity, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.capacity}>
               <View style={styles.row}>
                 <Typography variant="body" color="text" style={[styles.semibold, styles.flex]}>
                   {filled} of {max} {unit} filled
                 </Typography>
                 {left != null ? (
-                  <Typography variant="mono" style={{ color: left === 0 ? colors.dangerText : colors.warning, fontSize: 12 }}>
-                    {left === 0 ? 'full' : `${left} left`}
+                  <Typography style={[styles.semibold, styles.small, { color: left === 0 ? colors.dangerText : colors.textMuted }]}>
+                    {left === 0 ? 'Full' : `${left} left`}
                   </Typography>
                 ) : null}
               </View>
               <View style={[styles.track, { backgroundColor: colors.surfaceInner }]}>
-                <View style={[styles.fill, { width: `${max > 0 ? Math.min(100, (filled / max) * 100) : 0}%`, backgroundColor: colors.warning }]} />
+                <View style={[styles.fill, { width: `${max > 0 ? Math.min(100, (filled / max) * 100) : 0}%`, backgroundColor: left === 0 ? colors.dangerText : colors.primary }]} />
               </View>
               <View style={styles.row}>
-                <Icon name="clock" size={14} color="textMuted" />
                 <Typography variant="bodySmall" color="textMuted" style={styles.flex}>
                   Registration closes {shortWhen(event.registration.closes_at)}
                   {event.registration.waitlist_enabled ? ' · waitlist after full' : ''}
@@ -296,19 +289,11 @@ export default function EventDetails() {
             <Pressable
               onPress={() => navigation.navigate('Auction', { eventRef: ref })}
               accessibilityRole="button"
-              style={({ pressed }) => [
-                styles.card,
-                styles.auction,
-                { backgroundColor: colors.accentMuted, borderColor: colors.primary },
-                pressed && styles.pressed,
-              ]}
+              style={({ pressed }) => [styles.auction, { borderColor: colors.border }, pressed && styles.pressed]}
             >
               <View style={styles.row}>
-                <View style={[styles.iconTile, { backgroundColor: colors.primarySolid }]}>
-                  <Icon name="gavel" size={20} color="white" />
-                </View>
                 <View style={styles.flex}>
-                  <Typography variant="body" color="text" style={styles.semibold}>
+                  <Typography color="text" style={styles.blockTitle}>
                     {event.auction.status === 'live' ? 'Auction is live' : event.auction.status === 'finished' ? 'Auction results' : 'Live player auction'}
                   </Typography>
                   <Typography variant="bodySmall" color="textMuted" numberOfLines={1}>
@@ -337,15 +322,9 @@ export default function EventDetails() {
                 {event.description}
               </Typography>
               {event.tags.length ? (
-                <View style={styles.tags}>
-                  {event.tags.map((tag) => (
-                    <View key={tag} style={[styles.tag, { backgroundColor: colors.surfaceInner, borderColor: colors.border }]}>
-                      <Typography color="text" style={styles.tagText}>
-                        #{tag}
-                      </Typography>
-                    </View>
-                  ))}
-                </View>
+                <Typography color="textMuted" style={styles.tagText}>
+                  {event.tags.map((tag) => `#${tag}`).join('   ')}
+                </Typography>
               ) : null}
             </View>
           ) : null}
@@ -358,6 +337,7 @@ export default function EventDetails() {
                 data={gallery}
                 keyExtractor={(m) => m._id}
                 showsHorizontalScrollIndicator={false}
+                style={styles.bleed}
                 contentContainerStyle={styles.gallery}
                 renderItem={({ item, index }) => (
                   <Pressable onPress={() => navigation.navigate('MediaViewer', { items: gallery, index })} accessibilityLabel="Open photo">
@@ -371,20 +351,19 @@ export default function EventDetails() {
           {event.awards.length ? (
             <View style={styles.section}>
               <SectionHeader title="Awards" />
-              <View style={[styles.card, styles.list, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <View>
                 {event.awards.map((a, i) => {
-                  const tone = a.place === 1 ? colors.warning : a.place === 2 ? colors.textMuted : colors.primary;
-                  const tint = a.place === 1 ? colors.warningMuted : a.place === 2 ? colors.mutedTint : colors.accentMuted;
                   return (
                     <View
                       key={`${a.place}-${a.title}`}
-                      style={[styles.listRow, i < event.awards.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border }]}
+                      style={[
+                        styles.listRow,
+                        i < event.awards.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+                      ]}
                     >
-                      <View style={[styles.place, { backgroundColor: tint }]}>
-                        <Typography variant="mono" style={{ color: tone, fontSize: 12 }}>
-                          {a.place > 0 ? ordinal(a.place) : '★'}
-                        </Typography>
-                      </View>
+                      <Typography color="text" style={styles.place}>
+                        {a.place > 0 ? ordinal(a.place) : '★'}
+                      </Typography>
                       <View style={styles.flex}>
                         <Typography color="text" style={[styles.semibold, styles.small]}>
                           {a.title}
@@ -403,14 +382,15 @@ export default function EventDetails() {
           ) : null}
 
           {ruleLines?.length || event.rules_pdf_url || event.leaderboard ? (
-            <View style={[styles.card, styles.list, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+            <View style={styles.section}>
+              <SectionHeader title="Rules and standings" />
+              <View>
               {[
                 ruleLines?.length
-                  ? { icon: 'lock' as IconName, title: 'Read event rules', meta: 'In-app', onPress: () => setRulesVisible(true) }
+                  ? { title: 'Read event rules', meta: 'In-app', onPress: () => setRulesVisible(true) }
                   : null,
                 event.rules_pdf_url
                   ? {
-                      icon: 'external-link' as IconName,
                       title: 'Rulebook PDF',
                       meta: 'Opens in browser',
                       onPress: () => void Linking.openURL(resolveMediaUrl(event.rules_pdf_url)!),
@@ -418,7 +398,6 @@ export default function EventDetails() {
                   : null,
                 event.leaderboard
                   ? {
-                      icon: 'trophy' as IconName,
                       title: 'Standings',
                       meta: 'Live rankings for this event',
                       onPress: () => navigation.navigate('EventLeaderboard', { eventRef: ref, title: event.title }),
@@ -433,11 +412,10 @@ export default function EventDetails() {
                     accessibilityRole="button"
                     style={({ pressed }) => [
                       styles.listRow,
-                      i < all.length - 1 && { borderBottomWidth: 1, borderBottomColor: colors.border },
+                      i < all.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
                       pressed && styles.pressed,
                     ]}
                   >
-                    <Icon name={link.icon} size={18} color="textMuted" />
                     <View style={styles.flex}>
                       <Typography color="text" style={[styles.semibold, styles.small]}>
                         {link.title}
@@ -449,16 +427,24 @@ export default function EventDetails() {
                     <Icon name="chevron-right" size={18} color="textMuted" />
                   </Pressable>
                 ))}
+              </View>
             </View>
           ) : null}
 
           {event.contacts.some((c) => !c.deleted) ? (
             <View style={styles.section}>
               <SectionHeader title="Organisers" />
+              <View>
               {event.contacts
                 .filter((c) => !c.deleted)
-                .map((c) => (
-                  <View key={c.user_id} style={[styles.card, styles.contact, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                .map((c, i, all) => (
+                  <View
+                    key={c.user_id}
+                    style={[
+                      styles.contact,
+                      i < all.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+                    ]}
+                  >
                     <Avatar name={c.display_name} size={40} color={authorColor(c.display_name, colors)} />
                     <View style={styles.flex}>
                       <Typography variant="body" color="text" style={styles.semibold}>
@@ -473,14 +459,17 @@ export default function EventDetails() {
                         onPress={() => void Linking.openURL(contactUrl(c.contact))}
                         accessibilityRole="button"
                         accessibilityLabel={`Message ${c.display_name}`}
-                        hitSlop={6}
-                        style={({ pressed }) => [styles.chat, { backgroundColor: colors.successMuted }, pressed && styles.pressed]}
+                        hitSlop={10}
+                        style={({ pressed }) => pressed && styles.pressed}
                       >
-                        <Icon name="message" size={18} color="success" />
+                        <Typography color="primary" style={styles.link}>
+                          Message
+                        </Typography>
                       </Pressable>
                     ) : null}
                   </View>
                 ))}
+              </View>
             </View>
           ) : null}
         </View>
@@ -506,17 +495,14 @@ export default function EventDetails() {
         }}
       >
         <View style={styles.sheet}>
-          <View style={[styles.iconTile, styles.center, { backgroundColor: colors.dangerMuted }]}>
-            <Icon name="activity" size={24} color="danger" />
-          </View>
-          <Typography variant="h2" color="text" align="center">
+          <Typography variant="h2" color="text">
             Cancel your registration?
           </Typography>
-          <Typography variant="body" color="textMuted" align="center">
+          <Typography variant="body" color="textMuted">
             You’ll leave {event.title}.
             {event.registration.waitlist_enabled ? ' Your spot goes to the next person on the waitlist.' : ''}
           </Typography>
-          <View style={[styles.notes, { backgroundColor: colors.surfaceInner }]}>
+          <View style={styles.notes}>
             {[
               'You can register again while registration is open',
               registration?.context.event?.base_price ? `Your ${registration.context.event.base_price} cr base price is removed from the pool` : null,
@@ -579,7 +565,7 @@ function Hero({ event, registered }: { event: ApiEvent; registered: boolean }) {
             <Defs>
               <LinearGradient id="event-hero" x1="0" y1="0" x2="0" y2="1">
                 <Stop offset="0" stopColor={tone.cover} />
-                <Stop offset="1" stopColor="#141821" />
+                <Stop offset="1" stopColor={colors.background} />
               </LinearGradient>
             </Defs>
             <Rect width="100%" height="100%" fill="url(#event-hero)" />
@@ -589,31 +575,28 @@ function Hero({ event, registered }: { event: ApiEvent; registered: boolean }) {
           </View>
         </>
       )}
-      <View style={[styles.logo, { backgroundColor: colors.background }]}>
-        {logo ? <Image source={{ uri: logo }} style={styles.logoImage} contentFit="cover" /> : <Icon name="trophy" size={28} color="primary" />}
-      </View>
+      {logo ? (
+        <View style={[styles.logo, { backgroundColor: colors.background, borderColor: colors.border }]}>
+          <Image source={{ uri: logo }} style={styles.logoImage} contentFit="cover" />
+        </View>
+      ) : null}
+      {/* Status only; category and format are in the facts below */}
       <View style={styles.pills}>
-        <Badge label={EVENT_CATEGORY_LABELS[event.category]} variant={tone.pill} />
-        <Badge label={EVENT_TYPE_LABELS[event.type]} variant="info" />
         <Badge label={registered ? 'Registered' : pill.label} variant={registered ? 'success' : pill.variant} />
       </View>
     </View>
   );
 }
 
-function Fact({ icon, label, value }: { icon: IconName; label: string; value: string }) {
-  const { colors } = useTheme();
+function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <View style={[styles.card, styles.fact, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-      <Icon name={icon} size={18} color="primary" />
-      <View style={styles.factText}>
-        <Typography color="textMuted" style={styles.factLabel}>
-          {label}
-        </Typography>
-        <Typography color="text" style={[styles.semibold, styles.small]} numberOfLines={2}>
-          {value}
-        </Typography>
-      </View>
+    <View style={styles.fact}>
+      <Typography color="textMuted" style={styles.factLabel}>
+        {label}
+      </Typography>
+      <Typography color="text" style={styles.factValue} numberOfLines={2}>
+        {value}
+      </Typography>
     </View>
   );
 }
@@ -657,13 +640,10 @@ function RegistrationCard({
     { label: event.auction ? 'Team reveal' : 'Event day', when: event.auction ? 'After auction' : shortWhen(event.start_at), done: false },
   ];
   return (
-    <View style={[styles.card, styles.reg, { backgroundColor: colors.surface, borderColor: tone }]}>
+    <View style={[styles.reg, { borderTopColor: colors.border, borderBottomColor: colors.border }]}>
       <View style={styles.row}>
-        <View style={[styles.iconTile, { backgroundColor: withAlpha(tone, 0.16) }]}>
-          <Icon name={registration.status === 'confirmed' ? 'check' : 'clock'} size={18} color={tone} />
-        </View>
         <View style={styles.flex}>
-          <Typography variant="body" color="text" style={styles.semibold}>
+          <Typography color="text" style={styles.blockTitle}>
             {registration.status === 'confirmed' ? 'You’re in' : status.label}
             {roleLabel ? ` — ${roleLabel}` : ''}
           </Typography>
@@ -677,11 +657,11 @@ function RegistrationCard({
         <View style={[styles.timeline, styles.timelineTop, { borderTopColor: colors.border }]}>
           {steps.map((s) => (
             <View key={s.label} style={styles.row}>
-              <View style={[styles.stepDot, { backgroundColor: s.done ? colors.success : colors.surfaceInner }]} />
+              <View style={[styles.stepDot, s.done ? { backgroundColor: tone } : { borderWidth: 1.5, borderColor: colors.border }]} />
               <Typography variant="body" color={s.done ? 'text' : 'textMuted'} style={[styles.flex, styles.small]}>
                 {s.label}
               </Typography>
-              <Typography variant="mono" color="textMuted" style={styles.monoSmall}>
+              <Typography color="textMuted" style={styles.when}>
                 {s.when}
               </Typography>
             </View>
@@ -732,8 +712,7 @@ function TeamRow({
     // Auction members get their team at the hammer, not by joining.
     if (!isCaptain && auction) return null;
     return (
-      <View style={[styles.teamRow, { backgroundColor: colors.surfaceInner, borderColor: colors.border }]}>
-        <Icon name="users" size={18} color="textMuted" />
+      <View style={[styles.teamRow, { borderTopColor: colors.border }]}>
         <Typography variant="body" color="textMuted" style={[styles.flex, styles.small]}>
           {isCaptain ? 'You haven’t created your team yet.' : 'You’re not on a team yet.'}
         </Typography>
@@ -743,8 +722,7 @@ function TeamRow({
   }
   const code = team.invite_code;
   return (
-    <View style={[styles.teamRow, { backgroundColor: colors.surfaceInner, borderColor: colors.border }]}>
-      <Icon name="users" size={18} color="primary" />
+    <View style={[styles.teamRow, { borderTopColor: colors.border }]}>
       <View style={styles.flex}>
         <Typography variant="body" color="text" style={[styles.semibold, styles.small]} numberOfLines={1}>
           {team.name}
@@ -774,48 +752,54 @@ const styles = StyleSheet.create({
   pressed: { opacity: 0.85 },
   semibold: { fontFamily: FONT_FAMILIES.bodySemiBold },
   small: { fontSize: 13 },
-  monoSmall: { fontSize: 11 },
+  when: { fontSize: 12.5, lineHeight: 17 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   inline: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   center: { alignSelf: 'center' },
-  card: { borderWidth: 1 },
   hero: { height: 240, justifyContent: 'flex-end', gap: 12, padding: 20, overflow: 'hidden' },
   heroWatermark: { position: 'absolute', right: -15, top: 0, transform: [{ rotate: '12deg' }] },
-  logo: { alignSelf: 'flex-start', padding: 12, borderRadius: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)', overflow: 'hidden' },
-  logoImage: { width: 28, height: 28, borderRadius: 6 },
+  logo: { alignSelf: 'flex-start', padding: 6, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  logoImage: { width: 44, height: 44, borderRadius: 10 },
   pills: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  body: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 28, gap: 24 },
+  body: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 28, gap: 30 },
   titleBlock: { gap: 8 },
-  title: { fontSize: 34, lineHeight: 48 },
-  facts: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  fact: { flexBasis: '47%', flexGrow: 1, gap: 8, padding: 16, borderRadius: 20 },
-  factText: { gap: 2 },
+  title: { fontSize: 34, lineHeight: 40 },
+  // Facts: 2 × 2 grid of plain text between hairlines.
+  facts: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 16,
+    paddingVertical: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  fact: { width: '50%', gap: 3, paddingRight: 12 },
   factLabel: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 10, lineHeight: 15, letterSpacing: 0.8 },
-  capacity: { gap: 12, padding: 20, borderRadius: 24 },
-  track: { height: 8, borderRadius: 999, overflow: 'hidden' },
+  factValue: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 15, lineHeight: 20 },
+  capacity: { gap: 10 },
+  track: { height: 6, borderRadius: 999, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: 999 },
-  auction: { gap: 12, padding: 20, borderRadius: 24 },
-  iconTile: { padding: 8, borderRadius: 12 },
+  // Auction and registration: plain blocks between hairlines, no box.
+  auction: { gap: 10, paddingVertical: 16, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
+  blockTitle: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 18, lineHeight: 24 },
   link: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 13, lineHeight: 20 },
   section: { gap: 12 },
-  tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  tag: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
-  tagText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 12, lineHeight: 15 },
-  gallery: { gap: 12 },
-  photo: { width: 140, height: 100, borderRadius: 16 },
-  list: { borderRadius: 20, paddingHorizontal: 16, paddingVertical: 4 },
-  listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 16 },
-  place: { width: 46, alignItems: 'center', paddingVertical: 8, borderRadius: 12 },
-  contact: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderRadius: 20 },
-  chat: { padding: 8, borderRadius: 12 },
-  reg: { gap: 16, padding: 20, borderRadius: 24 },
+  tagText: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 13, lineHeight: 20 },
+  // Photos run to the screen edges; the first lines up with the text.
+  bleed: { marginHorizontal: -20 },
+  gallery: { gap: 10, paddingHorizontal: 20 },
+  photo: { width: 140, height: 100, borderRadius: 12 },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 14 },
+  place: { width: 40, fontFamily: FONT_FAMILIES.hero, fontSize: 18, lineHeight: 24 },
+  contact: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
+  reg: { gap: 16, paddingVertical: 18, borderTopWidth: StyleSheet.hairlineWidth, borderBottomWidth: StyleSheet.hairlineWidth },
   timeline: { gap: 12 },
-  timelineTop: { borderTopWidth: 1, paddingTop: 16 },
+  timelineTop: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 16 },
   stepDot: { width: 10, height: 10, borderRadius: 5 },
-  teamRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 16, borderWidth: 1 },
-  cancel: { alignItems: 'center', paddingHorizontal: 8 },
+  teamRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 16, borderTopWidth: StyleSheet.hairlineWidth },
+  cancel: { alignItems: 'center', justifyContent: 'center', minHeight: 44, paddingHorizontal: 8 },
   sheet: { gap: 16 },
-  notes: { gap: 12, padding: 16, borderRadius: 16 },
+  notes: { gap: 12 },
   noteText: { fontSize: 13, lineHeight: 18 },
   bullet: { width: 6, height: 6, borderRadius: 3 },
 });

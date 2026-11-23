@@ -8,12 +8,12 @@ import { Icon } from '../../src/icons/Icon';
 import { FONT_FAMILIES } from '../../src/theme/typography';
 import { withAlpha } from '../../src/theme/colors';
 import { Button } from '../../src/components/Button';
-import { Card } from '../../src/components/Card';
 import { FilterChips } from '../../src/components/FilterChips';
 import { SectionHeader } from '../../src/components/SectionHeader';
 import { SegmentedTabs } from '../../src/components/SegmentedTabs';
 import { AppHeader } from '../../src/components/AppHeader';
-import { Podium, StandingRow, MyPositionPill, type RankedRow } from '../../src/components/LeaderboardParts';
+import { Podium, MyPositionPill, type RankedRow } from '../../src/components/LeaderboardParts';
+import { Avatar } from '../../src/components/Avatar';
 import { EmptyState } from '../../src/feedback/EmptyState';
 import { ErrorState } from '../../src/feedback/ErrorState';
 import { Skeleton } from '../../src/feedback/Skeleton';
@@ -183,8 +183,8 @@ export default function Leaderboard() {
   const contentStyle = [
     styles.content,
     {
-      paddingHorizontal: Math.min(gutter, 14),
-      paddingTop: 8,
+      paddingHorizontal: Math.max(gutter, 16),
+      paddingTop: 12,
       paddingBottom: Math.max(90, insets.bottom + 80),
     },
   ];
@@ -198,7 +198,7 @@ export default function Leaderboard() {
           refreshControl={<RefreshControl refreshing={events.refreshing} onRefresh={() => void events.reload()} tintColor={colors.accent} />}
         >
           {tabs}
-          <Typography variant="body" color="textMuted">Standings for live and completed events.</Typography>
+          <SectionHeader title="Event standings" subtitle="Live and completed events" style={styles.sectionHeaderRow} />
           {events.loading ? (
             <>
               <Skeleton.Card />
@@ -209,31 +209,38 @@ export default function Leaderboard() {
           ) : !events.data?.events.some(event => event.leaderboard) ? (
             <EmptyState icon="trophy" title="No event leaderboards yet" description="Standings appear once an event goes live." style={styles.empty} />
           ) : (
-            events.data.events.filter(event => event.leaderboard).map((event) => {
-              const pill = eventStatusPill(event);
-              return (
-                <Card
-                  key={event._id}
-                  variant="solid"
-                  onPress={() => navigation.navigate('EventStandings', { ref: event.slug || event._id })}
-                  accessibilityLabel={`${event.title} standings`}
-                >
-                  <Card.Header
-                    title={event.title}
-                    subtitle={`${EVENT_TYPE_LABELS[event.type]} · ${formatDate(event.start_at)}`}
-                    rightAction={<Badge label={pill.label} variant={pill.variant} />}
-                  />
-                  <Card.Footer>
-                    <Typography variant="caption" color="textMuted">
-                      {event.counts?.registrations_confirmed ?? 0} participants
-                    </Typography>
-                    <Button label="View standings" size="sm" variant="outline" onPress={() => navigation.navigate('EventStandings', { ref: event.slug || event._id })} />
-                  </Card.Footer>
-                </Card>
-              );
-            })
+            <View>
+              {events.data.events.filter(event => event.leaderboard).map((event, i, list) => {
+                const pill = eventStatusPill(event);
+                return (
+                  <Pressable
+                    key={event._id}
+                    onPress={() => navigation.navigate('EventStandings', { ref: event.slug || event._id })}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${event.title} standings`}
+                    style={({ pressed }) => [
+                      styles.eventRow,
+                      i < list.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <View style={styles.flex}>
+                      <Typography color="text" style={styles.eventTitle} numberOfLines={1}>
+                        {event.title}
+                      </Typography>
+                      <Typography color="textMuted" style={styles.eventMeta} numberOfLines={1}>
+                        {EVENT_TYPE_LABELS[event.type]} · {formatDate(event.start_at)} · {event.counts?.registrations_confirmed ?? 0} participants
+                      </Typography>
+                    </View>
+                    {/* Status keeps its pill: it is the one thing to read at a glance */}
+                    <Badge label={pill.label} variant={pill.variant} />
+                    <Icon name="chevron-right" size={18} color="textMuted" />
+                  </Pressable>
+                );
+              })}
+            </View>
           )}
-          {events.data?.next_cursor && <Button label="More events" variant="outline" onPress={() => setEventCursor(events.data!.next_cursor)} />}
+          {events.data?.next_cursor && <Button label="More events" variant="ghost" onPress={() => setEventCursor(events.data!.next_cursor)} />}
           {eventCursor && <Button label="Back to latest events" variant="ghost" onPress={() => setEventCursor(null)} />}
         </ScrollView>
       </SafeAreaView>
@@ -274,25 +281,13 @@ export default function Leaderboard() {
           onPress={openFilters}
           accessibilityRole="button"
           accessibilityLabel={activeFilters ? `Filters, ${activeFilters} applied` : 'Filters'}
-          style={({ pressed }) => [
-            styles.filterButton,
-            activeFilters
-              ? { backgroundColor: withAlpha(colors.primary, 0.12), borderColor: withAlpha(colors.primary, 0.5) }
-              : { backgroundColor: colors.surfaceInner, borderColor: colors.border },
-            pressed && { opacity: 0.8 },
-          ]}
+          hitSlop={8}
+          style={({ pressed }) => [styles.filterButton, pressed && styles.pressed]}
         >
-          <Icon name="filter" size={15} color={activeFilters ? 'primary' : 'text'} />
-          <Typography variant="caption" color={activeFilters ? 'primary' : 'text'} style={styles.filterLabel}>
-            Filter
+          <Icon name="filter" size={15} color="primary" />
+          <Typography variant="body" color="primary" style={styles.filterLabel}>
+            {activeFilters ? `Filter · ${activeFilters}` : 'Filter'}
           </Typography>
-          {activeFilters ? (
-            <View style={[styles.filterCount, { backgroundColor: colors.primarySolid }]}>
-              <Typography variant="caption" color="primaryText" style={styles.filterCountText}>
-                {activeFilters}
-              </Typography>
-            </View>
-          ) : null}
         </Pressable>
       </View>
 
@@ -323,7 +318,7 @@ export default function Leaderboard() {
           {/* Section Divider */}
           {rest.length > 0 ? (
             <View style={styles.sectionHeaderRow}>
-              <SectionHeader title="Rankings" badge={total} />
+              <SectionHeader title="Rankings" subtitle={`${formatNumber(total)} members ranked`} />
             </View>
           ) : null}
         </>
@@ -342,7 +337,13 @@ export default function Leaderboard() {
         ref={listRef}
         data={loading && standings.length === 0 ? [] : rest}
         keyExtractor={(item) => item.key}
-        renderItem={({ item }) => <StandingRow row={item} onPress={() => navigation.navigate('Profile', { ref: item.key })} />}
+        renderItem={({ item, index }) => (
+          <RankRow
+            row={item}
+            last={index === rest.length - 1}
+            onPress={() => navigation.navigate('Profile', { ref: item.key })}
+          />
+        )}
         ListHeaderComponent={header}
         contentContainerStyle={[contentStyle, { paddingBottom: bottomPillOffset + 60 }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void load('refresh')} tintColor={colors.primary} />}
@@ -389,6 +390,58 @@ export default function Leaderboard() {
   );
 }
 
+/**
+ * One standing: rank, avatar, name and handle, points on the right. Plain row with a hairline
+ * under it (Spotify-chart style); your own row reads in the brand colour.
+ */
+function RankRow({ row, last, onPress }: { row: RankedRow; last: boolean; onPress: () => void }) {
+  const { colors } = useTheme();
+  const delta = row.delta ?? (row.rank != null && row.previousRank != null ? row.previousRank - row.rank : null);
+  const ink = row.isMe ? colors.primary : colors.text;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityLabel={`Rank ${row.rank ?? 'unranked'}, ${row.name}, ${row.score} pts`}
+      style={({ pressed }) => [
+        styles.rankRow,
+        !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+        pressed && styles.pressed,
+      ]}
+    >
+      <Typography style={[styles.rankNum, { color: row.isMe ? colors.primary : colors.textMuted }]} numberOfLines={1} adjustsFontSizeToFit>
+        {row.rank ?? '—'}
+      </Typography>
+      <Avatar name={row.name} uri={row.avatarUrl} size={38} ring={false} />
+      <View style={styles.flex}>
+        <Typography style={[styles.rankName, { color: ink }]} numberOfLines={1}>
+          {row.name}
+          {row.isMe ? ' · You' : ''}
+        </Typography>
+        <View style={styles.rankSubRow}>
+          {row.subtitle ? (
+            <Typography color="textMuted" style={styles.rankSub} numberOfLines={1}>
+              {row.subtitle}
+            </Typography>
+          ) : null}
+          {delta != null && delta !== 0 ? (
+            <Typography style={[styles.rankSub, styles.delta, { color: delta > 0 ? colors.success : colors.dangerText }]}>
+              {delta > 0 ? `▲ ${delta}` : `▼ ${Math.abs(delta)}`}
+            </Typography>
+          ) : null}
+        </View>
+      </View>
+      <View style={styles.scoreCol}>
+        <Typography style={[styles.score, { color: ink }]} numberOfLines={1}>
+          {formatNumber(row.score)}
+        </Typography>
+        <Typography color="textMuted" style={styles.scoreUnit}>
+          PTS
+        </Typography>
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   content: { padding: 13, gap: 8, width: '100%', maxWidth: 720, alignSelf: 'center' },
@@ -402,18 +455,22 @@ const styles = StyleSheet.create({
   empty: { paddingTop: 40, paddingBottom: 24 },
   filterRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   filterSummary: { flex: 1 },
-  filterButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    minHeight: 34,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderRadius: 999,
-  },
+  filterButton: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 34 },
   filterLabel: { fontFamily: FONT_FAMILIES.bodySemiBold, includeFontPadding: false },
-  filterCount: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' },
-  filterCountText: { fontFamily: FONT_FAMILIES.bodyBold, fontSize: 11, lineHeight: 13, includeFontPadding: false },
+  flex: { flex: 1 },
+  pressed: { opacity: 0.6 },
+  eventRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 14 },
+  eventTitle: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 16, lineHeight: 22 },
+  eventMeta: { fontSize: 13, lineHeight: 18, marginTop: 1 },
+  rankRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12 },
+  rankNum: { width: 30, textAlign: 'center', fontFamily: FONT_FAMILIES.hero, fontSize: 17, lineHeight: 22 },
+  rankName: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 15, lineHeight: 20 },
+  rankSubRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  rankSub: { fontSize: 12.5, lineHeight: 17, flexShrink: 1 },
+  delta: { fontFamily: FONT_FAMILIES.bodySemiBold, flexShrink: 0 },
+  scoreCol: { alignItems: 'flex-end' },
+  score: { fontFamily: FONT_FAMILIES.hero, fontSize: 18, lineHeight: 22 },
+  scoreUnit: { fontFamily: FONT_FAMILIES.bodySemiBold, fontSize: 9, lineHeight: 11, letterSpacing: 0.8 },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sheetSection: { gap: 8 },
   sheetLabel: { fontFamily: FONT_FAMILIES.bodySemiBold, letterSpacing: 0.8 },
